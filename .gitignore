@@ -1,0 +1,9 @@
+images/
+extracted_images/
+backup/
+hbo_usfm/
+ocr/
+outputs/
+.venv/
+*.pyc
+*.pdf
