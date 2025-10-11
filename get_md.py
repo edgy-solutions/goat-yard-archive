@@ -1176,18 +1176,228 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
     return corrected
 
 
+def discover_images_in_directory(start_image_path):
+    """
+    Discover all image files in the same directory as the start image.
+    
+    Args:
+        start_image_path: Path to the starting image file
+    
+    Returns:
+        List of image file paths in the directory
+    """
+    image_dir = os.path.dirname(os.path.abspath(start_image_path))
+    image_extensions = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'}
+    
+    images = []
+    for filename in os.listdir(image_dir):
+        if os.path.splitext(filename)[1].lower() in image_extensions:
+            images.append(os.path.join(image_dir, filename))
+    
+    return images
+
+
+def get_page_number_from_metadata(image_path):
+    """
+    Extract page number from an image's metadata JSON file.
+    
+    Args:
+        image_path: Path to the image file
+    
+    Returns:
+        Page number (int) or None if not found
+    """
+    base_name = os.path.splitext(image_path)[0]
+    metadata_path = base_name + '_metadata.json'
+    
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+                return metadata.get('page_number')
+        except:
+            pass
+    
+    return None
+
+
+def sort_images_by_page_number(images):
+    """
+    Sort images by their page numbers from metadata.
+    Images without metadata are placed at the end, sorted by filename.
+    
+    Args:
+        images: List of image file paths
+    
+    Returns:
+        Sorted list of (image_path, page_number) tuples
+    """
+    images_with_pages = []
+    images_without_pages = []
+    
+    for img in images:
+        page_num = get_page_number_from_metadata(img)
+        if page_num is not None:
+            images_with_pages.append((img, page_num))
+        else:
+            images_without_pages.append((img, None))
+    
+    # Sort images with page numbers
+    images_with_pages.sort(key=lambda x: x[1])
+    
+    # Sort images without page numbers by filename
+    images_without_pages.sort(key=lambda x: os.path.basename(x[0]))
+    
+    return images_with_pages + images_without_pages
+
+
+def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None, 
+                        validate_ollama=False, max_pages=None, 
+                        stop_on_book_change=False, stop_on_chapter_change=False):
+    """
+    Process multiple images in sequence, chaining metadata validation.
+    
+    Args:
+        start_image_path: Path to the starting image
+        lang: Tesseract language
+        right_col_char_pos: Right column character position
+        validate_ollama: Whether to validate with Ollama
+        max_pages: Maximum number of pages to process
+        stop_on_book_change: Stop when book changes
+        stop_on_chapter_change: Stop when chapter changes
+    
+    Returns:
+        Number of images processed
+    """
+    print(f"\n{'='*80}")
+    print(f"BATCH PROCESSING MODE")
+    print(f"{'='*80}")
+    
+    # Discover all images in the directory
+    print(f"\nDiscovering images in directory...")
+    all_images = discover_images_in_directory(start_image_path)
+    print(f"Found {len(all_images)} image files")
+    
+    # Sort by page number
+    print(f"Sorting images by page number...")
+    sorted_images = sort_images_by_page_number(all_images)
+    
+    # Find starting position
+    start_abs_path = os.path.abspath(start_image_path)
+    start_index = 0
+    for i, (img_path, page_num) in enumerate(sorted_images):
+        if os.path.abspath(img_path) == start_abs_path:
+            start_index = i
+            break
+    
+    print(f"Starting from image {start_index + 1} of {len(sorted_images)}: {os.path.basename(start_image_path)}")
+    
+    if max_pages:
+        print(f"Maximum pages to process: {max_pages}")
+    if stop_on_book_change:
+        print(f"Will stop when book changes")
+    if stop_on_chapter_change:
+        print(f"Will stop when chapter changes")
+    
+    print(f"\n{'='*80}\n")
+    
+    # Process images sequentially
+    prev_metadata = None
+    initial_book = None
+    initial_chapter = None
+    processed_count = 0
+    
+    for i in range(start_index, len(sorted_images)):
+        img_path, page_num = sorted_images[i]
+        
+        # Check max_pages limit
+        if max_pages and processed_count >= max_pages:
+            print(f"\n{'='*80}")
+            print(f"Reached maximum page limit ({max_pages})")
+            print(f"{'='*80}\n")
+            break
+        
+        print(f"\n{'='*80}")
+        print(f"Processing image {processed_count + 1}")
+        if max_pages:
+            print(f"Progress: {processed_count + 1}/{max_pages}")
+        print(f"File: {os.path.basename(img_path)}")
+        if page_num:
+            print(f"Current page: {page_num}")
+        print(f"{'='*80}\n")
+        
+        # Process the image
+        try:
+            metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama)
+            
+            # Validate against previous metadata if available
+            if prev_metadata:
+                metadata = validate_and_correct_metadata(metadata, prev_metadata)
+                
+                # Save corrected metadata
+                base_name = os.path.splitext(img_path)[0]
+                json_path = base_name + '_metadata.json'
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                print(f"Corrected metadata saved to: {json_path}")
+            
+            # Store initial book/chapter for comparison
+            if processed_count == 0:
+                initial_book = metadata.get('book_name')
+                initial_chapter = metadata.get('chapter')
+            
+            # Check stopping conditions
+            current_book = metadata.get('book_name')
+            current_chapter = metadata.get('chapter')
+            
+            if stop_on_book_change and current_book and initial_book:
+                if current_book != initial_book:
+                    print(f"\n{'='*80}")
+                    print(f"STOPPING: Book changed from '{initial_book}' to '{current_book}'")
+                    print(f"{'='*80}\n")
+                    break
+            
+            if stop_on_chapter_change and current_chapter and initial_chapter:
+                if current_chapter != initial_chapter:
+                    print(f"\n{'='*80}")
+                    print(f"STOPPING: Chapter changed from {initial_chapter} to {current_chapter}")
+                    print(f"{'='*80}\n")
+                    break
+            
+            # Update for next iteration
+            prev_metadata = metadata
+            processed_count += 1
+            
+        except Exception as e:
+            print(f"\nERROR processing {os.path.basename(img_path)}: {e}")
+            print(f"Continuing with next image...\n")
+            continue
+    
+    print(f"\n{'='*80}")
+    print(f"BATCH PROCESSING COMPLETE")
+    print(f"Processed {processed_count} images")
+    print(f"{'='*80}\n")
+    
+    return processed_count
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python script.py <image_path> [output_path] [--lang LANG] [--right-col POS] [--prev-metadata PATH] [--validate-ollama]")
+        print("Usage: python script.py <image_path> [output_path] [OPTIONS]")
         print("\nOutput files created:")
         print("  <base>_metadata.json - Metadata with book/chapter/verse/page info")
         print("  <base>.md            - Formatted markdown with columns")
         print("  <base>_ocr.json      - Complete OCR data with bounding boxes")
-        print("\nOptional arguments:")
-        print("  --lang LANG          - Tesseract language (default: eng)")
-        print("  --right-col POS      - Right column character position")
-        print("  --prev-metadata PATH - Previous page metadata JSON for validation")
-        print("  --validate-ollama    - Validate metadata using Ollama vision model")
+        print("\nSingle Image Processing Options:")
+        print("  --lang LANG              - Tesseract language (default: eng)")
+        print("  --right-col POS          - Right column character position")
+        print("  --prev-metadata PATH     - Previous page metadata JSON for validation")
+        print("  --validate-ollama        - Validate metadata using Ollama vision model")
+        print("\nBatch Processing Options:")
+        print("  --batch                  - Process all images in directory starting from given image")
+        print("  --max-pages N            - Maximum number of pages to process in batch mode")
+        print("  --stop-on-book-change    - Stop batch processing when book changes")
+        print("  --stop-on-chapter-change - Stop batch processing when chapter changes")
         sys.exit(1)
     
     image_path = sys.argv[1]
@@ -1196,6 +1406,10 @@ if __name__ == "__main__":
     right_col_char_pos = None
     prev_metadata_path = None
     validate_ollama = False
+    batch_mode = False
+    max_pages = None
+    stop_on_book_change = False
+    stop_on_chapter_change = False
     
     i = 2
     while i < len(sys.argv):
@@ -1211,29 +1425,54 @@ if __name__ == "__main__":
         elif sys.argv[i] == '--validate-ollama':
             validate_ollama = True
             i += 1
+        elif sys.argv[i] == '--batch':
+            batch_mode = True
+            i += 1
+        elif sys.argv[i] == '--max-pages' and i + 1 < len(sys.argv):
+            max_pages = int(sys.argv[i + 1])
+            i += 2
+        elif sys.argv[i] == '--stop-on-book-change':
+            stop_on_book_change = True
+            i += 1
+        elif sys.argv[i] == '--stop-on-chapter-change':
+            stop_on_chapter_change = True
+            i += 1
         else:
             output_path = sys.argv[i]
             i += 1
     
-    # Load previous metadata if provided
-    prev_metadata = None
-    if prev_metadata_path:
-        prev_metadata = load_previous_metadata(prev_metadata_path)
-    
-    # Process image
-    metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama)
-    
-    # Validate and correct if previous metadata available
-    if prev_metadata:
-        metadata = validate_and_correct_metadata(metadata, prev_metadata)
+    # Batch processing mode
+    if batch_mode:
+        batch_process_images(
+            image_path, 
+            lang=lang, 
+            right_col_char_pos=right_col_char_pos,
+            validate_ollama=validate_ollama,
+            max_pages=max_pages,
+            stop_on_book_change=stop_on_book_change,
+            stop_on_chapter_change=stop_on_chapter_change
+        )
+    else:
+        # Single image processing mode
+        # Load previous metadata if provided
+        prev_metadata = None
+        if prev_metadata_path:
+            prev_metadata = load_previous_metadata(prev_metadata_path)
         
-        # Save corrected metadata
-        if output_path:
-            base_name = os.path.splitext(output_path)[0]
-        else:
-            base_name = os.path.splitext(image_path)[0]
+        # Process image
+        metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama)
         
-        json_path = base_name + '_metadata.json'
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        print(f"\nCorrected metadata saved to: {json_path}")
+        # Validate and correct if previous metadata available
+        if prev_metadata:
+            metadata = validate_and_correct_metadata(metadata, prev_metadata)
+            
+            # Save corrected metadata
+            if output_path:
+                base_name = os.path.splitext(output_path)[0]
+            else:
+                base_name = os.path.splitext(image_path)[0]
+            
+            json_path = base_name + '_metadata.json'
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            print(f"\nCorrected metadata saved to: {json_path}")
