@@ -4,7 +4,266 @@ import re
 import sys
 import json
 import os
+from pathlib import Path
 pytesseract.pytesseract.tesseract_cmd = 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+
+# Import BAML client for Ollama validation
+try:
+    # Add current directory to path for baml_client import
+    script_dir = Path(__file__).parent
+    if str(script_dir) not in sys.path:
+        sys.path.insert(0, str(script_dir))
+    
+    from baml_client.sync_client import b as baml_client
+    from baml_client import types as baml_types
+    import baml_py
+    BAML_AVAILABLE = True
+except ImportError as e:
+    BAML_AVAILABLE = False
+    print(f"Warning: BAML client not available ({e}). Ollama validation will be skipped.")
+
+BOOK_NAME_TO_USFM = {
+    'Genesis': '02-GENhbo.usfm',
+    'Exodus': '03-EXOhbo.usfm',
+    'Leviticus': '04-LEVhbo.usfm',
+    'Numbers': '05-NUMhbo.usfm',
+    'Deuteronomy': '06-DEUhbo.usfm',
+    'Joshua': '07-JOShbo.usfm',
+    'Judges': '08-JDGhbo.usfm',
+    'Ruth': '09-RUThbo.usfm',
+    '1Samuel': '10-1SAhbo.usfm',
+    '1 Samuel': '10-1SAhbo.usfm',
+    '2Samuel': '11-2SAhbo.usfm',
+    '2 Samuel': '11-2SAhbo.usfm',
+    '1Kings': '12-1KIhbo.usfm',
+    '1 Kings': '12-1KIhbo.usfm',
+    '2Kings': '13-2KIhbo.usfm',
+    '2 Kings': '13-2KIhbo.usfm',
+    '1Chronicles': '14-1CHhbo.usfm',
+    '1 Chronicles': '14-1CHhbo.usfm',
+    '2Chronicles': '15-2CHhbo.usfm',
+    '2 Chronicles': '15-2CHhbo.usfm',
+    'Ezra': '16-EZRhbo.usfm',
+    'Nehemiah': '17-NEHhbo.usfm',
+    'Esther': '18-ESThbo.usfm',
+    'Job': '19-JOBhbo.usfm',
+    'Psalms': '20-PSAhbo.usfm',
+    'Proverbs': '21-PROhbo.usfm',
+    'Ecclesiastes': '22-ECChbo.usfm',
+    'SongofSolomon': '23-SNGhbo.usfm',
+    'Song of Solomon': '23-SNGhbo.usfm',
+    'Isaiah': '24-ISAhbo.usfm',
+    'Jeremiah': '25-JERhbo.usfm',
+    'Lamentations': '26-LAMhbo.usfm',
+    'Ezekiel': '27-EZKhbo.usfm',
+    'Daniel': '28-DANhbo.usfm',
+    'Hosea': '29-HOShbo.usfm',
+    'Joel': '30-JOLhbo.usfm',
+    'Amos': '31-AMOhbo.usfm',
+    'Obadiah': '32-OBAhbo.usfm',
+    'Jonah': '33-JONhbo.usfm',
+    'Micah': '34-MIChbo.usfm',
+    'Nahum': '35-NAMhbo.usfm',
+    'Habakkuk': '36-HABhbo.usfm',
+    'Zephaniah': '37-ZEPhbo.usfm',
+    'Haggai': '38-HAGhbo.usfm',
+    'Zechariah': '39-ZEChbo.usfm',
+    'Malachi': '40-MALhbo.usfm',
+}
+
+def get_usfm_directory():
+    """Get the path to the hbo_usfm directory."""
+    script_dir = Path(__file__).parent
+    usfm_dir = script_dir / 'hbo_usfm'
+    return usfm_dir if usfm_dir.exists() else None
+
+def parse_usfm_file(usfm_path):
+    """Parse a USFM file and return a dictionary of chapters and verses."""
+    chapters = {}
+    current_chapter = None
+    
+    try:
+        with open(usfm_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                
+                if line.startswith('\\c '):
+                    current_chapter = int(line[3:].strip())
+                    chapters[current_chapter] = {}
+                
+                elif line.startswith('\\v ') and current_chapter is not None:
+                    parts = line[3:].split(None, 1)
+                    if len(parts) == 2:
+                        verse_num = parts[0]
+                        verse_text = parts[1].strip()
+                        try:
+                            chapters[current_chapter][int(verse_num)] = verse_text
+                        except ValueError:
+                            continue
+    except Exception as e:
+        print(f"Error parsing USFM file {usfm_path}: {e}")
+        return {}
+    
+    return chapters
+
+def get_hebrew_verse(book_name, chapter, verse):
+    """
+    Extract Hebrew verse(s) from USFM files.
+    
+    Args:
+        book_name: Name of the book (English)
+        chapter: Chapter number (int)
+        verse: Verse number or range/list (str or int)
+                Examples: "3", "3-5", "3,4,5"
+    
+    Returns:
+        Dictionary with verse text or None if not found
+    """
+    if not book_name or not chapter or not verse:
+        return None
+    
+    usfm_dir = get_usfm_directory()
+    if not usfm_dir:
+        print("Warning: hbo_usfm directory not found")
+        return None
+    
+    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    usfm_filename = None
+    for key, value in BOOK_NAME_TO_USFM.items():
+        if key.lower() == book_name_normalized:
+            usfm_filename = value
+            break
+    
+    if not usfm_filename:
+        print(f"Warning: Could not find USFM file for book '{book_name}'")
+        return None
+    
+    usfm_path = usfm_dir / usfm_filename
+    if not usfm_path.exists():
+        print(f"Warning: USFM file not found: {usfm_path}")
+        return None
+    
+    chapters_data = parse_usfm_file(usfm_path)
+    
+    if chapter not in chapters_data:
+        print(f"Warning: Chapter {chapter} not found in {book_name}")
+        return None
+    
+    chapter_verses = chapters_data[chapter]
+    result = {}
+    verse_str = str(verse)
+    
+    if '-' in verse_str:
+        parts = verse_str.split('-')
+        if len(parts) == 2:
+            try:
+                start_verse = int(parts[0])
+                end_verse = int(parts[1])
+                for v in range(start_verse, end_verse + 1):
+                    if v in chapter_verses:
+                        result[str(v)] = chapter_verses[v]
+            except ValueError:
+                pass
+    
+    elif ',' in verse_str:
+        verse_nums = verse_str.split(',')
+        for v_str in verse_nums:
+            try:
+                v = int(v_str.strip())
+                if v in chapter_verses:
+                    result[str(v)] = chapter_verses[v]
+            except ValueError:
+                continue
+    
+    else:
+        try:
+            v = int(verse_str)
+            if v in chapter_verses:
+                result[str(v)] = chapter_verses[v]
+        except ValueError:
+            pass
+    
+    return result if result else None
+
+def validate_metadata_with_ollama(image_path, metadata):
+    """
+    Validate OCR metadata using Ollama vision model.
+    
+    Args:
+        image_path: Path to the image file
+        metadata: Dictionary with book_name, chapter, verse, page_number
+    
+    Returns:
+        Validated metadata dictionary or original if validation fails
+    """
+    if not BAML_AVAILABLE:
+        print("Skipping Ollama validation (BAML not available)")
+        return metadata
+    
+    try:
+        print("\nStep 3: Validating metadata with Ollama...")
+        
+        # Load image for BAML - convert to base64
+        import base64
+        with open(image_path, 'rb') as f:
+            image_data = base64.b64encode(f.read()).decode('utf-8')
+        
+        # Determine media type from file extension
+        ext = os.path.splitext(image_path)[1].lower()
+        media_type_map = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp'
+        }
+        media_type = media_type_map.get(ext, 'image/png')
+        
+        image = baml_py.Image.from_base64(media_type, image_data)
+        
+        # Convert metadata to BAML Metadata type
+        baml_metadata = baml_types.Metadata(
+            book_name=metadata.get('book_name'),
+            chapter=metadata.get('chapter'),
+            verse=metadata.get('verse'),
+            page_number=metadata.get('page_number')
+        )
+        
+        # Call Ollama validation
+        validated = baml_client.ValidateOCRMetadata(
+            image=image,
+            ocr_metadata=baml_metadata
+        )
+        
+        # Convert back to dictionary
+        result = {
+            'book_name': validated.book_name,
+            'chapter': validated.chapter,
+            'verse': validated.verse,
+            'page_number': validated.page_number
+        }
+        
+        # Check if anything changed
+        changes = []
+        for key in ['book_name', 'chapter', 'verse', 'page_number']:
+            old_val = metadata.get(key)
+            new_val = result.get(key)
+            if old_val != new_val:
+                changes.append(f"{key}: {old_val} -> {new_val}")
+        
+        if changes:
+            print(f"Ollama corrected metadata:")
+            for change in changes:
+                print(f"  - {change}")
+        else:
+            print("Ollama confirmed metadata is correct")
+        
+        return result
+        
+    except Exception as e:
+        print(f"Warning: Ollama validation failed: {e}")
+        print("Using original OCR metadata")
+        return metadata
 
 def extract_text_with_layout(image_path, lang='eng'):
     """Extract text from image with layout information using pytesseract."""
@@ -703,23 +962,33 @@ def format_as_markdown(paragraphs):
         markdown.append("")
     return '\n'.join(markdown)
 
-def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None):
+def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False):
     """Main function to process image and generate markdown."""
     print(f"Processing image: {image_path}")
-    print(f"Language: {lang}")
-    
-    tsv_data, img_width, img_height = extract_text_with_layout(image_path, lang)
+    print(f"Content language: {lang}")
     
     if output_path:
         base_name = os.path.splitext(output_path)[0]
     else:
         base_name = os.path.splitext(image_path)[0]
     
+    # Step 1: Run OCR with English only to extract metadata
+    print(f"\nStep 1: Running OCR with English to extract metadata...")
+    tsv_data_eng, img_width, img_height = extract_text_with_layout(image_path, 'eng')
+    header_info = extract_header_info(tsv_data_eng, img_width, img_height)
+    print(f"Metadata extracted: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
+    
+    # Validate metadata with Ollama if requested
+    if validate_ollama:
+        header_info = validate_metadata_with_ollama(image_path, header_info)
+    
+    # Step 2: Run OCR with specified language for content
+    print(f"\nStep 2: Running OCR with '{lang}' to extract content...")
+    tsv_data, img_width, img_height = extract_text_with_layout(image_path, lang)
+    
     ocr_json_path = base_name + '_ocr.json'
     save_ocr_json(tsv_data, ocr_json_path)
     print(f"Raw OCR data saved to: {ocr_json_path}")
-    
-    header_info = extract_header_info(tsv_data, img_width, img_height)
     
     line_list = group_by_lines(tsv_data)
     merged_lines = merge_lines_by_y_position(line_list)
@@ -753,6 +1022,16 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         f.write(markdown_output)
     print(f"Markdown saved to: {markdown_path}")
     
+    hebrew_verses = None
+    if header_info['book_name'] and header_info['chapter'] and header_info['verse']:
+        hebrew_verses = get_hebrew_verse(
+            header_info['book_name'],
+            header_info['chapter'],
+            header_info['verse']
+        )
+        if hebrew_verses:
+            print(f"\nExtracted Hebrew verse(s): {len(hebrew_verses)} verse(s) found")
+    
     metadata = {
         'input_file': os.path.basename(image_path),
         'markdown_file': os.path.basename(markdown_path),
@@ -760,10 +1039,13 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         'book_name': header_info['book_name'],
         'chapter': header_info['chapter'],
         'verse': header_info['verse'],
-        'page_number': header_info['page_number']
+        'page_number': header_info['page_number'],
+        'hebrew_text': hebrew_verses
     }
     
-    print(f"\nExtracted metadata: {json.dumps(metadata, indent=2)}")
+    print(f"\nExtracted metadata (without Hebrew text):")
+    metadata_without_hebrew = {k: v for k, v in metadata.items() if k != 'hebrew_text'}
+    print(json.dumps(metadata_without_hebrew, indent=2, ensure_ascii=False))
     
     json_path = base_name + '_metadata.json' if not output_path else output_path
     with open(json_path, 'w', encoding='utf-8') as f:
@@ -896,7 +1178,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python script.py <image_path> [output_path] [--lang LANG] [--right-col POS] [--prev-metadata PATH]")
+        print("Usage: python script.py <image_path> [output_path] [--lang LANG] [--right-col POS] [--prev-metadata PATH] [--validate-ollama]")
         print("\nOutput files created:")
         print("  <base>_metadata.json - Metadata with book/chapter/verse/page info")
         print("  <base>.md            - Formatted markdown with columns")
@@ -905,6 +1187,7 @@ if __name__ == "__main__":
         print("  --lang LANG          - Tesseract language (default: eng)")
         print("  --right-col POS      - Right column character position")
         print("  --prev-metadata PATH - Previous page metadata JSON for validation")
+        print("  --validate-ollama    - Validate metadata using Ollama vision model")
         sys.exit(1)
     
     image_path = sys.argv[1]
@@ -912,6 +1195,7 @@ if __name__ == "__main__":
     lang = 'eng'
     right_col_char_pos = None
     prev_metadata_path = None
+    validate_ollama = False
     
     i = 2
     while i < len(sys.argv):
@@ -924,6 +1208,9 @@ if __name__ == "__main__":
         elif sys.argv[i] == '--prev-metadata' and i + 1 < len(sys.argv):
             prev_metadata_path = sys.argv[i + 1]
             i += 2
+        elif sys.argv[i] == '--validate-ollama':
+            validate_ollama = True
+            i += 1
         else:
             output_path = sys.argv[i]
             i += 1
@@ -934,7 +1221,7 @@ if __name__ == "__main__":
         prev_metadata = load_previous_metadata(prev_metadata_path)
     
     # Process image
-    metadata = process_image(image_path, output_path, lang, right_col_char_pos)
+    metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama)
     
     # Validate and correct if previous metadata available
     if prev_metadata:
