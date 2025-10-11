@@ -237,7 +237,7 @@ def validate_metadata_with_ollama(image_path, metadata):
         
         # Convert back to dictionary
         result = {
-            'book_name': validated.book_name,
+            'book_name': validated.book_name.upper(),
             'chapter': validated.chapter,
             'verse': validated.verse,
             'page_number': validated.page_number
