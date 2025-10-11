@@ -1253,7 +1253,8 @@ def sort_images_by_page_number(images):
 
 def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None, 
                         validate_ollama=False, max_pages=None, 
-                        stop_on_book_change=False, stop_on_chapter_change=False):
+                        stop_on_book_change=False, stop_on_chapter_change=False,
+                        start_page=None, start_book=None, start_chapter=None, start_verse=None):
     """
     Process multiple images in sequence, chaining metadata validation.
     
@@ -1265,6 +1266,10 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
         max_pages: Maximum number of pages to process
         stop_on_book_change: Stop when book changes
         stop_on_chapter_change: Stop when chapter changes
+        start_page: Expected page number for first image (for validation seeding)
+        start_book: Expected book name for first image (for validation seeding)
+        start_chapter: Expected chapter for first image (for validation seeding)
+        start_verse: Expected starting verse for first image (for validation seeding)
     
     Returns:
         Number of images processed
@@ -1303,6 +1308,45 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
     
     # Process images sequentially
     prev_metadata = None
+    
+    # Create seed metadata if start parameters provided
+    if start_page or start_book or start_chapter or start_verse:
+        print(f"Using seed metadata for validation:")
+        if start_page:
+            print(f"  Expected starting page: {start_page}")
+        if start_book:
+            print(f"  Expected starting book: {start_book}")
+        if start_chapter:
+            print(f"  Expected starting chapter: {start_chapter}")
+        if start_verse:
+            print(f"  Expected starting verse: {start_verse}")
+        
+        # Create synthetic previous metadata (one page/verse before)
+        prev_metadata = {}
+        if start_page:
+            prev_metadata['page_number'] = start_page - 1
+        if start_book:
+            prev_metadata['book_name'] = start_book
+        if start_chapter:
+            prev_metadata['chapter'] = start_chapter
+        if start_verse:
+            # Parse verse to get the starting number
+            verse_str = str(start_verse)
+            if '-' in verse_str:
+                # It's a range, use the first number minus 1
+                first_verse = int(verse_str.split('-')[0])
+                prev_metadata['verse'] = str(max(1, first_verse - 1))
+            elif ',' in verse_str:
+                # It's a list, use the first number minus 1
+                first_verse = int(verse_str.split(',')[0])
+                prev_metadata['verse'] = str(max(1, first_verse - 1))
+            else:
+                # Single verse
+                prev_metadata['verse'] = str(max(1, int(verse_str) - 1))
+        
+        print(f"  Created synthetic previous metadata: {prev_metadata}")
+        print(f"\n{'='*80}\n")
+    
     initial_book = None
     initial_chapter = None
     processed_count = 0
@@ -1398,6 +1442,10 @@ if __name__ == "__main__":
         print("  --max-pages N            - Maximum number of pages to process in batch mode")
         print("  --stop-on-book-change    - Stop batch processing when book changes")
         print("  --stop-on-chapter-change - Stop batch processing when chapter changes")
+        print("  --start-page N           - Expected page number for first image (for validation)")
+        print("  --start-book NAME        - Expected book name for first image (for validation)")
+        print("  --start-chapter N        - Expected chapter for first image (for validation)")
+        print("  --start-verse N          - Expected verse for first image (for validation)")
         sys.exit(1)
     
     image_path = sys.argv[1]
@@ -1410,6 +1458,10 @@ if __name__ == "__main__":
     max_pages = None
     stop_on_book_change = False
     stop_on_chapter_change = False
+    start_page = None
+    start_book = None
+    start_chapter = None
+    start_verse = None
     
     i = 2
     while i < len(sys.argv):
@@ -1437,6 +1489,18 @@ if __name__ == "__main__":
         elif sys.argv[i] == '--stop-on-chapter-change':
             stop_on_chapter_change = True
             i += 1
+        elif sys.argv[i] == '--start-page' and i + 1 < len(sys.argv):
+            start_page = int(sys.argv[i + 1])
+            i += 2
+        elif sys.argv[i] == '--start-book' and i + 1 < len(sys.argv):
+            start_book = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == '--start-chapter' and i + 1 < len(sys.argv):
+            start_chapter = int(sys.argv[i + 1])
+            i += 2
+        elif sys.argv[i] == '--start-verse' and i + 1 < len(sys.argv):
+            start_verse = sys.argv[i + 1]
+            i += 2
         else:
             output_path = sys.argv[i]
             i += 1
@@ -1450,7 +1514,11 @@ if __name__ == "__main__":
             validate_ollama=validate_ollama,
             max_pages=max_pages,
             stop_on_book_change=stop_on_book_change,
-            stop_on_chapter_change=stop_on_chapter_change
+            stop_on_chapter_change=stop_on_chapter_change,
+            start_page=start_page,
+            start_book=start_book,
+            start_chapter=start_chapter,
+            start_verse=start_verse
         )
     else:
         # Single image processing mode
