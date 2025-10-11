@@ -5,7 +5,39 @@ import sys
 import json
 import os
 from pathlib import Path
+from datetime import datetime
 pytesseract.pytesseract.tesseract_cmd = 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+
+# Global log file handle
+_log_file = None
+
+def log_print(*args, **kwargs):
+    """Print to both console and log file if logging is enabled."""
+    # Print to console
+    print(*args, **kwargs)
+    
+    # Print to log file if enabled
+    if _log_file:
+        print(*args, **kwargs, file=_log_file)
+        _log_file.flush()  # Ensure it's written immediately
+
+def set_log_file(log_path):
+    """Enable logging to a file."""
+    global _log_file
+    if log_path:
+        _log_file = open(log_path, 'w', encoding='utf-8')
+        log_print(f"Logging started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        log_print(f"Log file: {log_path}")
+        log_print("="*80)
+
+def close_log_file():
+    """Close the log file if open."""
+    global _log_file
+    if _log_file:
+        log_print("="*80)
+        log_print(f"Logging ended at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        _log_file.close()
+        _log_file = None
 
 # Import BAML client for Ollama validation
 try:
@@ -20,7 +52,7 @@ try:
     BAML_AVAILABLE = True
 except ImportError as e:
     BAML_AVAILABLE = False
-    print(f"Warning: BAML client not available ({e}). Ollama validation will be skipped.")
+    log_print(f"Warning: BAML client not available ({e}). Ollama validation will be skipped.")
 
 BOOK_NAME_TO_USFM = {
     'Genesis': '02-GENhbo.usfm',
@@ -101,7 +133,7 @@ def parse_usfm_file(usfm_path):
                         except ValueError:
                             continue
     except Exception as e:
-        print(f"Error parsing USFM file {usfm_path}: {e}")
+        log_print(f"Error parsing USFM file {usfm_path}: {e}")
         return {}
     
     return chapters
@@ -124,7 +156,7 @@ def get_hebrew_verse(book_name, chapter, verse):
     
     usfm_dir = get_usfm_directory()
     if not usfm_dir:
-        print("Warning: hbo_usfm directory not found")
+        log_print("Warning: hbo_usfm directory not found")
         return None
     
     book_name_normalized = book_name.strip().replace(' ', '').lower()
@@ -135,18 +167,18 @@ def get_hebrew_verse(book_name, chapter, verse):
             break
     
     if not usfm_filename:
-        print(f"Warning: Could not find USFM file for book '{book_name}'")
+        log_print(f"Warning: Could not find USFM file for book '{book_name}'")
         return None
     
     usfm_path = usfm_dir / usfm_filename
     if not usfm_path.exists():
-        print(f"Warning: USFM file not found: {usfm_path}")
+        log_print(f"Warning: USFM file not found: {usfm_path}")
         return None
     
     chapters_data = parse_usfm_file(usfm_path)
     
     if chapter not in chapters_data:
-        print(f"Warning: Chapter {chapter} not found in {book_name}")
+        log_print(f"Warning: Chapter {chapter} not found in {book_name}")
         return None
     
     chapter_verses = chapters_data[chapter]
@@ -197,11 +229,11 @@ def validate_metadata_with_ollama(image_path, metadata):
         Validated metadata dictionary or original if validation fails
     """
     if not BAML_AVAILABLE:
-        print("Skipping Ollama validation (BAML not available)")
+        log_print("Skipping Ollama validation (BAML not available)")
         return metadata
     
     try:
-        print("\nStep 3: Validating metadata with Ollama...")
+        log_print("\nStep 3: Validating metadata with Ollama...")
         
         # Load image for BAML - convert to base64
         import base64
@@ -252,17 +284,17 @@ def validate_metadata_with_ollama(image_path, metadata):
                 changes.append(f"{key}: {old_val} -> {new_val}")
         
         if changes:
-            print(f"Ollama corrected metadata:")
+            log_print(f"Ollama corrected metadata:")
             for change in changes:
-                print(f"  - {change}")
+                log_print(f"  - {change}")
         else:
-            print("Ollama confirmed metadata is correct")
+            log_print("Ollama confirmed metadata is correct")
         
         return result
         
     except Exception as e:
-        print(f"Warning: Ollama validation failed: {e}")
-        print("Using original OCR metadata")
+        log_print(f"Warning: Ollama validation failed: {e}")
+        log_print("Using original OCR metadata")
         return metadata
 
 def extract_text_with_layout(image_path, lang='eng'):
@@ -367,7 +399,7 @@ def combine_verse_list_boxes(boxes, start_index):
     if verse_parts:
         # Join the parts with commas
         combined_verse = ','.join(verse_parts)
-        print(f"DEBUG: Combined verse list from boxes: {verse_parts} -> {combined_verse}")
+        log_print(f"DEBUG: Combined verse list from boxes: {verse_parts} -> {combined_verse}")
         return combined_verse, current_index
     
     return None, start_index
@@ -461,13 +493,13 @@ def extract_chapter_verse_from_boxes(boxes):
         corrected_box['text'] = corrected_text
         corrected_boxes.append(corrected_box)
         if corrected_text != box['text']:
-            print(f"DEBUG: OCR correction: '{box['text']}' -> '{corrected_text}'")
+            log_print(f"DEBUG: OCR correction: '{box['text']}' -> '{corrected_text}'")
     
     sorted_boxes = corrected_boxes
     
-    print(f"DEBUG: Searching for chapter/verse in {len(sorted_boxes)} boxes:")
+    log_print(f"DEBUG: Searching for chapter/verse in {len(sorted_boxes)} boxes:")
     for i, box in enumerate(sorted_boxes):
-        print(f"  {i}: '{box['text']}' at x={box['x']}")
+        log_print(f"  {i}: '{box['text']}' at x={box['x']}")
     
     # First try single-box patterns
     single_box_patterns = [
@@ -482,7 +514,7 @@ def extract_chapter_verse_from_boxes(boxes):
             if match:
                 chapter = roman_to_decimal(match.group(1))
                 verse = roman_to_decimal(match.group(2))
-                print(f"DEBUG: Single-box pattern found Ch.{chapter} V.{verse} in: '{box['text']}'")
+                log_print(f"DEBUG: Single-box pattern found Ch.{chapter} V.{verse} in: '{box['text']}'")
                 return chapter, verse
     
     # Try multi-box patterns
@@ -497,12 +529,12 @@ def extract_chapter_verse_from_boxes(boxes):
         # Look for chapter marker (with or without appended number)
         ch_match = re.search(r'^CH\.?([IVXLCDM]+)?', text, re.IGNORECASE)
         if ch_match:
-            print(f"DEBUG: Found chapter marker in '{text}' at position {i}")
+            log_print(f"DEBUG: Found chapter marker in '{text}' at position {i}")
             
             # Check if chapter number is appended to marker
             if ch_match.group(1):
                 chapter = roman_to_decimal(ch_match.group(1))
-                print(f"DEBUG: Chapter {chapter} found appended to marker")
+                log_print(f"DEBUG: Chapter {chapter} found appended to marker")
             else:
                 # Look in next few boxes for chapter number or chapter+verse combination
                 for j in range(i + 1, min(i + 4, len(sorted_boxes))):
@@ -514,7 +546,7 @@ def extract_chapter_verse_from_boxes(boxes):
                     if cv_match:
                         chapter = roman_to_decimal(cv_match.group(1))
                         if chapter:
-                            print(f"DEBUG: Chapter {chapter} found in combined box: '{next_text}' (interpreted as {cv_match.group(1)} + V.)")
+                            log_print(f"DEBUG: Chapter {chapter} found in combined box: '{next_text}' (interpreted as {cv_match.group(1)} + V.)")
                             # This box contains both chapter and verse marker
                             # Now we need to look for the verse numbers in the following boxes
                             i = j
@@ -525,13 +557,13 @@ def extract_chapter_verse_from_boxes(boxes):
                     elif re.match(r'^[IVXLCDM]+\.?$', next_text, re.IGNORECASE):
                         # Skip if it's clearly a verse marker (just "V.")
                         if re.match(r'^V\.?$', next_text, re.IGNORECASE):
-                            print(f"DEBUG: Skipping '{next_text}' - likely verse marker, not chapter")
+                            log_print(f"DEBUG: Skipping '{next_text}' - likely verse marker, not chapter")
                             break
                         
                         chapter = roman_to_decimal(next_text.replace('.', ''))
                         if chapter:
                             i = j  # Move index to this position
-                            print(f"DEBUG: Chapter {chapter} found in separate box: '{next_text}'")
+                            log_print(f"DEBUG: Chapter {chapter} found in separate box: '{next_text}'")
                             break
                     # Stop if we hit a standalone verse marker
                     elif re.match(r'^V\.', next_text, re.IGNORECASE):
@@ -555,42 +587,42 @@ def extract_chapter_verse_from_boxes(boxes):
                         verse_part = v_match.group(1)
                         verse = parse_verse_text(verse_part)
                         if verse:
-                            print(f"DEBUG: Verse {verse} found appended to marker: '{verse_text}'")
+                            log_print(f"DEBUG: Verse {verse} found appended to marker: '{verse_text}'")
                             break
                     
                     # Check for standalone verse marker
                     elif re.match(r'^[IV]V?\.?$', verse_text, re.IGNORECASE):
-                        print(f"DEBUG: Found verse marker '{verse_text}' at position {k}")
+                        log_print(f"DEBUG: Found verse marker '{verse_text}' at position {k}")
                         # Try to combine multiple boxes for verse list
                         combined_verse, next_index = combine_verse_list_boxes(sorted_boxes, k + 1)
                         if combined_verse:
                             verse = combined_verse
-                            print(f"DEBUG: Combined verse list: {verse}")
+                            log_print(f"DEBUG: Combined verse list: {verse}")
                             break
                         else:
                             # Look for verse number/range/list in next boxes (fallback)
                             for l in range(k + 1, min(k + 3, len(sorted_boxes))):
                                 num_box = sorted_boxes[l]
                                 num_text = num_box['text'].strip()
-                                print(f"DEBUG: Trying to parse verse from: '{num_text}'")
+                                log_print(f"DEBUG: Trying to parse verse from: '{num_text}'")
                                 
                                 verse = parse_verse_text(num_text)
                                 if verse:
-                                    print(f"DEBUG: Verse {verse} found in separate box: '{num_text}'")
+                                    log_print(f"DEBUG: Verse {verse} found in separate box: '{num_text}'")
                                     break
                                 else:
-                                    print(f"DEBUG: Could not parse verse from: '{num_text}'")
+                                    log_print(f"DEBUG: Could not parse verse from: '{num_text}'")
                         break
                     
                     # If no verse marker found, try to parse directly as verse numbers
                     # This handles the case where we already found the verse marker embedded (like in "IV.")
                     # and the next boxes contain the verse numbers directly (like "3,", "4.")
                     else:
-                        print(f"DEBUG: No verse marker in '{verse_text}', trying to combine verse list from position {k}")
+                        log_print(f"DEBUG: No verse marker in '{verse_text}', trying to combine verse list from position {k}")
                         combined_verse, next_index = combine_verse_list_boxes(sorted_boxes, k)
                         if combined_verse:
                             verse = combined_verse
-                            print(f"DEBUG: Combined verse list without explicit marker: {verse}")
+                            log_print(f"DEBUG: Combined verse list without explicit marker: {verse}")
                             break
                 
                 if chapter and verse:
@@ -598,7 +630,7 @@ def extract_chapter_verse_from_boxes(boxes):
         
         i += 1
     
-    print(f"DEBUG: Multi-box search result: chapter={chapter}, verse={verse}")
+    log_print(f"DEBUG: Multi-box search result: chapter={chapter}, verse={verse}")
     return chapter, verse
 
 
@@ -626,18 +658,18 @@ def extract_header_info(tsv_data, img_width, img_height):
     boxes.sort(key=lambda b: b['y'])
     min_y = boxes[0]['y']
     
-    print(f"DEBUG: Minimum Y: {min_y}")
-    print(f"DEBUG: First 10 boxes:")
+    log_print(f"DEBUG: Minimum Y: {min_y}")
+    log_print(f"DEBUG: First 10 boxes:")
     for i, box in enumerate(boxes[:10]):
-        print(f"  {i}: '{box['text']}' at x={box['x']}, y={box['y']}")
+        log_print(f"  {i}: '{box['text']}' at x={box['x']}, y={box['y']}")
     
     # Get topmost boxes with larger tolerance
     y_tolerance = 50
     topmost_boxes = [b for b in boxes if abs(b['y'] - min_y) <= y_tolerance]
     
-    print(f"\nDEBUG: Topmost boxes (y ~= {min_y} ± {y_tolerance}):")
+    log_print(f"\nDEBUG: Topmost boxes (y ~= {min_y} ± {y_tolerance}):")
     for box in topmost_boxes:
-        print(f"  '{box['text']}' at x={box['x']}, y={box['y']}")
+        log_print(f"  '{box['text']}' at x={box['x']}, y={box['y']}")
     
     if not topmost_boxes:
         return {'book_name': None, 'chapter': None, 'verse': None, 'page_number': None}
@@ -653,10 +685,10 @@ def extract_header_info(tsv_data, img_width, img_height):
     center_boxes = [b for b in topmost_boxes if left_boundary <= b['x'] <= right_boundary]
     right_boxes = [b for b in topmost_boxes if b['x'] > right_boundary]
     
-    print(f"\nDEBUG: Spatial categorization (img_width={img_width}):")
-    print(f"  Left boxes ({len(left_boxes)}): {[b['text'] for b in left_boxes]}")
-    print(f"  Center boxes ({len(center_boxes)}): {[b['text'] for b in center_boxes]}")
-    print(f"  Right boxes ({len(right_boxes)}): {[b['text'] for b in right_boxes]}")
+    log_print(f"\nDEBUG: Spatial categorization (img_width={img_width}):")
+    log_print(f"  Left boxes ({len(left_boxes)}): {[b['text'] for b in left_boxes]}")
+    log_print(f"  Center boxes ({len(center_boxes)}): {[b['text'] for b in center_boxes]}")
+    log_print(f"  Right boxes ({len(right_boxes)}): {[b['text'] for b in right_boxes]}")
     
     # Find book name from center boxes
     book_name = None
@@ -665,7 +697,7 @@ def extract_header_info(tsv_data, img_width, img_height):
         center_x = img_width / 2
         center_box = min(center_boxes, key=lambda b: abs((b['x'] + b['width']/2) - center_x))
         book_name = center_box['text'].replace('.', '').strip()
-        print(f"DEBUG: Book name found: '{book_name}'")
+        log_print(f"DEBUG: Book name found: '{book_name}'")
     
     # Find page number and determine its side
     page_number = None
@@ -678,13 +710,13 @@ def extract_header_info(tsv_data, img_width, img_height):
             
             # Skip if it looks like a verse (contains comma or ends with comma/period suggesting list)
             if ',' in text or re.match(r'^[0-9]+[,.]$', text):
-                print(f"DEBUG: Skipping '{text}' - looks like verse list item")
+                log_print(f"DEBUG: Skipping '{text}' - looks like verse list item")
                 continue
             
             # Skip if it's too close to chapter/verse markers
             if any(re.search(r'CH\.|V\.', other_box['text'], re.IGNORECASE)
                    for other_box in boxes_list if abs(other_box['x'] - box['x']) < 200):
-                print(f"DEBUG: Skipping '{text}' - too close to CH./V. markers")
+                log_print(f"DEBUG: Skipping '{text}' - too close to CH./V. markers")
                 continue
             
             # Skip if this number is part of a sequence (e.g., "5" followed by "6." = verse list)
@@ -696,14 +728,14 @@ def extract_header_info(tsv_data, img_width, img_height):
                         nearby_numbers.append(other_box['text'].strip())
             
             if nearby_numbers:
-                print(f"DEBUG: Skipping '{text}' - nearby numbers suggest verse list: {nearby_numbers}")
+                log_print(f"DEBUG: Skipping '{text}' - nearby numbers suggest verse list: {nearby_numbers}")
                 continue
             
             page_match = re.match(r'^\s*(\d+)\s*$', text)
             if page_match:
                 page_number = int(page_match.group(1))
                 page_side = side
-                print(f"DEBUG: Page number {page_number} found on {side} side in: '{box['text']}'")
+                log_print(f"DEBUG: Page number {page_number} found on {side} side in: '{box['text']}'")
                 break
         if page_number:
             break
@@ -714,19 +746,19 @@ def extract_header_info(tsv_data, img_width, img_height):
     
     if page_side == 'left':
         cv_boxes = right_boxes
-        print(f"DEBUG: Page number on left, searching for chapter/verse on right")
+        log_print(f"DEBUG: Page number on left, searching for chapter/verse on right")
     elif page_side == 'right':
         cv_boxes = left_boxes
-        print(f"DEBUG: Page number on right, searching for chapter/verse on left")
+        log_print(f"DEBUG: Page number on right, searching for chapter/verse on left")
     else:
         # Fallback: search all non-center boxes
         cv_boxes = left_boxes + right_boxes
-        print(f"DEBUG: Page number not found, searching all non-center boxes for chapter/verse")
+        log_print(f"DEBUG: Page number not found, searching all non-center boxes for chapter/verse")
     
     if cv_boxes:
         chapter, verse = extract_chapter_verse_from_boxes(cv_boxes)
     
-    print(f"\nDEBUG: Final result: book='{book_name}', ch={chapter}, v={verse}, page={page_number}\n")
+    log_print(f"\nDEBUG: Final result: book='{book_name}', ch={chapter}, v={verse}, page={page_number}\n")
     
     return {
         'book_name': book_name,
@@ -964,8 +996,8 @@ def format_as_markdown(paragraphs):
 
 def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False):
     """Main function to process image and generate markdown."""
-    print(f"Processing image: {image_path}")
-    print(f"Content language: {lang}")
+    log_print(f"Processing image: {image_path}")
+    log_print(f"Content language: {lang}")
     
     if output_path:
         base_name = os.path.splitext(output_path)[0]
@@ -973,22 +1005,22 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         base_name = os.path.splitext(image_path)[0]
     
     # Step 1: Run OCR with English only to extract metadata
-    print(f"\nStep 1: Running OCR with English to extract metadata...")
+    log_print(f"\nStep 1: Running OCR with English to extract metadata...")
     tsv_data_eng, img_width, img_height = extract_text_with_layout(image_path, 'eng')
     header_info = extract_header_info(tsv_data_eng, img_width, img_height)
-    print(f"Metadata extracted: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
+    log_print(f"Metadata extracted: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
     
     # Validate metadata with Ollama if requested
     if validate_ollama:
         header_info = validate_metadata_with_ollama(image_path, header_info)
     
     # Step 2: Run OCR with specified language for content
-    print(f"\nStep 2: Running OCR with '{lang}' to extract content...")
+    log_print(f"\nStep 2: Running OCR with '{lang}' to extract content...")
     tsv_data, img_width, img_height = extract_text_with_layout(image_path, lang)
     
     ocr_json_path = base_name + '_ocr.json'
     save_ocr_json(tsv_data, ocr_json_path)
-    print(f"Raw OCR data saved to: {ocr_json_path}")
+    log_print(f"Raw OCR data saved to: {ocr_json_path}")
     
     line_list = group_by_lines(tsv_data)
     merged_lines = merge_lines_by_y_position(line_list)
@@ -996,20 +1028,20 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     center_x = calculate_page_center(merged_lines)
     
     if center_x:
-        print(f"Page center calculated at X={center_x:.0f} (image width: {img_width})")
+        log_print(f"Page center calculated at X={center_x:.0f} (image width: {img_width})")
         right_col_start = find_right_column_start(merged_lines, center_x)
         if right_col_start:
-            print(f"Right column starts at X={right_col_start:.0f}")
+            log_print(f"Right column starts at X={right_col_start:.0f}")
         
         if right_col_char_pos is None:
             right_col_char_pos = calculate_right_col_position(merged_lines, avg_char_width, center_x)
-            print(f"Calculated right column character position: {right_col_char_pos}")
+            log_print(f"Calculated right column character position: {right_col_char_pos}")
         else:
-            print(f"Using specified right column character position: {right_col_char_pos}")
+            log_print(f"Using specified right column character position: {right_col_char_pos}")
         
         paragraphs = lines_to_paragraphs(merged_lines, avg_char_width, center_x, right_col_start, right_col_char_pos)
     else:
-        print("Could not calculate page center")
+        log_print("Could not calculate page center")
         paragraphs = []
         for line in merged_lines:
             if line:
@@ -1020,7 +1052,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     markdown_path = base_name + '.md'
     with open(markdown_path, 'w', encoding='utf-8') as f:
         f.write(markdown_output)
-    print(f"Markdown saved to: {markdown_path}")
+    log_print(f"Markdown saved to: {markdown_path}")
     
     hebrew_verses = None
     if header_info['book_name'] and header_info['chapter'] and header_info['verse']:
@@ -1030,7 +1062,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             header_info['verse']
         )
         if hebrew_verses:
-            print(f"\nExtracted Hebrew verse(s): {len(hebrew_verses)} verse(s) found")
+            log_print(f"\nExtracted Hebrew verse(s): {len(hebrew_verses)} verse(s) found")
     
     metadata = {
         'input_file': os.path.basename(image_path),
@@ -1043,14 +1075,14 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         'hebrew_text': hebrew_verses
     }
     
-    print(f"\nExtracted metadata (without Hebrew text):")
+    log_print(f"\nExtracted metadata (without Hebrew text):")
     metadata_without_hebrew = {k: v for k, v in metadata.items() if k != 'hebrew_text'}
-    print(json.dumps(metadata_without_hebrew, indent=2, ensure_ascii=False))
+    log_print(json.dumps(metadata_without_hebrew, indent=2, ensure_ascii=False))
     
     json_path = base_name + '_metadata.json' if not output_path else output_path
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
-    print(f"Metadata saved to: {json_path}")
+    log_print(f"Metadata saved to: {json_path}")
     
     return metadata
 
@@ -1061,7 +1093,7 @@ def load_previous_metadata(prev_metadata_path):
         with open(prev_metadata_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"Warning: Could not load previous metadata from {prev_metadata_path}: {e}")
+        log_print(f"Warning: Could not load previous metadata from {prev_metadata_path}: {e}")
         return None
 
 
@@ -1070,9 +1102,9 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
     if not prev_metadata:
         return current_metadata
     
-    print(f"\nDEBUG: Validating against previous metadata:")
-    print(f"  Previous: book={prev_metadata.get('book_name')}, ch={prev_metadata.get('chapter')}, v={prev_metadata.get('verse')}, page={prev_metadata.get('page_number')}")
-    print(f"  Current:  book={current_metadata.get('book_name')}, ch={current_metadata.get('chapter')}, v={current_metadata.get('verse')}, page={current_metadata.get('page_number')}")
+    log_print(f"\nDEBUG: Validating against previous metadata:")
+    log_print(f"  Previous: book={prev_metadata.get('book_name')}, ch={prev_metadata.get('chapter')}, v={prev_metadata.get('verse')}, page={prev_metadata.get('page_number')}")
+    log_print(f"  Current:  book={current_metadata.get('book_name')}, ch={current_metadata.get('chapter')}, v={current_metadata.get('verse')}, page={current_metadata.get('page_number')}")
     
     corrected = current_metadata.copy()
     corrections_made = []
@@ -1167,11 +1199,11 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
                 corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
     
     if corrections_made:
-        print(f"\nDEBUG: Corrections applied based on previous metadata:")
+        log_print(f"\nDEBUG: Corrections applied based on previous metadata:")
         for correction in corrections_made:
-            print(f"  - {correction}")
+            log_print(f"  - {correction}")
     else:
-        print(f"DEBUG: No corrections needed - metadata validated successfully")
+        log_print(f"DEBUG: No corrections needed - metadata validated successfully")
     
     return corrected
 
@@ -1197,9 +1229,42 @@ def discover_images_in_directory(start_image_path):
     return images
 
 
+def get_page_number_from_filename(image_path):
+    """
+    Extract page number from image filename.
+    Looks for patterns like 'page90', 'page_90', 'p90', etc.
+    
+    Args:
+        image_path: Path to the image file
+    
+    Returns:
+        Page number (int) or None if not found
+    """
+    filename = os.path.basename(image_path)
+    
+    # Try various patterns: page90, page_90, p90, etc.
+    import re
+    patterns = [
+        r'page[_\s]*(\d+)',  # page90, page_90, page 90
+        r'p[_\s]*(\d+)',     # p90, p_90, p 90
+        r'(\d+)',            # any number in filename
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, filename, re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except:
+                pass
+    
+    return None
+
+
 def get_page_number_from_metadata(image_path):
     """
     Extract page number from an image's metadata JSON file.
+    Falls back to filename if metadata doesn't exist.
     
     Args:
         image_path: Path to the image file
@@ -1214,11 +1279,14 @@ def get_page_number_from_metadata(image_path):
         try:
             with open(metadata_path, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
-                return metadata.get('page_number')
+                page_num = metadata.get('page_number')
+                if page_num is not None:
+                    return page_num
         except:
             pass
     
-    return None
+    # Fall back to filename
+    return get_page_number_from_filename(image_path)
 
 
 def sort_images_by_page_number(images):
@@ -1274,17 +1342,17 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
     Returns:
         Number of images processed
     """
-    print(f"\n{'='*80}")
-    print(f"BATCH PROCESSING MODE")
-    print(f"{'='*80}")
+    log_print(f"\n{'='*80}")
+    log_print(f"BATCH PROCESSING MODE")
+    log_print(f"{'='*80}")
     
     # Discover all images in the directory
-    print(f"\nDiscovering images in directory...")
+    log_print(f"\nDiscovering images in directory...")
     all_images = discover_images_in_directory(start_image_path)
-    print(f"Found {len(all_images)} image files")
+    log_print(f"Found {len(all_images)} image files")
     
     # Sort by page number
-    print(f"Sorting images by page number...")
+    log_print(f"Sorting images by page number...")
     sorted_images = sort_images_by_page_number(all_images)
     
     # Find starting position
@@ -1295,31 +1363,31 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             start_index = i
             break
     
-    print(f"Starting from image {start_index + 1} of {len(sorted_images)}: {os.path.basename(start_image_path)}")
+    log_print(f"Starting from image {start_index + 1} of {len(sorted_images)}: {os.path.basename(start_image_path)}")
     
     if max_pages:
-        print(f"Maximum pages to process: {max_pages}")
+        log_print(f"Maximum pages to process: {max_pages}")
     if stop_on_book_change:
-        print(f"Will stop when book changes")
+        log_print(f"Will stop when book changes")
     if stop_on_chapter_change:
-        print(f"Will stop when chapter changes")
+        log_print(f"Will stop when chapter changes")
     
-    print(f"\n{'='*80}\n")
+    log_print(f"\n{'='*80}\n")
     
     # Process images sequentially
     prev_metadata = None
     
     # Create seed metadata if start parameters provided
     if start_page or start_book or start_chapter or start_verse:
-        print(f"Using seed metadata for validation:")
+        log_print(f"Using seed metadata for validation:")
         if start_page:
-            print(f"  Expected starting page: {start_page}")
+            log_print(f"  Expected starting page: {start_page}")
         if start_book:
-            print(f"  Expected starting book: {start_book}")
+            log_print(f"  Expected starting book: {start_book}")
         if start_chapter:
-            print(f"  Expected starting chapter: {start_chapter}")
+            log_print(f"  Expected starting chapter: {start_chapter}")
         if start_verse:
-            print(f"  Expected starting verse: {start_verse}")
+            log_print(f"  Expected starting verse: {start_verse}")
         
         # Create synthetic previous metadata (one page/verse before)
         prev_metadata = {}
@@ -1344,8 +1412,8 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
                 # Single verse
                 prev_metadata['verse'] = str(max(1, int(verse_str) - 1))
         
-        print(f"  Created synthetic previous metadata: {prev_metadata}")
-        print(f"\n{'='*80}\n")
+        log_print(f"  Created synthetic previous metadata: {prev_metadata}")
+        log_print(f"\n{'='*80}\n")
     
     initial_book = None
     initial_chapter = None
@@ -1356,19 +1424,19 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
         
         # Check max_pages limit
         if max_pages and processed_count >= max_pages:
-            print(f"\n{'='*80}")
-            print(f"Reached maximum page limit ({max_pages})")
-            print(f"{'='*80}\n")
+            log_print(f"\n{'='*80}")
+            log_print(f"Reached maximum page limit ({max_pages})")
+            log_print(f"{'='*80}\n")
             break
         
-        print(f"\n{'='*80}")
-        print(f"Processing image {processed_count + 1}")
+        log_print(f"\n{'='*80}")
+        log_print(f"Processing image {processed_count + 1}")
         if max_pages:
-            print(f"Progress: {processed_count + 1}/{max_pages}")
-        print(f"File: {os.path.basename(img_path)}")
+            log_print(f"Progress: {processed_count + 1}/{max_pages}")
+        log_print(f"File: {os.path.basename(img_path)}")
         if page_num:
-            print(f"Current page: {page_num}")
-        print(f"{'='*80}\n")
+            log_print(f"Current page: {page_num}")
+        log_print(f"{'='*80}\n")
         
         # Process the image
         try:
@@ -1383,7 +1451,7 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
                 json_path = base_name + '_metadata.json'
                 with open(json_path, 'w', encoding='utf-8') as f:
                     json.dump(metadata, f, indent=2, ensure_ascii=False)
-                print(f"Corrected metadata saved to: {json_path}")
+                log_print(f"Corrected metadata saved to: {json_path}")
             
             # Store initial book/chapter for comparison
             if processed_count == 0:
@@ -1396,16 +1464,16 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             
             if stop_on_book_change and current_book and initial_book:
                 if current_book != initial_book:
-                    print(f"\n{'='*80}")
-                    print(f"STOPPING: Book changed from '{initial_book}' to '{current_book}'")
-                    print(f"{'='*80}\n")
+                    log_print(f"\n{'='*80}")
+                    log_print(f"STOPPING: Book changed from '{initial_book}' to '{current_book}'")
+                    log_print(f"{'='*80}\n")
                     break
             
             if stop_on_chapter_change and current_chapter and initial_chapter:
                 if current_chapter != initial_chapter:
-                    print(f"\n{'='*80}")
-                    print(f"STOPPING: Chapter changed from {initial_chapter} to {current_chapter}")
-                    print(f"{'='*80}\n")
+                    log_print(f"\n{'='*80}")
+                    log_print(f"STOPPING: Chapter changed from {initial_chapter} to {current_chapter}")
+                    log_print(f"{'='*80}\n")
                     break
             
             # Update for next iteration
@@ -1413,39 +1481,40 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             processed_count += 1
             
         except Exception as e:
-            print(f"\nERROR processing {os.path.basename(img_path)}: {e}")
-            print(f"Continuing with next image...\n")
+            log_print(f"\nERROR processing {os.path.basename(img_path)}: {e}")
+            log_print(f"Continuing with next image...\n")
             continue
     
-    print(f"\n{'='*80}")
-    print(f"BATCH PROCESSING COMPLETE")
-    print(f"Processed {processed_count} images")
-    print(f"{'='*80}\n")
+    log_print(f"\n{'='*80}")
+    log_print(f"BATCH PROCESSING COMPLETE")
+    log_print(f"Processed {processed_count} images")
+    log_print(f"{'='*80}\n")
     
     return processed_count
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python script.py <image_path> [output_path] [OPTIONS]")
-        print("\nOutput files created:")
-        print("  <base>_metadata.json - Metadata with book/chapter/verse/page info")
-        print("  <base>.md            - Formatted markdown with columns")
-        print("  <base>_ocr.json      - Complete OCR data with bounding boxes")
-        print("\nSingle Image Processing Options:")
-        print("  --lang LANG              - Tesseract language (default: eng)")
-        print("  --right-col POS          - Right column character position")
-        print("  --prev-metadata PATH     - Previous page metadata JSON for validation")
-        print("  --validate-ollama        - Validate metadata using Ollama vision model")
-        print("\nBatch Processing Options:")
-        print("  --batch                  - Process all images in directory starting from given image")
-        print("  --max-pages N            - Maximum number of pages to process in batch mode")
-        print("  --stop-on-book-change    - Stop batch processing when book changes")
-        print("  --stop-on-chapter-change - Stop batch processing when chapter changes")
-        print("  --start-page N           - Expected page number for first image (for validation)")
-        print("  --start-book NAME        - Expected book name for first image (for validation)")
-        print("  --start-chapter N        - Expected chapter for first image (for validation)")
-        print("  --start-verse N          - Expected verse for first image (for validation)")
+        log_print("Usage: python script.py <image_path> [output_path] [OPTIONS]")
+        log_print("\nOutput files created:")
+        log_print("  <base>_metadata.json - Metadata with book/chapter/verse/page info")
+        log_print("  <base>.md            - Formatted markdown with columns")
+        log_print("  <base>_ocr.json      - Complete OCR data with bounding boxes")
+        log_print("\nSingle Image Processing Options:")
+        log_print("  --lang LANG              - Tesseract language (default: eng)")
+        log_print("  --right-col POS          - Right column character position")
+        log_print("  --prev-metadata PATH     - Previous page metadata JSON for validation")
+        log_print("  --validate-ollama        - Validate metadata using Ollama vision model")
+        log_print("\nBatch Processing Options:")
+        log_print("  --batch                  - Process all images in directory starting from given image")
+        log_print("  --max-pages N            - Maximum number of pages to process in batch mode")
+        log_print("  --stop-on-book-change    - Stop batch processing when book changes")
+        log_print("  --stop-on-chapter-change - Stop batch processing when chapter changes")
+        log_print("  --start-page N           - Expected page number for first image (for validation)")
+        log_print("  --start-book NAME        - Expected book name for first image (for validation)")
+        log_print("  --start-chapter N        - Expected chapter for first image (for validation)")
+        log_print("  --start-verse N          - Expected verse for first image (for validation)")
+        log_print("  --log-file PATH          - Log all output to specified file")
         sys.exit(1)
     
     image_path = sys.argv[1]
@@ -1462,6 +1531,7 @@ if __name__ == "__main__":
     start_book = None
     start_chapter = None
     start_verse = None
+    log_file_path = None
     
     i = 2
     while i < len(sys.argv):
@@ -1501,46 +1571,57 @@ if __name__ == "__main__":
         elif sys.argv[i] == '--start-verse' and i + 1 < len(sys.argv):
             start_verse = sys.argv[i + 1]
             i += 2
+        elif (sys.argv[i] == '--log-file' or sys.argv[i] == '-log-file') and i + 1 < len(sys.argv):
+            log_file_path = sys.argv[i + 1]
+            i += 2
         else:
             output_path = sys.argv[i]
             i += 1
     
-    # Batch processing mode
-    if batch_mode:
-        batch_process_images(
-            image_path, 
-            lang=lang, 
-            right_col_char_pos=right_col_char_pos,
-            validate_ollama=validate_ollama,
-            max_pages=max_pages,
-            stop_on_book_change=stop_on_book_change,
-            stop_on_chapter_change=stop_on_chapter_change,
-            start_page=start_page,
-            start_book=start_book,
-            start_chapter=start_chapter,
-            start_verse=start_verse
-        )
-    else:
-        # Single image processing mode
-        # Load previous metadata if provided
-        prev_metadata = None
-        if prev_metadata_path:
-            prev_metadata = load_previous_metadata(prev_metadata_path)
-        
-        # Process image
-        metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama)
-        
-        # Validate and correct if previous metadata available
-        if prev_metadata:
-            metadata = validate_and_correct_metadata(metadata, prev_metadata)
+    # Set up logging if requested
+    if log_file_path:
+        set_log_file(log_file_path)
+    
+    try:
+        # Batch processing mode
+        if batch_mode:
+            batch_process_images(
+                image_path, 
+                lang=lang, 
+                right_col_char_pos=right_col_char_pos,
+                validate_ollama=validate_ollama,
+                max_pages=max_pages,
+                stop_on_book_change=stop_on_book_change,
+                stop_on_chapter_change=stop_on_chapter_change,
+                start_page=start_page,
+                start_book=start_book,
+                start_chapter=start_chapter,
+                start_verse=start_verse
+            )
+        else:
+            # Single image processing mode
+            # Load previous metadata if provided
+            prev_metadata = None
+            if prev_metadata_path:
+                prev_metadata = load_previous_metadata(prev_metadata_path)
             
-            # Save corrected metadata
-            if output_path:
-                base_name = os.path.splitext(output_path)[0]
-            else:
-                base_name = os.path.splitext(image_path)[0]
+            # Process image
+            metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama)
             
-            json_path = base_name + '_metadata.json'
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-            print(f"\nCorrected metadata saved to: {json_path}")
+            # Validate and correct if previous metadata available
+            if prev_metadata:
+                metadata = validate_and_correct_metadata(metadata, prev_metadata)
+                
+                # Save corrected metadata
+                if output_path:
+                    base_name = os.path.splitext(output_path)[0]
+                else:
+                    base_name = os.path.splitext(image_path)[0]
+                
+                json_path = base_name + '_metadata.json'
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                log_print(f"\nCorrected metadata saved to: {json_path}")
+    finally:
+        # Ensure log file is closed
+        close_log_file()
