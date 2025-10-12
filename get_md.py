@@ -611,10 +611,14 @@ def correct_ocr_errors(text):
     return corrected
 
 
-def correct_verse_ocr_errors(verse_parts):
+def correct_verse_ocr_errors(verse_parts, max_gap=10):
     """
     Correct common OCR errors in verse numbers, particularly '9' misread as '2'.
-    Detects when consecutive verse numbers have unrealistic gaps (>5) and tries correction.
+    Detects when consecutive verse numbers have unrealistic gaps and tries correction.
+    
+    Args:
+        verse_parts: List of verse number strings
+        max_gap: Maximum reasonable gap between consecutive verses (default: 10)
     """
     if len(verse_parts) < 2:
         return verse_parts
@@ -634,7 +638,7 @@ def correct_verse_ocr_errors(verse_parts):
             gap = current - prev
             
             # Suspiciously large gap (e.g., 25 -> 96)
-            if gap > 5:
+            if gap > max_gap:
                 # Try replacing '9' with '2' in current verse
                 if '9' in part:
                     test_part = part.replace('9', '2', 1)  # Replace first '9' only
@@ -642,8 +646,8 @@ def correct_verse_ocr_errors(verse_parts):
                         test_val = int(test_part)
                         test_gap = test_val - prev
                         
-                        # If corrected gap is reasonable (1-5), use it
-                        if 0 < test_gap <= 5:
+                        # If corrected gap is reasonable (within max_gap), use it
+                        if 0 < test_gap <= max_gap:
                             log_print(f"DEBUG: OCR correction: verse {part} -> {test_part} (gap {gap} -> {test_gap})")
                             corrected_part = test_part
         
@@ -653,7 +657,7 @@ def correct_verse_ocr_errors(verse_parts):
             gap = next_val - current
             
             # Large gap to next verse
-            if gap > 5:
+            if gap > max_gap:
                 # Try replacing '9' with '2' in next verse (will be corrected when we get there)
                 pass  # Will be handled when we process the next verse
         
