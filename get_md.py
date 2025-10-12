@@ -637,19 +637,29 @@ def correct_verse_ocr_errors(verse_parts, max_gap=10):
             prev = int(corrected[-1])
             gap = current - prev
             
-            # Suspiciously large gap (e.g., 25 -> 96)
+            # Suspiciously large gap (e.g., 25 -> 96, or 21 -> 99)
             if gap > max_gap:
                 # Try replacing '9' with '2' in current verse
                 if '9' in part:
-                    test_part = part.replace('9', '2', 1)  # Replace first '9' only
-                    if test_part.isdigit():
-                        test_val = int(test_part)
+                    # Try replacing all 9s first (for cases like "99" -> "22")
+                    test_all = part.replace('9', '2')
+                    if test_all.isdigit():
+                        test_val = int(test_all)
                         test_gap = test_val - prev
                         
-                        # If corrected gap is reasonable (within max_gap), use it
                         if 0 < test_gap <= max_gap:
-                            log_print(f"DEBUG: OCR correction: verse {part} -> {test_part} (gap {gap} -> {test_gap})")
-                            corrected_part = test_part
+                            log_print(f"DEBUG: OCR correction: verse {part} -> {test_all} (gap {gap} -> {test_gap})")
+                            corrected_part = test_all
+                        else:
+                            # If replacing all doesn't work, try just first '9'
+                            test_first = part.replace('9', '2', 1)
+                            if test_first.isdigit():
+                                test_val = int(test_first)
+                                test_gap = test_val - prev
+                                
+                                if 0 < test_gap <= max_gap:
+                                    log_print(f"DEBUG: OCR correction: verse {part} -> {test_first} (gap {gap} -> {test_gap})")
+                                    corrected_part = test_first
         
         # Check against next verse
         if i < len(verse_parts) - 1 and verse_parts[i + 1].isdigit():
@@ -716,6 +726,7 @@ def parse_verse_text(verse_text):
     verse_text = verse_text.replace('—', '-')  # Em dash (another encoding)
     verse_text = verse_text.replace('–', '-')  # En dash (another encoding)
     verse_text = verse_text.replace('―', '-')  # Horizontal bar
+    verse_text = verse_text.replace('~', '-')  # Tilde (OCR often misreads dashes as tildes)
     
     # Handle ranges like "10-19", "I-V"
     range_patterns = [
@@ -852,9 +863,10 @@ def extract_chapter_verse_from_boxes(boxes):
                             break
                     # Check if it's just a Roman numeral (chapter only)
                     elif re.match(r'^[IVXLCDM]+\.?$', next_text, re.IGNORECASE):
-                        # Skip if it's clearly a verse marker (just "V.")
+                        # If it's a verse marker (just "V."), continue to verse search
                         if re.match(r'^V\.?$', next_text, re.IGNORECASE):
-                            log_print(f"DEBUG: Skipping '{next_text}' - likely verse marker, not chapter")
+                            log_print(f"DEBUG: Found verse marker '{next_text}' without valid chapter number")
+                            i = j  # Move to verse marker position
                             break
                         
                         chapter = roman_to_decimal(next_text.replace('.', ''))
@@ -862,11 +874,16 @@ def extract_chapter_verse_from_boxes(boxes):
                             i = j  # Move index to this position
                             log_print(f"DEBUG: Chapter {chapter} found in separate box: '{next_text}'")
                             break
-                    # Stop if we hit a standalone verse marker
+                    # If we hit a verse marker, continue to search for verses (even without chapter)
                     elif re.match(r'^V\.', next_text, re.IGNORECASE):
+                        log_print(f"DEBUG: Found verse marker '{next_text}' - chapter unknown, will search for verses")
+                        i = j
                         break
             
-            if chapter:
+            # Search for verses if we found a chapter, or if we found chapter/verse markers
+            # This allows extracting verses even when chapter number is unknown
+            # (validation in Step 4-5 will fill in missing chapter from previous page)
+            if True:  # Always search for verses after finding CH. or V. markers
                 # Check if we found an embedded verse marker (like "IV." = I + V.)
                 # In this case, i points to the box with the embedded marker
                 # We need to look for verse numbers starting from the next box
@@ -879,16 +896,17 @@ def extract_chapter_verse_from_boxes(boxes):
                     verse_text = verse_box['text'].strip()
                     
                     # Check for verse marker with appended number/range/list
-                    v_match = re.search(r'^[IV]V?\.?(.+)', verse_text, re.IGNORECASE)
-                    if v_match:
+                    # Allow for OCR errors like "EV.21" where E is noise before V
+                    v_match = re.search(r'[IV]V?\.?(.+)', verse_text, re.IGNORECASE)
+                    if v_match and v_match.start() <= 1:  # V should be near the start (allow 1 char before)
                         verse_part = v_match.group(1)
                         verse = parse_verse_text(verse_part)
                         if verse:
                             log_print(f"DEBUG: Verse {verse} found appended to marker: '{verse_text}'")
                             break
                     
-                    # Check for standalone verse marker
-                    elif re.match(r'^[IV]V?\.?$', verse_text, re.IGNORECASE):
+                    # Check for standalone verse marker (including OCR errors like "EV." for "V.")
+                    elif re.search(r'[A-Z]?V\.?$', verse_text, re.IGNORECASE):
                         log_print(f"DEBUG: Found verse marker '{verse_text}' at position {k}")
                         # Try to combine multiple boxes for verse list
                         combined_verse, next_index = combine_verse_list_boxes(sorted_boxes, k + 1)
@@ -911,11 +929,17 @@ def extract_chapter_verse_from_boxes(boxes):
                                     log_print(f"DEBUG: Could not parse verse from: '{num_text}'")
                         break
                     
-                    # If no verse marker found, try to parse directly as verse numbers
-                    # This handles the case where we already found the verse marker embedded (like in "IV.")
-                    # and the next boxes contain the verse numbers directly (like "3,", "4.")
+                    # If no verse marker found, try to parse directly as verse numbers/range
+                    # This handles cases like "21—24." or "3,4" in a single box
                     else:
-                        log_print(f"DEBUG: No verse marker in '{verse_text}', trying to combine verse list from position {k}")
+                        # First try to parse as a complete verse range/list in this box
+                        verse = parse_verse_text(verse_text)
+                        if verse:
+                            log_print(f"DEBUG: Verse {verse} parsed directly from box: '{verse_text}'")
+                            break
+                        
+                        # If that fails, try to combine multiple boxes (like "3,", "4.", "5,")
+                        log_print(f"DEBUG: Could not parse '{verse_text}' directly, trying to combine verse list from position {k}")
                         combined_verse, next_index = combine_verse_list_boxes(sorted_boxes, k)
                         if combined_verse:
                             verse = combined_verse
@@ -1314,11 +1338,16 @@ def find_verse_markers_in_ocr(ocr_data):
     # Get image width to determine columns
     # Assuming we have left positions, calculate center
     left_positions = ocr_data['left']
+    widths = ocr_data.get('width', [])
     if len(left_positions) > 0:
-        max_x = max(left_positions[i] + ocr_data['width'][i] if i < len(ocr_data['width']) else left_positions[i] 
+        # Calculate actual page width
+        max_x = max(left_positions[i] + (widths[i] if i < len(widths) else 0)
                     for i in range(len(left_positions)) if left_positions[i] is not None)
         center_x = max_x / 2
-        center_margin = max_x * 0.15  # 15% margin around center
+        
+        # Use a narrow margin (5%) to only exclude true center content (like headers)
+        # Most commentary verse markers are in columns, not center
+        center_margin = max_x * 0.05
     else:
         return set()
     
@@ -1356,8 +1385,13 @@ def find_verse_markers_in_ocr(ocr_data):
         if i < len(text_boxes) - 1:
             if re.match(r'^\s*Ver\.\s*$', text):  # Ends with "Ver." at start of line
                 next_text = text_boxes[i + 1]
-                if next_text:
-                    match = re.match(r'^\s*(\d+)', next_text)
+                next_x = left_positions[i + 1] if i + 1 < len(left_positions) else None
+                
+                # Check if next box is in the same column (not center)
+                if next_text and next_x is not None and abs(next_x - center_x) >= center_margin:
+                    # More flexible pattern - strip trailing periods and parse
+                    next_clean = next_text.strip().rstrip('.,')
+                    match = re.match(r'^(\d+)', next_clean)
                     if match:
                         try:
                             verse_num = int(match.group(1))
@@ -1366,6 +1400,78 @@ def find_verse_markers_in_ocr(ocr_data):
                             log_print(f"DEBUG: Found verse marker 'Ver. {verse_num}' spanning boxes {i}-{i+1} in {column} column")
                         except ValueError:
                             pass
+    
+    # Apply OCR correction to found verses (9 -> 2 error)
+    corrected_verses = set()
+    verse_list = sorted(verses_found)
+    verse_strs = correct_verse_ocr_errors([str(v) for v in verse_list])
+    for v_str in verse_strs:
+        if v_str.isdigit():
+            corrected_verses.add(int(v_str))
+    
+    if corrected_verses != verses_found:
+        log_print(f"DEBUG: Applied OCR corrections to verse markers: {sorted(verses_found)} -> {sorted(corrected_verses)}")
+        verses_found = corrected_verses
+    
+    # Additional check: Correct outliers by inferring the correct verse number
+    # E.g., [21, 42, 23, 24] -> sorted [21, 23, 24, 42] 
+    #       We found 4 Ver. markers, so there ARE 4 verses
+    #       Gap 21->23 suggests 22 is missing -> replace 42 with 22 -> [21, 22, 23, 24]
+    if len(verses_found) >= 3:
+        sorted_verses = sorted(verses_found)
+        corrected = []
+        
+        for i, v in enumerate(sorted_verses):
+            # Check if this verse is an outlier
+            if i > 0:
+                prev = sorted_verses[i - 1]
+                gap_to_prev = v - prev
+            else:
+                gap_to_prev = 1  # First verse
+            
+            if i < len(sorted_verses) - 1:
+                next_v = sorted_verses[i + 1]
+                gap_to_next = next_v - v
+            else:
+                gap_to_next = 1  # Last verse
+            
+            # Detect outliers: large gap on one or both sides
+            is_outlier = False
+            if i > 0 and i < len(sorted_verses) - 1:
+                # Middle verse: large gaps on BOTH sides
+                if gap_to_prev > 5 and gap_to_next > 5:
+                    is_outlier = True
+            elif i == len(sorted_verses) - 1 and i > 0:
+                # Last verse: large gap from previous
+                if gap_to_prev > 5:
+                    is_outlier = True
+            
+            if is_outlier:
+                # Try to infer the correct verse based on sequence
+                # Look for gaps of >1 in the sequence to find missing verse
+                if i == len(sorted_verses) - 1:
+                    # Last verse is outlier - check for gap before it
+                    for j in range(len(sorted_verses) - 1):
+                        if sorted_verses[j + 1] - sorted_verses[j] > 1:
+                            # Found a gap - infer missing verse
+                            inferred = sorted_verses[j] + 1
+                            log_print(f"DEBUG: Replacing outlier {v} with inferred verse {inferred} (fills gap after {sorted_verses[j]})")
+                            corrected.append(inferred)
+                            break
+                    else:
+                        # No gap found, keep it
+                        corrected.append(v)
+                else:
+                    # Middle outlier - infer from neighbors
+                    inferred = prev + 1
+                    log_print(f"DEBUG: Replacing outlier {v} with inferred verse {inferred} (sequential after {prev})")
+                    corrected.append(inferred)
+            else:
+                corrected.append(v)
+        
+        if corrected != sorted_verses:
+            verses_found = set(corrected)
+            log_print(f"DEBUG: After correcting outliers: {sorted(verses_found)}")
     
     return verses_found
 
@@ -1731,32 +1837,109 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
             first_curr_verse = int(curr_verse_str) if str(curr_verse_str).isdigit() else None
         
         if last_prev_verse and first_curr_verse:
-            # Current verse should be within reasonable range of previous
-            # Allow: same verse (continuation), next verse, or skip max 2-3 verses
             verse_diff = first_curr_verse - last_prev_verse
             
-            if verse_diff > 3 or verse_diff < -1:
-                # Verse jump seems too large, likely OCR error
-                # Correct to expected verse(s)
-                expected_verse = last_prev_verse + 1
-                
-                # Try to infer the correct verse range/list
-                if ',' in curr_verse_str:
-                    # It's a list, adjust each number
-                    num_verses = len(curr_verse_str.split(','))
-                    corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
-                    corrected_verse = ','.join(corrected_verses)
-                elif '-' in curr_verse_str:
-                    # It's a range, adjust both numbers
-                    range_size = int(curr_verse_str.split('-')[1]) - int(curr_verse_str.split('-')[0])
-                    corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
+            # Get current chapter (after any corrections)
+            final_curr_chapter = corrected.get('chapter', current_metadata.get('chapter'))
+            
+            # Step 1: Check for overlap - current should never start at or before previous ending
+            # BUT: Only check if we're in the SAME chapter (chapter changes reset verse numbers)
+            if first_curr_verse <= last_prev_verse:
+                # Check if chapter changed
+                if prev_chapter is not None and final_curr_chapter is not None and final_curr_chapter != prev_chapter:
+                    # Chapter changed - verse reset to 1 is expected
+                    log_print(f"DEBUG: Chapter changed from {prev_chapter} to {final_curr_chapter}, verse reset to {first_curr_verse} is expected")
+                elif prev_chapter is None or final_curr_chapter is None:
+                    # Unknown chapter - skip overlap check
+                    log_print(f"DEBUG: Cannot verify overlap - chapter unknown (prev={prev_chapter}, curr={final_curr_chapter})")
                 else:
-                    # Single verse
-                    corrected_verse = str(expected_verse)
+                    # Same chapter - this is a real overlap
+                    log_print(f"DEBUG: Verse overlap detected: prev ends at {last_prev_verse}, current starts at {first_curr_verse}")
+                    expected_verse = last_prev_verse + 1
+                    
+                    # Reconstruct verse to start at expected_verse
+                    if ',' in curr_verse_str:
+                        # It's a list, adjust each number
+                        num_verses = len(curr_verse_str.split(','))
+                        corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
+                        corrected_verse = ','.join(corrected_verses)
+                    elif '-' in curr_verse_str:
+                        # It's a range, adjust both numbers
+                        range_size = int(curr_verse_str.split('-')[1]) - int(curr_verse_str.split('-')[0])
+                        corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
+                    else:
+                        # Single verse
+                        corrected_verse = str(expected_verse)
+                    
+                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (overlap with previous ending at {last_prev_verse})")
+                    corrected['verse'] = corrected_verse
+                    corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} to avoid overlap with previous verse {last_prev_verse}"
+                    
+                    # Update curr_verse_str for gap detection
+                    curr_verse_str = corrected_verse
+                    curr_verse = corrected_verse
+            
+            # Step 2: Check for unrealistic gaps (after overlap correction)
+            # Only check gaps if we're in the SAME chapter (not after chapter change)
+            same_chapter = (prev_chapter is not None and final_curr_chapter is not None and 
+                          final_curr_chapter == prev_chapter)
+            
+            if same_chapter:
+                # Re-parse the potentially corrected verse string
+                if ',' in curr_verse_str:
+                    verse_parts = [int(v.strip()) for v in curr_verse_str.split(',') if v.strip().isdigit()]
+                elif '-' in curr_verse_str:
+                    start, end = curr_verse_str.split('-')
+                    verse_parts = list(range(int(start), int(end) + 1))
+                else:
+                    verse_parts = [int(curr_verse_str)] if curr_verse_str.isdigit() else []
                 
-                corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large jump from {last_prev_verse}, expected {expected_verse})")
-                corrected['verse'] = corrected_verse
-                corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
+                # Check if range is unreasonably large (e.g., "25-96" = 72 verses on one page!)
+                if '-' in curr_verse_str and len(verse_parts) > 10:
+                    log_print(f"DEBUG: Unreasonably large range detected: {curr_verse_str} ({len(verse_parts)} verses)")
+                    
+                    # Likely OCR error - assume it should be just the first 2 digits
+                    # e.g., "25-96" should be "25-26"
+                    expected_verse = last_prev_verse + 1
+                    # Keep same range size but correct the numbers
+                    # Most common case: 2 verses per page for commentary
+                    corrected_verse = f"{expected_verse}-{expected_verse + 1}"
+                    
+                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (unreasonably large range)")
+                    corrected['verse'] = corrected_verse
+                    corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} (range too large)"
+                
+                # Check for gaps within a list (not range)
+                elif ',' in curr_verse_str and len(verse_parts) >= 2:
+                    # Check gaps between consecutive verses in the list
+                    for i in range(len(verse_parts) - 1):
+                        gap = verse_parts[i + 1] - verse_parts[i]
+                        if gap > 10:
+                            log_print(f"DEBUG: Large internal verse gap detected: {verse_parts[i]} -> {verse_parts[i+1]} (gap: {gap})")
+                            
+                            # Reconstruct the list with sequential verses
+                            expected_verse = last_prev_verse + 1
+                            corrected_verses = [str(expected_verse + j) for j in range(len(verse_parts))]
+                            corrected_verse = ','.join(corrected_verses)
+                            
+                            corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (internal gap detected)")
+                            corrected['verse'] = corrected_verse
+                            corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
+                            break
+                
+                # Also check gap from previous to current (single verse case)
+                elif verse_diff > 1 and not '-' in curr_verse_str and not ',' in curr_verse_str:
+                    log_print(f"DEBUG: A verse gap detected: {last_prev_verse} -> {first_curr_verse} (gap: {verse_diff})")
+                    expected_verse = last_prev_verse + 1
+                    
+                    # Single verse case
+                    corrected_verse = str(expected_verse)
+                    
+                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large gap from {last_prev_verse}, expected {expected_verse})")
+                    corrected['verse'] = corrected_verse
+                    corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
+            else:
+                log_print(f"DEBUG: Chapter changed - skipping gap detection (verses can restart at 1)")
     
     # Note: Verse content validation already done in Step 2 (passed via found_verses parameter)
     # No need to re-run find_verse_markers_in_ocr() here
@@ -1942,17 +2125,24 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
     # Process images sequentially
     prev_metadata = None
     
+    # Store seed expectations separately for fallback
+    seed_expectations = {}
+    
     # Create seed metadata if start parameters provided
     if start_page or start_book or start_chapter or start_verse:
         log_print(f"Using seed metadata for validation:")
         if start_page:
             log_print(f"  Expected starting page: {start_page}")
+            seed_expectations['page_number'] = start_page
         if start_book:
             log_print(f"  Expected starting book: {start_book}")
+            seed_expectations['book_name'] = start_book
         if start_chapter:
             log_print(f"  Expected starting chapter: {start_chapter}")
+            seed_expectations['chapter'] = start_chapter
         if start_verse:
             log_print(f"  Expected starting verse: {start_verse}")
+            seed_expectations['verse'] = start_verse
         
         # Create synthetic previous metadata (one page/verse before)
         prev_metadata = {}
@@ -1968,14 +2158,21 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             if '-' in verse_str:
                 # It's a range, use the first number minus 1
                 first_verse = int(verse_str.split('-')[0])
-                prev_metadata['verse'] = str(max(1, first_verse - 1))
+                if first_verse > 1:
+                    prev_metadata['verse'] = str(first_verse - 1)
+                # Don't set verse if starting at verse 1 (no previous verse exists)
             elif ',' in verse_str:
                 # It's a list, use the first number minus 1
                 first_verse = int(verse_str.split(',')[0])
-                prev_metadata['verse'] = str(max(1, first_verse - 1))
+                if first_verse > 1:
+                    prev_metadata['verse'] = str(first_verse - 1)
+                # Don't set verse if starting at verse 1
             else:
                 # Single verse
-                prev_metadata['verse'] = str(max(1, int(verse_str) - 1))
+                start_v = int(verse_str)
+                if start_v > 1:
+                    prev_metadata['verse'] = str(start_v - 1)
+                # Don't set verse if starting at verse 1
         
         log_print(f"  Created synthetic previous metadata: {prev_metadata}")
         log_print(f"\n{'='*80}\n")
@@ -2006,6 +2203,39 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
         # Process the image (all steps 1-9 are done in process_image)
         try:
             metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama, prev_metadata)
+            
+            # Apply seed expectations as fallback for first image if detection failed
+            if processed_count == 0 and seed_expectations:
+                if not metadata.get('page_number') and 'page_number' in seed_expectations:
+                    log_print(f"Applying seed expectation: page_number = {seed_expectations['page_number']}")
+                    metadata['page_number'] = seed_expectations['page_number']
+                if not metadata.get('book_name') and 'book_name' in seed_expectations:
+                    log_print(f"Applying seed expectation: book_name = {seed_expectations['book_name']}")
+                    metadata['book_name'] = seed_expectations['book_name']
+                if not metadata.get('chapter') and 'chapter' in seed_expectations:
+                    log_print(f"Applying seed expectation: chapter = {seed_expectations['chapter']}")
+                    metadata['chapter'] = seed_expectations['chapter']
+                if not metadata.get('verse') and 'verse' in seed_expectations:
+                    log_print(f"Applying seed expectation: verse = {seed_expectations['verse']}")
+                    metadata['verse'] = seed_expectations['verse']
+                    
+                    # Re-extract Hebrew verses with corrected metadata
+                    if metadata.get('book_name') and metadata.get('chapter'):
+                        hebrew_verses = get_hebrew_verse(
+                            metadata['book_name'],
+                            metadata['chapter'],
+                            metadata['verse']
+                        )
+                        if hebrew_verses:
+                            metadata['hebrew_text'] = hebrew_verses
+                            log_print(f"Re-extracted {len(hebrew_verses)} Hebrew verse(s) after applying seed expectations")
+                    
+                    # Save corrected metadata
+                    base_name = os.path.splitext(img_path)[0]
+                    json_path = base_name + '_metadata.json'
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(metadata, f, indent=2, ensure_ascii=False)
+                    log_print(f"Updated metadata saved with seed expectations")
             
             # Store initial book/chapter for comparison
             if processed_count == 0:
