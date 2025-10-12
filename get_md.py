@@ -54,6 +54,57 @@ except ImportError as e:
     BAML_AVAILABLE = False
     log_print(f"Warning: BAML client not available ({e}). Ollama validation will be skipped.")
 
+# Global Bible structure cache
+_BIBLE_STRUCTURE = None
+
+# Bible book order (Old Testament + New Testament)
+BIBLE_BOOK_ORDER = [
+    'GENESIS', 'EXODUS', 'LEVITICUS', 'NUMBERS', 'DEUTERONOMY',
+    'JOSHUA', 'JUDGES', 'RUTH', '1 SAMUEL', '2 SAMUEL',
+    '1 KINGS', '2 KINGS', '1 CHRONICLES', '2 CHRONICLES',
+    'EZRA', 'NEHEMIAH', 'ESTHER', 'JOB', 'PSALMS',
+    'PROVERBS', 'ECCLESIASTES', 'SONG OF SOLOMON', 'ISAIAH',
+    'JEREMIAH', 'LAMENTATIONS', 'EZEKIEL', 'DANIEL',
+    'HOSEA', 'JOEL', 'AMOS', 'OBADIAH', 'JONAH',
+    'MICAH', 'NAHUM', 'HABAKKUK', 'ZEPHANIAH', 'HAGGAI',
+    'ZECHARIAH', 'MALACHI',
+    'MATTHEW', 'MARK', 'LUKE', 'JOHN', 'ACTS',
+    'ROMANS', '1 CORINTHIANS', '2 CORINTHIANS', 'GALATIANS',
+    'EPHESIANS', 'PHILIPPIANS', 'COLOSSIANS', '1 THESSALONIANS',
+    '2 THESSALONIANS', '1 TIMOTHY', '2 TIMOTHY', 'TITUS',
+    'PHILEMON', 'HEBREWS', 'JAMES', '1 PETER', '2 PETER',
+    '1 JOHN', '2 JOHN', '3 JOHN', 'JUDE', 'REVELATION'
+]
+
+def get_next_book(current_book):
+    """Get the next book in Bible order."""
+    if not current_book:
+        return None
+    
+    current_book_upper = current_book.upper()
+    try:
+        idx = BIBLE_BOOK_ORDER.index(current_book_upper)
+        if idx < len(BIBLE_BOOK_ORDER) - 1:
+            return BIBLE_BOOK_ORDER[idx + 1]
+    except ValueError:
+        pass
+    return None
+
+def verse_has_restarted(verse_str):
+    """Check if verse has restarted from 1 (returns True for "1", "1-3", "1,2,3", etc.)"""
+    if not verse_str:
+        return False
+    
+    verse_str = str(verse_str).strip()
+    
+    # Check if it starts with 1
+    if verse_str == "1":
+        return True
+    if verse_str.startswith("1-") or verse_str.startswith("1,"):
+        return True
+    
+    return False
+
 BOOK_NAME_TO_USFM = {
     'Genesis': '02-GENhbo.usfm',
     'Exodus': '03-EXOhbo.usfm',
@@ -108,6 +159,194 @@ def get_usfm_directory():
     script_dir = Path(__file__).parent
     usfm_dir = script_dir / 'hbo_usfm'
     return usfm_dir if usfm_dir.exists() else None
+
+def get_english_usfm_directory():
+    """Get the path to the eng-kjv2006_usfm directory."""
+    script_dir = Path(__file__).parent
+    usfm_dir = script_dir / 'eng-kjv2006_usfm'
+    return usfm_dir if usfm_dir.exists() else None
+
+def build_bible_structure():
+    """
+    Build a complete Bible structure from English USFM files.
+    Returns a dictionary mapping book names to their chapter/verse structure.
+    
+    Structure:
+    {
+        'GENESIS': {
+            1: 31,  # Chapter 1 has 31 verses
+            2: 25,  # Chapter 2 has 25 verses
+            ...
+        },
+        ...
+    }
+    """
+    global _BIBLE_STRUCTURE
+    
+    if _BIBLE_STRUCTURE is not None:
+        return _BIBLE_STRUCTURE
+    
+    bible_structure = {}
+    eng_usfm_dir = get_english_usfm_directory()
+    
+    if not eng_usfm_dir:
+        log_print("Warning: eng-kjv2006_usfm directory not found")
+        return {}
+    
+    # Mapping from USFM file codes to standard book names
+    usfm_to_book_name = {
+        'GEN': 'GENESIS', 'EXO': 'EXODUS', 'LEV': 'LEVITICUS', 'NUM': 'NUMBERS', 'DEU': 'DEUTERONOMY',
+        'JOS': 'JOSHUA', 'JDG': 'JUDGES', 'RUT': 'RUTH', '1SA': '1 SAMUEL', '2SA': '2 SAMUEL',
+        '1KI': '1 KINGS', '2KI': '2 KINGS', '1CH': '1 CHRONICLES', '2CH': '2 CHRONICLES',
+        'EZR': 'EZRA', 'NEH': 'NEHEMIAH', 'EST': 'ESTHER', 'JOB': 'JOB', 'PSA': 'PSALMS',
+        'PRO': 'PROVERBS', 'ECC': 'ECCLESIASTES', 'SNG': 'SONG OF SOLOMON', 'ISA': 'ISAIAH',
+        'JER': 'JEREMIAH', 'LAM': 'LAMENTATIONS', 'EZK': 'EZEKIEL', 'DAN': 'DANIEL',
+        'HOS': 'HOSEA', 'JOL': 'JOEL', 'AMO': 'AMOS', 'OBA': 'OBADIAH', 'JON': 'JONAH',
+        'MIC': 'MICAH', 'NAM': 'NAHUM', 'HAB': 'HABAKKUK', 'ZEP': 'ZEPHANIAH', 'HAG': 'HAGGAI',
+        'ZEC': 'ZECHARIAH', 'MAL': 'MALACHI',
+        'MAT': 'MATTHEW', 'MRK': 'MARK', 'LUK': 'LUKE', 'JHN': 'JOHN', 'ACT': 'ACTS',
+        'ROM': 'ROMANS', '1CO': '1 CORINTHIANS', '2CO': '2 CORINTHIANS', 'GAL': 'GALATIANS',
+        'EPH': 'EPHESIANS', 'PHP': 'PHILIPPIANS', 'COL': 'COLOSSIANS', '1TH': '1 THESSALONIANS',
+        '2TH': '2 THESSALONIANS', '1TI': '1 TIMOTHY', '2TI': '2 TIMOTHY', 'TIT': 'TITUS',
+        'PHM': 'PHILEMON', 'HEB': 'HEBREWS', 'JAS': 'JAMES', '1PE': '1 PETER', '2PE': '2 PETER',
+        '1JN': '1 JOHN', '2JN': '2 JOHN', '3JN': '3 JOHN', 'JUD': 'JUDE', 'REV': 'REVELATION'
+    }
+    
+    # Parse all USFM files
+    for usfm_file in eng_usfm_dir.glob('*.usfm'):
+        # Extract book code from filename (e.g., "02-GENeng-kjv2006.usfm" -> "GEN")
+        filename = usfm_file.stem
+        parts = filename.split('-')
+        if len(parts) >= 2:
+            book_code = parts[1][:3].upper()
+            book_name = usfm_to_book_name.get(book_code)
+            
+            if book_name:
+                chapters = {}
+                current_chapter = None
+                current_verses = set()
+                
+                try:
+                    with open(usfm_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            
+                            if line.startswith('\\c '):
+                                # Save previous chapter
+                                if current_chapter is not None and current_verses:
+                                    chapters[current_chapter] = max(current_verses)
+                                
+                                # Start new chapter
+                                current_chapter = int(line[3:].strip())
+                                current_verses = set()
+                            
+                            elif line.startswith('\\v ') and current_chapter is not None:
+                                # Extract verse number
+                                parts = line[3:].split(None, 1)
+                                if parts:
+                                    try:
+                                        verse_num = int(parts[0])
+                                        current_verses.add(verse_num)
+                                    except ValueError:
+                                        pass
+                        
+                        # Save last chapter
+                        if current_chapter is not None and current_verses:
+                            chapters[current_chapter] = max(current_verses)
+                    
+                    if chapters:
+                        bible_structure[book_name] = chapters
+                        
+                except Exception as e:
+                    log_print(f"Warning: Error parsing {usfm_file}: {e}")
+    
+    _BIBLE_STRUCTURE = bible_structure
+    
+    if bible_structure:
+        log_print(f"\nBible structure loaded: {len(bible_structure)} books indexed for validation")
+        log_print(f"Books: {', '.join(sorted(list(bible_structure.keys())[:10]))}...")
+    else:
+        log_print("\nWarning: Bible structure not loaded - validation will be limited")
+    
+    return bible_structure
+
+def validate_bible_reference(book_name, chapter, verse):
+    """
+    Validate if a Bible reference is valid based on the Bible structure.
+    
+    Args:
+        book_name: Book name (string, e.g., "GENESIS")
+        chapter: Chapter number (int)
+        verse: Verse number, range, or list (string or int)
+    
+    Returns:
+        dict with keys:
+        - 'valid': bool
+        - 'errors': list of error messages
+        - 'max_chapter': int or None
+        - 'max_verse': int or None
+    """
+    bible = build_bible_structure()
+    errors = []
+    
+    # Normalize book name
+    book_name_upper = book_name.upper() if book_name else None
+    
+    # Check if book exists
+    if not book_name_upper or book_name_upper not in bible:
+        valid_books = sorted(bible.keys())
+        errors.append(f"Invalid book '{book_name}'. Valid books: {', '.join(valid_books[:5])}...")
+        return {'valid': False, 'errors': errors, 'max_chapter': None, 'max_verse': None}
+    
+    book_data = bible[book_name_upper]
+    max_chapter = max(book_data.keys()) if book_data else None
+    
+    # Check if chapter exists
+    if chapter is not None:
+        if chapter < 1 or chapter > max_chapter:
+            errors.append(f"Invalid chapter {chapter} for {book_name}. Valid range: 1-{max_chapter}")
+            return {'valid': False, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': None}
+        
+        max_verse = book_data.get(chapter)
+        
+        # Check verse(s)
+        if verse is not None:
+            verse_str = str(verse)
+            
+            # Parse verse range or list
+            if '-' in verse_str:
+                # Range like "3-5"
+                try:
+                    start, end = verse_str.split('-')
+                    start_v = int(start.strip())
+                    end_v = int(end.strip())
+                    
+                    if start_v < 1 or end_v > max_verse:
+                        errors.append(f"Invalid verse range {verse_str} for {book_name} {chapter}. Valid range: 1-{max_verse}")
+                except:
+                    errors.append(f"Invalid verse format: {verse_str}")
+                    
+            elif ',' in verse_str:
+                # List like "3,4,5"
+                try:
+                    verses = [int(v.strip()) for v in verse_str.split(',')]
+                    invalid = [v for v in verses if v < 1 or v > max_verse]
+                    if invalid:
+                        errors.append(f"Invalid verses {invalid} for {book_name} {chapter}. Valid range: 1-{max_verse}")
+                except:
+                    errors.append(f"Invalid verse format: {verse_str}")
+            else:
+                # Single verse
+                try:
+                    v = int(verse_str)
+                    if v < 1 or v > max_verse:
+                        errors.append(f"Invalid verse {v} for {book_name} {chapter}. Valid range: 1-{max_verse}")
+                except:
+                    errors.append(f"Invalid verse format: {verse_str}")
+        
+        return {'valid': len(errors) == 0, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': max_verse}
+    
+    return {'valid': len(errors) == 0, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': None}
 
 def parse_usfm_file(usfm_path):
     """Parse a USFM file and return a dictionary of chapters and verses."""
@@ -994,10 +1233,141 @@ def format_as_markdown(paragraphs):
         markdown.append("")
     return '\n'.join(markdown)
 
-def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False):
+def find_verse_markers_in_ocr(ocr_data):
+    """
+    Find verse markers (Ver. X) in OCR boxes throughout the page.
+    Only matches "Ver." (case-sensitive, capital V) at the beginning of lines
+    in the left or right columns (not center).
+    
+    Args:
+        ocr_data: Dict with 'text' list and other OCR data
+    
+    Returns:
+        Set of verse numbers found (as integers)
+    """
+    import re
+    
+    if 'text' not in ocr_data or 'left' not in ocr_data:
+        return set()
+    
+    verses_found = set()
+    text_boxes = ocr_data['text']
+    
+    # Get image width to determine columns
+    # Assuming we have left positions, calculate center
+    left_positions = ocr_data['left']
+    if len(left_positions) > 0:
+        max_x = max(left_positions[i] + ocr_data['width'][i] if i < len(ocr_data['width']) else left_positions[i] 
+                    for i in range(len(left_positions)) if left_positions[i] is not None)
+        center_x = max_x / 2
+        center_margin = max_x * 0.15  # 15% margin around center
+    else:
+        return set()
+    
+    # Pattern to match "Ver." (case-sensitive!) followed by numbers
+    # Must be at start of text (after optional whitespace)
+    verse_pattern = re.compile(r'^\s*Ver\.\s*(\d+)')  # No re.IGNORECASE - case sensitive!
+    
+    # Search each box
+    for i, text in enumerate(text_boxes):
+        if not text or text.strip() == '':
+            continue
+        
+        # Get x position of this box
+        x_pos = left_positions[i] if i < len(left_positions) else None
+        if x_pos is None:
+            continue
+        
+        # Skip if box is in center area (we only want left/right columns)
+        if abs(x_pos - center_x) < center_margin:
+            continue
+        
+        # Check if text starts with "Ver." (case-sensitive)
+        match = verse_pattern.match(text)
+        if match:
+            try:
+                verse_num = int(match.group(1))
+                verses_found.add(verse_num)
+                column = "left" if x_pos < center_x else "right"
+                log_print(f"DEBUG: Found verse marker 'Ver. {verse_num}' in {column} column, OCR box {i}: '{text[:50]}'")
+            except ValueError:
+                pass
+        
+        # Also check if current box starts with "Ver." and next box starts with a number
+        # This handles the case where the pattern spans boxes
+        if i < len(text_boxes) - 1:
+            if re.match(r'^\s*Ver\.\s*$', text):  # Ends with "Ver." at start of line
+                next_text = text_boxes[i + 1]
+                if next_text:
+                    match = re.match(r'^\s*(\d+)', next_text)
+                    if match:
+                        try:
+                            verse_num = int(match.group(1))
+                            verses_found.add(verse_num)
+                            column = "left" if x_pos < center_x else "right"
+                            log_print(f"DEBUG: Found verse marker 'Ver. {verse_num}' spanning boxes {i}-{i+1} in {column} column")
+                        except ValueError:
+                            pass
+    
+    return verses_found
+
+
+def validate_verses_against_content(metadata_verse, found_verses):
+    """
+    Validate that the verse(s) in metadata appear in the actual content.
+    
+    Args:
+        metadata_verse: Verse from metadata (can be "3", "3-5", "3,4,5")
+        found_verses: Set of verse numbers found in OCR content
+    
+    Returns:
+        dict with keys:
+        - 'valid': bool (True if at least some verses match)
+        - 'all_found': bool (True if ALL verses were found)
+        - 'missing_verses': list of verses in metadata but not found in content
+        - 'confidence': float (0.0 to 1.0, ratio of verses found)
+    """
+    if not metadata_verse or not found_verses:
+        return {'valid': False, 'all_found': False, 'missing_verses': [], 'confidence': 0.0}
+    
+    # Parse metadata verse into individual verse numbers
+    metadata_verse_str = str(metadata_verse).strip()
+    expected_verses = set()
+    
+    try:
+        if '-' in metadata_verse_str:
+            # Range like "3-5"
+            parts = metadata_verse_str.split('-')
+            start = int(parts[0].strip())
+            end = int(parts[1].strip())
+            expected_verses = set(range(start, end + 1))
+        elif ',' in metadata_verse_str:
+            # List like "3,4,5"
+            expected_verses = {int(v.strip()) for v in metadata_verse_str.split(',')}
+        else:
+            # Single verse
+            expected_verses = {int(metadata_verse_str)}
+    except ValueError:
+        return {'valid': False, 'all_found': False, 'missing_verses': [], 'confidence': 0.0}
+    
+    # Check which expected verses were found
+    found_in_content = expected_verses & found_verses
+    missing = expected_verses - found_verses
+    
+    confidence = len(found_in_content) / len(expected_verses) if expected_verses else 0.0
+    
+    return {
+        'valid': len(found_in_content) > 0,  # At least one verse found
+        'all_found': len(missing) == 0,      # All verses found
+        'missing_verses': sorted(list(missing)),
+        'confidence': confidence
+    }
+
+
+def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False, prev_metadata=None):
     """Main function to process image and generate markdown."""
     log_print(f"Processing image: {image_path}")
-    log_print(f"Content language: {lang}")
+    log_print(f"Content language: {lang}\n")
     
     if output_path:
         base_name = os.path.splitext(output_path)[0]
@@ -1005,43 +1375,90 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         base_name = os.path.splitext(image_path)[0]
     
     # Step 1: Run OCR with English only to extract metadata
-    log_print(f"\nStep 1: Running OCR with English to extract metadata...")
+    log_print(f"Step 1: Running OCR with English to extract metadata...")
     tsv_data_eng, img_width, img_height = extract_text_with_layout(image_path, 'eng')
     header_info = extract_header_info(tsv_data_eng, img_width, img_height)
-    log_print(f"Metadata extracted: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
+    log_print(f"Initial metadata: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
     
-    # Validate metadata with Ollama if requested
+    # Step 2: Find verse markers in English OCR to validate and correct verses
+    log_print(f"\nStep 2: Searching for verse markers to validate verses...")
+    found_verses = find_verse_markers_in_ocr(tsv_data_eng)
+    if found_verses:
+        log_print(f"Found {len(found_verses)} verse markers: {sorted(found_verses)}")
+        
+        if header_info['verse']:
+            verse_validation = validate_verses_against_content(header_info['verse'], found_verses)
+            log_print(f"Verse validation: {header_info['verse']} -> confidence {verse_validation['confidence']:.1%}")
+            
+            # Correct verse if confidence is low
+            if not verse_validation['valid'] or verse_validation['confidence'] < 0.5:
+                min_v = min(found_verses)
+                max_v = max(found_verses)
+                corrected_verse = f"{min_v}-{max_v}" if len(found_verses) > 1 else str(min_v)
+                log_print(f"Correcting verse: {header_info['verse']} -> {corrected_verse}")
+                header_info['verse'] = corrected_verse
+    
+    # Step 3: Validate metadata with Ollama if requested
     if validate_ollama:
+        log_print(f"\nStep 3: Validating with Ollama...")
         header_info = validate_metadata_with_ollama(image_path, header_info)
+        log_print(f"After Ollama: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
     
-    # Step 2: Run OCR with specified language for content
-    log_print(f"\nStep 2: Running OCR with '{lang}' to extract content...")
+    # Create basic metadata
+    metadata = {
+        'book_name': header_info['book_name'],
+        'chapter': header_info['chapter'],
+        'verse': header_info['verse'],
+        'page_number': header_info['page_number']
+    }
+    
+    # Steps 4-5: Validate against previous metadata and Bible structure
+    if prev_metadata:
+        log_print("\nStep 4-5: Validating against previous metadata and Bible structure...")
+        # We haven't run full OCR yet, so we only use English OCR data
+        metadata = validate_and_correct_metadata(metadata, prev_metadata, tsv_data_eng)
+    
+    # Step 6: Add Hebrew verses to validated metadata
+    log_print("\nStep 6: Extracting Hebrew verses from USFM...")
+    hebrew_verses = None
+    if metadata.get('book_name') and metadata.get('chapter') and metadata.get('verse'):
+        hebrew_verses = get_hebrew_verse(
+            metadata['book_name'],
+            metadata['chapter'],
+            metadata['verse']
+        )
+        if hebrew_verses:
+            log_print(f"Found {len(hebrew_verses)} Hebrew verse(s)")
+    
+    metadata['hebrew_text'] = hebrew_verses
+    
+    # Step 7: Save final metadata
+    json_path = base_name + '_metadata.json'
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    log_print(f"Step 7: Final metadata saved to {os.path.basename(json_path)}")
+    
+    # Step 8: Run OCR with specified language for full content
+    log_print(f"\nStep 8: Running OCR with '{lang}' for full content...")
     tsv_data, img_width, img_height = extract_text_with_layout(image_path, lang)
     
     ocr_json_path = base_name + '_ocr.json'
     save_ocr_json(tsv_data, ocr_json_path)
-    log_print(f"Raw OCR data saved to: {ocr_json_path}")
+    log_print(f"OCR data saved to {os.path.basename(ocr_json_path)}")
     
+    # Step 9: Generate and save Markdown
+    log_print(f"\nStep 9: Generating markdown...")
     line_list = group_by_lines(tsv_data)
     merged_lines = merge_lines_by_y_position(line_list)
     avg_char_width = calculate_avg_char_width(merged_lines)
     center_x = calculate_page_center(merged_lines)
     
     if center_x:
-        log_print(f"Page center calculated at X={center_x:.0f} (image width: {img_width})")
         right_col_start = find_right_column_start(merged_lines, center_x)
-        if right_col_start:
-            log_print(f"Right column starts at X={right_col_start:.0f}")
-        
         if right_col_char_pos is None:
             right_col_char_pos = calculate_right_col_position(merged_lines, avg_char_width, center_x)
-            log_print(f"Calculated right column character position: {right_col_char_pos}")
-        else:
-            log_print(f"Using specified right column character position: {right_col_char_pos}")
-        
         paragraphs = lines_to_paragraphs(merged_lines, avg_char_width, center_x, right_col_start, right_col_char_pos)
     else:
-        log_print("Could not calculate page center")
         paragraphs = []
         for line in merged_lines:
             if line:
@@ -1052,37 +1469,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     markdown_path = base_name + '.md'
     with open(markdown_path, 'w', encoding='utf-8') as f:
         f.write(markdown_output)
-    log_print(f"Markdown saved to: {markdown_path}")
-    
-    hebrew_verses = None
-    if header_info['book_name'] and header_info['chapter'] and header_info['verse']:
-        hebrew_verses = get_hebrew_verse(
-            header_info['book_name'],
-            header_info['chapter'],
-            header_info['verse']
-        )
-        if hebrew_verses:
-            log_print(f"\nExtracted Hebrew verse(s): {len(hebrew_verses)} verse(s) found")
-    
-    metadata = {
-        'input_file': os.path.basename(image_path),
-        'markdown_file': os.path.basename(markdown_path),
-        'ocr_file': os.path.basename(ocr_json_path),
-        'book_name': header_info['book_name'],
-        'chapter': header_info['chapter'],
-        'verse': header_info['verse'],
-        'page_number': header_info['page_number'],
-        'hebrew_text': hebrew_verses
-    }
-    
-    log_print(f"\nExtracted metadata (without Hebrew text):")
-    metadata_without_hebrew = {k: v for k, v in metadata.items() if k != 'hebrew_text'}
-    log_print(json.dumps(metadata_without_hebrew, indent=2, ensure_ascii=False))
-    
-    json_path = base_name + '_metadata.json' if not output_path else output_path
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, indent=2, ensure_ascii=False)
-    log_print(f"Metadata saved to: {json_path}")
+    log_print(f"Markdown saved to {os.path.basename(markdown_path)}")
     
     return metadata
 
@@ -1097,8 +1484,17 @@ def load_previous_metadata(prev_metadata_path):
         return None
 
 
-def validate_and_correct_metadata(current_metadata, prev_metadata):
-    """Validate current metadata against previous page and correct if needed."""
+def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None):
+    """
+    Validate current metadata against previous page and auto-correct obvious errors.
+    Uses Bible structure to validate book names, chapter ranges, and verse ranges.
+    Also validates verses against content markers (Ver. X) found in OCR.
+    
+    Args:
+        current_metadata: Current page metadata
+        prev_metadata: Previous page metadata
+        ocr_data: Optional OCR data for content-based validation
+    """
     if not prev_metadata:
         return current_metadata
     
@@ -1109,11 +1505,96 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
     corrected = current_metadata.copy()
     corrections_made = []
     
+    # Step 1: Validate against Bible structure
+    curr_book = corrected.get('book_name')
+    curr_chapter = corrected.get('chapter')
+    curr_verse = corrected.get('verse')
+    prev_book = prev_metadata.get('book_name')
+    prev_chapter = prev_metadata.get('chapter')
+    prev_verse = prev_metadata.get('verse')
+    
+    # Detect if this is likely a book or chapter transition based on verse restart
+    verse_restarted = verse_has_restarted(curr_verse)
+    
+    if curr_book or curr_chapter or curr_verse:
+        validation = validate_bible_reference(curr_book, curr_chapter, curr_verse)
+        bible_struct = build_bible_structure()
+        
+        if not validation['valid']:
+            log_print(f"\nDEBUG: Bible structure validation errors:")
+            for error in validation['errors']:
+                log_print(f"  - {error}")
+            
+            # SMART CORRECTION LOGIC
+            
+            # Case 1: Book is invalid/unreadable AND verse has restarted from 1
+            # This suggests a new book has started
+            if curr_book:
+                if curr_book.upper() not in bible_struct and verse_restarted:
+                    next_book = get_next_book(prev_book)
+                    if next_book:
+                        log_print(f"DEBUG: Verse restarted and book invalid -> assuming transition to next book: {next_book}")
+                        corrections_made.append(f"book: {curr_book} -> {next_book} (verse restart suggests new book)")
+                        corrected['book_name'] = next_book
+                        corrected['book_warning'] = f"OCR detected invalid book '{curr_book}', verse restart suggests {next_book}"
+                        # Also reset chapter to 1 when transitioning to new book
+                        if curr_chapter != 1:
+                            corrections_made.append(f"chapter: {curr_chapter} -> 1 (new book)")
+                            corrected['chapter'] = 1
+                elif curr_book.upper() not in bible_struct:
+                    # Book invalid but no verse restart - use previous book
+                    if prev_book:
+                        corrections_made.append(f"book: {curr_book} -> {prev_book} (invalid book name)")
+                        corrected['book_name'] = prev_book
+                        corrected['book_warning'] = f"OCR detected invalid book '{curr_book}', using previous book"
+            
+            # Case 2: Chapter is invalid/missing AND verse has restarted from 1
+            # This suggests chapter has transitioned to next chapter
+            elif not curr_chapter or (curr_chapter and validation['max_chapter'] and curr_chapter > validation['max_chapter']):
+                if verse_restarted and prev_chapter:
+                    next_chapter = prev_chapter + 1
+                    # Verify next chapter is valid for current book
+                    curr_book_for_check = corrected.get('book_name') or prev_book
+                    if curr_book_for_check:
+                        book_validation = validate_bible_reference(curr_book_for_check, next_chapter, None)
+                        if book_validation['valid']:
+                            log_print(f"DEBUG: Verse restarted and chapter invalid -> assuming next chapter: {next_chapter}")
+                            corrections_made.append(f"chapter: {curr_chapter} -> {next_chapter} (verse restart suggests new chapter)")
+                            corrected['chapter'] = next_chapter
+                            corrected['chapter_warning'] = f"OCR detected chapter {curr_chapter}, verse restart suggests {next_chapter}"
+                        else:
+                            # Next chapter would be out of range - might be new book
+                            if prev_book:
+                                next_book = get_next_book(prev_book)
+                                if next_book:
+                                    log_print(f"DEBUG: Verse restarted, chapter invalid, and next chapter out of range -> new book: {next_book}")
+                                    corrections_made.append(f"book: {corrected.get('book_name')} -> {next_book} (chapter overflow + verse restart)")
+                                    corrected['book_name'] = next_book
+                                    corrected['chapter'] = 1
+                                    corrected['book_warning'] = f"Chapter exceeded max, verse restart suggests new book {next_book}"
+            
+            # Case 3: Chapter is out of range but no verse restart - use previous chapter
+            elif curr_chapter and validation['max_chapter']:
+                if curr_chapter > validation['max_chapter']:
+                    if prev_chapter and prev_chapter <= validation['max_chapter']:
+                        corrections_made.append(f"chapter: {curr_chapter} -> {prev_chapter} (out of range)")
+                        corrected['chapter'] = prev_chapter
+                        corrected['chapter_warning'] = f"OCR detected chapter {curr_chapter} but max is {validation['max_chapter']}"
+            
+            # Re-validate after corrections
+            curr_book = corrected.get('book_name')
+            curr_chapter = corrected.get('chapter')
+            curr_verse = corrected.get('verse')
+            validation = validate_bible_reference(curr_book, curr_chapter, curr_verse)
+            
+            if not validation['valid']:
+                log_print(f"DEBUG: Still invalid after corrections: {validation['errors']}")
+    
     # Validate and correct page number
     if prev_metadata.get('page_number') is not None:
         expected_page = prev_metadata['page_number'] + 1
         if current_metadata.get('page_number') != expected_page:
-            corrections_made.append(f"page: {current_metadata.get('page_number')} → {expected_page}")
+            corrections_made.append(f"page: {current_metadata.get('page_number')} -> {expected_page}")
             corrected['page_number'] = expected_page
     
     # Validate and correct book name
@@ -1122,12 +1603,12 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
     if prev_book:
         if not curr_book:
             # If current book missing, use previous
-            corrections_made.append(f"book: None → {prev_book}")
+            corrections_made.append(f"book: None -> {prev_book}")
             corrected['book_name'] = prev_book
         elif curr_book != prev_book:
             # Book should only change if chapter restarts to 1
             if corrected.get('chapter') != 1:
-                corrections_made.append(f"book: {curr_book} → {prev_book}")
+                corrections_made.append(f"book: {curr_book} -> {prev_book}")
                 corrected['book_name'] = prev_book
     
     # Validate and correct chapter
@@ -1137,11 +1618,11 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
         # Chapter should be same or +1
         if curr_chapter not in [prev_chapter, prev_chapter + 1]:
             # If current seems wrong, keep previous chapter
-            corrections_made.append(f"chapter: {curr_chapter} → {prev_chapter}")
+            corrections_made.append(f"chapter: {curr_chapter} -> {prev_chapter}")
             corrected['chapter'] = prev_chapter
     elif prev_chapter is not None and curr_chapter is None:
         # If current chapter missing, use previous
-        corrections_made.append(f"chapter: None → {prev_chapter}")
+        corrections_made.append(f"chapter: None -> {prev_chapter}")
         corrected['chapter'] = prev_chapter
     
     # Validate and correct verse
@@ -1194,9 +1675,36 @@ def validate_and_correct_metadata(current_metadata, prev_metadata):
                     # Single verse
                     corrected_verse = str(expected_verse)
                 
-                corrections_made.append(f"verse: {curr_verse} → {corrected_verse} (large jump from {last_prev_verse}, expected {expected_verse})")
+                corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large jump from {last_prev_verse}, expected {expected_verse})")
                 corrected['verse'] = corrected_verse
                 corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
+    
+    # Step 3: Validate verses against content if OCR data available
+    if ocr_data and corrected.get('verse'):
+        found_verses = find_verse_markers_in_ocr(ocr_data)
+        if found_verses:
+            verse_validation = validate_verses_against_content(corrected.get('verse'), found_verses)
+            
+            # If metadata verse has low confidence, try to infer correct verse from content
+            if not verse_validation['valid'] or verse_validation['confidence'] < 0.5:
+                log_print(f"\nDEBUG: Metadata verse '{corrected.get('verse')}' doesn't match content well (confidence: {verse_validation['confidence']:.1%})")
+                
+                # If we have previous verse and content starts from a low number, might be sequential
+                if prev_verse and found_verses:
+                    min_found = min(found_verses)
+                    max_found = max(found_verses)
+                    
+                    # Try to infer verse range from content
+                    if len(found_verses) > 1:
+                        inferred_verse = f"{min_found}-{max_found}"
+                    else:
+                        inferred_verse = str(min_found)
+                    
+                    if inferred_verse != corrected.get('verse'):
+                        log_print(f"DEBUG: Content suggests verse should be '{inferred_verse}' instead of '{corrected.get('verse')}'")
+                        corrections_made.append(f"verse: {corrected.get('verse')} -> {inferred_verse} (based on content markers)")
+                        corrected['verse'] = inferred_verse
+                        corrected['verse_warning'] = f"OCR detected {current_metadata.get('verse')}, content markers suggest {inferred_verse}"
     
     if corrections_made:
         log_print(f"\nDEBUG: Corrections applied based on previous metadata:")
@@ -1291,8 +1799,9 @@ def get_page_number_from_metadata(image_path):
 
 def sort_images_by_page_number(images):
     """
-    Sort images by their page numbers from metadata.
-    Images without metadata are placed at the end, sorted by filename.
+    Sort images by their page numbers extracted from filenames.
+    This ensures sequential filename-based processing (page90, page91, page92, etc.)
+    Falls back to alphabetical filename sorting if no page number found.
     
     Args:
         images: List of image file paths
@@ -1304,16 +1813,17 @@ def sort_images_by_page_number(images):
     images_without_pages = []
     
     for img in images:
-        page_num = get_page_number_from_metadata(img)
+        # Use filename-based page number for sorting (not metadata)
+        page_num = get_page_number_from_filename(img)
         if page_num is not None:
             images_with_pages.append((img, page_num))
         else:
             images_without_pages.append((img, None))
     
-    # Sort images with page numbers
+    # Sort images with page numbers numerically
     images_with_pages.sort(key=lambda x: x[1])
     
-    # Sort images without page numbers by filename
+    # Sort images without page numbers alphabetically by filename
     images_without_pages.sort(key=lambda x: os.path.basename(x[0]))
     
     return images_with_pages + images_without_pages
@@ -1438,20 +1948,9 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             log_print(f"Current page: {page_num}")
         log_print(f"{'='*80}\n")
         
-        # Process the image
+        # Process the image (all steps 1-9 are done in process_image)
         try:
-            metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama)
-            
-            # Validate against previous metadata if available
-            if prev_metadata:
-                metadata = validate_and_correct_metadata(metadata, prev_metadata)
-                
-                # Save corrected metadata
-                base_name = os.path.splitext(img_path)[0]
-                json_path = base_name + '_metadata.json'
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
-                log_print(f"Corrected metadata saved to: {json_path}")
+            metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama, prev_metadata)
             
             # Store initial book/chapter for comparison
             if processed_count == 0:
@@ -1605,23 +2104,8 @@ if __name__ == "__main__":
             if prev_metadata_path:
                 prev_metadata = load_previous_metadata(prev_metadata_path)
             
-            # Process image
-            metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama)
-            
-            # Validate and correct if previous metadata available
-            if prev_metadata:
-                metadata = validate_and_correct_metadata(metadata, prev_metadata)
-                
-                # Save corrected metadata
-                if output_path:
-                    base_name = os.path.splitext(output_path)[0]
-                else:
-                    base_name = os.path.splitext(image_path)[0]
-                
-                json_path = base_name + '_metadata.json'
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
-                log_print(f"\nCorrected metadata saved to: {json_path}")
+            # Process image (all steps 1-9 are done in process_image)
+            metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama, prev_metadata)
     finally:
         # Ensure log file is closed
         close_log_file()
