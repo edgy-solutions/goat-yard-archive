@@ -611,6 +611,57 @@ def correct_ocr_errors(text):
     return corrected
 
 
+def correct_verse_ocr_errors(verse_parts):
+    """
+    Correct common OCR errors in verse numbers, particularly '9' misread as '2'.
+    Detects when consecutive verse numbers have unrealistic gaps (>5) and tries correction.
+    """
+    if len(verse_parts) < 2:
+        return verse_parts
+    
+    corrected = []
+    for i, part in enumerate(verse_parts):
+        if not part.isdigit():
+            corrected.append(part)
+            continue
+        
+        current = int(part)
+        corrected_part = part
+        
+        # Check against previous verse
+        if i > 0 and corrected[-1].isdigit():
+            prev = int(corrected[-1])
+            gap = current - prev
+            
+            # Suspiciously large gap (e.g., 25 -> 96)
+            if gap > 5:
+                # Try replacing '9' with '2' in current verse
+                if '9' in part:
+                    test_part = part.replace('9', '2', 1)  # Replace first '9' only
+                    if test_part.isdigit():
+                        test_val = int(test_part)
+                        test_gap = test_val - prev
+                        
+                        # If corrected gap is reasonable (1-5), use it
+                        if 0 < test_gap <= 5:
+                            log_print(f"DEBUG: OCR correction: verse {part} -> {test_part} (gap {gap} -> {test_gap})")
+                            corrected_part = test_part
+        
+        # Check against next verse
+        if i < len(verse_parts) - 1 and verse_parts[i + 1].isdigit():
+            next_val = int(verse_parts[i + 1])
+            gap = next_val - current
+            
+            # Large gap to next verse
+            if gap > 5:
+                # Try replacing '9' with '2' in next verse (will be corrected when we get there)
+                pass  # Will be handled when we process the next verse
+        
+        corrected.append(corrected_part)
+    
+    return corrected
+
+
 def combine_verse_list_boxes(boxes, start_index):
     """Combine consecutive boxes that form a verse list like '3,' + '4.' = '3,4'."""
     if start_index >= len(boxes):
@@ -636,6 +687,9 @@ def combine_verse_list_boxes(boxes, start_index):
             break
     
     if verse_parts:
+        # Apply OCR correction for common '9' -> '2' error
+        verse_parts = correct_verse_ocr_errors(verse_parts)
+        
         # Join the parts with commas
         combined_verse = ','.join(verse_parts)
         log_print(f"DEBUG: Combined verse list from boxes: {verse_parts} -> {combined_verse}")
@@ -1381,22 +1435,43 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     log_print(f"Initial metadata: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
     
     # Step 2: Find verse markers in English OCR to validate and correct verses
-    log_print(f"\nStep 2: Searching for verse markers to validate verses...")
-    found_verses = find_verse_markers_in_ocr(tsv_data_eng)
+    log_print(f"\nStep 2: Searching for verse markers in body to validate verses...")
+    found_verses = find_verse_markers_in_ocr(tsv_data_eng) or set()
+    
     if found_verses:
-        log_print(f"Found {len(found_verses)} verse markers: {sorted(found_verses)}")
+        log_print(f"Found {len(found_verses)} verse markers in body: {sorted(found_verses)}")
+        
+        # Apply OCR correction to detected verses (9 -> 2)
+        verse_list = sorted(found_verses)
+        corrected_verse_strs = correct_verse_ocr_errors([str(v) for v in verse_list])
+        corrected_verses = [int(v) for v in corrected_verse_strs if v.isdigit()]
+        
+        if corrected_verses != verse_list:
+            log_print(f"After OCR correction: {corrected_verses}")
+            found_verses = set(corrected_verses)
+        
+        # Generate verse range/list from body markers
+        min_v = min(found_verses)
+        max_v = max(found_verses)
+        body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
         
         if header_info['verse']:
+            # Header has verse - validate against body
             verse_validation = validate_verses_against_content(header_info['verse'], found_verses)
-            log_print(f"Verse validation: {header_info['verse']} -> confidence {verse_validation['confidence']:.1%}")
+            log_print(f"Header verse '{header_info['verse']}' validation: {verse_validation['confidence']:.1%} confidence")
             
-            # Correct verse if confidence is low
+            # Use body verse if header confidence is low
             if not verse_validation['valid'] or verse_validation['confidence'] < 0.5:
-                min_v = min(found_verses)
-                max_v = max(found_verses)
-                corrected_verse = f"{min_v}-{max_v}" if len(found_verses) > 1 else str(min_v)
-                log_print(f"Correcting verse: {header_info['verse']} -> {corrected_verse}")
-                header_info['verse'] = corrected_verse
+                log_print(f"Using body verse: {header_info['verse']} -> {body_verse}")
+                header_info['verse'] = body_verse
+        else:
+            # Header has no verse - infer from body
+            log_print(f"Header missing verse, inferring from body: {body_verse}")
+            header_info['verse'] = body_verse
+    else:
+        log_print("No verse markers found in body")
+        if not header_info['verse']:
+            log_print("WARNING: No verse found in header or body")
     
     # Step 3: Validate metadata with Ollama if requested
     if validate_ollama:
@@ -1415,8 +1490,8 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     # Steps 4-5: Validate against previous metadata and Bible structure
     if prev_metadata:
         log_print("\nStep 4-5: Validating against previous metadata and Bible structure...")
-        # We haven't run full OCR yet, so we only use English OCR data
-        metadata = validate_and_correct_metadata(metadata, prev_metadata, tsv_data_eng)
+        # Pass found_verses from Step 2 to avoid re-finding them
+        metadata = validate_and_correct_metadata(metadata, prev_metadata, tsv_data_eng, found_verses)
     
     # Step 6: Add Hebrew verses to validated metadata
     log_print("\nStep 6: Extracting Hebrew verses from USFM...")
@@ -1484,7 +1559,7 @@ def load_previous_metadata(prev_metadata_path):
         return None
 
 
-def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None):
+def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None, found_verses=None):
     """
     Validate current metadata against previous page and auto-correct obvious errors.
     Uses Bible structure to validate book names, chapter ranges, and verse ranges.
@@ -1679,32 +1754,8 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                 corrected['verse'] = corrected_verse
                 corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
     
-    # Step 3: Validate verses against content if OCR data available
-    if ocr_data and corrected.get('verse'):
-        found_verses = find_verse_markers_in_ocr(ocr_data)
-        if found_verses:
-            verse_validation = validate_verses_against_content(corrected.get('verse'), found_verses)
-            
-            # If metadata verse has low confidence, try to infer correct verse from content
-            if not verse_validation['valid'] or verse_validation['confidence'] < 0.5:
-                log_print(f"\nDEBUG: Metadata verse '{corrected.get('verse')}' doesn't match content well (confidence: {verse_validation['confidence']:.1%})")
-                
-                # If we have previous verse and content starts from a low number, might be sequential
-                if prev_verse and found_verses:
-                    min_found = min(found_verses)
-                    max_found = max(found_verses)
-                    
-                    # Try to infer verse range from content
-                    if len(found_verses) > 1:
-                        inferred_verse = f"{min_found}-{max_found}"
-                    else:
-                        inferred_verse = str(min_found)
-                    
-                    if inferred_verse != corrected.get('verse'):
-                        log_print(f"DEBUG: Content suggests verse should be '{inferred_verse}' instead of '{corrected.get('verse')}'")
-                        corrections_made.append(f"verse: {corrected.get('verse')} -> {inferred_verse} (based on content markers)")
-                        corrected['verse'] = inferred_verse
-                        corrected['verse_warning'] = f"OCR detected {current_metadata.get('verse')}, content markers suggest {inferred_verse}"
+    # Note: Verse content validation already done in Step 2 (passed via found_verses parameter)
+    # No need to re-run find_verse_markers_in_ocr() here
     
     if corrections_made:
         log_print(f"\nDEBUG: Corrections applied based on previous metadata:")
