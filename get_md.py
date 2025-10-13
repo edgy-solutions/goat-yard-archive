@@ -507,8 +507,11 @@ def validate_metadata_with_ollama(image_path, metadata):
         )
         
         # Convert back to dictionary
+        # Clean book name: strip trailing punctuation that Ollama sometimes adds
+        book_name = validated.book_name.upper().rstrip('.,;:!? ') if validated.book_name else None
+        
         result = {
-            'book_name': validated.book_name.upper(),
+            'book_name': book_name,
             'chapter': validated.chapter,
             'verse': validated.verse,
             'page_number': validated.page_number
@@ -678,7 +681,10 @@ def correct_verse_ocr_errors(verse_parts, max_gap=10):
 
 def combine_verse_list_boxes(boxes, start_index):
     """Combine consecutive boxes that form a verse list like '3,' + '4.' = '3,4'."""
+    log_print(f"DEBUG: combine_verse_list_boxes called with start_index={start_index}, len(boxes)={len(boxes)}")
+    
     if start_index >= len(boxes):
+        log_print(f"DEBUG: start_index >= len(boxes), returning None")
         return None, start_index
     
     verse_parts = []
@@ -688,19 +694,25 @@ def combine_verse_list_boxes(boxes, start_index):
     while current_index < len(boxes):
         box = boxes[current_index]
         text = box['text'].strip()
+        log_print(f"DEBUG:   Checking box {current_index}: '{text}'")
         
         # Check if this looks like part of a verse list
         if re.match(r'^[0-9IVXLCDM]+[,.]?$', text, re.IGNORECASE):
-            verse_parts.append(text.replace('.', '').replace(',', ''))
+            verse_part = text.replace('.', '').replace(',', '')
+            verse_parts.append(verse_part)
+            log_print(f"DEBUG:   Matched! Added '{verse_part}' to list")
             current_index += 1
             
             # If this text ends with a period, it's likely the end of the list
             if text.endswith('.'):
+                log_print(f"DEBUG:   Text ends with period, stopping")
                 break
         else:
+            log_print(f"DEBUG:   No match, stopping")
             break
     
     if verse_parts:
+        log_print(f"DEBUG: Before OCR correction: {verse_parts}")
         # Apply OCR correction for common '9' -> '2' error
         verse_parts = correct_verse_ocr_errors(verse_parts)
         
@@ -709,6 +721,7 @@ def combine_verse_list_boxes(boxes, start_index):
         log_print(f"DEBUG: Combined verse list from boxes: {verse_parts} -> {combined_verse}")
         return combined_verse, current_index
     
+    log_print(f"DEBUG: No verse parts found, returning None")
     return None, start_index
 
 
@@ -894,10 +907,12 @@ def extract_chapter_verse_from_boxes(boxes):
                 for k in range(verse_search_start, min(verse_search_start + 4, len(sorted_boxes))):
                     verse_box = sorted_boxes[k]
                     verse_text = verse_box['text'].strip()
+                    log_print(f"DEBUG: Checking box {k} for verses: '{verse_text}'")
                     
                     # Check for verse marker with appended number/range/list
                     # Allow for OCR errors like "EV.21" where E is noise before V
                     v_match = re.search(r'[IV]V?\.?(.+)', verse_text, re.IGNORECASE)
+                    log_print(f"DEBUG:   Pattern 1 ([IV]V?\.?(.+)): match={v_match is not None}")
                     if v_match and v_match.start() <= 1:  # V should be near the start (allow 1 char before)
                         verse_part = v_match.group(1)
                         verse = parse_verse_text(verse_part)
@@ -906,7 +921,9 @@ def extract_chapter_verse_from_boxes(boxes):
                             break
                     
                     # Check for standalone verse marker (including OCR errors like "EV." for "V.")
-                    elif re.search(r'[A-Z]?V\.?$', verse_text, re.IGNORECASE):
+                    verse_marker_match = re.search(r'[A-Z]?V\.?$', verse_text, re.IGNORECASE)
+                    log_print(f"DEBUG:   Pattern 2 ([A-Z]?V\.?$): match={verse_marker_match is not None}")
+                    if verse_marker_match:
                         log_print(f"DEBUG: Found verse marker '{verse_text}' at position {k}")
                         # Try to combine multiple boxes for verse list
                         combined_verse, next_index = combine_verse_list_boxes(sorted_boxes, k + 1)
@@ -931,7 +948,7 @@ def extract_chapter_verse_from_boxes(boxes):
                     
                     # If no verse marker found, try to parse directly as verse numbers/range
                     # This handles cases like "21—24." or "3,4" in a single box
-                    else:
+                    if not v_match and not verse_marker_match:
                         # First try to parse as a complete verse range/list in this box
                         verse = parse_verse_text(verse_text)
                         if verse:
@@ -1356,6 +1373,9 @@ def find_verse_markers_in_ocr(ocr_data):
     verse_pattern = re.compile(r'^\s*Ver\.\s*(\d+)')  # No re.IGNORECASE - case sensitive!
     
     # Search each box
+    ver_boxes_checked = 0
+    ver_boxes_matched = 0
+    
     for i, text in enumerate(text_boxes):
         if not text or text.strip() == '':
             continue
@@ -1369,9 +1389,15 @@ def find_verse_markers_in_ocr(ocr_data):
         if abs(x_pos - center_x) < center_margin:
             continue
         
+        # Only debug boxes that contain "Ver"
+        if "Ver" in text:
+            ver_boxes_checked += 1
+            log_print(f"DEBUG: Checking box {i}: '{text}' at x={x_pos}")
+        
         # Check if text starts with "Ver." (case-sensitive)
         match = verse_pattern.match(text)
         if match:
+            ver_boxes_matched += 1
             try:
                 verse_num = int(match.group(1))
                 verses_found.add(verse_num)
@@ -1408,6 +1434,8 @@ def find_verse_markers_in_ocr(ocr_data):
     for v_str in verse_strs:
         if v_str.isdigit():
             corrected_verses.add(int(v_str))
+    
+    log_print(f"DEBUG: Searched {len(text_boxes)} boxes, found {ver_boxes_checked} boxes containing 'Ver', matched {ver_boxes_matched} verse patterns")
     
     if corrected_verses != verses_found:
         log_print(f"DEBUG: Applied OCR corrections to verse markers: {sorted(verses_found)} -> {sorted(corrected_verses)}")
@@ -1570,10 +1598,58 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             verse_validation = validate_verses_against_content(header_info['verse'], found_verses)
             log_print(f"Header verse '{header_info['verse']}' validation: {verse_validation['confidence']:.1%} confidence")
             
-            # Use body verse if header confidence is low
-            if not verse_validation['valid'] or verse_validation['confidence'] < 0.5:
-                log_print(f"Using body verse: {header_info['verse']} -> {body_verse}")
+            # Only replace header if:
+            # 1. Header has obvious error (wrong order like "19-16")
+            # 2. Body found MORE verses than header
+            # 3. Confidence is very low (< 25%) AND body has complete sequential range
+            
+            header_verse_str = str(header_info['verse'])
+            should_replace = False
+            reason = ""
+            
+            # Check for wrong order (e.g., "19-16")
+            if '-' in header_verse_str:
+                parts = header_verse_str.split('-')
+                try:
+                    start, end = int(parts[0]), int(parts[1])
+                    if start > end:
+                        should_replace = True
+                        reason = "wrong order"
+                except:
+                    pass
+            
+            # Check if body found MORE verses
+            if not should_replace:
+                try:
+                    if '-' in header_verse_str:
+                        parts = header_verse_str.split('-')
+                        header_verse_count = int(parts[1]) - int(parts[0]) + 1
+                    elif ',' in header_verse_str:
+                        header_verse_count = len(header_verse_str.split(','))
+                    else:
+                        header_verse_count = 1
+                    
+                    body_verse_count = len(found_verses)
+                    
+                    if body_verse_count > header_verse_count:
+                        should_replace = True
+                        reason = f"body has more verses ({body_verse_count} vs {header_verse_count})"
+                except:
+                    pass
+            
+            # Check for very low confidence with complete body range
+            if not should_replace and verse_validation['confidence'] < 0.25:
+                # Body has complete sequential range?
+                expected_body_verses = set(range(min_v, max_v + 1))
+                if found_verses == expected_body_verses:
+                    should_replace = True
+                    reason = f"very low confidence ({verse_validation['confidence']:.1%}) and body has complete range"
+            
+            if should_replace:
+                log_print(f"Replacing header verse ({reason}): {header_info['verse']} -> {body_verse}")
                 header_info['verse'] = body_verse
+            else:
+                log_print(f"Keeping header verse '{header_info['verse']}' (confidence: {verse_validation['confidence']:.1%})")
         else:
             # Header has no verse - infer from body
             log_print(f"Header missing verse, inferring from body: {body_verse}")
