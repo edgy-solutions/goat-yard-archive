@@ -1726,15 +1726,14 @@ def find_verse_markers_in_ocr(ocr_data):
         verses_found = corrected_verses
     
     # Additional check: Correct outliers by inferring the correct verse number
-    # E.g., [21, 42, 23, 24] -> sorted [21, 23, 24, 42] 
-    #       We found 4 Ver. markers, so there ARE 4 verses
-    #       Gap 21->23 suggests 22 is missing -> replace 42 with 22 -> [21, 22, 23, 24]
+    # Use known OCR error pattern: 2 -> 9 (e.g., 22 -> 29)
+    # E.g., [21, 23, 24, 29] -> check if 29 contains '9' -> try 22 -> [21, 22, 23, 24]
     if len(verses_found) >= 3:
         sorted_verses = sorted(verses_found)
         corrected = []
         
         for i, v in enumerate(sorted_verses):
-            # Check if this verse is an outlier
+            # Check if this verse is an outlier by examining gaps
             if i > 0:
                 prev = sorted_verses[i - 1]
                 gap_to_prev = v - prev
@@ -1747,21 +1746,60 @@ def find_verse_markers_in_ocr(ocr_data):
             else:
                 gap_to_next = 1  # Last verse
             
-            # Detect outliers: large gap on one or both sides
+            # Detect outliers: gap > 2 suggests OCR error
             is_outlier = False
             if i > 0 and i < len(sorted_verses) - 1:
                 # Middle verse: large gaps on BOTH sides
-                if gap_to_prev > 5 and gap_to_next > 5:
+                if gap_to_prev > 2 and gap_to_next > 2:
                     is_outlier = True
             elif i == len(sorted_verses) - 1 and i > 0:
                 # Last verse: large gap from previous
-                if gap_to_prev > 5:
+                if gap_to_prev > 2:
+                    is_outlier = True
+            elif i == 0 and len(sorted_verses) > 1:
+                # First verse: large gap to next
+                if gap_to_next > 2:
                     is_outlier = True
             
             if is_outlier:
-                # Try to infer the correct verse based on sequence
+                log_print(f"DEBUG: Outlier detected: {v} (gap_prev={gap_to_prev}, gap_next={gap_to_next})")
+                
+                # Try OCR correction: replace 9 with 2 and see if it fits the sequence
+                v_str = str(v)
+                correction_applied = False
+                
+                if '9' in v_str:
+                    # Try replacing 9 with 2 (common OCR error)
+                    corrected_str = v_str.replace('9', '2')
+                    try:
+                        corrected_v = int(corrected_str)
+                        log_print(f"DEBUG: Trying 9->2 OCR correction: {v} -> {corrected_v}")
+                        
+                        # Check if corrected value fills a gap in the sequence
+                        # Look through the sequence for a gap where corrected_v would fit
+                        for j in range(len(sorted_verses) - 1):
+                            if j != i and (j + 1) != i:  # Skip positions involving the outlier
+                                gap = sorted_verses[j + 1] - sorted_verses[j]
+                                if gap > 1:
+                                    # There's a gap - check if corrected_v fits
+                                    if sorted_verses[j] < corrected_v < sorted_verses[j + 1]:
+                                        log_print(f"DEBUG: Corrected value {corrected_v} fills gap between {sorted_verses[j]} and {sorted_verses[j+1]}")
+                                        # Verify it doesn't duplicate
+                                        # Verify it doesn't duplicate
+                                        if corrected_v not in [sorted_verses[k] for k in range(len(sorted_verses)) if k != i]:
+                                            log_print(f"DEBUG: Replacing outlier {v} with {corrected_v} (9->2 OCR correction)")
+                                            corrected.append(corrected_v)
+                                            correction_applied = True
+                                            break
+                    except ValueError:
+                        pass
+                
+                if correction_applied:
+                    continue
+                
+                # If OCR correction didn't work, try to infer from sequence
                 # Look for gaps of >1 in the sequence to find missing verse
-                if i == len(sorted_verses) - 1:
+                if i == len(sorted_verses) - 1 and i > 0:
                     # Last verse is outlier - check for gap before it
                     for j in range(len(sorted_verses) - 1):
                         if sorted_verses[j + 1] - sorted_verses[j] > 1:
@@ -1773,11 +1811,14 @@ def find_verse_markers_in_ocr(ocr_data):
                     else:
                         # No gap found, keep it
                         corrected.append(v)
-                else:
+                elif i < len(sorted_verses) - 1 and i > 0:
                     # Middle outlier - infer from neighbors
                     inferred = prev + 1
                     log_print(f"DEBUG: Replacing outlier {v} with inferred verse {inferred} (sequential after {prev})")
                     corrected.append(inferred)
+                else:
+                    # Keep the original
+                    corrected.append(v)
             else:
                 corrected.append(v)
         
@@ -2751,6 +2792,7 @@ def sort_images_by_page_number(images):
 def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None, 
                         validate_ollama=False, max_pages=None, 
                         stop_on_book_change=False, stop_on_chapter_change=False,
+                        continue_on_error=False,
                         start_page=None, start_book=None, start_chapter=None, start_verse=None):
     """
     Process multiple images in sequence, chaining metadata validation.
@@ -2763,6 +2805,7 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
         max_pages: Maximum number of pages to process
         stop_on_book_change: Stop when book changes
         stop_on_chapter_change: Stop when chapter changes
+        continue_on_error: Continue processing on errors (default: abort)
         start_page: Expected page number for first image (for validation seeding)
         start_book: Expected book name for first image (for validation seeding)
         start_chapter: Expected chapter for first image (for validation seeding)
@@ -2947,8 +2990,22 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             
         except Exception as e:
             log_print(f"\nERROR processing {os.path.basename(img_path)}: {e}")
-            log_print(f"Continuing with next image...\n")
-            continue
+            import traceback
+            traceback.print_exc()
+            
+            if continue_on_error:
+                log_print(f"WARNING: Continuing with next image (metadata chain broken)\n")
+                # Reset prev_metadata to prevent cascading errors
+                prev_metadata = None
+                continue
+            else:
+                log_print(f"ABORTING: Cannot continue without valid metadata from previous page\n")
+                log_print(f"\n{'='*80}")
+                log_print(f"BATCH PROCESSING ABORTED")
+                log_print(f"Successfully processed {processed_count} images before error")
+                log_print(f"To continue processing despite errors, use --continue-on-error flag")
+                log_print(f"{'='*80}\n")
+                return processed_count
     
     log_print(f"\n{'='*80}")
     log_print(f"BATCH PROCESSING COMPLETE")
@@ -2975,6 +3032,7 @@ if __name__ == "__main__":
         log_print("  --max-pages N            - Maximum number of pages to process in batch mode")
         log_print("  --stop-on-book-change    - Stop batch processing when book changes")
         log_print("  --stop-on-chapter-change - Stop batch processing when chapter changes")
+        log_print("  --continue-on-error      - Continue processing on errors (default: abort)")
         log_print("  --start-page N           - Expected page number for first image (for validation)")
         log_print("  --start-book NAME        - Expected book name for first image (for validation)")
         log_print("  --start-chapter N        - Expected chapter for first image (for validation)")
@@ -2992,6 +3050,7 @@ if __name__ == "__main__":
     max_pages = None
     stop_on_book_change = False
     stop_on_chapter_change = False
+    continue_on_error = False
     start_page = None
     start_book = None
     start_chapter = None
@@ -3023,6 +3082,9 @@ if __name__ == "__main__":
             i += 1
         elif sys.argv[i] == '--stop-on-chapter-change':
             stop_on_chapter_change = True
+            i += 1
+        elif sys.argv[i] == '--continue-on-error':
+            continue_on_error = True
             i += 1
         elif sys.argv[i] == '--start-page' and i + 1 < len(sys.argv):
             start_page = int(sys.argv[i + 1])
@@ -3058,6 +3120,7 @@ if __name__ == "__main__":
                 max_pages=max_pages,
                 stop_on_book_change=stop_on_book_change,
                 stop_on_chapter_change=stop_on_chapter_change,
+                continue_on_error=continue_on_error,
                 start_page=start_page,
                 start_book=start_book,
                 start_chapter=start_chapter,
