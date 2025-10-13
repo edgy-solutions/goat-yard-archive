@@ -277,7 +277,7 @@ def validate_bible_reference(book_name, chapter, verse):
     Args:
         book_name: Book name (string, e.g., "GENESIS")
         chapter: Chapter number (int)
-        verse: Verse number, range, or list (string or int)
+        verse: Verse number, range, or list (string or int), or chapter-spanning notation (e.g., "5:30-32,6:1,2")
     
     Returns:
         dict with keys:
@@ -301,7 +301,47 @@ def validate_bible_reference(book_name, chapter, verse):
     book_data = bible[book_name_upper]
     max_chapter = max(book_data.keys()) if book_data else None
     
-    # Check if chapter exists
+    # Check if chapter exists (only if not using chapter-spanning notation)
+    verse_str = str(verse) if verse is not None else None
+    
+    # Check if this is chapter-spanning notation
+    if verse_str and ':' in verse_str:
+        # Chapter-spanning notation like "5:30-32,6:1,2"
+        # Validate each chapter:verse segment
+        from verse_notation import parse_verse_notation
+        
+        try:
+            parsed = parse_verse_notation(verse_str)
+            if not parsed:
+                errors.append(f"Invalid chapter-spanning notation: {verse_str}")
+                return {'valid': False, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': None}
+            
+            # Validate each chapter and its verses
+            for span in parsed:
+                ch = span['chapter']
+                verses = span['verses']
+                
+                if ch < 1 or ch > max_chapter:
+                    errors.append(f"Invalid chapter {ch} in notation {verse_str}. Valid range: 1-{max_chapter}")
+                    continue
+                
+                max_v = book_data.get(ch)
+                if max_v is None:
+                    errors.append(f"Chapter {ch} not found in {book_name}")
+                    continue
+                
+                invalid_verses = [v for v in verses if v < 1 or v > max_v]
+                if invalid_verses:
+                    errors.append(f"Invalid verses {invalid_verses} for {book_name} {ch}. Valid range: 1-{max_v}")
+            
+            # Return validation result for chapter-spanning
+            return {'valid': len(errors) == 0, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': None}
+            
+        except Exception as e:
+            errors.append(f"Error parsing chapter-spanning notation '{verse_str}': {e}")
+            return {'valid': False, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': None}
+    
+    # Standard validation for single-chapter notation
     if chapter is not None:
         if chapter < 1 or chapter > max_chapter:
             errors.append(f"Invalid chapter {chapter} for {book_name}. Valid range: 1-{max_chapter}")
@@ -311,8 +351,6 @@ def validate_bible_reference(book_name, chapter, verse):
         
         # Check verse(s)
         if verse is not None:
-            verse_str = str(verse)
-            
             # Parse verse range or list
             if '-' in verse_str:
                 # Range like "3-5"
@@ -377,21 +415,92 @@ def parse_usfm_file(usfm_path):
     
     return chapters
 
+def get_hebrew_verse_spanning(book_name, verse_notation):
+    """
+    Extract Hebrew verses from USFM files using chapter-spanning notation.
+    
+    Args:
+        book_name: Name of the book (English)
+        verse_notation: Chapter-spanning notation (e.g., "27:42-46,28:1")
+    
+    Returns:
+        Dictionary with verse text organized by chapter:verse keys or None if not found
+        Example: {"27:42": "text", "27:43": "text", ..., "28:1": "text"}
+    """
+    from verse_notation import parse_verse_notation
+    
+    parsed = parse_verse_notation(verse_notation)
+    if not parsed:
+        log_print(f"Warning: Could not parse verse notation: {verse_notation}")
+        return None
+    
+    usfm_dir = get_usfm_directory()
+    if not usfm_dir:
+        log_print("Warning: hbo_usfm directory not found")
+        return None
+    
+    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    usfm_filename = None
+    for key, value in BOOK_NAME_TO_USFM.items():
+        if key.lower() == book_name_normalized:
+            usfm_filename = value
+            break
+    
+    if not usfm_filename:
+        log_print(f"Warning: Could not find USFM file for book '{book_name}'")
+        return None
+    
+    usfm_path = usfm_dir / usfm_filename
+    if not usfm_path.exists():
+        log_print(f"Warning: USFM file not found: {usfm_path}")
+        return None
+    
+    chapters_data = parse_usfm_file(usfm_path)
+    result = {}
+    
+    # parsed is a list of dicts: [{'chapter': 27, 'verses': [42,43,44,45,46]}, ...]
+    for span in parsed:
+        chapter_num = span['chapter']
+        verse_list = span['verses']
+        
+        if chapter_num not in chapters_data:
+            log_print(f"Warning: Chapter {chapter_num} not found in {book_name}")
+            continue
+        
+        chapter_verses = chapters_data[chapter_num]
+        
+        for v in verse_list:
+            if v in chapter_verses:
+                # Use chapter:verse format as key
+                key = f"{chapter_num}:{v}"
+                result[key] = chapter_verses[v]
+    
+    return result if result else None
+
+
 def get_hebrew_verse(book_name, chapter, verse):
     """
     Extract Hebrew verse(s) from USFM files.
     
     Args:
         book_name: Name of the book (English)
-        chapter: Chapter number (int)
+        chapter: Chapter number (int) - may be ignored if verse contains chapter notation
         verse: Verse number or range/list (str or int)
-                Examples: "3", "3-5", "3,4,5"
+                Examples: 
+                - Single chapter: "3", "3-5", "3,4,5"
+                - Chapter-spanning: "27:42-46,28:1" (new notation)
     
     Returns:
         Dictionary with verse text or None if not found
     """
-    if not book_name or not chapter or not verse:
+    if not book_name or not verse:
         return None
+    
+    # Check if verse contains chapter-spanning notation (e.g., "27:42-46,28:1")
+    verse_str = str(verse)
+    if ':' in verse_str:
+        log_print(f"DEBUG: Detected chapter-spanning notation: {verse_str}")
+        return get_hebrew_verse_spanning(book_name, verse_str)
     
     usfm_dir = get_usfm_directory()
     if not usfm_dir:
@@ -516,6 +625,12 @@ def validate_metadata_with_ollama(image_path, metadata):
             'verse': validated.verse,
             'page_number': validated.page_number
         }
+        
+        # Normalize mixed verse notation if present
+        if result.get('verse') and result.get('chapter'):
+            normalized_verse = normalize_mixed_verse_notation(result['verse'], result['chapter'])
+            if normalized_verse != result['verse']:
+                result['verse'] = normalized_verse
         
         # Check if anything changed
         changes = []
@@ -763,6 +878,23 @@ def parse_verse_text(verse_text):
                 end_num = int(end_verse)
             
             if start_num and end_num:
+                # Check for reversed range (OCR error like "49-46" should be "42-46")
+                if start_num > end_num:
+                    log_print(f"DEBUG: Detected reversed range {start_num}-{end_num}, attempting OCR correction")
+                    # Try replacing 9 with 2 in start number
+                    start_str = str(start_num)
+                    if '9' in start_str:
+                        corrected_start = start_str.replace('9', '2')
+                        if corrected_start.isdigit():
+                            corrected_start_num = int(corrected_start)
+                            if corrected_start_num < end_num:
+                                log_print(f"DEBUG: Corrected reversed range: {start_num}-{end_num} -> {corrected_start_num}-{end_num}")
+                                start_num = corrected_start_num
+                
+                # Apply OCR correction to detect common 9→2 errors in ranges
+                corrected = correct_verse_ocr_errors([str(start_num), str(end_num)])
+                if corrected and len(corrected) == 2:
+                    return f"{corrected[0]}-{corrected[1]}"
                 return f"{start_num}-{end_num}"
     
     # Handle lists like "1,2", "I,II", "1, 2"
@@ -798,10 +930,140 @@ def parse_verse_text(verse_text):
     return None
 
 
+def extract_multi_chapter_span(boxes):
+    """
+    Detect chapter-spanning pattern: CH. XXVII. V. 42-46. XXVIII. V. 1
+    Returns (first_chapter, verse_notation) or (None, None) if not found.
+    
+    verse_notation will be in new format: "27:42-46,28:1"
+    """
+    if not boxes or len(boxes) < 6:  # Need at least CH. ch1 V. v1 ch2 V. v2
+        return None, None
+    
+    sorted_boxes = sorted(boxes, key=lambda b: b['x'])
+    
+    # Look for pattern: CH. <ch1> V. <v1> <ch2> V. <v2>
+    i = 0
+    while i < len(sorted_boxes) - 5:
+        # Step 1: Find CH. marker
+        if not re.match(r'^CH\.?', sorted_boxes[i]['text'], re.IGNORECASE):
+            i += 1
+            continue
+        
+        log_print(f"DEBUG: Checking for multi-chapter span starting at box {i}")
+        
+        # Step 2: Find first chapter number
+        ch1 = None
+        j = i + 1
+        while j < min(i + 3, len(sorted_boxes)):
+            text = sorted_boxes[j]['text'].strip()
+            if re.match(r'^[IVXLCDM]+\.?$', text, re.IGNORECASE):
+                ch1 = roman_to_decimal(text.replace('.', ''))
+                if ch1:
+                    log_print(f"DEBUG: Found first chapter: {ch1}")
+                    break
+            j += 1
+        
+        if not ch1:
+            i += 1
+            continue
+        
+        # Step 3: Find first V. marker
+        v1_idx = None
+        while j < min(i + 5, len(sorted_boxes)):
+            if re.match(r'^V\.?$', sorted_boxes[j]['text'], re.IGNORECASE):
+                v1_idx = j
+                log_print(f"DEBUG: Found first V. marker at {j}")
+                break
+            j += 1
+        
+        if v1_idx is None:
+            i += 1
+            continue
+        
+        # Step 4: Find first verse(s)
+        v1 = None
+        j = v1_idx + 1
+        while j < min(v1_idx + 3, len(sorted_boxes)):
+            text = sorted_boxes[j]['text'].strip()
+            v1 = parse_verse_text(text)
+            if v1:
+                log_print(f"DEBUG: Found first verse(s): {v1}")
+                break
+            j += 1
+        
+        if not v1:
+            i += 1
+            continue
+        
+        # Step 5: Find second chapter number (no CH. marker, just roman numeral)
+        ch2 = None
+        ch2_box_idx = None
+        j += 1
+        while j < min(v1_idx + 5, len(sorted_boxes)):
+            text = sorted_boxes[j]['text'].strip()
+            if re.match(r'^[IVXLCDM]+\.?$', text, re.IGNORECASE) and not re.match(r'^V\.?$', text, re.IGNORECASE):
+                ch2 = roman_to_decimal(text.replace('.', ''))
+                if ch2:
+                    # Allow same chapter number if OCR error (e.g., XXVII→XXVIII)
+                    # Validation will handle sequential correctness
+                    log_print(f"DEBUG: Found second chapter: {ch2}" + (f" (same as first, likely OCR error)" if ch2 == ch1 else ""))
+                    ch2_box_idx = j
+                    break
+            j += 1
+        
+        if not ch2:
+            i += 1
+            continue
+        
+        j = ch2_box_idx
+        
+        # Step 6: Find second V. marker
+        v2_idx = None
+        while j < min(v1_idx + 7, len(sorted_boxes)):
+            if re.match(r'^V\.?$', sorted_boxes[j]['text'], re.IGNORECASE):
+                v2_idx = j
+                log_print(f"DEBUG: Found second V. marker at {j}")
+                break
+            j += 1
+        
+        if v2_idx is None:
+            i += 1
+            continue
+        
+        # Step 7: Find second verse(s)
+        v2 = None
+        j = v2_idx + 1
+        while j < min(v2_idx + 3, len(sorted_boxes)):
+            text = sorted_boxes[j]['text'].strip()
+            v2 = parse_verse_text(text)
+            if v2:
+                log_print(f"DEBUG: Found second verse(s): {v2}")
+                break
+            j += 1
+        
+        if not v2:
+            i += 1
+            continue
+        
+        # Success! Build chapter-spanning notation
+        verse_notation = f"{ch1}:{v1},{ch2}:{v2}"
+        log_print(f"DEBUG: Multi-chapter span detected: {verse_notation}")
+        return ch1, verse_notation
+    
+    return None, None
+
+
 def extract_chapter_verse_from_boxes(boxes):
     """Extract chapter and verse from a list of boxes, handling multi-box patterns."""
     if not boxes:
         return None, None
+    
+    # First, try to detect chapter-spanning pattern
+    chapter, verse_notation = extract_multi_chapter_span(boxes)
+    if chapter and verse_notation:
+        log_print(f"DEBUG: Using multi-chapter notation: ch={chapter}, verse={verse_notation}")
+        return chapter, verse_notation
     
     # Sort boxes by x-position (left to right)
     sorted_boxes = sorted(boxes, key=lambda b: b['x'])
@@ -1082,16 +1344,21 @@ def extract_header_info(tsv_data, img_width, img_height):
     chapter = None
     verse = None
     
+    # Include center boxes that might contain chapter markers (CH., roman numerals)
+    chapter_related_center = [b for b in center_boxes 
+                              if re.search(r'CH\.|^[IVXLCDM]+\.?$', b['text'], re.IGNORECASE)
+                              and b['text'].strip().upper() != book_name.upper()]
+    
     if page_side == 'left':
-        cv_boxes = right_boxes
-        log_print(f"DEBUG: Page number on left, searching for chapter/verse on right")
+        cv_boxes = chapter_related_center + right_boxes
+        log_print(f"DEBUG: Page number on left, searching for chapter/verse in {len(chapter_related_center)} center boxes + {len(right_boxes)} right boxes")
     elif page_side == 'right':
-        cv_boxes = left_boxes
-        log_print(f"DEBUG: Page number on right, searching for chapter/verse on left")
+        cv_boxes = chapter_related_center + left_boxes
+        log_print(f"DEBUG: Page number on right, searching for chapter/verse in {len(chapter_related_center)} center boxes + {len(left_boxes)} left boxes")
     else:
-        # Fallback: search all non-center boxes
-        cv_boxes = left_boxes + right_boxes
-        log_print(f"DEBUG: Page number not found, searching all non-center boxes for chapter/verse")
+        # Fallback: search all boxes
+        cv_boxes = center_boxes + left_boxes + right_boxes
+        log_print(f"DEBUG: Page number not found, searching all boxes for chapter/verse")
     
     if cv_boxes:
         chapter, verse = extract_chapter_verse_from_boxes(cv_boxes)
@@ -1526,8 +1793,8 @@ def validate_verses_against_content(metadata_verse, found_verses):
     Validate that the verse(s) in metadata appear in the actual content.
     
     Args:
-        metadata_verse: Verse from metadata (can be "3", "3-5", "3,4,5")
-        found_verses: Set of verse numbers found in OCR content
+        metadata_verse: Verse from metadata (can be "3", "3-5", "3,4,5", or chapter-spanning "27:42-46,28:1")
+        found_verses: Set of verse numbers found in OCR content (without chapter info)
     
     Returns:
         dict with keys:
@@ -1544,7 +1811,24 @@ def validate_verses_against_content(metadata_verse, found_verses):
     expected_verses = set()
     
     try:
-        if '-' in metadata_verse_str:
+        # Check if this is chapter-spanning notation (contains ':')
+        if ':' in metadata_verse_str:
+            # New format: "27:42-46,28:1"
+            # Parse using verse_notation module
+            from verse_notation import parse_verse_notation
+            
+            parsed = parse_verse_notation(metadata_verse_str)
+            if parsed:
+                # Extract verse numbers from all chapters
+                # Note: Verse markers don't have chapter info, so we just collect verse numbers
+                for span in parsed:
+                    verses = span['verses']
+                    expected_verses.update(verses)
+                log_print(f"DEBUG: Parsed chapter-spanning notation '{metadata_verse_str}' -> verses {sorted(expected_verses)}")
+            else:
+                log_print(f"WARNING: Could not parse chapter-spanning notation: {metadata_verse_str}")
+                return {'valid': False, 'all_found': False, 'missing_verses': [], 'confidence': 0.0}
+        elif '-' in metadata_verse_str:
             # Range like "3-5"
             parts = metadata_verse_str.split('-')
             start = int(parts[0].strip())
@@ -1556,7 +1840,8 @@ def validate_verses_against_content(metadata_verse, found_verses):
         else:
             # Single verse
             expected_verses = {int(metadata_verse_str)}
-    except ValueError:
+    except ValueError as e:
+        log_print(f"WARNING: Could not parse verse notation '{metadata_verse_str}': {e}")
         return {'valid': False, 'all_found': False, 'missing_verses': [], 'confidence': 0.0}
     
     # Check which expected verses were found
@@ -1762,16 +2047,179 @@ def load_previous_metadata(prev_metadata_path):
         return None
 
 
+def normalize_mixed_verse_notation(verse_str, current_chapter):
+    """
+    Normalize mixed verse notation where some segments have chapter markers and some don't.
+    
+    Example: "30-32,6:1,2" with chapter 5 becomes "5:30-32,6:1-2"
+    
+    Args:
+        verse_str: Verse string that may be in mixed format
+        current_chapter: The current chapter number to apply to segments without markers
+    
+    Returns:
+        Normalized verse notation string
+    """
+    if not verse_str or not current_chapter:
+        return verse_str
+    
+    verse_str = str(verse_str)
+    
+    # Check if it's mixed format (contains : but not all segments have it)
+    if ':' not in verse_str:
+        # No chapter markers at all - this is standard format
+        return verse_str
+    
+    # Split by comma BUT keep track of which segments belong to which chapter
+    # "30-32,6:1,2" should become "5:30-32,6:1-2" not "5:30-32,6:1,5:2"
+    segments = verse_str.split(',')
+    normalized_segments = []
+    last_chapter = current_chapter
+    pending_verses = []
+    
+    for i, segment in enumerate(segments):
+        segment = segment.strip()
+        
+        if ':' in segment:
+            # Flush any pending verses with previous chapter
+            if pending_verses:
+                verse_part = ','.join(pending_verses)
+                normalized_segments.append(f"{last_chapter}:{verse_part}")
+                pending_verses = []
+            
+            # Extract chapter and verse from this segment
+            ch_str, v_part = segment.split(':', 1)
+            try:
+                last_chapter = int(ch_str)
+                # Add verses to pending (might be followed by more verses for this chapter)
+                pending_verses.append(v_part)
+            except ValueError:
+                # Invalid chapter, just add as-is
+                normalized_segments.append(segment)
+        else:
+            # No chapter marker - add to pending verses for last_chapter
+            pending_verses.append(segment)
+    
+    # Flush remaining pending verses
+    if pending_verses:
+        verse_part = ','.join(pending_verses)
+        # If this is the very first segment and has no chapter, use current_chapter
+        if not normalized_segments and last_chapter == current_chapter:
+            normalized_segments.append(f"{current_chapter}:{verse_part}")
+        else:
+            normalized_segments.append(f"{last_chapter}:{verse_part}")
+    
+    normalized = ','.join(normalized_segments)
+    
+    if normalized != verse_str:
+        log_print(f"DEBUG: Normalized mixed verse format: '{verse_str}' -> '{normalized}'")
+    
+    return normalized
+
+
+def extract_first_verse_from_notation(verse_notation):
+    """
+    Extract first chapter:verse from notation.
+    
+    Args:
+        verse_notation: String like "27:42-46" or "27:42-46,28:1"
+    
+    Returns:
+        (chapter, verse) tuple or (None, None)
+    """
+    if not verse_notation:
+        return None, None
+    
+    verse_str = str(verse_notation)
+    
+    # Check if it's chapter-spanning notation (contains :)
+    if ':' in verse_str:
+        # Parse first segment
+        first_segment = verse_str.split(',')[0].strip()
+        
+        # Extract chapter:verse
+        ch_str, v_part = first_segment.split(':', 1)
+        chapter = int(ch_str)
+        
+        # Extract first verse from range or single
+        if '-' in v_part:
+            verse = int(v_part.split('-')[0])
+        else:
+            verse = int(v_part)
+        
+        return chapter, verse
+    else:
+        # Old format (no chapter marker)
+        if '-' in verse_str:
+            verse = int(verse_str.split('-')[0])
+        elif ',' in verse_str:
+            verse = int(verse_str.split(',')[0])
+        else:
+            verse = int(verse_str) if verse_str.isdigit() else None
+        
+        return None, verse
+
+
+def extract_last_verse_from_notation(verse_notation):
+    """
+    Extract last chapter:verse from notation.
+    
+    Args:
+        verse_notation: String like "27:42-46" or "27:42-46,28:1"
+    
+    Returns:
+        (chapter, verse) tuple or (None, None)
+    """
+    if not verse_notation:
+        return None, None
+    
+    verse_str = str(verse_notation)
+    
+    # Check if it's chapter-spanning notation (contains :)
+    if ':' in verse_str:
+        # Parse last segment
+        last_segment = verse_str.split(',')[-1].strip()
+        
+        # Extract chapter:verse
+        if ':' in last_segment:
+            ch_str, v_part = last_segment.split(':', 1)
+            chapter = int(ch_str)
+        else:
+            # No chapter marker in last segment, need to find from previous segment
+            # This shouldn't happen with our format, but handle it
+            return None, None
+        
+        # Extract last verse from range or single
+        if '-' in v_part:
+            verse = int(v_part.split('-')[-1])
+        else:
+            verse = int(v_part)
+        
+        return chapter, verse
+    else:
+        # Old format (no chapter marker)
+        if '-' in verse_str:
+            verse = int(verse_str.split('-')[-1])
+        elif ',' in verse_str:
+            verse = int(verse_str.split(',')[-1])
+        else:
+            verse = int(verse_str) if verse_str.isdigit() else None
+        
+        return None, verse
+
+
 def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None, found_verses=None):
     """
     Validate current metadata against previous page and auto-correct obvious errors.
     Uses Bible structure to validate book names, chapter ranges, and verse ranges.
     Also validates verses against content markers (Ver. X) found in OCR.
+    Supports chapter-spanning notation (e.g., "27:42-46,28:1").
     
     Args:
         current_metadata: Current page metadata
         prev_metadata: Previous page metadata
         ocr_data: Optional OCR data for content-based validation
+        found_verses: Optional list of verse markers found in content
     """
     if not prev_metadata:
         return current_metadata
@@ -1908,26 +2356,11 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     curr_verse = current_metadata.get('verse')
     
     if prev_verse and curr_verse:
-        # Extract last verse number from previous page
-        prev_verse_str = str(prev_verse)
-        if '-' in prev_verse_str:
-            # Range: get the end number
-            last_prev_verse = int(prev_verse_str.split('-')[-1])
-        elif ',' in prev_verse_str:
-            # List: get the last number
-            last_prev_verse = int(prev_verse_str.split(',')[-1])
-        else:
-            # Single verse
-            last_prev_verse = int(prev_verse_str) if str(prev_verse_str).isdigit() else None
+        # Extract last chapter:verse from previous page
+        last_prev_ch, last_prev_verse = extract_last_verse_from_notation(prev_verse)
         
-        # Extract first verse number from current page
-        curr_verse_str = str(curr_verse)
-        if '-' in curr_verse_str:
-            first_curr_verse = int(curr_verse_str.split('-')[0])
-        elif ',' in curr_verse_str:
-            first_curr_verse = int(curr_verse_str.split(',')[0])
-        else:
-            first_curr_verse = int(curr_verse_str) if str(curr_verse_str).isdigit() else None
+        # Extract first chapter:verse from current page
+        first_curr_ch, first_curr_verse = extract_first_verse_from_notation(curr_verse)
         
         if last_prev_verse and first_curr_verse:
             verse_diff = first_curr_verse - last_prev_verse
@@ -1935,16 +2368,147 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
             # Get current chapter (after any corrections)
             final_curr_chapter = corrected.get('chapter', current_metadata.get('chapter'))
             
+            # Determine if chapters changed
+            # If notation contains chapter markers, use those; otherwise use metadata chapter
+            prev_chapter_for_compare = last_prev_ch if last_prev_ch is not None else prev_chapter
+            curr_chapter_for_compare = first_curr_ch if first_curr_ch is not None else final_curr_chapter
+            
+            log_print(f"DEBUG: Verse comparison: prev={prev_chapter_for_compare}:{last_prev_verse}, curr={curr_chapter_for_compare}:{first_curr_verse}")
+            
+            # Step 0: Detect suspicious patterns that suggest OCR errors in chapter-spanning notation
+            # Pattern: "Ch:V1-V2,Ch:1" where V2 is high (e.g., 42-46) and next is verse 1
+            # This strongly suggests chapter transition: should be "Ch:V1-V2,(Ch+1):1"
+            curr_verse_str = str(curr_verse)
+            if ':' in curr_verse_str and ',' in curr_verse_str:
+                # Parse segments
+                segments = curr_verse_str.split(',')
+                if len(segments) == 2:
+                    # Check if both segments have same chapter
+                    seg1_parts = segments[0].split(':')
+                    seg2_parts = segments[1].split(':')
+                    
+                    if len(seg1_parts) == 2 and len(seg2_parts) == 2:
+                        ch1 = int(seg1_parts[0])
+                        ch2 = int(seg2_parts[0])
+                        
+                        # Extract verses from each segment
+                        v1_part = seg1_parts[1]
+                        v2_part = seg2_parts[1]
+                        
+                        # Check if second segment starts with verse 1 and same chapter
+                        if ch1 == ch2 and v2_part.startswith('1'):
+                            # Get the last verse from first segment
+                            if '-' in v1_part:
+                                last_v1 = int(v1_part.split('-')[-1])
+                            else:
+                                last_v1 = int(v1_part)
+                            
+                            # If last verse is > 20 (suggesting end of chapter), this is likely OCR error
+                            if last_v1 > 20:
+                                log_print(f"DEBUG: Suspicious pattern detected: {ch1}:{v1_part} followed by {ch2}:{v2_part}")
+                                log_print(f"DEBUG: Verses ending at {last_v1} followed by verse 1 suggests chapter transition")
+                                
+                                # Use Bible structure to determine which chapter is wrong
+                                # Check if ch1 can have the verse range specified
+                                bible_struct = build_bible_structure()
+                                current_book = corrected.get('book_name') or prev_book
+                                
+                                correct_ch1 = ch1
+                                correct_ch2 = ch1 + 1
+                                
+                                if current_book and current_book.upper() in bible_struct:
+                                    book_chapters = bible_struct[current_book.upper()]
+                                    
+                                    # Check if ch1 can accommodate the verses (e.g., 42-46)
+                                    if ch1 in book_chapters:
+                                        max_verses_ch1 = book_chapters[ch1]
+                                        
+                                        # Check if the verse range is valid for ch1
+                                        if last_v1 > max_verses_ch1:
+                                            # Verses don't fit in ch1! Ch1 must be wrong.
+                                            log_print(f"DEBUG: Chapter {ch1} only has {max_verses_ch1} verses, but notation has verses up to {last_v1}")
+                                            log_print(f"DEBUG: First chapter must be incorrect")
+                                            
+                                            # Try previous chapter if it can accommodate these verses
+                                            if prev_chapter and prev_chapter in book_chapters:
+                                                max_verses_prev = book_chapters[prev_chapter]
+                                                if last_v1 <= max_verses_prev:
+                                                    # Previous chapter can accommodate! Use it.
+                                                    correct_ch1 = prev_chapter
+                                                    correct_ch2 = prev_chapter + 1
+                                                    log_print(f"DEBUG: Chapter {prev_chapter} has {max_verses_prev} verses - using it as first chapter")
+                                                else:
+                                                    # Even previous chapter can't accommodate
+                                                    # Try ch1-1
+                                                    if ch1 - 1 in book_chapters:
+                                                        max_verses_ch1_minus_1 = book_chapters[ch1 - 1]
+                                                        if last_v1 <= max_verses_ch1_minus_1:
+                                                            correct_ch1 = ch1 - 1
+                                                            correct_ch2 = ch1
+                                                            log_print(f"DEBUG: Chapter {ch1-1} has {max_verses_ch1_minus_1} verses - using it")
+                                            else:
+                                                # No prev_chapter, try ch1-1
+                                                if ch1 - 1 in book_chapters:
+                                                    max_verses_ch1_minus_1 = book_chapters[ch1 - 1]
+                                                    if last_v1 <= max_verses_ch1_minus_1:
+                                                        correct_ch1 = ch1 - 1
+                                                        correct_ch2 = ch1
+                                                        log_print(f"DEBUG: Chapter {ch1-1} has {max_verses_ch1_minus_1} verses - using it")
+                                        else:
+                                            # Ch1 can accommodate the verses, so ch1 is correct
+                                            log_print(f"DEBUG: Chapter {ch1} has {max_verses_ch1} verses, can accommodate verses up to {last_v1}")
+                                            correct_ch1 = ch1
+                                            correct_ch2 = ch1 + 1
+                                    else:
+                                        # Ch1 not in Bible structure, fall back to previous chapter logic
+                                        log_print(f"DEBUG: Chapter {ch1} not found in Bible structure for {current_book}")
+                                        if prev_chapter:
+                                            correct_ch1 = prev_chapter
+                                            correct_ch2 = prev_chapter + 1
+                                else:
+                                    # No Bible structure available, use simple heuristics
+                                    log_print(f"DEBUG: No Bible structure available for {current_book}")
+                                    if prev_chapter and prev_chapter == ch1 - 1:
+                                        correct_ch1 = ch1
+                                        correct_ch2 = ch1 + 1
+                                    elif prev_chapter:
+                                        correct_ch1 = prev_chapter
+                                        correct_ch2 = prev_chapter + 1
+                                    else:
+                                        correct_ch1 = ch1
+                                        correct_ch2 = ch1 + 1
+                                
+                                log_print(f"DEBUG: Correcting: {ch1}:{v1_part},{ch2}:{v2_part} -> {correct_ch1}:{v1_part},{correct_ch2}:{v2_part}")
+                                
+                                # Correct the notation
+                                corrected_verse = f"{correct_ch1}:{v1_part},{correct_ch2}:{v2_part}"
+                                corrected['verse'] = corrected_verse
+                                corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (OCR error: chapter should change)")
+                                corrected['verse_warning'] = f"OCR read both chapters as {ch1}, corrected to {correct_ch1},{correct_ch2} based on verse pattern and previous chapter"
+                                
+                                # Also update metadata chapter if first chapter was corrected
+                                if correct_ch1 != ch1 and corrected.get('chapter') == ch1:
+                                    corrected['chapter'] = correct_ch1
+                                    corrections_made.append(f"chapter: {ch1} -> {correct_ch1} (corrected based on verse pattern)")
+                                
+                                # Update for subsequent checks
+                                curr_verse_str = corrected_verse
+                                curr_verse = corrected_verse
+                                # Re-extract chapter/verse after correction
+                                first_curr_ch, first_curr_verse = extract_first_verse_from_notation(corrected_verse)
+                                curr_chapter_for_compare = first_curr_ch if first_curr_ch is not None else final_curr_chapter
+            
             # Step 1: Check for overlap - current should never start at or before previous ending
             # BUT: Only check if we're in the SAME chapter (chapter changes reset verse numbers)
             if first_curr_verse <= last_prev_verse:
-                # Check if chapter changed
-                if prev_chapter is not None and final_curr_chapter is not None and final_curr_chapter != prev_chapter:
-                    # Chapter changed - verse reset to 1 is expected
-                    log_print(f"DEBUG: Chapter changed from {prev_chapter} to {final_curr_chapter}, verse reset to {first_curr_verse} is expected")
-                elif prev_chapter is None or final_curr_chapter is None:
+                # Check if chapter changed (using chapter from notation if available)
+                if (prev_chapter_for_compare is not None and curr_chapter_for_compare is not None and 
+                    curr_chapter_for_compare != prev_chapter_for_compare):
+                    # Chapter changed - verse reset is expected
+                    log_print(f"DEBUG: Chapter changed from {prev_chapter_for_compare} to {curr_chapter_for_compare}, verse reset to {first_curr_verse} is expected")
+                elif prev_chapter_for_compare is None or curr_chapter_for_compare is None:
                     # Unknown chapter - skip overlap check
-                    log_print(f"DEBUG: Cannot verify overlap - chapter unknown (prev={prev_chapter}, curr={final_curr_chapter})")
+                    log_print(f"DEBUG: Cannot verify overlap - chapter unknown (prev={prev_chapter_for_compare}, curr={curr_chapter_for_compare})")
                 else:
                     # Same chapter - this is a real overlap
                     log_print(f"DEBUG: Verse overlap detected: prev ends at {last_prev_verse}, current starts at {first_curr_verse}")
@@ -1995,8 +2559,11 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
             
             # Step 2: Check for unrealistic gaps (after overlap correction)
             # Only check gaps if we're in the SAME chapter (not after chapter change)
-            same_chapter = (prev_chapter is not None and final_curr_chapter is not None and 
-                          final_curr_chapter == prev_chapter)
+            # Use chapter from notation if available, otherwise use metadata chapter
+            same_chapter = (prev_chapter_for_compare is not None and curr_chapter_for_compare is not None and 
+                          curr_chapter_for_compare == prev_chapter_for_compare)
+            
+            log_print(f"DEBUG: Gap detection - same_chapter={same_chapter} (prev_ch={prev_chapter_for_compare}, curr_ch={curr_chapter_for_compare})")
             
             if same_chapter:
                 # Re-parse the potentially corrected verse string

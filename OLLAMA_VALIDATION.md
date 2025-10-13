@@ -6,6 +6,8 @@ This document describes the Ollama integration for validating OCR-extracted meta
 
 The script now supports optional validation of OCR metadata (book, chapter, verse, page number) using Ollama's vision model. This helps correct OCR errors by having a vision LLM review the image and extracted metadata.
 
+**New in v2.0:** Support for chapter-spanning notation (e.g., `"27:42-46,28:1"`) for pages that cover content from multiple chapters.
+
 ## Setup
 
 ### 1. Install Dependencies
@@ -65,6 +67,32 @@ python get_md.py images/page90_image1.png --lang "eng+heb" --validate-ollama
    
 4. **Step 4**: Hebrew verse extraction
    - Uses the validated metadata to fetch Hebrew verses from USFM files
+
+## Verse Notation Formats
+
+The system supports multiple verse notation formats:
+
+### Standard Formats (Single Chapter)
+- **Single verse**: `"3"` - A single verse
+- **Range**: `"3-5"` - Verses 3 through 5 (inclusive)
+- **List**: `"3,4,5"` - Specific verses (non-contiguous)
+
+### Chapter-Spanning Format (New in v2.0)
+When a page covers content from multiple chapters, the notation includes chapter markers:
+
+- **Format**: `"chapter:verses,chapter:verses"`
+- **Example**: `"27:42-46,28:1"` 
+  - Means: Verses 42-46 from chapter 27, and verse 1 from chapter 28
+
+### Detection and Correction
+
+The system automatically:
+1. **Detects** chapter-spanning patterns in headers (e.g., `"CH. XXVII. V. 42-46. XXVIII. V. 1"`)
+2. **Corrects** OCR errors using Bible structure validation
+   - Example: If OCR reads both chapters as 28, but Genesis 28 only has 22 verses
+   - System infers that verses 42-46 must be from chapter 27
+   - Corrects to: `"27:42-46,28:1"`
+3. **Extracts** Hebrew verses from multiple chapters automatically
 
 ## Output
 
