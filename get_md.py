@@ -1362,37 +1362,48 @@ def find_verse_markers_in_ocr(ocr_data):
                     for i in range(len(left_positions)) if left_positions[i] is not None)
         center_x = max_x / 2
         
-        # Use a narrow margin (5%) to only exclude true center content (like headers)
-        # Most commentary verse markers are in columns, not center
-        center_margin = max_x * 0.05
+        # Use a minimal margin (0.05%) to only exclude content at the exact center line
+        # Commentary pages have right columns starting extremely close to center (within 5-10px)
+        # This margin (~1-2 pixels) only excludes truly centered single characters/thin dividers
+        center_margin = max_x * 0.0005
     else:
         return set()
     
-    # Pattern to match "Ver." (case-sensitive!) followed by numbers
+    # Pattern to match "Ver" (case-sensitive!) with optional punctuation, followed by numbers
     # Must be at start of text (after optional whitespace)
-    verse_pattern = re.compile(r'^\s*Ver\.\s*(\d+)')  # No re.IGNORECASE - case sensitive!
+    # Matches: "Ver." "Ver," "Ver" "Ver " followed by digits
+    verse_pattern = re.compile(r'^\s*Ver[.,\s]*(\d+)')  # No re.IGNORECASE - case sensitive!
     
     # Search each box
     ver_boxes_checked = 0
     ver_boxes_matched = 0
+    boxes_skipped_no_text = 0
+    boxes_skipped_no_position = 0
+    boxes_skipped_center = 0
     
     for i, text in enumerate(text_boxes):
         if not text or text.strip() == '':
+            boxes_skipped_no_text += 1
             continue
         
         # Get x position of this box
         x_pos = left_positions[i] if i < len(left_positions) else None
         if x_pos is None:
+            boxes_skipped_no_position += 1
             continue
         
         # Skip if box is in center area (we only want left/right columns)
         if abs(x_pos - center_x) < center_margin:
+            # Check if this center box contains "Ver" (we might be excluding too much)
+            if "Ver" in text or "ver" in text.lower():
+                log_print(f"DEBUG: SKIPPED center box {i}: '{text}' at x={x_pos} (center={center_x}, margin={center_margin})")
+            boxes_skipped_center += 1
             continue
         
-        # Only debug boxes that contain "Ver"
-        if "Ver" in text:
+        # Check ALL boxes for "Ver" (case-insensitive) to see what we're finding
+        if "ver" in text.lower():
             ver_boxes_checked += 1
-            log_print(f"DEBUG: Checking box {i}: '{text}' at x={x_pos}")
+            log_print(f"DEBUG: Found 'Ver' in box {i}: '{text}' at x={x_pos}")
         
         # Check if text starts with "Ver." (case-sensitive)
         match = verse_pattern.match(text)
@@ -1406,10 +1417,11 @@ def find_verse_markers_in_ocr(ocr_data):
             except ValueError:
                 pass
         
-        # Also check if current box starts with "Ver." and next box starts with a number
+        # Also check if current box starts with "Ver" and next box starts with a number
         # This handles the case where the pattern spans boxes
         if i < len(text_boxes) - 1:
-            if re.match(r'^\s*Ver\.\s*$', text):  # Ends with "Ver." at start of line
+            # Match "Ver.", "Ver,", "Ver" with optional trailing punctuation/space
+            if re.match(r'^\s*Ver[.,\s]*$', text):  # Box contains just "Ver" with optional punctuation
                 next_text = text_boxes[i + 1]
                 next_x = left_positions[i + 1] if i + 1 < len(left_positions) else None
                 
@@ -1435,7 +1447,12 @@ def find_verse_markers_in_ocr(ocr_data):
         if v_str.isdigit():
             corrected_verses.add(int(v_str))
     
-    log_print(f"DEBUG: Searched {len(text_boxes)} boxes, found {ver_boxes_checked} boxes containing 'Ver', matched {ver_boxes_matched} verse patterns")
+    log_print(f"DEBUG: Searched {len(text_boxes)} boxes:")
+    log_print(f"  - Skipped {boxes_skipped_no_text} (no text)")
+    log_print(f"  - Skipped {boxes_skipped_no_position} (no position)")
+    log_print(f"  - Skipped {boxes_skipped_center} (center area)")
+    log_print(f"  - Found {ver_boxes_checked} boxes containing 'Ver'")
+    log_print(f"  - Matched {ver_boxes_matched} verse patterns")
     
     if corrected_verses != verses_found:
         log_print(f"DEBUG: Applied OCR corrections to verse markers: {sorted(verses_found)} -> {sorted(corrected_verses)}")
@@ -1933,23 +1950,44 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     log_print(f"DEBUG: Verse overlap detected: prev ends at {last_prev_verse}, current starts at {first_curr_verse}")
                     expected_verse = last_prev_verse + 1
                     
-                    # Reconstruct verse to start at expected_verse
+                    # Remove overlapping verses instead of blindly shifting
                     if ',' in curr_verse_str:
-                        # It's a list, adjust each number
-                        num_verses = len(curr_verse_str.split(','))
-                        corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
-                        corrected_verse = ','.join(corrected_verses)
+                        # It's a list - remove overlapping verses
+                        verse_nums = [int(v.strip()) for v in curr_verse_str.split(',') if v.strip().isdigit()]
+                        non_overlapping = [v for v in verse_nums if v >= expected_verse]
+                        
+                        if non_overlapping:
+                            corrected_verse = ','.join(str(v) for v in non_overlapping)
+                            log_print(f"DEBUG: Removed overlapping verses: {verse_nums} -> {non_overlapping}")
+                        else:
+                            # All verses overlap - shift to expected range
+                            num_verses = len(verse_nums)
+                            corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
+                            corrected_verse = ','.join(corrected_verses)
+                            log_print(f"DEBUG: All verses overlapped, shifted: {verse_nums} -> {corrected_verses}")
                     elif '-' in curr_verse_str:
-                        # It's a range, adjust both numbers
-                        range_size = int(curr_verse_str.split('-')[1]) - int(curr_verse_str.split('-')[0])
-                        corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
+                        # It's a range - adjust to start at expected_verse
+                        parts = curr_verse_str.split('-')
+                        range_start = int(parts[0])
+                        range_end = int(parts[1])
+                        
+                        if range_end >= expected_verse:
+                            # Keep non-overlapping part of range
+                            corrected_verse = f"{expected_verse}-{range_end}"
+                            log_print(f"DEBUG: Trimmed overlapping range: {range_start}-{range_end} -> {expected_verse}-{range_end}")
+                        else:
+                            # Entire range overlaps - shift it
+                            range_size = range_end - range_start
+                            corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
+                            log_print(f"DEBUG: Entire range overlapped, shifted: {range_start}-{range_end} -> {corrected_verse}")
                     else:
-                        # Single verse
+                        # Single verse overlaps - replace with expected
                         corrected_verse = str(expected_verse)
+                        log_print(f"DEBUG: Single verse overlapped, replaced: {first_curr_verse} -> {expected_verse}")
                     
-                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (overlap with previous ending at {last_prev_verse})")
+                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (removed overlap with previous ending at {last_prev_verse})")
                     corrected['verse'] = corrected_verse
-                    corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} to avoid overlap with previous verse {last_prev_verse}"
+                    corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} to remove overlap with previous verse {last_prev_verse}"
                     
                     # Update curr_verse_str for gap detection
                     curr_verse_str = corrected_verse
