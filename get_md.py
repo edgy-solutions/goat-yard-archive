@@ -1728,8 +1728,31 @@ def find_verse_markers_in_ocr(ocr_data):
     # Additional check: Correct outliers by inferring the correct verse number
     # Use known OCR error pattern: 2 -> 9 (e.g., 22 -> 29)
     # E.g., [21, 23, 24, 29] -> check if 29 contains '9' -> try 22 -> [21, 22, 23, 24]
+    # 
+    # IMPORTANT: Detect chapter transitions to avoid false outlier detection
+    # Pattern: [1, 2, ..., N] where N >> rest suggests N is from previous chapter
     if len(verses_found) >= 3:
         sorted_verses = sorted(verses_found)
+        
+        # Detect likely chapter transition: verses start at 1 with large value at end
+        # Only detect if we have a small number of verses (<=4), suggesting partial page overlap
+        has_chapter_transition = False
+        if sorted_verses[0] == 1 and len(sorted_verses) >= 2 and len(sorted_verses) <= 4:
+            # Check if we have sequential verses from 1 and a much larger value
+            sequential_from_1 = True
+            for i in range(min(3, len(sorted_verses) - 1)):
+                if sorted_verses[i] != i + 1:
+                    sequential_from_1 = False
+                    break
+            
+            # If last verse is much larger (>10), likely from previous chapter
+            # AND the gap is significant (>5 verses missing)
+            if sequential_from_1 and sorted_verses[-1] > 10:
+                gap = sorted_verses[-1] - sorted_verses[-2]
+                if gap > 5:
+                    has_chapter_transition = True
+                    log_print(f"DEBUG: Detected likely chapter transition: verses start at 1 sequentially, last verse {sorted_verses[-1]} likely from previous chapter")
+        
         corrected = []
         
         for i, v in enumerate(sorted_verses):
@@ -1747,8 +1770,13 @@ def find_verse_markers_in_ocr(ocr_data):
                 gap_to_next = 1  # Last verse
             
             # Detect outliers: gap > 2 suggests OCR error
+            # BUT: Skip outlier detection if this looks like a chapter transition
             is_outlier = False
-            if i > 0 and i < len(sorted_verses) - 1:
+            
+            # Don't treat last verse as outlier if we detected chapter transition
+            if has_chapter_transition and i == len(sorted_verses) - 1:
+                is_outlier = False
+            elif i > 0 and i < len(sorted_verses) - 1:
                 # Middle verse: large gaps on BOTH sides
                 if gap_to_prev > 2 and gap_to_next > 2:
                     is_outlier = True
@@ -2007,6 +2035,66 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         log_print(f"\nStep 3: Validating with Ollama...")
         header_info = validate_metadata_with_ollama(image_path, header_info)
         log_print(f"After Ollama: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
+        
+        # Validate Ollama result against body verse markers and Bible structure
+        if found_verses and header_info.get('verse'):
+            log_print(f"\nValidating Ollama result against body verse markers...")
+            verse_validation = validate_verses_against_content(header_info['verse'], found_verses)
+            log_print(f"Ollama verse '{header_info['verse']}' validation: {verse_validation['confidence']:.1%} confidence")
+            
+            # If Ollama result doesn't match body verses well, use body markers instead
+            if verse_validation['confidence'] < 0.75:
+                sorted_found = sorted(found_verses)
+                
+                # Check if this looks like a chapter transition
+                # (verses start from 1 with a large verse at the end)
+                if sorted_found[0] == 1 and len(sorted_found) >= 2 and sorted_found[-1] > 10:
+                    # Chapter transition: last verse is from previous chapter
+                    new_chapter_verses = [v for v in sorted_found if v <= 10]
+                    prev_chapter_verse = sorted_found[-1]
+                    
+                    # Get chapters from Ollama result if it's chapter-spanning
+                    current_verse_str = str(header_info.get('verse', ''))
+                    if ':' in current_verse_str and ',' in current_verse_str:
+                        # Extract chapters from notation like "23:20-24,24:1-2"
+                        try:
+                            from verse_notation import parse_verse_notation
+                            parsed = parse_verse_notation(current_verse_str)
+                            if len(parsed) >= 2:
+                                prev_ch = parsed[0]['chapter']
+                                current_ch = parsed[-1]['chapter']
+                            else:
+                                # Fallback to metadata chapter
+                                current_ch = header_info.get('chapter')
+                                prev_ch = current_ch - 1 if current_ch and current_ch > 1 else None
+                        except:
+                            # Fallback to metadata chapter
+                            current_ch = header_info.get('chapter')
+                            prev_ch = current_ch - 1 if current_ch and current_ch > 1 else None
+                    else:
+                        # Use metadata chapter and assume previous is ch-1
+                        current_ch = header_info.get('chapter')
+                        prev_ch = current_ch - 1 if current_ch and current_ch > 1 else None
+                    
+                    if prev_ch and current_ch:
+                        # Format: "prev_ch:prev_verse,current_ch:new_verses"
+                        if len(new_chapter_verses) == 1:
+                            new_verses_str = str(new_chapter_verses[0])
+                        else:
+                            new_verses_str = f"{min(new_chapter_verses)}-{max(new_chapter_verses)}"
+                        
+                        corrected_verse = f"{prev_ch}:{prev_chapter_verse},{current_ch}:{new_verses_str}"
+                        log_print(f"Correcting Ollama result based on body verse markers:")
+                        log_print(f"  {header_info['verse']} -> {corrected_verse}")
+                        header_info['verse'] = corrected_verse
+                else:
+                    # No chapter transition, use simple range
+                    min_v = min(found_verses)
+                    max_v = max(found_verses)
+                    body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
+                    log_print(f"Correcting Ollama result based on body verse markers:")
+                    log_print(f"  {header_info['verse']} -> {body_verse}")
+                    header_info['verse'] = body_verse
     
     # Create basic metadata
     metadata = {
@@ -2171,34 +2259,53 @@ def extract_first_verse_from_notation(verse_notation):
     if not verse_notation:
         return None, None
     
-    verse_str = str(verse_notation)
-    
-    # Check if it's chapter-spanning notation (contains :)
-    if ':' in verse_str:
-        # Parse first segment
-        first_segment = verse_str.split(',')[0].strip()
+    try:
+        verse_str = str(verse_notation).strip()
         
-        # Extract chapter:verse
-        ch_str, v_part = first_segment.split(':', 1)
-        chapter = int(ch_str)
-        
-        # Extract first verse from range or single
-        if '-' in v_part:
-            verse = int(v_part.split('-')[0])
+        # Check if it's chapter-spanning notation (contains :)
+        if ':' in verse_str:
+            # Parse first segment
+            first_segment = verse_str.split(',')[0].strip()
+            
+            # Extract chapter:verse
+            ch_str, v_part = first_segment.split(':', 1)
+            chapter = int(ch_str.strip())
+            
+            # Extract first verse from range or single
+            # Clean v_part of any extraneous characters
+            v_part = v_part.strip()
+            if '-' in v_part:
+                first_v = v_part.split('-')[0].strip()
+                # Remove any trailing commas or non-digit characters
+                first_v = ''.join(c for c in first_v if c.isdigit())
+                verse = int(first_v) if first_v else None
+            else:
+                # Remove any trailing commas or non-digit characters
+                v_part = ''.join(c for c in v_part if c.isdigit())
+                verse = int(v_part) if v_part else None
+            
+            return chapter, verse if verse else None
         else:
-            verse = int(v_part)
-        
-        return chapter, verse
-    else:
-        # Old format (no chapter marker)
-        if '-' in verse_str:
-            verse = int(verse_str.split('-')[0])
-        elif ',' in verse_str:
-            verse = int(verse_str.split(',')[0])
-        else:
-            verse = int(verse_str) if verse_str.isdigit() else None
-        
-        return None, verse
+            # Old format (no chapter marker)
+            if '-' in verse_str:
+                first_v = verse_str.split('-')[0].strip()
+                # Remove any non-digit characters
+                first_v = ''.join(c for c in first_v if c.isdigit())
+                verse = int(first_v) if first_v else None
+            elif ',' in verse_str:
+                first_v = verse_str.split(',')[0].strip()
+                # Remove any non-digit characters
+                first_v = ''.join(c for c in first_v if c.isdigit())
+                verse = int(first_v) if first_v else None
+            else:
+                # Remove any non-digit characters
+                verse_str = ''.join(c for c in verse_str if c.isdigit())
+                verse = int(verse_str) if verse_str else None
+            
+            return None, verse
+    except Exception as e:
+        log_print(f"WARNING: Error parsing verse notation '{verse_notation}': {e}")
+        return None, None
 
 
 def extract_last_verse_from_notation(verse_notation):
@@ -2214,39 +2321,57 @@ def extract_last_verse_from_notation(verse_notation):
     if not verse_notation:
         return None, None
     
-    verse_str = str(verse_notation)
-    
-    # Check if it's chapter-spanning notation (contains :)
-    if ':' in verse_str:
-        # Parse last segment
-        last_segment = verse_str.split(',')[-1].strip()
+    try:
+        verse_str = str(verse_notation).strip()
         
-        # Extract chapter:verse
-        if ':' in last_segment:
-            ch_str, v_part = last_segment.split(':', 1)
-            chapter = int(ch_str)
+        # Check if it's chapter-spanning notation (contains :)
+        if ':' in verse_str:
+            # Parse last segment
+            last_segment = verse_str.split(',')[-1].strip()
+            
+            # Extract chapter:verse
+            if ':' in last_segment:
+                ch_str, v_part = last_segment.split(':', 1)
+                chapter = int(ch_str.strip())
+            else:
+                # No chapter marker in last segment, need to find from previous segment
+                return None, None
+            
+            # Extract last verse from range or single
+            # Clean v_part of any extraneous characters
+            v_part = v_part.strip()
+            if '-' in v_part:
+                last_v = v_part.split('-')[-1].strip()
+                # Remove any trailing commas or non-digit characters
+                last_v = ''.join(c for c in last_v if c.isdigit())
+                verse = int(last_v) if last_v else None
+            else:
+                # Remove any trailing commas or non-digit characters
+                v_part = ''.join(c for c in v_part if c.isdigit())
+                verse = int(v_part) if v_part else None
+            
+            return chapter, verse if verse else None
         else:
-            # No chapter marker in last segment, need to find from previous segment
-            # This shouldn't happen with our format, but handle it
-            return None, None
-        
-        # Extract last verse from range or single
-        if '-' in v_part:
-            verse = int(v_part.split('-')[-1])
-        else:
-            verse = int(v_part)
-        
-        return chapter, verse
-    else:
-        # Old format (no chapter marker)
-        if '-' in verse_str:
-            verse = int(verse_str.split('-')[-1])
-        elif ',' in verse_str:
-            verse = int(verse_str.split(',')[-1])
-        else:
-            verse = int(verse_str) if verse_str.isdigit() else None
-        
-        return None, verse
+            # Old format (no chapter marker)
+            if '-' in verse_str:
+                last_v = verse_str.split('-')[-1].strip()
+                # Remove any non-digit characters
+                last_v = ''.join(c for c in last_v if c.isdigit())
+                verse = int(last_v) if last_v else None
+            elif ',' in verse_str:
+                last_v = verse_str.split(',')[-1].strip()
+                # Remove any non-digit characters
+                last_v = ''.join(c for c in last_v if c.isdigit())
+                verse = int(last_v) if last_v else None
+            else:
+                # Remove any non-digit characters
+                verse_str = ''.join(c for c in verse_str if c.isdigit())
+                verse = int(verse_str) if verse_str else None
+            
+            return None, verse
+    except Exception as e:
+        log_print(f"WARNING: Error parsing verse notation '{verse_notation}': {e}")
+        return None, None
 
 
 def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None, found_verses=None):
