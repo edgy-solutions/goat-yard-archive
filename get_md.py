@@ -734,6 +734,9 @@ def correct_verse_ocr_errors(verse_parts, max_gap=10):
     Correct common OCR errors in verse numbers, particularly '9' misread as '2'.
     Detects when consecutive verse numbers have unrealistic gaps and tries correction.
     
+    Note: Only applies correction for VERY large gaps (>25) to avoid false positives.
+    Moderate gaps (10-25) may be legitimate sparse verse ranges in commentary.
+    
     Args:
         verse_parts: List of verse number strings
         max_gap: Maximum reasonable gap between consecutive verses (default: 10)
@@ -756,7 +759,8 @@ def correct_verse_ocr_errors(verse_parts, max_gap=10):
             gap = current - prev
             
             # Suspiciously large gap (e.g., 25 -> 96, or 21 -> 99)
-            if gap > max_gap:
+            # Only correct for VERY large gaps (>25) to avoid false positives on sparse ranges
+            if gap > 25:  # Changed from max_gap (10) to 25 to be more conservative
                 # Try replacing '9' with '2' in current verse
                 if '9' in part:
                     # Try replacing all 9s first (for cases like "99" -> "22")
@@ -784,8 +788,8 @@ def correct_verse_ocr_errors(verse_parts, max_gap=10):
             next_val = int(verse_parts[i + 1])
             gap = next_val - current
             
-            # Large gap to next verse
-            if gap > max_gap:
+            # Large gap to next verse (only for very large gaps)
+            if gap > 25:
                 # Try replacing '9' with '2' in next verse (will be corrected when we get there)
                 pass  # Will be handled when we process the next verse
         
@@ -1692,10 +1696,37 @@ def find_verse_markers_in_ocr(ocr_data):
                 next_text = text_boxes[i + 1]
                 next_x = left_positions[i + 1] if i + 1 < len(left_positions) else None
                 
-                # Check if next box is in the same column (not center)
+                # Check if next box is in the same column (not center) AND same side as Ver.
                 if next_text and next_x is not None and abs(next_x - center_x) >= center_margin:
+                    # Verify next box is in SAME column as 'Ver.' box
+                    # BUT: Allow spanning if both boxes are close to center (within 150px)
+                    # This handles cases where "Ver." is at column edge and number spans to next column
+                    ver_distance_from_center = abs(x_pos - center_x)
+                    next_distance_from_center = abs(next_x - center_x)
+                    
+                    if ver_distance_from_center < 150 or next_distance_from_center < 150:
+                        # At least one box is close to center - allow spanning
+                        pass
+                    else:
+                        # Both boxes far from center - must be same column
+                        ver_is_left = x_pos < center_x
+                        next_is_left = next_x < center_x
+                        if ver_is_left != next_is_left:
+                            # Different columns - skip this match
+                            continue
                     # More flexible pattern - strip trailing periods and parse
                     next_clean = next_text.strip().rstrip('.,')
+                    
+                    # Apply OCR corrections for common verse number misreads
+                    # "1" often misread as "t", "l", "I", "|"
+                    if next_clean.lower().startswith('t') or next_clean.lower().startswith('l') or next_clean.startswith('I') or next_clean.startswith('|'):
+                        # Try replacing first char with '1'
+                        corrected = '1' + next_clean[1:]
+                        match = re.match(r'^(\d+)', corrected)
+                        if match:
+                            log_print(f"DEBUG: OCR correction for verse number: '{next_clean}' -> '{corrected}'")
+                            next_clean = corrected
+                    
                     match = re.match(r'^(\d+)', next_clean)
                     if match:
                         try:
@@ -1729,29 +1760,73 @@ def find_verse_markers_in_ocr(ocr_data):
     # Use known OCR error pattern: 2 -> 9 (e.g., 22 -> 29)
     # E.g., [21, 23, 24, 29] -> check if 29 contains '9' -> try 22 -> [21, 22, 23, 24]
     # 
-    # IMPORTANT: Detect chapter transitions to avoid false outlier detection
-    # Pattern: [1, 2, ..., N] where N >> rest suggests N is from previous chapter
+    # IMPORTANT: 
+    # 1. Detect chapter transitions to avoid false outlier detection
+    # 2. Detect sparse verse ranges (commentary may only mark some verses)
+    #    If first and last verses suggest a range, keep intermediate "outliers"
     if len(verses_found) >= 3:
         sorted_verses = sorted(verses_found)
         
-        # Detect likely chapter transition: verses start at 1 with large value at end
-        # Only detect if we have a small number of verses (<=4), suggesting partial page overlap
+        # Detect likely chapter transition (two patterns)
+        # Only detect if we have a small number of verses (<=5), suggesting partial page overlap
         has_chapter_transition = False
-        if sorted_verses[0] == 1 and len(sorted_verses) >= 2 and len(sorted_verses) <= 4:
-            # Check if we have sequential verses from 1 and a much larger value
-            sequential_from_1 = True
-            for i in range(min(3, len(sorted_verses) - 1)):
-                if sorted_verses[i] != i + 1:
-                    sequential_from_1 = False
-                    break
+        
+        # Pattern 1: [1, 2, ..., N] or [1, 3, ..., N] where N >> rest (last verses from PREVIOUS chapter)
+        # Also handles sparse low verses like [1, 3] with high verses [17, 18]
+        if sorted_verses[0] == 1 and len(sorted_verses) >= 2 and len(sorted_verses) <= 5:
+            # Separate low verses (≤10) from high verses (>10)
+            low_verses = [v for v in sorted_verses if v <= 10]
+            high_verses = [v for v in sorted_verses if v > 10]
             
-            # If last verse is much larger (>10), likely from previous chapter
-            # AND the gap is significant (>5 verses missing)
-            if sequential_from_1 and sorted_verses[-1] > 10:
-                gap = sorted_verses[-1] - sorted_verses[-2]
-                if gap > 5:
+            # If we have both low and high verses with a significant gap
+            if low_verses and high_verses:
+                gap = min(high_verses) - max(low_verses)
+                if gap > 5:  # Significant gap suggests chapter transition
                     has_chapter_transition = True
-                    log_print(f"DEBUG: Detected likely chapter transition: verses start at 1 sequentially, last verse {sorted_verses[-1]} likely from previous chapter")
+                    log_print(f"DEBUG: Detected chapter transition (Pattern 1): low verses {low_verses} from new chapter, high verses {high_verses} likely from previous chapter")
+        
+        # Pattern 2: [N, N+1, ..., 1] where 1 is at end (first verse from NEXT chapter)
+        # Check if: sorted list has 1 in it, and the verses AFTER removing 1 are sequential and high
+        if not has_chapter_transition and 1 in sorted_verses and len(sorted_verses) >= 2 and len(sorted_verses) <= 5:
+            # Remove verse 1 and check if remaining verses are sequential and high
+            verses_without_1 = [v for v in sorted_verses if v != 1]
+            
+            if len(verses_without_1) >= 1 and verses_without_1[0] > 10:
+                # Check if verses (without 1) are sequential
+                sequential_high = True
+                for i in range(len(verses_without_1) - 1):
+                    if verses_without_1[i + 1] - verses_without_1[i] != 1:
+                        sequential_high = False
+                        break
+                
+                if sequential_high:
+                    has_chapter_transition = True
+                    log_print(f"DEBUG: Detected chapter transition (Pattern 2): verses {verses_without_1} are sequential and high, verse 1 likely from next chapter")
+        
+        # Check for sparse verse range pattern
+        # If first and last verses are far apart but sequential verses exist in between,
+        # this suggests a sparse commentary that only marks some verses in a range
+        is_sparse_range = False
+        if not has_chapter_transition and len(sorted_verses) >= 3:
+            first_v = sorted_verses[0]
+            last_v = sorted_verses[-1]
+            verse_span = last_v - first_v + 1  # Total verses in range
+            actual_count = len(sorted_verses)  # Actual markers found
+            
+            # If we have < 50% of verses in the range, it's sparse
+            # AND the range is reasonable (< 30 verses for commentary)
+            if verse_span <= 30 and actual_count < (verse_span * 0.5):
+                # Check if there are some sequential verses at the start
+                # This confirms it's not just random outliers
+                sequential_start = 0
+                for j in range(min(3, len(sorted_verses) - 1)):
+                    if sorted_verses[j + 1] - sorted_verses[j] == 1:
+                        sequential_start += 1
+                
+                if sequential_start >= 2:  # At least 2-3 sequential verses
+                    is_sparse_range = True
+                    log_print(f"DEBUG: Detected sparse verse range: {first_v}-{last_v} with {actual_count}/{verse_span} markers ({actual_count/verse_span*100:.0f}%)")
+                    log_print(f"DEBUG: Keeping all markers as-is, skipping outlier correction")
         
         corrected = []
         
@@ -1770,12 +1845,20 @@ def find_verse_markers_in_ocr(ocr_data):
                 gap_to_next = 1  # Last verse
             
             # Detect outliers: gap > 2 suggests OCR error
-            # BUT: Skip outlier detection if this looks like a chapter transition
+            # BUT: Skip outlier detection if:
+            # 1. This looks like a chapter transition
+            # 2. This is a sparse verse range (commentary only marks some verses)
             is_outlier = False
             
-            # Don't treat last verse as outlier if we detected chapter transition
-            if has_chapter_transition and i == len(sorted_verses) - 1:
+            # Skip all outlier detection for sparse ranges
+            if is_sparse_range:
                 is_outlier = False
+            # Don't treat boundary verses as outliers if we detected chapter transition
+            elif has_chapter_transition:
+                # Pattern 1: [1, 2, ..., N] - skip last verse (N from previous chapter)
+                # Pattern 2: [N, N+1, ..., 1] - skip last verse (1 from next chapter)
+                if i == len(sorted_verses) - 1:
+                    is_outlier = False
             elif i > 0 and i < len(sorted_verses) - 1:
                 # Middle verse: large gaps on BOTH sides
                 if gap_to_prev > 2 and gap_to_next > 2:
@@ -1943,6 +2026,9 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     header_info = extract_header_info(tsv_data_eng, img_width, img_height)
     log_print(f"Initial metadata: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
     
+    # Save original header verse for later comparison with Ollama
+    original_header_verse = header_info.get('verse')
+    
     # Step 2: Find verse markers in English OCR to validate and correct verses
     log_print(f"\nStep 2: Searching for verse markers in body to validate verses...")
     found_verses = find_verse_markers_in_ocr(tsv_data_eng) or set()
@@ -1960,9 +2046,77 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             found_verses = set(corrected_verses)
         
         # Generate verse range/list from body markers
+        # Check if this looks like a chapter transition
+        sorted_found = sorted(found_verses)
         min_v = min(found_verses)
         max_v = max(found_verses)
-        body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
+        
+        # Detect chapter transition patterns
+        has_transition = False
+        
+        # Pattern 1: [1, 2, ..., N] or [1, 3, ..., N] - verses from new chapter + verses from prev
+        # Separate low verses (≤10) from high verses (>10)
+        if sorted_found[0] == 1 and len(sorted_found) >= 2 and len(sorted_found) <= 5 and max_v > 10:
+            low_verses = [v for v in sorted_found if v <= 10]
+            high_verses = [v for v in sorted_found if v > 10]
+            
+            # If we have both low and high verses with a significant gap
+            if low_verses and high_verses:
+                gap = min(high_verses) - max(low_verses)
+                if gap > 5:  # Significant gap suggests chapter transition
+                    has_transition = True
+                    new_ch_verses = low_verses
+                    prev_ch_verses_body = high_verses
+        
+        # Pattern 2: [N, N+1, ..., 1] - verses from prev chapter + first verse from next
+        if not has_transition and 1 in sorted_found and len(sorted_found) >= 2:
+            verses_without_1 = [v for v in sorted_found if v != 1]
+            if verses_without_1 and verses_without_1[0] > 10:
+                # Check if sequential (without verse 1)
+                sequential = all(verses_without_1[i + 1] - verses_without_1[i] == 1 
+                               for i in range(len(verses_without_1) - 1))
+                if sequential:
+                    has_transition = True
+                    prev_ch_verses = verses_without_1
+                    next_ch_verse = 1
+        
+        # Check for sparse range (same logic as outlier detection)
+        is_sparse_range = False
+        if not has_transition and len(sorted_found) >= 3:
+            verse_span = max_v - min_v + 1
+            actual_count = len(sorted_found)
+            if verse_span <= 30 and actual_count < (verse_span * 0.5):
+                sequential_start = sum(1 for j in range(min(3, len(sorted_found) - 1)) 
+                                     if sorted_found[j + 1] - sorted_found[j] == 1)
+                if sequential_start >= 2:
+                    is_sparse_range = True
+        
+        # Format verse string based on detection
+        if has_transition:
+            # Get current chapter from header
+            current_ch = header_info.get('chapter')
+            if current_ch:
+                # Determine which pattern and format accordingly
+                if 'prev_ch_verses_body' in locals():
+                    # Pattern 1: new chapter verses + prev chapter verses
+                    new_verses_str = f"{min(new_ch_verses)}-{max(new_ch_verses)}" if len(new_ch_verses) > 1 else str(new_ch_verses[0])
+                    prev_verses_str = f"{min(prev_ch_verses_body)}-{max(prev_ch_verses_body)}" if len(prev_ch_verses_body) > 1 else str(prev_ch_verses_body[0])
+                    body_verse = f"{current_ch - 1}:{prev_verses_str},{current_ch}:{new_verses_str}"
+                else:
+                    # Pattern 2: prev chapter verses + next chapter first verse
+                    prev_verses_str = f"{min(prev_ch_verses)}-{max(prev_ch_verses)}" if len(prev_ch_verses) > 1 else str(prev_ch_verses[0])
+                    body_verse = f"{current_ch}:{prev_verses_str},{current_ch + 1}:{next_ch_verse}"
+            else:
+                # Fallback to simple range if no chapter info
+                body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
+        elif is_sparse_range:
+            # Sparse range - use first-last notation even with gaps
+            # The markers suggest endpoints, intermediate verses may not be marked
+            body_verse = f"{min_v}-{max_v}"
+            log_print(f"DEBUG: Sparse range detected in body markers: {min_v}-{max_v} (found {len(sorted_found)} of {max_v - min_v + 1} verses)")
+        else:
+            # No chapter transition - simple range
+            body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
         
         if header_info['verse']:
             # Header has verse - validate against body
@@ -2042,16 +2196,78 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             verse_validation = validate_verses_against_content(header_info['verse'], found_verses)
             log_print(f"Ollama verse '{header_info['verse']}' validation: {verse_validation['confidence']:.1%} confidence")
             
-            # If Ollama result doesn't match body verses well, use body markers instead
+            # If Ollama result doesn't match body verses well, consider correction
+            # BUT: Trust header+Ollama agreement over incomplete body markers
+            # AND: For sparse ranges, trust Ollama more if it found the correct endpoints
+            should_correct_ollama = False
+            
             if verse_validation['confidence'] < 0.75:
+                # First priority: Check if Ollama matches original header
+                # When both header and Ollama agree, body markers may be incomplete (OCR errors)
+                ollama_verse_str = str(header_info.get('verse', ''))
+                if original_header_verse and ollama_verse_str == original_header_verse:
+                    log_print(f"DEBUG: Ollama matches original header '{original_header_verse}' - trusting header+Ollama over body markers")
+                    should_correct_ollama = False
+                # Second priority: Check if Ollama has a range that CONTAINS all sequential body markers
+                # This suggests body markers are incomplete (OCR failures), not that Ollama is wrong
+                elif '-' in ollama_verse_str and ':' not in ollama_verse_str:
+                    try:
+                        parts = ollama_verse_str.split('-')
+                        if len(parts) == 2:
+                            ollama_first = int(parts[0])
+                            ollama_last = int(parts[1])
+                            sorted_body = sorted(found_verses)
+                            
+                            # Check if ALL body markers are within Ollama's range
+                            all_within_range = all(ollama_first <= v <= ollama_last for v in sorted_body)
+                            
+                            # Check if body markers are sequential (no gaps)
+                            is_sequential = all(sorted_body[i+1] - sorted_body[i] == 1 
+                                              for i in range(len(sorted_body) - 1))
+                            
+                            if all_within_range and is_sequential:
+                                # Ollama's range naturally extends the sequential body markers
+                                log_print(f"DEBUG: Ollama range {ollama_first}-{ollama_last} contains all sequential body markers {sorted_body} - trusting Ollama (body likely incomplete)")
+                                should_correct_ollama = False
+                            else:
+                                should_correct_ollama = True
+                        else:
+                            should_correct_ollama = True
+                    except:
+                        should_correct_ollama = True
+                # Third priority: Check if Ollama found a range that matches our sparse range detection
+                elif is_sparse_range and '-' in ollama_verse_str:
+                    # Parse Ollama's range
+                    try:
+                        if ':' not in ollama_verse_str:  # Simple range
+                            parts = ollama_verse_str.split('-')
+                            if len(parts) == 2:
+                                ollama_first = int(parts[0])
+                                ollama_last = int(parts[1])
+                                # If Ollama found same endpoints as body markers, trust it!
+                                if ollama_first == min_v and ollama_last == max_v:
+                                    log_print(f"DEBUG: Ollama found correct sparse range {min_v}-{max_v}, keeping Ollama result")
+                                    should_correct_ollama = False
+                                else:
+                                    should_correct_ollama = True
+                            else:
+                                should_correct_ollama = True
+                        else:
+                            should_correct_ollama = True
+                    except:
+                        should_correct_ollama = True
+                else:
+                    should_correct_ollama = True
+            
+            if should_correct_ollama:
                 sorted_found = sorted(found_verses)
                 
                 # Check if this looks like a chapter transition
-                # (verses start from 1 with a large verse at the end)
+                # (verses start from 1 with high verses mixed in)
                 if sorted_found[0] == 1 and len(sorted_found) >= 2 and sorted_found[-1] > 10:
-                    # Chapter transition: last verse is from previous chapter
+                    # Chapter transition: high verses (>10) are from previous chapter
                     new_chapter_verses = [v for v in sorted_found if v <= 10]
-                    prev_chapter_verse = sorted_found[-1]
+                    prev_chapter_verses = [v for v in sorted_found if v > 10]
                     
                     # Get chapters from Ollama result if it's chapter-spanning
                     current_verse_str = str(header_info.get('verse', ''))
@@ -2077,13 +2293,18 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                         prev_ch = current_ch - 1 if current_ch and current_ch > 1 else None
                     
                     if prev_ch and current_ch:
-                        # Format: "prev_ch:prev_verse,current_ch:new_verses"
+                        # Format: "prev_ch:prev_verses,current_ch:new_verses"
                         if len(new_chapter_verses) == 1:
                             new_verses_str = str(new_chapter_verses[0])
                         else:
                             new_verses_str = f"{min(new_chapter_verses)}-{max(new_chapter_verses)}"
                         
-                        corrected_verse = f"{prev_ch}:{prev_chapter_verse},{current_ch}:{new_verses_str}"
+                        if len(prev_chapter_verses) == 1:
+                            prev_verses_str = str(prev_chapter_verses[0])
+                        else:
+                            prev_verses_str = f"{min(prev_chapter_verses)}-{max(prev_chapter_verses)}"
+                        
+                        corrected_verse = f"{prev_ch}:{prev_verses_str},{current_ch}:{new_verses_str}"
                         log_print(f"Correcting Ollama result based on body verse markers:")
                         log_print(f"  {header_info['verse']} -> {corrected_verse}")
                         header_info['verse'] = corrected_verse
@@ -2665,10 +2886,14 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                                 curr_chapter_for_compare = first_curr_ch if first_curr_ch is not None else final_curr_chapter
             
             # Step 1: Check for overlap - current should never start at or before previous ending
-            # BUT: Only check if we're in the SAME chapter (chapter changes reset verse numbers)
+            # BUT: Only check if we're in the SAME book and SAME chapter (changes reset verse numbers)
             if first_curr_verse <= last_prev_verse:
-                # Check if chapter changed (using chapter from notation if available)
-                if (prev_chapter_for_compare is not None and curr_chapter_for_compare is not None and 
+                # First check: Did the BOOK change?
+                if prev_book and curr_book and prev_book != curr_book:
+                    # Book changed - verse reset is expected (Genesis → Exodus, etc.)
+                    log_print(f"DEBUG: Book changed from {prev_book} to {curr_book}, verse reset to {first_curr_verse} is expected")
+                # Second check: Did the chapter change? (using chapter from notation if available)
+                elif (prev_chapter_for_compare is not None and curr_chapter_for_compare is not None and 
                     curr_chapter_for_compare != prev_chapter_for_compare):
                     # Chapter changed - verse reset is expected
                     log_print(f"DEBUG: Chapter changed from {prev_chapter_for_compare} to {curr_chapter_for_compare}, verse reset to {first_curr_verse} is expected")
@@ -2676,7 +2901,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     # Unknown chapter - skip overlap check
                     log_print(f"DEBUG: Cannot verify overlap - chapter unknown (prev={prev_chapter_for_compare}, curr={curr_chapter_for_compare})")
                 else:
-                    # Same chapter - this is a real overlap
+                    # Same book and same chapter - this is a real overlap
                     log_print(f"DEBUG: Verse overlap detected: prev ends at {last_prev_verse}, current starts at {first_curr_verse}")
                     expected_verse = last_prev_verse + 1
                     
@@ -2724,25 +2949,46 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     curr_verse = corrected_verse
             
             # Step 2: Check for unrealistic gaps (after overlap correction)
-            # Only check gaps if we're in the SAME chapter (not after chapter change)
+            # Only check gaps if we're in the SAME book AND SAME chapter (not after book/chapter changes)
             # Use chapter from notation if available, otherwise use metadata chapter
+            same_book = (prev_book is not None and curr_book is not None and prev_book == curr_book)
             same_chapter = (prev_chapter_for_compare is not None and curr_chapter_for_compare is not None and 
                           curr_chapter_for_compare == prev_chapter_for_compare)
             
-            log_print(f"DEBUG: Gap detection - same_chapter={same_chapter} (prev_ch={prev_chapter_for_compare}, curr_ch={curr_chapter_for_compare})")
+            log_print(f"DEBUG: Gap detection - same_book={same_book}, same_chapter={same_chapter} (prev_book={prev_book}, curr_book={curr_book}, prev_ch={prev_chapter_for_compare}, curr_ch={curr_chapter_for_compare})")
             
-            if same_chapter:
+            if same_book and same_chapter:
                 # Re-parse the potentially corrected verse string
-                if ',' in curr_verse_str:
-                    verse_parts = [int(v.strip()) for v in curr_verse_str.split(',') if v.strip().isdigit()]
-                elif '-' in curr_verse_str:
-                    start, end = curr_verse_str.split('-')
-                    verse_parts = list(range(int(start), int(end) + 1))
+                # First, strip chapter prefix if present (e.g., "27:2-9" -> "2-9")
+                verse_only_str = curr_verse_str
+                if ':' in curr_verse_str:
+                    # Chapter-spanning notation - extract just the verses from current chapter
+                    # For notation like "27:2-9", take the part after the colon
+                    # For notation like "26:32-35,27:1", we already extracted first_curr_verse
+                    if ',' in curr_verse_str:
+                        # Multi-chapter: use the verse we already extracted
+                        verse_only_str = str(first_curr_verse)
+                    else:
+                        # Single chapter with notation like "27:2-9"
+                        parts = curr_verse_str.split(':', 1)
+                        if len(parts) == 2:
+                            verse_only_str = parts[1]
+                
+                # Now parse the verse-only string
+                if ',' in verse_only_str:
+                    verse_parts = [int(v.strip()) for v in verse_only_str.split(',') if v.strip().isdigit()]
+                elif '-' in verse_only_str:
+                    try:
+                        start, end = verse_only_str.split('-')
+                        verse_parts = list(range(int(start.strip()), int(end.strip()) + 1))
+                    except ValueError:
+                        # If parsing fails, skip gap detection
+                        verse_parts = []
                 else:
-                    verse_parts = [int(curr_verse_str)] if curr_verse_str.isdigit() else []
+                    verse_parts = [int(verse_only_str)] if verse_only_str.isdigit() else []
                 
                 # Check if range is unreasonably large (e.g., "25-96" = 72 verses on one page!)
-                if '-' in curr_verse_str and len(verse_parts) > 10:
+                if '-' in verse_only_str and len(verse_parts) > 10:
                     log_print(f"DEBUG: Unreasonably large range detected: {curr_verse_str} ({len(verse_parts)} verses)")
                     
                     # Likely OCR error - assume it should be just the first 2 digits
@@ -2757,7 +3003,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} (range too large)"
                 
                 # Check for gaps within a list (not range)
-                elif ',' in curr_verse_str and len(verse_parts) >= 2:
+                elif ',' in verse_only_str and len(verse_parts) >= 2:
                     # Check gaps between consecutive verses in the list
                     for i in range(len(verse_parts) - 1):
                         gap = verse_parts[i + 1] - verse_parts[i]
@@ -2774,19 +3020,61 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                             corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
                             break
                 
-                # Also check gap from previous to current (single verse case)
-                elif verse_diff > 1 and not '-' in curr_verse_str and not ',' in curr_verse_str:
+                # Also check gap from previous to current (applies to ranges/lists too)
+                # Check if first verse in current page has a gap from last verse of previous page
+                elif verse_diff > 1:
                     log_print(f"DEBUG: A verse gap detected: {last_prev_verse} -> {first_curr_verse} (gap: {verse_diff})")
                     expected_verse = last_prev_verse + 1
                     
-                    # Single verse case
-                    corrected_verse = str(expected_verse)
+                    # Correct the first verse in the notation
+                    if ':' in curr_verse_str:
+                        # Chapter-spanning notation like "25:34,26:1-2"
+                        # Replace the first verse number while preserving the structure
+                        from verse_notation import parse_verse_notation, format_verse_notation
+                        try:
+                            parsed = parse_verse_notation(curr_verse_str)
+                            if parsed and len(parsed[0]['verses']) > 0:
+                                # Replace first verse
+                                parsed[0]['verses'][0] = expected_verse
+                                # Reconstruct notation
+                                parts = []
+                                for span in parsed:
+                                    ch = span['chapter']
+                                    verses = span['verses']
+                                    if len(verses) == 1:
+                                        v_str = str(verses[0])
+                                    elif len(verses) == 2:
+                                        v_str = f"{verses[0]},{verses[1]}"
+                                    else:
+                                        v_str = f"{verses[0]}-{verses[-1]}"
+                                    parts.append(f"{ch}:{v_str}")
+                                corrected_verse = ','.join(parts)
+                        except:
+                            # Fallback to simple replacement
+                            corrected_verse = str(expected_verse)
+                    elif '-' in verse_only_str:
+                        # Range - only adjust START to fix gap, keep END unchanged
+                        # The ending verse is likely correct (from body markers/header)
+                        # Only the starting verse was missed (OCR failure)
+                        parts = verse_only_str.split('-')
+                        new_start = expected_verse
+                        new_end = int(parts[1])  # Keep original ending
+                        corrected_verse = f"{new_start}-{new_end}"
+                        log_print(f"DEBUG: Adjusted range start to fix gap: {verse_only_str} -> {corrected_verse}")
+                    elif ',' in verse_only_str:
+                        # List like "34,36", correct first to expected
+                        parts = verse_only_str.split(',')
+                        parts[0] = str(expected_verse)
+                        corrected_verse = ','.join(parts)
+                    else:
+                        # Single verse
+                        corrected_verse = str(expected_verse)
                     
                     corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large gap from {last_prev_verse}, expected {expected_verse})")
                     corrected['verse'] = corrected_verse
                     corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
             else:
-                log_print(f"DEBUG: Chapter changed - skipping gap detection (verses can restart at 1)")
+                log_print(f"DEBUG: Book or chapter changed - skipping gap detection (verses can restart at 1)")
     
     # Note: Verse content validation already done in Step 2 (passed via found_verses parameter)
     # No need to re-run find_verse_markers_in_ocr() here
