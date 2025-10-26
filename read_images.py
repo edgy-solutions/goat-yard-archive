@@ -140,10 +140,51 @@ if __name__ == "__main__":
         print("No vision models found. Please check your API key or network connection.")
         exit(1)
     
-    print(f"\nAvailable models that support image input ({len(models)} models):")
-    # Create a numbered list for selection
-    model_list = list(models.items())
-    for idx, (model_id, model_name) in enumerate(model_list[:20], 1):  # Show first 20
+    # Define popular models order (well-known vision models)
+    popular_models_order = [
+        'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo', 
+        'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-sonnet', 'anthropic/claude-3-opus',
+        'anthropic/claude-3-haiku', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro',
+        'google/gemini-1.5-flash', 'google/gemini-1.5-pro', 'google/gemini-pro-vision',
+        'meta-llama/llama-3.2-90b-vision', 'meta-llama/llama-3.2-11b-vision',
+        'qwen/qwen2-vl-72b-instruct', 'qwen/qwen2-vl-7b-instruct',
+        'mistralai/pixtral-12b', 'mistralai/pixtral-large'
+    ]
+    
+    # Ask user for sorting preference
+    print(f"\nFound {len(models)} vision-capable models")
+    print("\nSort by:")
+    print("1. Popular models first (recommended)")
+    print("2. Newest models first")
+    print("3. Alphabetical by name")
+    
+    sort_choice = input("\nSelect sorting (1-3) [default: 1]: ").strip() or "1"
+    
+    # Sort models based on user choice
+    if sort_choice == "1":
+        # Sort by popularity (popular models first, then alphabetical)
+        def popularity_key(item):
+            model_id, model_name = item
+            try:
+                # Find the index in popular list, or use large number if not found
+                idx = next((i for i, pm in enumerate(popular_models_order) if pm in model_id), 999)
+                return (idx, model_name.lower())
+            except:
+                return (999, model_name.lower())
+        model_list = sorted(models.items(), key=popularity_key)
+        sort_desc = "popular models first"
+    elif sort_choice == "2":
+        # API already returns newest first, so keep original order
+        model_list = list(models.items())
+        sort_desc = "newest first"
+    else:
+        # Sort alphabetically by name
+        model_list = sorted(models.items(), key=lambda x: x[1].lower())
+        sort_desc = "alphabetical"
+    
+    print(f"\nAvailable models that support image input (sorted by {sort_desc}):")
+    # Show first 20 models
+    for idx, (model_id, model_name) in enumerate(model_list[:20], 1):
         print(f"{idx}. {model_name} ({model_id})")
     
     if len(models) > 20:
