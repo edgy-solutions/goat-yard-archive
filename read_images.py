@@ -294,19 +294,48 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                 ]
             }
             
-            # Send request to OpenRouter
+            # Send request to OpenRouter with timeout
+            logging.info(f"Sending request to OpenRouter API...")
             response = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
                 },
-                json=payload
+                json=payload,
+                timeout=300  # 5 minute timeout
             )
             
+            logging.info(f"Received response with status code: {response.status_code}")
+            
             if response.status_code == 200:
-                result = response.json()
-                extracted_text = result['choices'][0]['message']['content']
+                try:
+                    # Log response size
+                    response_size = len(response.content)
+                    logging.info(f"Response size: {response_size} bytes")
+                    
+                    result = response.json()
+                    extracted_text = result['choices'][0]['message']['content']
+                    logging.info(f"Successfully extracted text ({len(extracted_text)} characters)")
+                except json.JSONDecodeError as e:
+                    error_msg = f"Failed to parse JSON response for {png_file.name}: {e}"
+                    logging.error(error_msg)
+                    logging.error(f"Response length: {len(response.text)} characters")
+                    # Log first 500 chars of response for debugging
+                    response_preview = response.text[:500] if len(response.text) > 500 else response.text
+                    logging.error(f"Response preview: {response_preview}")
+                    
+                    # Log error to metrics
+                    metrics_entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "file": png_file.name,
+                        "model": model_name,
+                        "error": f"JSON decode error: {str(e)}",
+                        "success": False
+                    }
+                    with open(metrics_file, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps(metrics_entry) + '\n')
+                    continue  # Skip to next image
                 
                 # Extract usage information
                 usage = result.get('usage', {})
@@ -371,6 +400,36 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                 }
                 with open(metrics_file, 'a', encoding='utf-8') as f:
                     f.write(json.dumps(metrics_entry) + '\n')
+                
+        except requests.exceptions.Timeout:
+            error_msg = f"Request timeout for {png_file.name} after 300 seconds"
+            logging.error(error_msg)
+            
+            # Log timeout to metrics
+            metrics_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "file": png_file.name,
+                "model": model_name,
+                "error": "Request timeout (300s)",
+                "success": False
+            }
+            with open(metrics_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(metrics_entry) + '\n')
+                
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Request error for {png_file.name}: {str(e)}"
+            logging.error(error_msg)
+            
+            # Log request error to metrics
+            metrics_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "file": png_file.name,
+                "model": model_name,
+                "error": f"Request error: {str(e)}",
+                "success": False
+            }
+            with open(metrics_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(metrics_entry) + '\n')
                 
         except Exception as e:
             logging.exception(f"Failed to process {png_file.name}: {str(e)}")
