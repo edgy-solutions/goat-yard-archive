@@ -23,8 +23,11 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (1)
+# Generated classes (2)
 # #########################################################################
+
+class ExtractedText(BaseModel):
+    text: typing.Optional[str] = None
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None

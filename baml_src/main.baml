@@ -8,6 +8,11 @@ class Metadata {
   page_number int? @description("The page number found at top left or top right")
 }
 
+// Define the extracted text structure for OpenRouter
+class ExtractedText {
+  text string @description("The extracted text from the image")
+}
+
 // Define the Ollama client using OpenAI-compatible endpoint
 client<llm> Ollama {
   provider openai
@@ -19,6 +24,15 @@ client<llm> Ollama {
     options: {
       num_ctx: 2048
     }
+  }
+}
+
+// Define the OpenRouter client
+client<llm> OpenRouter {
+  provider openai
+  options {
+    base_url "https://openrouter.ai/api/v1"
+    api_key env.OPENROUTER_API_KEY
   }
 }
 
@@ -58,5 +72,19 @@ function ValidateOCRMetadata(
     {{ image }}
     
     {{ ctx.output_format }}
+  "#
+}
+
+// Define the image text extraction function for OpenRouter
+function ExtractTextFromImage(
+  image: image
+) -> string {
+  client OpenRouter
+  
+  prompt #"
+    Please extract the original text from the image. Please extract it exactly as it is in the image. Do not change anything. Please make sure you keep the older English used in the image such as the use of 'nay' and all footnotes. Also notice that footnotes might extend from the left column to the right column if the left column footnote terminates with a dash. Also note that the text is mostly English but does contain Latin, Greek, Hebrew and Arabic especially in footnotes.
+    
+    {{ _.role("user") }}
+    {{ image }}
   "#
 }

@@ -16,6 +16,9 @@ from . import stream_types
 
 type_map = {
 
+    "types.ExtractedText": types.ExtractedText,
+    "stream_types.ExtractedText": stream_types.ExtractedText,
+
     "types.Metadata": types.Metadata,
     "stream_types.Metadata": stream_types.Metadata,
 

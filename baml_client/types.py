@@ -41,8 +41,11 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 
 # #########################################################################
-# Generated classes (1)
+# Generated classes (2)
 # #########################################################################
+
+class ExtractedText(BaseModel):
+    text: str
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None
