@@ -82,7 +82,7 @@ function ExtractTextFromImage(
   client OpenRouter
   
   prompt #"
-    Please extract the original text from the image. Please extract it exactly as it is in the image. Do not change anything. Please make sure you keep the older English used in the image such as the use of 'nay' and all footnotes. Also notice that footnotes might extend from the left column to the right column if the left column footnote terminates with a dash. Also note that the text is mostly English but does contain Latin, Greek, Hebrew and Arabic especially in footnotes.
+    Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text. Be careful to notice that the page has two columns and thus the text and footnotes might be hyphenated from one column to the other. Also the footnotes ONLY use lower case lettering. There can be duplicate footnote letters when they are reused in the different paragraphs. The output of an OCR tool is attached below and should be ONLY used to maintain accuracy in matching the original word for word since it gets some words wrong. The OCR often fails to detect the footnote lettering. OCR also struggles with the languages so use the image for those. Original Hebrew verse the commentary is referring to is provided as a reference to use the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.
     
     {{ _.role("user") }}
     {{ image }}

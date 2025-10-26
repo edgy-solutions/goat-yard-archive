@@ -28,6 +28,43 @@ def load_metadata(image_path):
             print(f"Warning: Failed to load metadata for {image_path.name}: {e}")
     return None
 
+def load_ocr_markdown(image_path):
+    """Load OCR markdown file for an image.
+    
+    Args:
+        image_path (Path): Path to the image file
+        
+    Returns:
+        str or None: Markdown content if file exists, None otherwise
+    """
+    # Try to find matching .md file
+    md_path = image_path.with_suffix('.md')
+    
+    if md_path.exists():
+        try:
+            with open(md_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            print(f"Warning: Failed to load OCR markdown for {image_path.name}: {e}")
+    return None
+
+def format_hebrew_verses(hebrew_text_dict):
+    """Format Hebrew verses from metadata into a readable string.
+    
+    Args:
+        hebrew_text_dict (dict): Dictionary mapping verse numbers to Hebrew text
+        
+    Returns:
+        str: Formatted Hebrew verses
+    """
+    if not hebrew_text_dict:
+        return ""
+    
+    lines = []
+    for verse_num, hebrew in sorted(hebrew_text_dict.items(), key=lambda x: str(x[0])):
+        lines.append(f"Verse {verse_num}: {hebrew}")
+    return "\n".join(lines)
+
 def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=None):
     """Check if metadata matches the given filters.
     
@@ -147,17 +184,49 @@ def process_images_with_openrouter(api_key, directory_path, model_name="anthropi
         book = metadata.get('book_name', 'Unknown')
         chapter = metadata.get('chapter', '?')
         verse = metadata.get('verse', '?')
+        page_number = metadata.get('page_number', '?')
         print(f"\n{'='*60}")
         print(f"Processing: {png_file.name}")
-        print(f"Book: {book}, Chapter: {chapter}, Verse: {verse}")
+        print(f"Book: {book}, Chapter: {chapter}, Verse: {verse}, Page: {page_number}")
         print(f"{'='*60}")
         try:
             # Read and encode the image
             with open(png_file, "rb") as image_file:
                 image_data = base64.b64encode(image_file.read()).decode('utf-8')
             
-            # Prepare the payload (same as BAML would send)
-            prompt_text = """Please extract the original text from the image. Please extract it exactly as it is in the image. Do not change anything. Please make sure you keep the older English used in the image such as the use of 'nay' and all footnotes. Also notice that footnotes might extend from the left column to the right column if the left column footnote terminates with a dash. Also note that the text is mostly English but does contain Latin, Greek, Hebrew and Arabic especially in footnotes."""
+            # Load OCR markdown if available
+            ocr_markdown = load_ocr_markdown(png_file)
+            
+            # Extract Hebrew verses from metadata
+            hebrew_text_dict = metadata.get('hebrew_text', {})
+            hebrew_verses = format_hebrew_verses(hebrew_text_dict)
+            
+            # Build enhanced prompt with metadata context
+            prompt_parts = []
+            
+            # Base instruction
+            prompt_parts.append("""Please extract the original text from the image. Please extract it exactly as it is in the image. Do not change anything. Please make sure you keep the older English used in the image such as the use of 'nay' and all footnotes. Also notice that footnotes might extend from the left column to the right column if the left column footnote terminates with a dash. Also note that the text is mostly English but does contain Latin, Greek, Hebrew and Arabic especially in footnotes.""")
+            
+            # Add metadata context
+            prompt_parts.append("\n\n=== METADATA CONTEXT ===")
+            prompt_parts.append(f"Book: {book}")
+            prompt_parts.append(f"Chapter: {chapter}")
+            prompt_parts.append(f"Verse(s): {verse}")
+            prompt_parts.append(f"Page Number: {page_number}")
+            
+            # Add Hebrew text if available
+            if hebrew_verses:
+                prompt_parts.append("\n=== HEBREW TEXT FOR THESE VERSES ===")
+                prompt_parts.append(hebrew_verses)
+                prompt_parts.append("\nNote: The Hebrew text above corresponds to the verses on this page. This can help verify the content and identify any Hebrew characters or quotations in the English text.")
+            
+            # Add OCR markdown if available
+            if ocr_markdown:
+                prompt_parts.append("\n\n=== OCR PRELIMINARY EXTRACTION ===")
+                prompt_parts.append("Below is a preliminary OCR extraction of this image. Use it as a reference to help identify difficult-to-read text, but prioritize the actual image content for accuracy:")
+                prompt_parts.append("\n" + ocr_markdown)
+            
+            prompt_text = "\n".join(prompt_parts)
             
             payload = {
                 "model": model_name,
