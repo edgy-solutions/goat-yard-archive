@@ -26,14 +26,19 @@ def setup_logging(output_dir, model_name):
     log_filename = f"processing_{model_safe}_{timestamp}.log"
     log_path = output_dir / log_filename
     
-    # Configure logging
+    # Clear any existing handlers
+    logger = logging.getLogger()
+    logger.handlers.clear()
+    
+    # Configure logging with force=True to override any existing config
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler(log_path, encoding='utf-8'),
             logging.StreamHandler(sys.stdout)
-        ]
+        ],
+        force=True
     )
     
     return str(log_path)
@@ -167,8 +172,31 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
         else:
             skipped_filtered += 1
     
-    # Print filter summary
+    if not png_files:
+        # We'll log this after logging is set up
+        pass
+    
+    # Create output directory named after the model
+    # Replace slashes with underscores for valid directory name
+    model_dir_name = model_name.replace("/", "_")
+    output_dir = Path(directory_path) / model_dir_name
+    output_dir.mkdir(exist_ok=True)
+    
+    # Setup logging to output directory (must be done before any logging calls)
+    log_path = setup_logging(output_dir, model_name)
+    
+    # Now we can start logging
+    logging.info("="*60)
+    logging.info("IMAGE PROCESSING SESSION STARTED")
+    logging.info("="*60)
+    logging.info(f"Model: {model_name}")
+    logging.info(f"Output directory: {output_dir}")
+    logging.info(f"Log file: {log_path}")
+    logging.info("="*60)
+    
+    # Log the filtering information
     if book_filter or chapter_start or chapter_end:
+        logging.info("")
         logging.info("="*60)
         logging.info("FILTER APPLIED:")
         if book_filter:
@@ -187,26 +215,13 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
     logging.info(f"Skipped {skipped_filtered} images not matching filters")
     logging.info(f"Processing {len(png_files)} images")
     
+    # Check if we have images to process
     if not png_files:
         logging.warning("No images to process after applying filters")
+        logging.info("="*60)
+        logging.info("SESSION ENDED - No images to process")
+        logging.info("="*60)
         return
-    
-    # Create output directory named after the model
-    # Replace slashes with underscores for valid directory name
-    model_dir_name = model_name.replace("/", "_")
-    output_dir = Path(directory_path) / model_dir_name
-    output_dir.mkdir(exist_ok=True)
-    
-    # Setup logging to output directory
-    log_path = setup_logging(output_dir, model_name)
-    
-    logging.info("="*60)
-    logging.info("IMAGE PROCESSING SESSION STARTED")
-    logging.info("="*60)
-    logging.info(f"Model: {model_name}")
-    logging.info(f"Output directory: {output_dir}")
-    logging.info(f"Log file: {log_path}")
-    logging.info("="*60)
     
     # Initialize metrics tracking
     metrics_file = output_dir / "metrics.jsonl"
