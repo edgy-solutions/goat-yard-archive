@@ -2,11 +2,41 @@ import os
 import base64
 import json
 import argparse
+import logging
+import sys
 from pathlib import Path
 from datetime import datetime
 from baml_client.sync_client import b as baml_client
 import baml_py
 import requests
+
+def setup_logging(output_dir, model_name):
+    """Setup logging to both file and console.
+    
+    Args:
+        output_dir (Path): Directory where log file will be saved
+        model_name (str): Name of the model being used
+        
+    Returns:
+        str: Path to the log file
+    """
+    # Create log filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    model_safe = model_name.replace('/', '_')
+    log_filename = f"processing_{model_safe}_{timestamp}.log"
+    log_path = output_dir / log_filename
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_path, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    return str(log_path)
 
 def load_metadata(image_path):
     """Load metadata for an image from its corresponding JSON file.
@@ -25,7 +55,7 @@ def load_metadata(image_path):
             with open(metadata_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"Warning: Failed to load metadata for {image_path.name}: {e}")
+            logging.warning(f"Failed to load metadata for {image_path.name}: {e}")
     return None
 
 def load_ocr_markdown(image_path):
@@ -45,7 +75,7 @@ def load_ocr_markdown(image_path):
             with open(md_path, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            print(f"Warning: Failed to load OCR markdown for {image_path.name}: {e}")
+            logging.warning(f"Failed to load OCR markdown for {image_path.name}: {e}")
     return None
 
 def format_hebrew_verses(hebrew_text_dict):
@@ -117,7 +147,7 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
     all_png_files = list(Path(directory_path).glob("*.png"))
     
     if not all_png_files:
-        print(f"No PNG files found in {directory_path}")
+        logging.warning(f"No PNG files found in {directory_path}")
         return
     
     # Filter images based on metadata
@@ -139,26 +169,26 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
     
     # Print filter summary
     if book_filter or chapter_start or chapter_end:
-        print(f"\n{'='*60}")
-        print(f"FILTER APPLIED:")
+        logging.info("="*60)
+        logging.info("FILTER APPLIED:")
         if book_filter:
-            print(f"  Book: {book_filter}")
+            logging.info(f"  Book: {book_filter}")
         if chapter_start is not None or chapter_end is not None:
             if chapter_start == chapter_end:
-                print(f"  Chapter: {chapter_start}")
+                logging.info(f"  Chapter: {chapter_start}")
             else:
                 start_str = str(chapter_start) if chapter_start is not None else "beginning"
                 end_str = str(chapter_end) if chapter_end is not None else "end"
-                print(f"  Chapters: {start_str} to {end_str}")
-        print(f"{'='*60}")
+                logging.info(f"  Chapters: {start_str} to {end_str}")
+        logging.info("="*60)
     
-    print(f"\nFound {len(all_png_files)} total images")
-    print(f"Skipped {skipped_no_metadata} images without metadata")
-    print(f"Skipped {skipped_filtered} images not matching filters")
-    print(f"Processing {len(png_files)} images")
+    logging.info(f"\nFound {len(all_png_files)} total images")
+    logging.info(f"Skipped {skipped_no_metadata} images without metadata")
+    logging.info(f"Skipped {skipped_filtered} images not matching filters")
+    logging.info(f"Processing {len(png_files)} images")
     
     if not png_files:
-        print(f"No images to process after applying filters")
+        logging.warning("No images to process after applying filters")
         return
     
     # Create output directory named after the model
@@ -167,7 +197,16 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
     output_dir = Path(directory_path) / model_dir_name
     output_dir.mkdir(exist_ok=True)
     
-    print(f"Output directory: {output_dir}")
+    # Setup logging to output directory
+    log_path = setup_logging(output_dir, model_name)
+    
+    logging.info("="*60)
+    logging.info("IMAGE PROCESSING SESSION STARTED")
+    logging.info("="*60)
+    logging.info(f"Model: {model_name}")
+    logging.info(f"Output directory: {output_dir}")
+    logging.info(f"Log file: {log_path}")
+    logging.info("="*60)
     
     # Initialize metrics tracking
     metrics_file = output_dir / "metrics.jsonl"
@@ -185,10 +224,10 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
         chapter = metadata.get('chapter', '?')
         verse = metadata.get('verse', '?')
         page_number = metadata.get('page_number', '?')
-        print(f"\n{'='*60}")
-        print(f"Processing: {png_file.name}")
-        print(f"Book: {book}, Chapter: {chapter}, Verse: {verse}, Page: {page_number}")
-        print(f"{'='*60}")
+        logging.info("\n" + "="*60)
+        logging.info(f"Processing: {png_file.name}")
+        logging.info(f"Book: {book}, Chapter: {chapter}, Verse: {verse}, Page: {page_number}")
+        logging.info("="*60)
         try:
             # Read and encode the image
             with open(png_file, "rb") as image_file:
@@ -290,16 +329,17 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                 total_images += 1
                 
                 # Display metrics
-                print(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
+                logging.info(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
                 if model_pricing:
-                    print(f"Cost: ${cost:.6f}")
-                print(extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text)
+                    logging.info(f"Cost: ${cost:.6f}")
+                preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
+                logging.info(f"Preview: {preview}")
                 
                 # Save results to file in model-specific directory
                 output_file = output_dir / png_file.with_suffix('.md').name
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(extracted_text)
-                print(f"Results saved to: {output_file}")
+                logging.info(f"Results saved to: {output_file}")
                 
                 # Log metrics to JSONL file
                 metrics_entry = {
@@ -318,7 +358,8 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                     f.write(json.dumps(metrics_entry) + '\n')
                 
             else:
-                print(f"Error processing {png_file.name}: {response.status_code} - {response.text}")
+                error_msg = f"Error processing {png_file.name}: {response.status_code} - {response.text}"
+                logging.error(error_msg)
                 
                 # Log error to metrics
                 metrics_entry = {
@@ -332,7 +373,7 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                     f.write(json.dumps(metrics_entry) + '\n')
                 
         except Exception as e:
-            print(f"Failed to process {png_file.name}: {str(e)}")
+            logging.exception(f"Failed to process {png_file.name}: {str(e)}")
             
             # Log exception to metrics
             metrics_entry = {
@@ -346,15 +387,17 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                 f.write(json.dumps(metrics_entry) + '\n')
     
     # Print summary
-    print(f"\n{'='*60}")
-    print(f"PROCESSING SUMMARY")
-    print(f"{'='*60}")
-    print(f"Images processed: {total_images}")
-    print(f"Total tokens: {total_prompt_tokens} prompt + {total_completion_tokens} completion = {total_prompt_tokens + total_completion_tokens} total")
+    logging.info("\n" + "="*60)
+    logging.info("PROCESSING SUMMARY")
+    logging.info("="*60)
+    logging.info(f"Images processed: {total_images}")
+    logging.info(f"Total tokens: {total_prompt_tokens} prompt + {total_completion_tokens} completion = {total_prompt_tokens + total_completion_tokens} total")
     if model_pricing:
-        print(f"Total cost: ${total_cost:.6f}")
-    print(f"Metrics saved to: {metrics_file}")
-    print(f"{'='*60}")
+        logging.info(f"Total cost: ${total_cost:.6f}")
+    logging.info(f"Metrics saved to: {metrics_file}")
+    logging.info(f"Log file: {log_path}")
+    logging.info("="*60)
+    logging.info("SESSION COMPLETED")
 
 def get_available_models(api_key):
     """Get list of available models from OpenRouter that support image input
@@ -408,12 +451,12 @@ def get_available_models(api_key):
             
             return vision_models, pricing_info
         else:
-            print(f"Warning: Failed to fetch models from OpenRouter (status {response.status_code})")
-            print("Falling back to default model list")
+            logging.warning(f"Failed to fetch models from OpenRouter (status {response.status_code})")
+            logging.info("Falling back to default model list")
             return get_fallback_models(), {}
     except Exception as e:
-        print(f"Warning: Error fetching models from OpenRouter: {e}")
-        print("Falling back to default model list")
+        logging.warning(f"Error fetching models from OpenRouter: {e}")
+        logging.info("Falling back to default model list")
         return get_fallback_models(), {}
 
 def get_fallback_models():
