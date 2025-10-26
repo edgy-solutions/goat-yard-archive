@@ -98,7 +98,7 @@ def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=N
     
     return True
 
-def process_images_with_openrouter(api_key, directory_path, model_name="anthropic/claude-3-opus", model_pricing=None, 
+def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwen3-vl-235b-a22b-thinking", model_pricing=None, 
                                   book_filter=None, chapter_start=None, chapter_end=None):
     """
     Process all PNG images in a directory using OpenRouter API via BAML
@@ -419,6 +419,7 @@ def get_available_models(api_key):
 def get_fallback_models():
     """Get fallback list of common models that support image input"""
     return {
+        "qwen/qwen3-vl-235b-a22b-thinking": "Qwen 3 VL 235B Thinking",
         "z-ai/glm-4.5v": "GLM-4.5V",
         "anthropic/claude-3-sonnet": "Claude 3 Sonnet",
         "anthropic/claude-3-haiku": "Claude 3 Haiku",
@@ -451,6 +452,9 @@ Examples:
   
   # Process from chapter 10 onwards
   python read_images.py --chapter-start 10
+  
+  # Process with specific model (skip interactive selection)
+  python read_images.py --book Genesis --chapter-start 1 --chapter-end 1 --model qwen/qwen3-vl-235b-a22b-thinking
         """
     )
     parser.add_argument('--book', '-b', type=str, help='Filter by book name (e.g., Genesis, Exodus)')
@@ -458,6 +462,8 @@ Examples:
     parser.add_argument('--chapter-end', '-ce', type=int, help='Ending chapter (inclusive)')
     parser.add_argument('--directory', '-d', type=str, default=DIRECTORY_PATH, 
                        help=f'Directory containing images (default: {DIRECTORY_PATH})')
+    parser.add_argument('--model', '-m', type=str, 
+                       help='Model to use (e.g., qwen/qwen3-vl-235b-a22b-thinking). If not specified, will show interactive selection.')
     
     args = parser.parse_args()
     
@@ -467,96 +473,110 @@ Examples:
             print("Error: chapter-start must be less than or equal to chapter-end")
             exit(1)
     
-    print("Fetching available models from OpenRouter...")
-    models, pricing_info = get_available_models(API_KEY)
-    
-    if not models:
-        print("No vision models found. Please check your API key or network connection.")
-        exit(1)
-    
-    # Define popular models order (well-known vision models)
-    popular_models_order = [
-        'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo', 
-        'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-sonnet', 'anthropic/claude-3-opus',
-        'anthropic/claude-3-haiku', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro',
-        'google/gemini-1.5-flash', 'google/gemini-1.5-pro', 'google/gemini-pro-vision',
-        'meta-llama/llama-3.2-90b-vision', 'meta-llama/llama-3.2-11b-vision',
-        'qwen/qwen2-vl-72b-instruct', 'qwen/qwen2-vl-7b-instruct',
-        'mistralai/pixtral-12b', 'mistralai/pixtral-large'
-    ]
-    
-    # Ask user for sorting preference
-    print(f"\nFound {len(models)} vision-capable models")
-    print("\nSort by:")
-    print("1. Popular models first (recommended)")
-    print("2. Newest models first")
-    print("3. Alphabetical by name")
-    
-    sort_choice = input("\nSelect sorting (1-3) [default: 1]: ").strip() or "1"
-    
-    # Sort models based on user choice
-    if sort_choice == "1":
-        # Sort by popularity (popular models first, then alphabetical)
-        def popularity_key(item):
-            model_id, model_name = item
-            try:
-                # Find the index in popular list, or use large number if not found
-                idx = next((i for i, pm in enumerate(popular_models_order) if pm in model_id), 999)
-                return (idx, model_name.lower())
-            except:
-                return (999, model_name.lower())
-        model_list = sorted(models.items(), key=popularity_key)
-        sort_desc = "popular models first"
-    elif sort_choice == "2":
-        # API already returns newest first, so keep original order
-        model_list = list(models.items())
-        sort_desc = "newest first"
-    else:
-        # Sort alphabetically by name
-        model_list = sorted(models.items(), key=lambda x: x[1].lower())
-        sort_desc = "alphabetical"
-    
-    print(f"\nAvailable models that support image input (sorted by {sort_desc}):")
-    # Show first 20 models with pricing
-    for idx, (model_id, model_name) in enumerate(model_list[:20], 1):
-        pricing = pricing_info.get(model_id, {})
-        prompt_price = pricing.get('prompt', '0')
-        completion_price = pricing.get('completion', '0')
-        image_price = pricing.get('image', '0')
+    # Check if model is specified via command line
+    if args.model:
+        selected_model = args.model
+        print(f"Using model from command line: {selected_model}")
         
-        # Format pricing display
-        if float(prompt_price) > 0 or float(completion_price) > 0:
-            # Calculate approximate cost for a typical image (assuming ~1500 prompt tokens, ~1000 completion tokens)
-            est_cost = (float(prompt_price) * 1500) + (float(completion_price) * 1000) + float(image_price)
-            pricing_str = f" [~${est_cost:.4f}/image]"
-        else:
-            pricing_str = " [pricing unavailable]"
-        
-        print(f"{idx}. {model_name}{pricing_str}")
-        print(f"    ID: {model_id}")
-    
-    if len(models) > 20:
-        print(f"... and {len(models) - 20} more models")
-    
-    # Let user choose a model
-    choice = input("\nSelect a model number or enter custom model ID: ").strip()
-    
-    # Check if it's a number selection
-    if choice.isdigit():
-        choice_num = int(choice)
-        if 1 <= choice_num <= len(model_list):
-            selected_model = model_list[choice_num - 1][0]  # Get the model ID
-        else:
-            print(f"Invalid selection. Using first model.")
-            selected_model = model_list[0][0]
+        # Fetch pricing for the selected model
+        print("Fetching model pricing from OpenRouter...")
+        models, pricing_info = get_available_models(API_KEY)
+        model_pricing = pricing_info.get(selected_model)
     else:
-        # Allow custom model input
-        selected_model = choice
+        # Interactive model selection
+        print("Fetching available models from OpenRouter...")
+        models, pricing_info = get_available_models(API_KEY)
+        
+        if not models:
+            print("No vision models found. Please check your API key or network connection.")
+            exit(1)
+        
+        # Define popular models order (well-known vision models)
+        popular_models_order = [
+            'qwen/qwen3-vl-235b-a22b-thinking',  # Default preferred model
+            'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo', 
+            'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-sonnet', 'anthropic/claude-3-opus',
+            'anthropic/claude-3-haiku', 'google/gemini-2.5-flash', 'google/gemini-2.5-pro',
+            'google/gemini-1.5-flash', 'google/gemini-1.5-pro', 'google/gemini-pro-vision',
+            'meta-llama/llama-3.2-90b-vision', 'meta-llama/llama-3.2-11b-vision',
+            'qwen/qwen2-vl-72b-instruct', 'qwen/qwen2-vl-7b-instruct',
+            'mistralai/pixtral-12b', 'mistralai/pixtral-large'
+        ]
+        
+        # Ask user for sorting preference
+        print(f"\nFound {len(models)} vision-capable models")
+        print("\nSort by:")
+        print("1. Popular models first (recommended)")
+        print("2. Newest models first")
+        print("3. Alphabetical by name")
+        
+        sort_choice = input("\nSelect sorting (1-3) [default: 1]: ").strip() or "1"
+        
+        # Sort models based on user choice
+        if sort_choice == "1":
+            # Sort by popularity (popular models first, then alphabetical)
+            def popularity_key(item):
+                model_id, model_name = item
+                try:
+                    # Find the index in popular list, or use large number if not found
+                    idx = next((i for i, pm in enumerate(popular_models_order) if pm in model_id), 999)
+                    return (idx, model_name.lower())
+                except:
+                    return (999, model_name.lower())
+            model_list = sorted(models.items(), key=popularity_key)
+            sort_desc = "popular models first"
+        elif sort_choice == "2":
+            # API already returns newest first, so keep original order
+            model_list = list(models.items())
+            sort_desc = "newest first"
+        else:
+            # Sort alphabetically by name
+            model_list = sorted(models.items(), key=lambda x: x[1].lower())
+            sort_desc = "alphabetical"
+        
+        print(f"\nAvailable models that support image input (sorted by {sort_desc}):")
+        # Show first 20 models with pricing
+        for idx, (model_id, model_name) in enumerate(model_list[:20], 1):
+            pricing = pricing_info.get(model_id, {})
+            prompt_price = pricing.get('prompt', '0')
+            completion_price = pricing.get('completion', '0')
+            image_price = pricing.get('image', '0')
+            
+            # Format pricing display
+            if float(prompt_price) > 0 or float(completion_price) > 0:
+                # Calculate approximate cost for a typical image (assuming ~1500 prompt tokens, ~1000 completion tokens)
+                est_cost = (float(prompt_price) * 1500) + (float(completion_price) * 1000) + float(image_price)
+                pricing_str = f" [~${est_cost:.4f}/image]"
+            else:
+                pricing_str = " [pricing unavailable]"
+            
+            print(f"{idx}. {model_name}{pricing_str}")
+            print(f"    ID: {model_id}")
+        
+        if len(models) > 20:
+            print(f"... and {len(models) - 20} more models")
+        
+        # Let user choose a model
+        choice = input("\nSelect a model number or enter custom model ID: ").strip()
+        
+        # Check if it's a number selection
+        if choice.isdigit():
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(model_list):
+                selected_model = model_list[choice_num - 1][0]  # Get the model ID
+            else:
+                print(f"Invalid selection. Using first model.")
+                selected_model = model_list[0][0]
+        else:
+            # Allow custom model input
+            selected_model = choice
+        
+        print(f"Using model: {selected_model}")
+        
+        # Get pricing for selected model
+        model_pricing = pricing_info.get(selected_model)
     
-    print(f"Using model: {selected_model}")
-    
-    # Get pricing for selected model
-    model_pricing = pricing_info.get(selected_model)
+    # Display pricing if available
     if model_pricing:
         print(f"Pricing: ${model_pricing.get('prompt', 0)} per prompt token, ${model_pricing.get('completion', 0)} per completion token, ${model_pricing.get('image', 0)} per image")
     
