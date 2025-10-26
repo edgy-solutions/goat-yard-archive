@@ -1,51 +1,59 @@
 # Enhanced Prompt with Context
 
-The `read_images.py` script now includes rich contextual information in the prompt sent to the vision model, significantly improving extraction accuracy.
+The `read_images.py` script now uses the same prompt as defined in the BAML configuration (`ExtractTextFromImage`), with additional contextual information to significantly improve extraction accuracy.
 
 ## What's Included in the Prompt
 
-### 1. **Base Instructions**
-The original extraction instructions for handling old English, footnotes, and multilingual text.
+### 1. **Base Instructions** (from BAML)
+Extract the text from the image in markdown format with specific handling for:
+- **Multilingual text**: Greek, Hebrew, and Arabic (especially in footnotes)
+- **Footnote linking**: Connect footnotes to their references in the text
+- **Two-column layout**: Handle hyphenation across columns
+- **Footnote lettering**: Lower case letters only, can be duplicated across paragraphs
 
-### 2. **Metadata Context**
+### 2. **OCR Context** (conditional)
+If an OCR `.md` file exists, the prompt explains its purpose:
+- Use ONLY for word-for-word accuracy
+- OCR often misses footnote lettering
+- OCR struggles with non-English languages (use image instead)
+
+### 3. **Hebrew Context** (conditional)
+If Hebrew verses are available:
+- Original Hebrew verses are provided as reference
+- Model should match Hebrew letter order as shown in image
+
+### 4. **Metadata**
 Automatically included from the `*_metadata.json` file:
 - **Book name**: e.g., GENESIS, EXODUS
 - **Chapter number**: e.g., 1, 2, 3
 - **Verse(s)**: e.g., "31", "1-3", "27:42-46,28:1"
 - **Page number**: e.g., 12, 13
 
-### 3. **Hebrew Text**
-The actual Hebrew verses for the page from the metadata file. This helps the model:
-- Verify it's extracting the correct verses
-- Identify Hebrew characters or quotations in the English text
-- Cross-reference content for accuracy
+### 5. **Original Hebrew Verses** (if available)
+The actual Hebrew verses for the page from the metadata file.
 
-### 4. **OCR Preliminary Extraction**
-If a matching `.md` file exists (from previous OCR), it's included as a reference. The model can use this to:
-- Identify difficult-to-read or ambiguous text
-- Verify uncertain characters
-- Handle complex layouts more accurately
-- **Note**: The model is instructed to prioritize the actual image over the OCR
+### 6. **OCR Output** (if available)
+The complete OCR markdown content for reference.
 
 ## Example Enhanced Prompt
 
 ```
-Please extract the original text from the image. Please extract it exactly as it is in the image. Do not change anything. Please make sure you keep the older English used in the image such as the use of 'nay' and all footnotes. Also notice that footnotes might extend from the left column to the right column if the left column footnote terminates with a dash. Also note that the text is mostly English but does contain Latin, Greek, Hebrew and Arabic especially in footnotes.
+Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text. Be careful to notice that the page has two columns and thus the text and footnotes might be hyphenated from one column to the other. Also the footnotes ONLY use lower case lettering. There can be duplicate footnote letters when they are reused in the different paragraphs.
 
-=== METADATA CONTEXT ===
+The output of an OCR tool is attached below and should be ONLY used to maintain accuracy in matching the original word for word since it gets some words wrong. The OCR often fails to detect the footnote lettering. OCR also struggles with the languages so use the image for those.
+
+Original Hebrew verse the commentary is referring to is provided as a reference to use the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.
+
+=== METADATA ===
 Book: GENESIS
 Chapter: 1
 Verse(s): 31
 Page Number: 12
 
-=== HEBREW TEXT FOR THESE VERSES ===
+=== ORIGINAL HEBREW VERSES ===
 Verse 31: וַיַּ֤רְא אֱלֹהִים֙ אֶת־כָּל־אֲשֶׁ֣ר עָשָׂ֔ה וְהִנֵּה־טֹ֖וב מְאֹ֑ד וֽ͏ַיְהִי־עֶ֥רֶב וֽ͏ַיְהִי־בֹ֖קֶר יֹ֥ום הַשִּׁשִּֽׁי׃ פ
 
-Note: The Hebrew text above corresponds to the verses on this page. This can help verify the content and identify any Hebrew characters or quotations in the English text.
-
-=== OCR PRELIMINARY EXTRACTION ===
-Below is a preliminary OCR extraction of this image. Use it as a reference to help identify difficult-to-read text, but prioritize the actual image content for accuracy:
-
+=== OCR OUTPUT (For Reference Only) ===
 [OCR markdown content here]
 ```
 

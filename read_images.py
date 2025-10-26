@@ -201,14 +201,22 @@ def process_images_with_openrouter(api_key, directory_path, model_name="anthropi
             hebrew_text_dict = metadata.get('hebrew_text', {})
             hebrew_verses = format_hebrew_verses(hebrew_text_dict)
             
-            # Build enhanced prompt with metadata context
+            # Build enhanced prompt with metadata context (matching BAML ExtractTextFromImage)
             prompt_parts = []
             
-            # Base instruction
-            prompt_parts.append("""Please extract the original text from the image. Please extract it exactly as it is in the image. Do not change anything. Please make sure you keep the older English used in the image such as the use of 'nay' and all footnotes. Also notice that footnotes might extend from the left column to the right column if the left column footnote terminates with a dash. Also note that the text is mostly English but does contain Latin, Greek, Hebrew and Arabic especially in footnotes.""")
+            # Base instruction from BAML
+            prompt_parts.append("Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text. Be careful to notice that the page has two columns and thus the text and footnotes might be hyphenated from one column to the other. Also the footnotes ONLY use lower case lettering. There can be duplicate footnote letters when they are reused in the different paragraphs.")
+            
+            # Add context about OCR output
+            if ocr_markdown:
+                prompt_parts.append("\nThe output of an OCR tool is attached below and should be ONLY used to maintain accuracy in matching the original word for word since it gets some words wrong. The OCR often fails to detect the footnote lettering. OCR also struggles with the languages so use the image for those.")
+            
+            # Add context about Hebrew text
+            if hebrew_verses:
+                prompt_parts.append("\nOriginal Hebrew verse the commentary is referring to is provided as a reference to use the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.")
             
             # Add metadata context
-            prompt_parts.append("\n\n=== METADATA CONTEXT ===")
+            prompt_parts.append("\n\n=== METADATA ===")
             prompt_parts.append(f"Book: {book}")
             prompt_parts.append(f"Chapter: {chapter}")
             prompt_parts.append(f"Verse(s): {verse}")
@@ -216,15 +224,13 @@ def process_images_with_openrouter(api_key, directory_path, model_name="anthropi
             
             # Add Hebrew text if available
             if hebrew_verses:
-                prompt_parts.append("\n=== HEBREW TEXT FOR THESE VERSES ===")
+                prompt_parts.append("\n=== ORIGINAL HEBREW VERSES ===")
                 prompt_parts.append(hebrew_verses)
-                prompt_parts.append("\nNote: The Hebrew text above corresponds to the verses on this page. This can help verify the content and identify any Hebrew characters or quotations in the English text.")
             
             # Add OCR markdown if available
             if ocr_markdown:
-                prompt_parts.append("\n\n=== OCR PRELIMINARY EXTRACTION ===")
-                prompt_parts.append("Below is a preliminary OCR extraction of this image. Use it as a reference to help identify difficult-to-read text, but prioritize the actual image content for accuracy:")
-                prompt_parts.append("\n" + ocr_markdown)
+                prompt_parts.append("\n\n=== OCR OUTPUT (For Reference Only) ===")
+                prompt_parts.append(ocr_markdown)
             
             prompt_text = "\n".join(prompt_parts)
             
