@@ -300,9 +300,23 @@ if __name__ == "__main__":
         sort_desc = "alphabetical"
     
     print(f"\nAvailable models that support image input (sorted by {sort_desc}):")
-    # Show first 20 models
+    # Show first 20 models with pricing
     for idx, (model_id, model_name) in enumerate(model_list[:20], 1):
-        print(f"{idx}. {model_name} ({model_id})")
+        pricing = pricing_info.get(model_id, {})
+        prompt_price = pricing.get('prompt', '0')
+        completion_price = pricing.get('completion', '0')
+        image_price = pricing.get('image', '0')
+        
+        # Format pricing display
+        if float(prompt_price) > 0 or float(completion_price) > 0:
+            # Calculate approximate cost for a typical image (assuming ~1500 prompt tokens, ~1000 completion tokens)
+            est_cost = (float(prompt_price) * 1500) + (float(completion_price) * 1000) + float(image_price)
+            pricing_str = f" [~${est_cost:.4f}/image]"
+        else:
+            pricing_str = " [pricing unavailable]"
+        
+        print(f"{idx}. {model_name}{pricing_str}")
+        print(f"    ID: {model_id}")
     
     if len(models) > 20:
         print(f"... and {len(models) - 20} more models")
