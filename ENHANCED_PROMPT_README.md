@@ -8,8 +8,18 @@ The `read_images.py` script now uses the same prompt as defined in the BAML conf
 Extract the text from the image in markdown format with specific handling for:
 - **Multilingual text**: Greek, Hebrew, and Arabic (especially in footnotes)
 - **Footnote linking**: Connect footnotes to their references in the text
-- **Two-column layout**: Handle hyphenation across columns
-- **Footnote lettering**: Lower case letters only, can be duplicated across paragraphs
+
+### **CRITICAL: Single-Column Output**
+The prompt explicitly instructs the model to:
+- **MERGE two columns** into a single continuous text
+- **Read order**: Left column top-to-bottom FIRST, then right column top-to-bottom
+- **Hyphenation handling**: Combine hyphenated words that span columns
+- **NO two-column layout** in output - must be single flowing text
+
+### **Footnote Handling**
+- **Lowercase lettering only**: a, b, c, etc.
+- **Can be duplicated** across different paragraphs
+- **Include at end** of respective paragraph/section with proper letter markers
 
 ### 2. **OCR Context** (conditional)
 If an OCR `.md` file exists, the prompt explains its purpose:
@@ -38,7 +48,11 @@ The complete OCR markdown content for reference.
 ## Example Enhanced Prompt
 
 ```
-Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text. Be careful to notice that the page has two columns and thus the text and footnotes might be hyphenated from one column to the other. Also the footnotes ONLY use lower case lettering. There can be duplicate footnote letters when they are reused in the different paragraphs.
+Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text.
+
+IMPORTANT: The image has TWO COLUMNS but you must MERGE them into a SINGLE continuous text output. Read the left column completely from top to bottom first, then continue with the right column from top to bottom. Handle text that is hyphenated from one column to the other by combining the hyphenated word. Do NOT preserve the two-column layout in your output - provide a single flowing text.
+
+FOOTNOTES: The footnotes ONLY use lower case lettering (a, b, c, etc.). There can be duplicate footnote letters when they are reused in different paragraphs. Include all footnotes at the end of their respective paragraph or section, properly linked with their lowercase letter markers.
 
 The output of an OCR tool is attached below and should be ONLY used to maintain accuracy in matching the original word for word since it gets some words wrong. The OCR often fails to detect the footnote lettering. OCR also struggles with the languages so use the image for those.
 

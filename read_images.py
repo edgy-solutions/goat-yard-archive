@@ -258,8 +258,12 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
             # Build enhanced prompt with metadata context (matching BAML ExtractTextFromImage)
             prompt_parts = []
             
-            # Base instruction from BAML
-            prompt_parts.append("Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text. Be careful to notice that the page has two columns and thus the text and footnotes might be hyphenated from one column to the other. Also the footnotes ONLY use lower case lettering. There can be duplicate footnote letters when they are reused in the different paragraphs.")
+            # Base instruction from BAML - updated to ensure single-column output
+            prompt_parts.append("Extract the text from the image in markdown format. Some words might be in Greek, Hebrew or Arabic, especially in footnotes, please include these words in their proper language. Please link the footnote to its place in the text.")
+            
+            prompt_parts.append("\nIMPORTANT: The image has TWO COLUMNS but you must MERGE them into a SINGLE continuous text output. Read the left column completely from top to bottom first, then continue with the right column from top to bottom. Handle text that is hyphenated from one column to the other by combining the hyphenated word. Do NOT preserve the two-column layout in your output - provide a single flowing text.")
+            
+            prompt_parts.append("\nFOOTNOTES: The footnotes ONLY use lower case lettering (a, b, c, etc.). There can be duplicate footnote letters when they are reused in different paragraphs. Include all footnotes at the end of their respective paragraph or section, properly linked with their lowercase letter markers.")
             
             # Add context about OCR output
             if ocr_markdown:
