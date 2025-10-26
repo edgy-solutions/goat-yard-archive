@@ -1,13 +1,68 @@
 import os
 import base64
 import json
+import argparse
 from pathlib import Path
 from datetime import datetime
 from baml_client.sync_client import b as baml_client
 import baml_py
 import requests
 
-def process_images_with_openrouter(api_key, directory_path, model_name="anthropic/claude-3-opus", model_pricing=None):
+def load_metadata(image_path):
+    """Load metadata for an image from its corresponding JSON file.
+    
+    Args:
+        image_path (Path): Path to the image file
+        
+    Returns:
+        dict or None: Metadata dict if file exists, None otherwise
+    """
+    # Remove extension and add _metadata.json
+    metadata_path = image_path.with_suffix('').with_suffix('').parent / f"{image_path.stem}_metadata.json"
+    
+    if metadata_path.exists():
+        try:
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load metadata for {image_path.name}: {e}")
+    return None
+
+def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=None):
+    """Check if metadata matches the given filters.
+    
+    Args:
+        metadata (dict): Image metadata
+        book_filter (str): Book name to filter by (case-insensitive)
+        chapter_start (int): Starting chapter (inclusive)
+        chapter_end (int): Ending chapter (inclusive)
+        
+    Returns:
+        bool: True if metadata matches all filters
+    """
+    if not metadata:
+        return False
+    
+    # Check book filter
+    if book_filter:
+        book_name = metadata.get('book_name', '')
+        if book_name.upper() != book_filter.upper():
+            return False
+    
+    # Check chapter range
+    chapter = metadata.get('chapter')
+    if chapter is None:
+        return False
+        
+    if chapter_start is not None and chapter < chapter_start:
+        return False
+    if chapter_end is not None and chapter > chapter_end:
+        return False
+    
+    return True
+
+def process_images_with_openrouter(api_key, directory_path, model_name="anthropic/claude-3-opus", model_pricing=None, 
+                                  book_filter=None, chapter_start=None, chapter_end=None):
     """
     Process all PNG images in a directory using OpenRouter API via BAML
     
@@ -16,13 +71,57 @@ def process_images_with_openrouter(api_key, directory_path, model_name="anthropi
         directory_path (str): Path to directory containing PNG images
         model_name (str): OpenRouter model to use
         model_pricing (dict): Pricing information for the model
+        book_filter (str): Optional book name filter
+        chapter_start (int): Optional starting chapter (inclusive)
+        chapter_end (int): Optional ending chapter (inclusive)
     """
     
     # Get all PNG files in the directory
-    png_files = list(Path(directory_path).glob("*.png"))
+    all_png_files = list(Path(directory_path).glob("*.png"))
+    
+    if not all_png_files:
+        print(f"No PNG files found in {directory_path}")
+        return
+    
+    # Filter images based on metadata
+    png_files = []
+    skipped_no_metadata = 0
+    skipped_filtered = 0
+    
+    for png_file in all_png_files:
+        metadata = load_metadata(png_file)
+        
+        if metadata is None:
+            skipped_no_metadata += 1
+            continue
+        
+        if matches_filter(metadata, book_filter, chapter_start, chapter_end):
+            png_files.append((png_file, metadata))
+        else:
+            skipped_filtered += 1
+    
+    # Print filter summary
+    if book_filter or chapter_start or chapter_end:
+        print(f"\n{'='*60}")
+        print(f"FILTER APPLIED:")
+        if book_filter:
+            print(f"  Book: {book_filter}")
+        if chapter_start is not None or chapter_end is not None:
+            if chapter_start == chapter_end:
+                print(f"  Chapter: {chapter_start}")
+            else:
+                start_str = str(chapter_start) if chapter_start is not None else "beginning"
+                end_str = str(chapter_end) if chapter_end is not None else "end"
+                print(f"  Chapters: {start_str} to {end_str}")
+        print(f"{'='*60}")
+    
+    print(f"\nFound {len(all_png_files)} total images")
+    print(f"Skipped {skipped_no_metadata} images without metadata")
+    print(f"Skipped {skipped_filtered} images not matching filters")
+    print(f"Processing {len(png_files)} images")
     
     if not png_files:
-        print(f"No PNG files found in {directory_path}")
+        print(f"No images to process after applying filters")
         return
     
     # Create output directory named after the model
@@ -43,7 +142,15 @@ def process_images_with_openrouter(api_key, directory_path, model_name="anthropi
     # Get BAML prompt template to send directly to OpenRouter
     from baml_client.sync_client import b as sync_baml_client
     
-    for png_file in png_files:
+    for png_file, metadata in png_files:
+        # Display metadata info
+        book = metadata.get('book_name', 'Unknown')
+        chapter = metadata.get('chapter', '?')
+        verse = metadata.get('verse', '?')
+        print(f"\n{'='*60}")
+        print(f"Processing: {png_file.name}")
+        print(f"Book: {book}, Chapter: {chapter}, Verse: {verse}")
+        print(f"{'='*60}")
         try:
             # Read and encode the image
             with open(png_file, "rb") as image_file:
@@ -108,7 +215,6 @@ def process_images_with_openrouter(api_key, directory_path, model_name="anthropi
                 total_images += 1
                 
                 # Display metrics
-                print(f"\n=== Results for {png_file.name} ===")
                 print(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
                 if model_pricing:
                     print(f"Cost: ${cost:.6f}")
@@ -247,9 +353,45 @@ def get_fallback_models():
 
 # Configuration
 API_KEY = "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"     # Replace with your actual API key
-DIRECTORY_PATH = "./images"  # Replace with your directory path
+DIRECTORY_PATH = "./extracted_images"  # Replace with your directory path
 
 if __name__ == "__main__":
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Process images with OpenRouter vision models',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Process all images with metadata
+  python read_images.py
+  
+  # Process only Genesis images
+  python read_images.py --book Genesis
+  
+  # Process Genesis chapters 1-3
+  python read_images.py --book Genesis --chapter-start 1 --chapter-end 3
+  
+  # Process chapter 5 of any book
+  python read_images.py --chapter-start 5 --chapter-end 5
+  
+  # Process from chapter 10 onwards
+  python read_images.py --chapter-start 10
+        """
+    )
+    parser.add_argument('--book', '-b', type=str, help='Filter by book name (e.g., Genesis, Exodus)')
+    parser.add_argument('--chapter-start', '-cs', type=int, help='Starting chapter (inclusive)')
+    parser.add_argument('--chapter-end', '-ce', type=int, help='Ending chapter (inclusive)')
+    parser.add_argument('--directory', '-d', type=str, default=DIRECTORY_PATH, 
+                       help=f'Directory containing images (default: {DIRECTORY_PATH})')
+    
+    args = parser.parse_args()
+    
+    # Validate chapter range
+    if args.chapter_start is not None and args.chapter_end is not None:
+        if args.chapter_start > args.chapter_end:
+            print("Error: chapter-start must be less than or equal to chapter-end")
+            exit(1)
+    
     print("Fetching available models from OpenRouter...")
     models, pricing_info = get_available_models(API_KEY)
     
@@ -344,4 +486,12 @@ if __name__ == "__main__":
         print(f"Pricing: ${model_pricing.get('prompt', 0)} per prompt token, ${model_pricing.get('completion', 0)} per completion token, ${model_pricing.get('image', 0)} per image")
     
     # Run the processing
-    process_images_with_openrouter(API_KEY, DIRECTORY_PATH, selected_model, model_pricing)
+    process_images_with_openrouter(
+        API_KEY, 
+        args.directory, 
+        selected_model, 
+        model_pricing,
+        book_filter=args.book,
+        chapter_start=args.chapter_start,
+        chapter_end=args.chapter_end
+    )
