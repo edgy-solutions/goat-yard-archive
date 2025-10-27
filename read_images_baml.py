@@ -135,20 +135,20 @@ def setup_logging(output_dir, model_name):
     os.dup2(log_file.fileno(), stdout_fd)
     os.dup2(log_file.fileno(), stderr_fd)
     
-    # Create handlers for Python logging
-    file_handler = logging.FileHandler(log_path, encoding='utf-8')
-    console_handler = logging.StreamHandler(console_stream)
+    # Create handlers for Python logging - write to our MultiWriter
+    # This ensures Python logs go to both console and file
+    console_handler = logging.StreamHandler(sys.stdout)
     
     # Set format
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
     
-    # Configure root logger
+    # Configure root logger with just the one handler
+    # It will write to sys.stdout which is our MultiWriter (console + file + capture)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[file_handler, console_handler],
+        handlers=[console_handler],
         force=True
     )
     
