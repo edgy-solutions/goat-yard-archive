@@ -15,12 +15,14 @@ from baml_client.sync_client import b
 from baml_py import Image
 from baml_py.baml_py import ClientRegistry
 from baml_py.internal_monkeypatch import BamlClientHttpError
+from baml_py.errors import BamlValidationError
 
 # Load environment variables from .env file
 load_dotenv()
 
 
 import re
+import random
 
 
 class TeeStream:
@@ -170,14 +172,14 @@ def matches_filter(metadata, book_filter, chapter_start, chapter_end):
     return True
 
 
-def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, ocr_text, max_retries=5):
-    """Call BAML ExtractTextFromImage with retry logic and exponential backoff.
+def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, ocr_text, max_retries=10):
+    """Call BAML ExtractTextFromImage with robust retry logic and exponential backoff with jitter.
     
     Args:
         baml_image: BAML image object
         book, chapter, verse, page_number: Metadata strings
         hebrew_text, ocr_text: Optional context strings
-        max_retries: Maximum number of retry attempts (default: 5)
+        max_retries: Maximum number of retry attempts (default: 10)
         
     Returns:
         str: Extracted text
@@ -185,8 +187,8 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
     Raises:
         Exception: If all retry attempts fail
     """
-    base_delay = 2  # Start with 2 second delay
-    max_delay = 60  # Cap at 60 seconds
+    base_delay = 5  # Start with 5 second delay (increased from 2)
+    max_delay = 120  # Cap at 120 seconds (increased from 60)
     
     for attempt in range(max_retries):
         try:
@@ -205,31 +207,48 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
             
             # Success!
             if attempt > 0:
-                logging.info(f"Succeeded after {attempt} retries")
+                logging.info(f"✓ Succeeded after {attempt} retries")
             return extracted_text
             
-        except BamlClientHttpError as e:
+        except (BamlClientHttpError, BamlValidationError) as e:
             error_msg = str(e)
             is_retryable = False
+            reason = "unknown error"
             
             # Check if this is a retryable error
             if "Failed to parse JSON" in error_msg and "EOF" in error_msg:
                 is_retryable = True
                 reason = "truncated JSON response"
+            elif "ConnectionReset" in error_msg or "Connection reset" in error_msg:
+                is_retryable = True
+                reason = "connection reset"
+            elif "Could not read response body" in error_msg:
+                is_retryable = True
+                reason = "response read error"
             elif "status_code=500" in error_msg or "status_code=502" in error_msg or "status_code=503" in error_msg:
                 is_retryable = True
                 reason = "server error"
+            elif "status_code=504" in error_msg:
+                is_retryable = True
+                reason = "gateway timeout"
             elif "timeout" in error_msg.lower():
                 is_retryable = True
                 reason = "timeout"
             elif "status_code=429" in error_msg:
                 is_retryable = True
                 reason = "rate limit"
+            elif "ConnectError" in error_msg or "NetworkError" in error_msg:
+                is_retryable = True
+                reason = "network error"
             
             if is_retryable and attempt < max_retries - 1:
-                # Calculate exponential backoff delay
-                delay = min(base_delay * (2 ** attempt), max_delay)
-                logging.warning(f"BAML call failed ({reason}), retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
+                # Calculate exponential backoff with jitter
+                base_backoff = min(base_delay * (2 ** attempt), max_delay)
+                # Add random jitter (±25%) to prevent thundering herd
+                jitter = base_backoff * (0.75 + random.random() * 0.5)
+                delay = min(jitter, max_delay)
+                
+                logging.warning(f"BAML call failed ({reason}), retrying in {delay:.1f}s... (attempt {attempt + 1}/{max_retries})")
                 logging.debug(f"Error details: {error_msg[:500]}")
                 time.sleep(delay)
             else:
@@ -237,12 +256,27 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
                 if not is_retryable:
                     logging.error(f"Non-retryable error: {error_msg[:500]}")
                 else:
-                    logging.error(f"Max retries ({max_retries}) exceeded")
+                    logging.error(f"Max retries ({max_retries}) exceeded. Last error: {reason}")
                 raise
                 
         except Exception as e:
-            # Unexpected error, don't retry
-            logging.error(f"Unexpected error (non-retryable): {type(e).__name__}: {str(e)[:500]}")
+            # Catch-all for unexpected errors - some might still be retryable
+            error_msg = str(e)
+            error_type = type(e).__name__
+            
+            # Check if it's a network-related error that should be retried
+            if any(keyword in error_msg.lower() for keyword in ['connection', 'network', 'timeout', 'reset', 'refused']):
+                if attempt < max_retries - 1:
+                    base_backoff = min(base_delay * (2 ** attempt), max_delay)
+                    jitter = base_backoff * (0.75 + random.random() * 0.5)
+                    delay = min(jitter, max_delay)
+                    logging.warning(f"Network error ({error_type}), retrying in {delay:.1f}s... (attempt {attempt + 1}/{max_retries})")
+                    logging.debug(f"Error details: {error_msg[:500]}")
+                    time.sleep(delay)
+                    continue
+            
+            # Truly unexpected error
+            logging.error(f"Unexpected error (non-retryable): {error_type}: {error_msg[:500]}")
             raise
     
     # Should never reach here, but just in case
@@ -475,7 +509,7 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
                 page_number=str(page_number),
                 hebrew_text=hebrew_verses if hebrew_verses else None,
                 ocr_text=ocr_markdown if ocr_markdown else None,
-                max_retries=5  # Allow up to 5 attempts
+                max_retries=10  # Allow up to 10 attempts (increased for robustness)
             )
             
             logging.info(f"Successfully extracted text ({len(extracted_text)} characters)")
