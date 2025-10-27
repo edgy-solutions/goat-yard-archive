@@ -106,11 +106,11 @@ function ExtractTextFromImage(
     {% if book or chapter or verse or page_number %}
     
     === METADATA ===
-    {% if book %}Book: {{ book }}{% endif %}
-    {% if chapter %}Chapter: {{ chapter }}{% endif %}
-    {% if verse %}Verse(s): {{ verse }}{% endif %}
-    {% if page_number %}Page Number: {{ page_number }}{% endif %}
-    {% endif %}
+    {% if book %}Book: {{ book }}
+    {% endif %}{% if chapter %}Chapter: {{ chapter }}
+    {% endif %}{% if verse %}Verse(s): {{ verse }}
+    {% endif %}{% if page_number %}Page Number: {{ page_number }}
+    {% endif %}{% endif %}
     
     {% if hebrew_text %}
     
