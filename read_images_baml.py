@@ -20,6 +20,9 @@ from baml_py.internal_monkeypatch import BamlClientHttpError
 load_dotenv()
 
 
+import re
+
+
 class TeeStream:
     """A stream that writes to multiple destinations."""
     def __init__(self, *streams):
@@ -35,8 +38,36 @@ class TeeStream:
             stream.flush()
 
 
+class BAMLOutputCapture:
+    """Capture BAML output and extract token information."""
+    def __init__(self):
+        self.last_output = ""
+        self.last_tokens = None
+        
+    def write(self, data):
+        self.last_output += data
+        # Look for BAML token information
+        # Pattern: "Tokens(in/out): 14887/3891"
+        match = re.search(r'Tokens\(in/out\):\s*(\d+)/(\d+)', data)
+        if match:
+            self.last_tokens = {
+                'prompt_tokens': int(match.group(1)),
+                'completion_tokens': int(match.group(2))
+            }
+    
+    def flush(self):
+        pass
+    
+    def get_tokens_and_reset(self):
+        """Get captured tokens and reset for next call."""
+        tokens = self.last_tokens
+        self.last_tokens = None
+        self.last_output = ""
+        return tokens
+
+
 def setup_logging(output_dir, model_name):
-    """Setup logging to both file and console."""
+    """Setup logging to both file and console, and create BAML output capture."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     model_safe = model_name.replace('/', '_')
     log_filename = f"processing_{model_safe}_{timestamp}.log"
@@ -49,8 +80,11 @@ def setup_logging(output_dir, model_name):
     # Open log file for direct writing (for BAML logs that go to stdout)
     log_file = open(log_path, 'w', encoding='utf-8')
     
-    # Create a tee stream that writes to both console and file
-    tee_stdout = TeeStream(sys.stdout, log_file)
+    # Create BAML output capture
+    baml_capture = BAMLOutputCapture()
+    
+    # Create a tee stream that writes to console, file, and BAML capture
+    tee_stdout = TeeStream(sys.stdout, log_file, baml_capture)
     tee_stderr = TeeStream(sys.stderr, log_file)
     
     # Redirect stdout and stderr to capture BAML logs
@@ -77,7 +111,7 @@ def setup_logging(output_dir, model_name):
     # Set BAML logging environment variable to INFO level
     os.environ['BAML_LOG'] = 'info'
     
-    return str(log_path)
+    return str(log_path), baml_capture
 
 
 def load_metadata(image_path):
@@ -290,17 +324,33 @@ def fetch_latest_generation_cost(provisioning_key, model_name, start_time, max_w
     return None
 
 
+def calculate_cost(prompt_tokens, completion_tokens, model_pricing):
+    """Calculate cost based on token counts and model pricing.
+    
+    Args:
+        prompt_tokens: Number of prompt tokens
+        completion_tokens: Number of completion tokens
+        model_pricing: Dict with 'prompt', 'completion', and 'image' pricing per token
+        
+    Returns:
+        float: Total cost in dollars
+    """
+    if not model_pricing:
+        return 0.0
+    
+    prompt_cost = float(model_pricing.get('prompt', 0)) * prompt_tokens
+    completion_cost = float(model_pricing.get('completion', 0)) * completion_tokens
+    image_cost = float(model_pricing.get('image', 0))
+    
+    return prompt_cost + completion_cost + image_cost
+
+
 def process_images_with_baml(api_key, provisioning_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
-                             book_filter=None, chapter_start=None, chapter_end=None):
+                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None):
     """Process images using BAML for text extraction."""
     
     # Set API key as environment variable for BAML to use
     os.environ["OPENROUTER_API_KEY"] = api_key
-    
-    # Validate provisioning key is available
-    if not provisioning_key or provisioning_key == "your-provisioning-key-here":
-        logging.warning("No valid provisioning key found. Cost metrics will not be available.")
-        logging.warning("Add OPENROUTER_PROVISIONING_KEY to .env file to enable cost tracking.")
     
     # Filter and collect PNG files
     all_png_files = list(Path(directory_path).glob("*.png"))
@@ -335,7 +385,7 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
     output_dir.mkdir(exist_ok=True)
     
     # Setup logging
-    log_path = setup_logging(output_dir, model_name)
+    log_path, baml_capture = setup_logging(output_dir, model_name)
     
     logging.info("="*60)
     logging.info("IMAGE PROCESSING SESSION STARTED")
@@ -413,9 +463,6 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
                 image_b64 = base64.b64encode(f.read()).decode('utf-8')
             baml_image = Image.from_base64("image/png", image_b64)
             
-            # Record start time for activity API lookup
-            start_time = datetime.utcnow()
-            
             # Call BAML with enhanced context and retry logic
             logging.info("Calling BAML ExtractTextFromImage with metadata, Hebrew, and OCR context...")
             # Note: BAML uses the client defined in main.baml (OpenRouter client)
@@ -435,35 +482,31 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
             preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
             logging.info(f"Preview: {preview}")
             
-            # Fetch cost from activity API (only if provisioning key is available)
-            if provisioning_key and provisioning_key != "your-provisioning-key-here":
-                logging.info("Fetching cost data from OpenRouter activity API...")
-                generation_info = fetch_latest_generation_cost(provisioning_key, model_name, start_time)
-            else:
-                generation_info = None
+            # Extract token counts from BAML output
+            tokens_from_baml = baml_capture.get_tokens_and_reset()
             
-            if generation_info:
-                prompt_tokens = generation_info.get('tokens_prompt', 0)
-                completion_tokens = generation_info.get('tokens_completion', 0)
+            if tokens_from_baml:
+                prompt_tokens = tokens_from_baml['prompt_tokens']
+                completion_tokens = tokens_from_baml['completion_tokens']
                 total_tokens = prompt_tokens + completion_tokens
-                cost = generation_info.get('cost', 0.0)
-                generation_id = generation_info.get('generation_id', 'unknown')
                 
-                logging.info(f"Generation ID: {generation_id}")
-                logging.info(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
-                logging.info(f"Cost: ${cost:.6f}")
+                # Calculate cost from tokens and pricing
+                cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
+                
+                logging.info(f"Tokens: {prompt_tokens:,} prompt + {completion_tokens:,} completion = {total_tokens:,} total")
+                if model_pricing:
+                    logging.info(f"Cost: ${cost:.6f}")
                 
                 total_cost += cost
                 total_prompt_tokens += prompt_tokens
                 total_completion_tokens += completion_tokens
                 total_images += 1
             else:
-                logging.warning("Could not fetch cost data from activity API")
+                logging.warning("Could not extract token counts from BAML output")
                 prompt_tokens = 0
                 completion_tokens = 0
                 total_tokens = 0
                 cost = 0.0
-                generation_id = 'unknown'
                 total_images += 1
             
             # Save results
@@ -477,7 +520,6 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
                 "timestamp": datetime.now().isoformat(),
                 "file": png_file.name,
                 "model": model_name,
-                "generation_id": generation_id,
                 "tokens": {
                     "prompt": prompt_tokens,
                     "completion": completion_tokens,
@@ -537,11 +579,20 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # Set model pricing (approximate values for qwen3-vl-235b-a22b-thinking)
+    # Update these based on OpenRouter's pricing page: https://openrouter.ai/models
+    model_pricing = {
+        'prompt': 0.000005,  # $5 per 1M tokens
+        'completion': 0.000015,  # $15 per 1M tokens
+        'image': 0.0  # Additional per-image cost if any
+    }
+    
     process_images_with_baml(
         api_key=API_KEY,
         provisioning_key=PROVISIONING_KEY,
         directory_path=args.directory,
         model_name=args.model,
+        model_pricing=model_pricing,
         book_filter=args.book,
         chapter_start=args.chapter_start,
         chapter_end=args.chapter_end
