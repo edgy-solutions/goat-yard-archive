@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 from baml_client.sync_client import b
-from baml_py import Image
+from baml_py import Image, Collector
 from baml_py.baml_py import ClientRegistry
 from baml_py.internal_monkeypatch import BamlClientHttpError
 from baml_py.errors import BamlValidationError
@@ -214,13 +214,14 @@ def matches_filter(metadata, book_filter, chapter_start, chapter_end):
     return True
 
 
-def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, ocr_text, max_retries=10):
+def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, ocr_text, collector, max_retries=10):
     """Call BAML ExtractTextFromImage with robust retry logic and exponential backoff with jitter.
     
     Args:
         baml_image: BAML image object
         book, chapter, verse, page_number: Metadata strings
         hebrew_text, ocr_text: Optional context strings
+        collector: BAML Collector instance for tracking metrics
         max_retries: Maximum number of retry attempts (default: 10)
         
     Returns:
@@ -244,7 +245,8 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
                 verse=verse,
                 page_number=page_number,
                 hebrew_text=hebrew_text,
-                ocr_text=ocr_text
+                ocr_text=ocr_text,
+                baml_options={"collector": collector}
             )
             
             # Success!
@@ -325,79 +327,49 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
     raise Exception(f"Failed after {max_retries} attempts")
 
 
-def fetch_latest_generation_cost(provisioning_key, model_name, start_time, max_wait_seconds=10):
-    """Fetch the cost of the latest generation from OpenRouter activity API.
+def extract_metrics_from_collector(collector, model_pricing):
+    """Extract token counts and calculate cost from BAML Collector.
     
-    Note: Requires a provisioning key (not the regular API key).
-    Get it from: https://openrouter.ai/settings/keys
+    Args:
+        collector: BAML Collector instance
+        model_pricing: Dict with pricing information
+        
+    Returns:
+        dict: Metrics including tokens and cost, or None if unavailable
     """
-    url = "https://openrouter.ai/api/v1/activity"
-    headers = {
-        "Authorization": f"Bearer {provisioning_key}",
-        "Content-Type": "application/json"
-    }
-    
-    end_time = time.time() + max_wait_seconds
-    attempt = 0
-    
-    while time.time() < end_time:
-        attempt += 1
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                activity_data = response.json()
-                items = activity_data.get('data', [])
-                
-                # Log diagnostic info on first attempt
-                if attempt == 1:
-                    logging.info(f"Activity API returned {len(items)} items")
-                    if items:
-                        logging.info(f"Most recent activity: model={items[0].get('model')}, created_at={items[0].get('created_at')}")
-                
-                for item in items:
-                    item_model = item.get('model', '')
-                    item_created_at_str = item.get('created_at', '')
-                    
-                    # Check if model matches
-                    if item_model == model_name:
-                        if item_created_at_str:
-                            # Parse timestamp - handle both with and without timezone
-                            try:
-                                if '+' in item_created_at_str:
-                                    # Remove timezone for comparison
-                                    created_at = datetime.fromisoformat(item_created_at_str.replace('+00:00', ''))
-                                else:
-                                    created_at = datetime.fromisoformat(item_created_at_str)
-                                
-                                # Make comparison timezone-agnostic
-                                time_diff = (created_at - start_time).total_seconds()
-                                
-                                if time_diff >= -5 and time_diff < 180:  # Allow 5s buffer before, up to 3 minutes after
-                                    logging.info(f"Found matching generation: {item.get('generation_id')} (time_diff={time_diff:.1f}s)")
-                                    return {
-                                        'generation_id': item.get('generation_id'),
-                                        'tokens_prompt': item.get('tokens_prompt', 0),
-                                        'tokens_completion': item.get('tokens_completion', 0),
-                                        'cost': item.get('usage', 0.0),
-                                        'created_at': item_created_at_str,
-                                    }
-                                elif attempt == 1:
-                                    logging.info(f"Found model {model_name} but time_diff={time_diff:.1f}s is outside window")
-                            except Exception as e:
-                                logging.info(f"Error parsing timestamp {item_created_at_str}: {e}")
-                                continue
-            else:
-                logging.warning(f"Activity API returned status {response.status_code}: {response.text[:200]}")
-            
-            time.sleep(1)
-            
-        except Exception as e:
-            logging.warning(f"Error fetching activity data: {e}")
-            time.sleep(1)
-    
-    logging.info(f"No matching generation found after {attempt} attempts over {max_wait_seconds}s")
-    return None
+    try:
+        if not collector or not collector.last:
+            return None
+        
+        last_log = collector.last
+        usage = last_log.usage
+        
+        if not usage:
+            return None
+        
+        # Extract token counts from usage
+        prompt_tokens = usage.input_tokens or 0
+        completion_tokens = usage.output_tokens or 0
+        total_tokens = usage.total_tokens or (prompt_tokens + completion_tokens)
+        
+        # Calculate cost
+        cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
+        
+        # Get latency in seconds
+        latency_ms = last_log.latency_ms or 0
+        latency_s = latency_ms / 1000.0
+        
+        return {
+            'prompt_tokens': prompt_tokens,
+            'completion_tokens': completion_tokens,
+            'total_tokens': total_tokens,
+            'cost': cost,
+            'latency_s': latency_s,
+            'model': last_log.model_name or 'unknown'
+        }
+    except Exception as e:
+        logging.debug(f"Error extracting metrics from collector: {e}")
+        return None
 
 
 def calculate_cost(prompt_tokens, completion_tokens, model_pricing):
@@ -421,7 +393,7 @@ def calculate_cost(prompt_tokens, completion_tokens, model_pricing):
     return prompt_cost + completion_cost + image_cost
 
 
-def process_images_with_baml(api_key, provisioning_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
+def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
                              model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None):
     """Process images using BAML for text extraction."""
     
@@ -539,6 +511,9 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
                 image_b64 = base64.b64encode(f.read()).decode('utf-8')
             baml_image = Image.from_base64("image/png", image_b64)
             
+            # Create a collector for this image
+            collector = Collector(name=f"{png_file.stem}")
+            
             # Call BAML with enhanced context and retry logic
             logging.info("Calling BAML ExtractTextFromImage with metadata, Hebrew, and OCR context...")
             # Note: BAML uses the client defined in main.baml (OpenRouter client)
@@ -551,6 +526,7 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
                 page_number=str(page_number),
                 hebrew_text=hebrew_verses if hebrew_verses else None,
                 ocr_text=ocr_markdown if ocr_markdown else None,
+                collector=collector,
                 max_retries=10  # Allow up to 10 attempts (increased for robustness)
             )
             
@@ -558,32 +534,51 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
             preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
             logging.info(f"Preview: {preview}")
             
-            # Extract token counts from BAML output
-            tokens_from_baml = baml_capture.get_tokens_and_reset()
+            # Extract metrics from collector
+            metrics = extract_metrics_from_collector(collector, model_pricing)
             
-            if tokens_from_baml:
-                prompt_tokens = tokens_from_baml['prompt_tokens']
-                completion_tokens = tokens_from_baml['completion_tokens']
-                total_tokens = prompt_tokens + completion_tokens
-                
-                # Calculate cost from tokens and pricing
-                cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
+            if metrics:
+                prompt_tokens = metrics['prompt_tokens']
+                completion_tokens = metrics['completion_tokens']
+                total_tokens = metrics['total_tokens']
+                cost = metrics['cost']
+                latency_s = metrics['latency_s']
                 
                 logging.info(f"Tokens: {prompt_tokens:,} prompt + {completion_tokens:,} completion = {total_tokens:,} total")
                 if model_pricing:
                     logging.info(f"Cost: ${cost:.6f}")
+                logging.info(f"Latency: {latency_s:.1f}s")
                 
                 total_cost += cost
                 total_prompt_tokens += prompt_tokens
                 total_completion_tokens += completion_tokens
                 total_images += 1
             else:
-                logging.warning("Could not extract token counts from BAML output")
-                prompt_tokens = 0
-                completion_tokens = 0
-                total_tokens = 0
-                cost = 0.0
-                total_images += 1
+                # Fallback to BAML output capture if collector doesn't work
+                logging.warning("Collector did not return metrics, trying BAML output capture...")
+                tokens_from_baml = baml_capture.get_tokens_and_reset()
+                
+                if tokens_from_baml:
+                    prompt_tokens = tokens_from_baml['prompt_tokens']
+                    completion_tokens = tokens_from_baml['completion_tokens']
+                    total_tokens = prompt_tokens + completion_tokens
+                    cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
+                    
+                    logging.info(f"Tokens: {prompt_tokens:,} prompt + {completion_tokens:,} completion = {total_tokens:,} total")
+                    if model_pricing:
+                        logging.info(f"Cost: ${cost:.6f}")
+                    
+                    total_cost += cost
+                    total_prompt_tokens += prompt_tokens
+                    total_completion_tokens += completion_tokens
+                    total_images += 1
+                else:
+                    logging.warning("Could not extract token counts from any source")
+                    prompt_tokens = 0
+                    completion_tokens = 0
+                    total_tokens = 0
+                    cost = 0.0
+                    total_images += 1
             
             # Save results
             output_file = output_dir / png_file.with_suffix('.md').name
@@ -639,9 +634,8 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
     logging.info("="*60)
 
 
-# Load API keys from environment variables
+# Load API key from environment variables
 API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
-PROVISIONING_KEY = os.getenv("OPENROUTER_PROVISIONING_KEY", "")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract text from images using BAML and OpenRouter")
@@ -665,7 +659,6 @@ if __name__ == "__main__":
     
     process_images_with_baml(
         api_key=API_KEY,
-        provisioning_key=PROVISIONING_KEY,
         directory_path=args.directory,
         model_name=args.model,
         model_pricing=model_pricing,
