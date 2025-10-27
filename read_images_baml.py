@@ -258,6 +258,17 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
             page_number = metadata.get('page_number', 'Unknown')
             logging.info(f"Metadata: {book} {chapter}:{verse} (Page {page_number})")
             
+            # Load OCR markdown if available
+            ocr_markdown = load_ocr_markdown(png_file)
+            if ocr_markdown:
+                logging.info(f"Loaded OCR markdown ({len(ocr_markdown)} characters)")
+            
+            # Extract and format Hebrew verses from metadata
+            hebrew_text_dict = metadata.get('hebrew_text', {})
+            hebrew_verses = format_hebrew_verses(hebrew_text_dict)
+            if hebrew_verses:
+                logging.info(f"Loaded Hebrew text for {len(hebrew_text_dict)} verse(s)")
+            
             # Create BAML image from file
             with open(png_file, 'rb') as f:
                 import base64
@@ -267,11 +278,19 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
             # Record start time for activity API lookup
             start_time = datetime.utcnow()
             
-            # Call BAML
-            logging.info("Calling BAML ExtractTextFromImage...")
+            # Call BAML with enhanced context
+            logging.info("Calling BAML ExtractTextFromImage with metadata, Hebrew, and OCR context...")
             # Note: BAML uses the client defined in main.baml (OpenRouter client)
             # The model cannot be dynamically changed per call in current BAML version
-            extracted_text = b.ExtractTextFromImage(baml_image)
+            extracted_text = b.ExtractTextFromImage(
+                baml_image,
+                book=str(book),
+                chapter=str(chapter),
+                verse=str(verse),
+                page_number=str(page_number),
+                hebrew_text=hebrew_verses if hebrew_verses else None,
+                ocr_text=ocr_markdown if ocr_markdown else None
+            )
             
             logging.info(f"Successfully extracted text ({len(extracted_text)} characters)")
             preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text

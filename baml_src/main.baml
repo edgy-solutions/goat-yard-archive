@@ -78,7 +78,13 @@ function ValidateOCRMetadata(
 
 // Define the image text extraction function for OpenRouter
 function ExtractTextFromImage(
-  image: image
+  image: image,
+  book: string?,
+  chapter: string?,
+  verse: string?,
+  page_number: string?,
+  hebrew_text: string?,
+  ocr_text: string?
 ) -> string {
   client OpenRouter
   
@@ -89,7 +95,34 @@ function ExtractTextFromImage(
     
     FOOTNOTES: The footnotes ONLY use lower case lettering (a, b, c, etc.). There can be duplicate footnote letters when they are reused in different paragraphs. Include all footnotes at the end of their respective paragraph or section, properly linked with their lowercase letter markers.
     
-    The output of an OCR tool is attached below and should be ONLY used to maintain accuracy in matching the original word for word since it gets some words wrong. The OCR often fails to detect the footnote lettering. OCR also struggles with the languages so use the image for those. Original Hebrew verse the commentary is referring to is provided as a reference to use the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.
+    {% if ocr_text %}
+    The output of an OCR tool is attached below and should be ONLY used to maintain accuracy in matching the original word for word since it gets some words wrong. The OCR often fails to detect the footnote lettering. OCR also struggles with the languages so use the image for those.
+    {% endif %}
+    
+    {% if hebrew_text %}
+    Original Hebrew verse the commentary is referring to is provided as a reference to use the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.
+    {% endif %}
+    
+    {% if book or chapter or verse or page_number %}
+    
+    === METADATA ===
+    {% if book %}Book: {{ book }}{% endif %}
+    {% if chapter %}Chapter: {{ chapter }}{% endif %}
+    {% if verse %}Verse(s): {{ verse }}{% endif %}
+    {% if page_number %}Page Number: {{ page_number }}{% endif %}
+    {% endif %}
+    
+    {% if hebrew_text %}
+    
+    === ORIGINAL HEBREW VERSES ===
+    {{ hebrew_text }}
+    {% endif %}
+    
+    {% if ocr_text %}
+    
+    === OCR OUTPUT (For Reference Only) ===
+    {{ ocr_text }}
+    {% endif %}
     
     {{ _.role("user") }}
     {{ image }}

@@ -91,18 +91,18 @@ class BamlSyncClient:
     def parse_stream(self):
       return self.__llm_stream_parser
     
-    def ExtractTextFromImage(self, image: baml_py.Image,
+    def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> str:
         # Check if on_tick is provided
         if 'on_tick' in baml_options:
-            stream = self.stream.ExtractTextFromImage(image=image,
+            stream = self.stream.ExtractTextFromImage(image=image,book=book,chapter=chapter,verse=verse,page_number=page_number,hebrew_text=hebrew_text,ocr_text=ocr_text,
                 baml_options=baml_options)
             return stream.get_final_response()
         else:
             # Original non-streaming code
             result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractTextFromImage", args={
-                "image": image,
+                "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"ocr_text": ocr_text,
             })
             return typing.cast(str, result.cast_to(types, types, stream_types, False, __runtime__))
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
@@ -128,11 +128,11 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractTextFromImage(self, image: baml_py.Image,
+    def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[str, str]:
         ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractTextFromImage", args={
-            "image": image,
+            "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"ocr_text": ocr_text,
         })
         return baml_py.BamlSyncStream[str, str](
           result,
@@ -160,11 +160,11 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractTextFromImage(self, image: baml_py.Image,
+    def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractTextFromImage", args={
-            "image": image,
+            "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"ocr_text": ocr_text,
         }, mode="request")
         return result
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
@@ -182,11 +182,11 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractTextFromImage(self, image: baml_py.Image,
+    def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractTextFromImage", args={
-            "image": image,
+            "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"ocr_text": ocr_text,
         }, mode="stream")
         return result
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
