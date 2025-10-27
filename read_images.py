@@ -342,6 +342,56 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                         result = response.json()
                         extracted_text = result['choices'][0]['message']['content']
                         logging.info(f"Successfully extracted text ({len(extracted_text)} characters)")
+                        
+                        # Extract usage information
+                        usage = result.get('usage', {})
+                        prompt_tokens = usage.get('prompt_tokens', 0)
+                        completion_tokens = usage.get('completion_tokens', 0)
+                        total_tokens = usage.get('total_tokens', 0)
+                        
+                        # Calculate cost if pricing is available
+                        cost = 0.0
+                        if model_pricing:
+                            prompt_cost = float(model_pricing.get('prompt', 0)) * prompt_tokens
+                            completion_cost = float(model_pricing.get('completion', 0)) * completion_tokens
+                            image_cost = float(model_pricing.get('image', 0))
+                            cost = prompt_cost + completion_cost + image_cost
+                        
+                        # Update totals
+                        total_cost += cost
+                        total_prompt_tokens += prompt_tokens
+                        total_completion_tokens += completion_tokens
+                        total_images += 1
+                        
+                        # Display metrics
+                        logging.info(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
+                        if model_pricing:
+                            logging.info(f"Cost: ${cost:.6f}")
+                        preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
+                        logging.info(f"Preview: {preview}")
+                        
+                        # Save results to file in model-specific directory
+                        output_file = output_dir / png_file.with_suffix('.md').name
+                        with open(output_file, 'w', encoding='utf-8') as f:
+                            f.write(extracted_text)
+                        logging.info(f"Results saved to: {output_file}")
+                        
+                        # Log metrics to JSONL file
+                        metrics_entry = {
+                            "timestamp": datetime.now().isoformat(),
+                            "file": png_file.name,
+                            "model": model_name,
+                            "tokens": {
+                                "prompt": prompt_tokens,
+                                "completion": completion_tokens,
+                                "total": total_tokens
+                            },
+                            "cost": cost,
+                            "success": True
+                        }
+                        with open(metrics_file, 'a', encoding='utf-8') as f:
+                            f.write(json.dumps(metrics_entry) + '\n')
+                        
                     except json.JSONDecodeError as e:
                         error_msg = f"Failed to parse JSON response for {png_file.name}: {e}"
                         logging.error(error_msg)
@@ -371,55 +421,6 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
                         with open(metrics_file, 'a', encoding='utf-8') as f:
                             f.write(json.dumps(metrics_entry) + '\n')
                         continue  # Skip to next image
-                
-                # Extract usage information
-                usage = result.get('usage', {})
-                prompt_tokens = usage.get('prompt_tokens', 0)
-                completion_tokens = usage.get('completion_tokens', 0)
-                total_tokens = usage.get('total_tokens', 0)
-                
-                # Calculate cost if pricing is available
-                cost = 0.0
-                if model_pricing:
-                    prompt_cost = float(model_pricing.get('prompt', 0)) * prompt_tokens
-                    completion_cost = float(model_pricing.get('completion', 0)) * completion_tokens
-                    image_cost = float(model_pricing.get('image', 0))
-                    cost = prompt_cost + completion_cost + image_cost
-                
-                # Update totals
-                total_cost += cost
-                total_prompt_tokens += prompt_tokens
-                total_completion_tokens += completion_tokens
-                total_images += 1
-                
-                # Display metrics
-                logging.info(f"Tokens: {prompt_tokens} prompt + {completion_tokens} completion = {total_tokens} total")
-                if model_pricing:
-                    logging.info(f"Cost: ${cost:.6f}")
-                preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
-                logging.info(f"Preview: {preview}")
-                
-                # Save results to file in model-specific directory
-                output_file = output_dir / png_file.with_suffix('.md').name
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(extracted_text)
-                logging.info(f"Results saved to: {output_file}")
-                
-                # Log metrics to JSONL file
-                metrics_entry = {
-                    "timestamp": datetime.now().isoformat(),
-                    "file": png_file.name,
-                    "model": model_name,
-                    "tokens": {
-                        "prompt": prompt_tokens,
-                        "completion": completion_tokens,
-                        "total": total_tokens
-                    },
-                    "cost": cost,
-                    "success": True
-                }
-                with open(metrics_file, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(metrics_entry) + '\n')
                     
                 else:
                     error_msg = f"Error processing {png_file.name}: {response.status_code}"
