@@ -10,9 +10,13 @@ import requests
 import time
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 from baml_client.sync_client import b
 from baml_py import Image
 from baml_py.baml_py import ClientRegistry
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class TeeStream:
@@ -131,11 +135,15 @@ def matches_filter(metadata, book_filter, chapter_start, chapter_end):
     return True
 
 
-def fetch_latest_generation_cost(api_key, model_name, start_time, max_wait_seconds=10):
-    """Fetch the cost of the latest generation from OpenRouter activity API."""
+def fetch_latest_generation_cost(provisioning_key, model_name, start_time, max_wait_seconds=10):
+    """Fetch the cost of the latest generation from OpenRouter activity API.
+    
+    Note: Requires a provisioning key (not the regular API key).
+    Get it from: https://openrouter.ai/settings/keys
+    """
     url = "https://openrouter.ai/api/v1/activity"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {provisioning_key}",
         "Content-Type": "application/json"
     }
     
@@ -202,12 +210,17 @@ def fetch_latest_generation_cost(api_key, model_name, start_time, max_wait_secon
     return None
 
 
-def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
+def process_images_with_baml(api_key, provisioning_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
                              book_filter=None, chapter_start=None, chapter_end=None):
     """Process images using BAML for text extraction."""
     
     # Set API key as environment variable for BAML to use
     os.environ["OPENROUTER_API_KEY"] = api_key
+    
+    # Validate provisioning key is available
+    if not provisioning_key or provisioning_key == "your-provisioning-key-here":
+        logging.warning("No valid provisioning key found. Cost metrics will not be available.")
+        logging.warning("Add OPENROUTER_PROVISIONING_KEY to .env file to enable cost tracking.")
     
     # Filter and collect PNG files
     all_png_files = list(Path(directory_path).glob("*.png"))
@@ -341,9 +354,12 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
             preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
             logging.info(f"Preview: {preview}")
             
-            # Fetch cost from activity API
-            logging.info("Fetching cost data from OpenRouter activity API...")
-            generation_info = fetch_latest_generation_cost(api_key, model_name, start_time)
+            # Fetch cost from activity API (only if provisioning key is available)
+            if provisioning_key and provisioning_key != "your-provisioning-key-here":
+                logging.info("Fetching cost data from OpenRouter activity API...")
+                generation_info = fetch_latest_generation_cost(provisioning_key, model_name, start_time)
+            else:
+                generation_info = None
             
             if generation_info:
                 prompt_tokens = generation_info.get('tokens_prompt', 0)
@@ -424,8 +440,9 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
     logging.info("="*60)
 
 
-# Configuration
-API_KEY = "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"
+# Load API keys from environment variables
+API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+PROVISIONING_KEY = os.getenv("OPENROUTER_PROVISIONING_KEY", "")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract text from images using BAML and OpenRouter")
@@ -441,6 +458,7 @@ if __name__ == "__main__":
     
     process_images_with_baml(
         api_key=API_KEY,
+        provisioning_key=PROVISIONING_KEY,
         directory_path=args.directory,
         model_name=args.model,
         book_filter=args.book,
