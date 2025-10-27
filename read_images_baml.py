@@ -15,6 +15,21 @@ from baml_py import Image
 from baml_py.baml_py import ClientRegistry
 
 
+class TeeStream:
+    """A stream that writes to multiple destinations."""
+    def __init__(self, *streams):
+        self.streams = streams
+    
+    def write(self, data):
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+    
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+
 def setup_logging(output_dir, model_name):
     """Setup logging to both file and console."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -26,9 +41,20 @@ def setup_logging(output_dir, model_name):
     logger = logging.getLogger()
     logger.handlers.clear()
     
-    # Create handlers
+    # Open log file for direct writing (for BAML logs that go to stdout)
+    log_file = open(log_path, 'w', encoding='utf-8')
+    
+    # Create a tee stream that writes to both console and file
+    tee_stdout = TeeStream(sys.stdout, log_file)
+    tee_stderr = TeeStream(sys.stderr, log_file)
+    
+    # Redirect stdout and stderr to capture BAML logs
+    sys.stdout = tee_stdout
+    sys.stderr = tee_stderr
+    
+    # Create handlers for Python logging
     file_handler = logging.FileHandler(log_path, encoding='utf-8')
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(tee_stdout)
     
     # Set format
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -43,21 +69,8 @@ def setup_logging(output_dir, model_name):
         force=True
     )
     
-    # Also configure BAML logger to use the same handlers
-    baml_logger = logging.getLogger('baml')
-    baml_logger.setLevel(logging.INFO)
-    baml_logger.handlers.clear()
-    baml_logger.addHandler(file_handler)
-    baml_logger.addHandler(console_handler)
-    baml_logger.propagate = False  # Don't propagate to root logger
-    
-    # Configure baml_py logger
-    baml_py_logger = logging.getLogger('baml_py')
-    baml_py_logger.setLevel(logging.INFO)
-    baml_py_logger.handlers.clear()
-    baml_py_logger.addHandler(file_handler)
-    baml_py_logger.addHandler(console_handler)
-    baml_py_logger.propagate = False
+    # Set BAML logging environment variable to INFO level
+    os.environ['BAML_LOG'] = 'info'
     
     return str(log_path)
 
