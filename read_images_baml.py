@@ -69,7 +69,10 @@ class BAMLOutputCapture:
 
 
 def setup_logging(output_dir, model_name):
-    """Setup logging to both file and console, and create BAML output capture."""
+    """Setup logging to both file and console, and create BAML output capture.
+    
+    Uses OS-level file descriptor duplication to capture BAML's native output.
+    """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     model_safe = model_name.replace('/', '_')
     log_filename = f"processing_{model_safe}_{timestamp}.log"
@@ -79,23 +82,62 @@ def setup_logging(output_dir, model_name):
     logger = logging.getLogger()
     logger.handlers.clear()
     
-    # Open log file for direct writing (for BAML logs that go to stdout)
-    log_file = open(log_path, 'w', encoding='utf-8')
+    # Open log file for writing
+    log_file = open(log_path, 'w', encoding='utf-8', buffering=1)  # Line buffered
     
-    # Create BAML output capture
+    # Save original stdout/stderr file descriptors
+    stdout_fd = sys.stdout.fileno()
+    stderr_fd = sys.stderr.fileno()
+    
+    # Save original stdout/stderr for later use
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    
+    # Duplicate the original stdout/stderr file descriptors
+    stdout_dup = os.dup(stdout_fd)
+    stderr_dup = os.dup(stderr_fd)
+    
+    # Create BAML output capture that wraps the original stdout
     baml_capture = BAMLOutputCapture()
     
-    # Create a tee stream that writes to console, file, and BAML capture
-    tee_stdout = TeeStream(sys.stdout, log_file, baml_capture)
-    tee_stderr = TeeStream(sys.stderr, log_file)
+    # Create a custom class that writes to multiple destinations at OS level
+    class MultiWriter:
+        def __init__(self, *streams):
+            self.streams = streams
+        
+        def write(self, data):
+            for stream in self.streams:
+                try:
+                    stream.write(data)
+                    stream.flush()
+                except:
+                    pass
+            return len(data)
+        
+        def flush(self):
+            for stream in self.streams:
+                try:
+                    stream.flush()
+                except:
+                    pass
+        
+        def fileno(self):
+            return stdout_fd
     
-    # Redirect stdout and stderr to capture BAML logs
-    sys.stdout = tee_stdout
-    sys.stderr = tee_stderr
+    # Create console writer using duplicated file descriptor
+    console_stream = os.fdopen(stdout_dup, 'w', encoding='utf-8', buffering=1)
+    
+    # Replace sys.stdout/stderr with multi-writer
+    sys.stdout = MultiWriter(console_stream, log_file, baml_capture)
+    sys.stderr = MultiWriter(console_stream, log_file)
+    
+    # Also redirect at OS level - this captures BAML's native Rust output
+    os.dup2(log_file.fileno(), stdout_fd)
+    os.dup2(log_file.fileno(), stderr_fd)
     
     # Create handlers for Python logging
     file_handler = logging.FileHandler(log_path, encoding='utf-8')
-    console_handler = logging.StreamHandler(tee_stdout)
+    console_handler = logging.StreamHandler(console_stream)
     
     # Set format
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
