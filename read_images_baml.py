@@ -23,6 +23,8 @@ load_dotenv()
 
 import re
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 
 class TeeStream:
@@ -266,6 +268,9 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
             elif "ConnectionReset" in error_msg or "Connection reset" in error_msg:
                 is_retryable = True
                 reason = "connection reset"
+            elif ("Http2" in error_msg or "HTTP/2" in error_msg) and ("Reset" in error_msg or "PROTOCOL_ERROR" in error_msg):
+                is_retryable = True
+                reason = "HTTP/2 protocol error"
             elif "Could not read response body" in error_msg:
                 is_retryable = True
                 reason = "response read error"
@@ -393,9 +398,141 @@ def calculate_cost(prompt_tokens, completion_tokens, model_pricing):
     return prompt_cost + completion_cost + image_cost
 
 
+def process_single_image(png_file, metadata, output_dir, model_pricing, baml_capture):
+    """Process a single image and return metrics.
+    
+    Args:
+        png_file: Path to the PNG file
+        metadata: Metadata dict for the image
+        output_dir: Directory for output files
+        model_pricing: Pricing information
+        baml_capture: BAML output capture instance
+        
+    Returns:
+        dict: Metrics for this image including tokens and cost
+    """
+    try:
+        book = metadata.get('book', 'Unknown')
+        chapter = metadata.get('chapter', 'Unknown')
+        verse = metadata.get('verse', 'Unknown')
+        page_number = metadata.get('page_number', 'Unknown')
+        
+        logging.info(f"Processing: {png_file.name} - {book} {chapter}:{verse} (Page {page_number})")
+        
+        # Load OCR markdown if available
+        ocr_markdown = load_ocr_markdown(png_file)
+        if ocr_markdown:
+            logging.debug(f"Loaded OCR markdown ({len(ocr_markdown)} characters)")
+        
+        # Extract and format Hebrew verses from metadata
+        hebrew_text_dict = metadata.get('hebrew_text', {})
+        hebrew_verses = format_hebrew_verses(hebrew_text_dict)
+        if hebrew_verses:
+            logging.debug(f"Loaded Hebrew text for {len(hebrew_text_dict)} verse(s)")
+        
+        # Create BAML image from file
+        with open(png_file, 'rb') as f:
+            import base64
+            image_b64 = base64.b64encode(f.read()).decode('utf-8')
+        baml_image = Image.from_base64("image/png", image_b64)
+        
+        # Create a collector for this image
+        collector = Collector(name=f"{png_file.stem}")
+        
+        # Call BAML with enhanced context and retry logic
+        logging.info(f"Calling BAML for {png_file.name}...")
+        extracted_text = call_baml_with_retry(
+            baml_image=baml_image,
+            book=str(book),
+            chapter=str(chapter),
+            verse=str(verse),
+            page_number=str(page_number),
+            hebrew_text=hebrew_verses if hebrew_verses else None,
+            ocr_text=ocr_markdown if ocr_markdown else None,
+            collector=collector,
+            max_retries=10
+        )
+        
+        logging.info(f"✓ {png_file.name}: Extracted {len(extracted_text)} characters")
+        
+        # Extract metrics from collector
+        metrics = extract_metrics_from_collector(collector, model_pricing)
+        
+        if metrics:
+            prompt_tokens = metrics['prompt_tokens']
+            completion_tokens = metrics['completion_tokens']
+            total_tokens = metrics['total_tokens']
+            cost = metrics['cost']
+            latency_s = metrics['latency_s']
+            
+            logging.info(f"{png_file.name}: {prompt_tokens:,}+{completion_tokens:,}={total_tokens:,} tokens, ${cost:.6f}, {latency_s:.1f}s")
+        else:
+            # Fallback to BAML output capture
+            tokens_from_baml = baml_capture.get_tokens_and_reset()
+            
+            if tokens_from_baml:
+                prompt_tokens = tokens_from_baml['prompt_tokens']
+                completion_tokens = tokens_from_baml['completion_tokens']
+                total_tokens = prompt_tokens + completion_tokens
+                cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
+                latency_s = 0
+                
+                logging.info(f"{png_file.name}: {prompt_tokens:,}+{completion_tokens:,}={total_tokens:,} tokens, ${cost:.6f}")
+            else:
+                logging.warning(f"{png_file.name}: Could not extract metrics")
+                prompt_tokens = 0
+                completion_tokens = 0
+                total_tokens = 0
+                cost = 0.0
+                latency_s = 0
+        
+        # Save results
+        output_file = output_dir / png_file.with_suffix('.md').name
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(extracted_text)
+        logging.info(f"✓ {png_file.name}: Saved to {output_file.name}")
+        
+        # Return metrics
+        return {
+            'file': png_file.name,
+            'success': True,
+            'prompt_tokens': prompt_tokens,
+            'completion_tokens': completion_tokens,
+            'total_tokens': total_tokens,
+            'cost': cost,
+            'latency_s': latency_s
+        }
+        
+    except Exception as e:
+        logging.error(f"✗ {png_file.name}: {type(e).__name__}: {str(e)[:200]}")
+        logging.exception(f"Exception details for {png_file.name}:")
+        
+        return {
+            'file': png_file.name,
+            'success': False,
+            'error': str(e),
+            'prompt_tokens': 0,
+            'completion_tokens': 0,
+            'total_tokens': 0,
+            'cost': 0.0,
+            'latency_s': 0
+        }
+
+
 def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
-                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None):
-    """Process images using BAML for text extraction."""
+                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, max_workers=1):
+    """Process images using BAML for text extraction.
+    
+    Args:
+        api_key: OpenRouter API key
+        directory_path: Directory containing images
+        model_name: Model to use
+        model_pricing: Pricing information
+        book_filter: Optional book name filter
+        chapter_start: Optional starting chapter
+        chapter_end: Optional ending chapter
+        max_workers: Number of concurrent workers (default: 1 for sequential processing)
+    """
     
     # Set API key as environment variable for BAML to use
     os.environ["OPENROUTER_API_KEY"] = api_key
@@ -473,165 +610,125 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
     
     # Initialize metrics tracking
     metrics_file = output_dir / "metrics.jsonl"
-    total_cost = 0.0
-    total_prompt_tokens = 0
-    total_completion_tokens = 0
-    total_images = 0
+    metrics_lock = Lock()  # Thread-safe metrics writing
     
-    # Process each image
-    for i, png_file in enumerate(png_files, 1):
-        logging.info("")
-        logging.info("="*60)
-        logging.info(f"Processing image {i}/{len(png_files)}: {png_file.name}")
-        logging.info("="*60)
-        
-        try:
-            # Load metadata (required)
-            metadata = load_metadata(png_file)
-            book = metadata.get('book', 'Unknown')
-            chapter = metadata.get('chapter', 'Unknown')
-            verse = metadata.get('verse', 'Unknown')
-            page_number = metadata.get('page_number', 'Unknown')
-            logging.info(f"Metadata: {book} {chapter}:{verse} (Page {page_number})")
-            
-            # Load OCR markdown if available
-            ocr_markdown = load_ocr_markdown(png_file)
-            if ocr_markdown:
-                logging.info(f"Loaded OCR markdown ({len(ocr_markdown)} characters)")
-            
-            # Extract and format Hebrew verses from metadata
-            hebrew_text_dict = metadata.get('hebrew_text', {})
-            hebrew_verses = format_hebrew_verses(hebrew_text_dict)
-            if hebrew_verses:
-                logging.info(f"Loaded Hebrew text for {len(hebrew_text_dict)} verse(s)")
-            
-            # Create BAML image from file
-            with open(png_file, 'rb') as f:
-                import base64
-                image_b64 = base64.b64encode(f.read()).decode('utf-8')
-            baml_image = Image.from_base64("image/png", image_b64)
-            
-            # Create a collector for this image
-            collector = Collector(name=f"{png_file.stem}")
-            
-            # Call BAML with enhanced context and retry logic
-            logging.info("Calling BAML ExtractTextFromImage with metadata, Hebrew, and OCR context...")
-            # Note: BAML uses the client defined in main.baml (OpenRouter client)
-            # The model cannot be dynamically changed per call in current BAML version
-            extracted_text = call_baml_with_retry(
-                baml_image=baml_image,
-                book=str(book),
-                chapter=str(chapter),
-                verse=str(verse),
-                page_number=str(page_number),
-                hebrew_text=hebrew_verses if hebrew_verses else None,
-                ocr_text=ocr_markdown if ocr_markdown else None,
-                collector=collector,
-                max_retries=10  # Allow up to 10 attempts (increased for robustness)
-            )
-            
-            logging.info(f"Successfully extracted text ({len(extracted_text)} characters)")
-            preview = extracted_text[:200] + "..." if len(extracted_text) > 200 else extracted_text
-            logging.info(f"Preview: {preview}")
-            
-            # Extract metrics from collector
-            metrics = extract_metrics_from_collector(collector, model_pricing)
-            
-            if metrics:
-                prompt_tokens = metrics['prompt_tokens']
-                completion_tokens = metrics['completion_tokens']
-                total_tokens = metrics['total_tokens']
-                cost = metrics['cost']
-                latency_s = metrics['latency_s']
-                
-                logging.info(f"Tokens: {prompt_tokens:,} prompt + {completion_tokens:,} completion = {total_tokens:,} total")
-                if model_pricing:
-                    logging.info(f"Cost: ${cost:.6f}")
-                logging.info(f"Latency: {latency_s:.1f}s")
-                
-                total_cost += cost
-                total_prompt_tokens += prompt_tokens
-                total_completion_tokens += completion_tokens
-                total_images += 1
-            else:
-                # Fallback to BAML output capture if collector doesn't work
-                logging.warning("Collector did not return metrics, trying BAML output capture...")
-                tokens_from_baml = baml_capture.get_tokens_and_reset()
-                
-                if tokens_from_baml:
-                    prompt_tokens = tokens_from_baml['prompt_tokens']
-                    completion_tokens = tokens_from_baml['completion_tokens']
-                    total_tokens = prompt_tokens + completion_tokens
-                    cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
-                    
-                    logging.info(f"Tokens: {prompt_tokens:,} prompt + {completion_tokens:,} completion = {total_tokens:,} total")
-                    if model_pricing:
-                        logging.info(f"Cost: ${cost:.6f}")
-                    
-                    total_cost += cost
-                    total_prompt_tokens += prompt_tokens
-                    total_completion_tokens += completion_tokens
-                    total_images += 1
-                else:
-                    logging.warning("Could not extract token counts from any source")
-                    prompt_tokens = 0
-                    completion_tokens = 0
-                    total_tokens = 0
-                    cost = 0.0
-                    total_images += 1
-            
-            # Save results
-            output_file = output_dir / png_file.with_suffix('.md').name
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(extracted_text)
-            logging.info(f"Results saved to: {output_file}")
-            
-            # Log metrics
-            metrics_entry = {
-                "timestamp": datetime.now().isoformat(),
-                "file": png_file.name,
-                "model": model_name,
-                "tokens": {
-                    "prompt": prompt_tokens,
-                    "completion": completion_tokens,
-                    "total": total_tokens
-                },
-                "cost": cost,
-                "success": True
-            }
-            with open(metrics_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(metrics_entry) + '\n')
-            
-        except Exception as e:
-            error_msg = f"Error processing {png_file.name}: {str(e)}"
-            logging.error(error_msg)
-            logging.exception("Exception details:")
-            
-            metrics_entry = {
-                "timestamp": datetime.now().isoformat(),
-                "file": png_file.name,
-                "model": model_name,
-                "error": str(e),
-                "success": False
-            }
-            with open(metrics_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(metrics_entry) + '\n')
-            continue
+    # Prepare list of images with metadata
+    images_to_process = [(png_file, load_metadata(png_file)) for png_file in png_files]
     
-    # Print summary
     logging.info("")
     logging.info("="*60)
-    logging.info("PROCESSING COMPLETE")
+    logging.info(f"Starting processing with {max_workers} worker(s)")
     logging.info("="*60)
-    logging.info(f"Total images processed: {total_images}")
-    logging.info(f"Total tokens: {total_prompt_tokens + total_completion_tokens:,}")
-    logging.info(f"  - Prompt tokens: {total_prompt_tokens:,}")
-    logging.info(f"  - Completion tokens: {total_completion_tokens:,}")
-    logging.info(f"Total cost: ${total_cost:.6f}")
-    if total_images > 0:
-        logging.info(f"Average cost per image: ${total_cost/total_images:.6f}")
+    
+    # Process images in parallel or sequentially
+    all_results = []
+    
+    if max_workers == 1:
+        # Sequential processing
+        for i, (png_file, metadata) in enumerate(images_to_process, 1):
+            logging.info("")
+            logging.info(f"[{i}/{len(images_to_process)}] Processing {png_file.name}")
+            result = process_single_image(png_file, metadata, output_dir, model_pricing, baml_capture)
+            all_results.append(result)
+            
+            # Write metrics immediately
+            metrics_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "file": result['file'],
+                "model": model_name,
+                "tokens": {
+                    "prompt": result['prompt_tokens'],
+                    "completion": result['completion_tokens'],
+                    "total": result['total_tokens']
+                },
+                "cost": result['cost'],
+                "success": result['success']
+            }
+            if not result['success']:
+                metrics_entry['error'] = result.get('error', 'Unknown error')
+            
+            with open(metrics_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(metrics_entry) + '\n')
+    else:
+        # Parallel processing
+        logging.info(f"Using ThreadPoolExecutor with {max_workers} workers")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_image = {}
+            for i, (png_file, metadata) in enumerate(images_to_process, 1):
+                future = executor.submit(process_single_image, png_file, metadata, output_dir, model_pricing, baml_capture)
+                future_to_image[future] = (i, png_file.name)
+            
+            # Collect results as they complete
+            completed = 0
+            for future in as_completed(future_to_image):
+                completed += 1
+                i, filename = future_to_image[future]
+                
+                try:
+                    result = future.result()
+                    all_results.append(result)
+                    
+                    # Write metrics with thread safety
+                    metrics_entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "file": result['file'],
+                        "model": model_name,
+                        "tokens": {
+                            "prompt": result['prompt_tokens'],
+                            "completion": result['completion_tokens'],
+                            "total": result['total_tokens']
+                        },
+                        "cost": result['cost'],
+                        "success": result['success']
+                    }
+                    if not result['success']:
+                        metrics_entry['error'] = result.get('error', 'Unknown error')
+                    
+                    with metrics_lock:
+                        with open(metrics_file, 'a', encoding='utf-8') as f:
+                            f.write(json.dumps(metrics_entry) + '\n')
+                    
+                    logging.info(f"Progress: {completed}/{len(images_to_process)} completed")
+                    
+                except Exception as e:
+                    logging.error(f"Unexpected error getting result for {filename}: {e}")
+                    all_results.append({
+                        'file': filename,
+                        'success': False,
+                        'error': str(e),
+                        'prompt_tokens': 0,
+                        'completion_tokens': 0,
+                        'total_tokens': 0,
+                        'cost': 0.0,
+                        'latency_s': 0
+                    })
+    
+    # Aggregate results
+    total_cost = sum(r['cost'] for r in all_results)
+    total_prompt_tokens = sum(r['prompt_tokens'] for r in all_results)
+    total_completion_tokens = sum(r['completion_tokens'] for r in all_results)
+    successful_images = sum(1 for r in all_results if r['success'])
+    failed_images = len(all_results) - successful_images
+    
+    # Print summary
+    logging.info("\n" + "="*60)
+    logging.info("PROCESSING SUMMARY")
+    logging.info("="*60)
+    logging.info(f"Total images: {len(all_results)}")
+    logging.info(f"Successful: {successful_images}")
+    if failed_images > 0:
+        logging.info(f"Failed: {failed_images}")
+    logging.info(f"Total tokens: {total_prompt_tokens:,} prompt + {total_completion_tokens:,} completion = {total_prompt_tokens + total_completion_tokens:,} total")
+    if model_pricing:
+        logging.info(f"Total cost: ${total_cost:.6f}")
+        if successful_images > 0:
+            logging.info(f"Average cost per image: ${total_cost/successful_images:.6f}")
     logging.info(f"Metrics saved to: {metrics_file}")
+    logging.info(f"Log file: {log_path}")
     logging.info("="*60)
+    logging.info("SESSION COMPLETED")
 
 
 # Load API key from environment variables
@@ -646,8 +743,20 @@ if __name__ == "__main__":
     parser.add_argument("--book", "-b", help="Filter by book name (e.g., Genesis)")
     parser.add_argument("--chapter-start", "-cs", type=int, help="Start chapter (inclusive)")
     parser.add_argument("--chapter-end", "-ce", type=int, help="End chapter (inclusive)")
+    parser.add_argument("--workers", "-w", type=int, default=1,
+                       help="Number of concurrent workers (default: 1). Use 2-4 for parallel processing.")
     
     args = parser.parse_args()
+    
+    # Validate workers
+    if args.workers < 1:
+        print("Error: --workers must be at least 1")
+        exit(1)
+    if args.workers > 10:
+        print("Warning: Using more than 10 workers may cause rate limiting or instability")
+        response = input("Continue anyway? (y/n): ")
+        if response.lower() != 'y':
+            exit(0)
     
     # Set model pricing (approximate values for qwen3-vl-235b-a22b-thinking)
     # Update these based on OpenRouter's pricing page: https://openrouter.ai/models
@@ -664,5 +773,6 @@ if __name__ == "__main__":
         model_pricing=model_pricing,
         book_filter=args.book,
         chapter_start=args.chapter_start,
-        chapter_end=args.chapter_end
+        chapter_end=args.chapter_end,
+        max_workers=args.workers
     )
