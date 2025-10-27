@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from baml_client.sync_client import b
 from baml_py import Image
 from baml_py.baml_py import ClientRegistry
+from baml_py.internal_monkeypatch import BamlClientHttpError
 
 # Load environment variables from .env file
 load_dotenv()
@@ -133,6 +134,85 @@ def matches_filter(metadata, book_filter, chapter_start, chapter_end):
             return False
     
     return True
+
+
+def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, ocr_text, max_retries=5):
+    """Call BAML ExtractTextFromImage with retry logic and exponential backoff.
+    
+    Args:
+        baml_image: BAML image object
+        book, chapter, verse, page_number: Metadata strings
+        hebrew_text, ocr_text: Optional context strings
+        max_retries: Maximum number of retry attempts (default: 5)
+        
+    Returns:
+        str: Extracted text
+        
+    Raises:
+        Exception: If all retry attempts fail
+    """
+    base_delay = 2  # Start with 2 second delay
+    max_delay = 60  # Cap at 60 seconds
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                logging.info(f"Retry attempt {attempt}/{max_retries-1}")
+            
+            extracted_text = b.ExtractTextFromImage(
+                baml_image,
+                book=book,
+                chapter=chapter,
+                verse=verse,
+                page_number=page_number,
+                hebrew_text=hebrew_text,
+                ocr_text=ocr_text
+            )
+            
+            # Success!
+            if attempt > 0:
+                logging.info(f"Succeeded after {attempt} retries")
+            return extracted_text
+            
+        except BamlClientHttpError as e:
+            error_msg = str(e)
+            is_retryable = False
+            
+            # Check if this is a retryable error
+            if "Failed to parse JSON" in error_msg and "EOF" in error_msg:
+                is_retryable = True
+                reason = "truncated JSON response"
+            elif "status_code=500" in error_msg or "status_code=502" in error_msg or "status_code=503" in error_msg:
+                is_retryable = True
+                reason = "server error"
+            elif "timeout" in error_msg.lower():
+                is_retryable = True
+                reason = "timeout"
+            elif "status_code=429" in error_msg:
+                is_retryable = True
+                reason = "rate limit"
+            
+            if is_retryable and attempt < max_retries - 1:
+                # Calculate exponential backoff delay
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                logging.warning(f"BAML call failed ({reason}), retrying in {delay}s... (attempt {attempt + 1}/{max_retries})")
+                logging.debug(f"Error details: {error_msg[:500]}")
+                time.sleep(delay)
+            else:
+                # Not retryable or out of retries
+                if not is_retryable:
+                    logging.error(f"Non-retryable error: {error_msg[:500]}")
+                else:
+                    logging.error(f"Max retries ({max_retries}) exceeded")
+                raise
+                
+        except Exception as e:
+            # Unexpected error, don't retry
+            logging.error(f"Unexpected error (non-retryable): {type(e).__name__}: {str(e)[:500]}")
+            raise
+    
+    # Should never reach here, but just in case
+    raise Exception(f"Failed after {max_retries} attempts")
 
 
 def fetch_latest_generation_cost(provisioning_key, model_name, start_time, max_wait_seconds=10):
@@ -336,18 +416,19 @@ def process_images_with_baml(api_key, provisioning_key, directory_path="extracte
             # Record start time for activity API lookup
             start_time = datetime.utcnow()
             
-            # Call BAML with enhanced context
+            # Call BAML with enhanced context and retry logic
             logging.info("Calling BAML ExtractTextFromImage with metadata, Hebrew, and OCR context...")
             # Note: BAML uses the client defined in main.baml (OpenRouter client)
             # The model cannot be dynamically changed per call in current BAML version
-            extracted_text = b.ExtractTextFromImage(
-                baml_image,
+            extracted_text = call_baml_with_retry(
+                baml_image=baml_image,
                 book=str(book),
                 chapter=str(chapter),
                 verse=str(verse),
                 page_number=str(page_number),
                 hebrew_text=hebrew_verses if hebrew_verses else None,
-                ocr_text=ocr_markdown if ocr_markdown else None
+                ocr_text=ocr_markdown if ocr_markdown else None,
+                max_retries=5  # Allow up to 5 attempts
             )
             
             logging.info(f"Successfully extracted text ({len(extracted_text)} characters)")
