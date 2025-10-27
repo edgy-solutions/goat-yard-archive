@@ -140,26 +140,57 @@ def fetch_latest_generation_cost(api_key, model_name, start_time, max_wait_secon
     }
     
     end_time = time.time() + max_wait_seconds
+    attempt = 0
     
     while time.time() < end_time:
+        attempt += 1
         try:
             response = requests.get(url, headers=headers, timeout=10)
+            
             if response.status_code == 200:
                 activity_data = response.json()
+                items = activity_data.get('data', [])
                 
-                for item in activity_data.get('data', []):
-                    if item.get('model') == model_name:
-                        created_at_str = item.get('created_at', '')
-                        if created_at_str:
-                            created_at = datetime.fromisoformat(created_at_str.replace('+00:00', ''))
-                            if created_at >= start_time and (created_at - start_time).total_seconds() < 120:
-                                return {
-                                    'generation_id': item.get('generation_id'),
-                                    'tokens_prompt': item.get('tokens_prompt', 0),
-                                    'tokens_completion': item.get('tokens_completion', 0),
-                                    'cost': item.get('usage', 0.0),
-                                    'created_at': created_at_str,
-                                }
+                # Log diagnostic info on first attempt
+                if attempt == 1:
+                    logging.info(f"Activity API returned {len(items)} items")
+                    if items:
+                        logging.info(f"Most recent activity: model={items[0].get('model')}, created_at={items[0].get('created_at')}")
+                
+                for item in items:
+                    item_model = item.get('model', '')
+                    item_created_at_str = item.get('created_at', '')
+                    
+                    # Check if model matches
+                    if item_model == model_name:
+                        if item_created_at_str:
+                            # Parse timestamp - handle both with and without timezone
+                            try:
+                                if '+' in item_created_at_str:
+                                    # Remove timezone for comparison
+                                    created_at = datetime.fromisoformat(item_created_at_str.replace('+00:00', ''))
+                                else:
+                                    created_at = datetime.fromisoformat(item_created_at_str)
+                                
+                                # Make comparison timezone-agnostic
+                                time_diff = (created_at - start_time).total_seconds()
+                                
+                                if time_diff >= -5 and time_diff < 180:  # Allow 5s buffer before, up to 3 minutes after
+                                    logging.info(f"Found matching generation: {item.get('generation_id')} (time_diff={time_diff:.1f}s)")
+                                    return {
+                                        'generation_id': item.get('generation_id'),
+                                        'tokens_prompt': item.get('tokens_prompt', 0),
+                                        'tokens_completion': item.get('tokens_completion', 0),
+                                        'cost': item.get('usage', 0.0),
+                                        'created_at': item_created_at_str,
+                                    }
+                                elif attempt == 1:
+                                    logging.info(f"Found model {model_name} but time_diff={time_diff:.1f}s is outside window")
+                            except Exception as e:
+                                logging.info(f"Error parsing timestamp {item_created_at_str}: {e}")
+                                continue
+            else:
+                logging.warning(f"Activity API returned status {response.status_code}: {response.text[:200]}")
             
             time.sleep(1)
             
@@ -167,6 +198,7 @@ def fetch_latest_generation_cost(api_key, model_name, start_time, max_wait_secon
             logging.warning(f"Error fetching activity data: {e}")
             time.sleep(1)
     
+    logging.info(f"No matching generation found after {attempt} attempts over {max_wait_seconds}s")
     return None
 
 
