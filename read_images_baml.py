@@ -10,7 +10,7 @@ import requests
 import time
 from pathlib import Path
 from datetime import datetime
-from baml_client import b
+from baml_client.sync_client import b
 from baml_py import Image
 from baml_py.baml_py import ClientRegistry
 
@@ -22,18 +22,42 @@ def setup_logging(output_dir, model_name):
     log_filename = f"processing_{model_safe}_{timestamp}.log"
     log_path = output_dir / log_filename
     
+    # Clear existing handlers
     logger = logging.getLogger()
     logger.handlers.clear()
     
+    # Create handlers
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    console_handler = logging.StreamHandler(sys.stdout)
+    
+    # Set format
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Configure root logger
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_path, encoding='utf-8'),
-            logging.StreamHandler(sys.stdout)
-        ],
+        handlers=[file_handler, console_handler],
         force=True
     )
+    
+    # Also configure BAML logger to use the same handlers
+    baml_logger = logging.getLogger('baml')
+    baml_logger.setLevel(logging.INFO)
+    baml_logger.handlers.clear()
+    baml_logger.addHandler(file_handler)
+    baml_logger.addHandler(console_handler)
+    baml_logger.propagate = False  # Don't propagate to root logger
+    
+    # Configure baml_py logger
+    baml_py_logger = logging.getLogger('baml_py')
+    baml_py_logger.setLevel(logging.INFO)
+    baml_py_logger.handlers.clear()
+    baml_py_logger.addHandler(file_handler)
+    baml_py_logger.addHandler(console_handler)
+    baml_py_logger.propagate = False
     
     return str(log_path)
 
