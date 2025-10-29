@@ -532,7 +532,7 @@ def process_single_image(png_file, metadata, output_dir, model_pricing, baml_cap
 
 
 def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
-                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, max_workers=1):
+                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, max_workers=1, skip_existing=True):
     """Process images using BAML for text extraction.
     
     Args:
@@ -544,16 +544,23 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
         chapter_start: Optional starting chapter
         chapter_end: Optional ending chapter
         max_workers: Number of concurrent workers (default: 1 for sequential processing)
+        skip_existing: Skip images that already have MD files in output directory (default: True)
     """
     
     # Set API key as environment variable for BAML to use
     os.environ["OPENROUTER_API_KEY"] = api_key
+    
+    # Create output directory first (needed for checking existing files)
+    model_dir_name = model_name.replace("/", "_")
+    output_dir = Path(directory_path) / model_dir_name
+    output_dir.mkdir(exist_ok=True)
     
     # Filter and collect PNG files
     all_png_files = list(Path(directory_path).glob("*.png"))
     png_files = []
     skipped_no_metadata = 0
     skipped_filtered = 0
+    skipped_existing = 0
     
     for png_file in all_png_files:
         metadata = load_metadata(png_file)
@@ -562,6 +569,13 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
         if metadata is None:
             skipped_no_metadata += 1
             continue
+        
+        # Check if output file already exists
+        if skip_existing:
+            output_file = output_dir / png_file.with_suffix('.md').name
+            if output_file.exists():
+                skipped_existing += 1
+                continue
         
         # If filters are specified, check if metadata matches
         if book_filter or chapter_start or chapter_end:
@@ -575,11 +589,6 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
     
     if not png_files:
         pass
-    
-    # Create output directory
-    model_dir_name = model_name.replace("/", "_")
-    output_dir = Path(directory_path) / model_dir_name
-    output_dir.mkdir(exist_ok=True)
     
     # Setup logging
     log_path, baml_capture = setup_logging(output_dir, model_name)
@@ -610,6 +619,8 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
     
     logging.info(f"\nFound {len(all_png_files)} total images")
     logging.info(f"Skipped {skipped_no_metadata} images without metadata")
+    if skip_existing and skipped_existing > 0:
+        logging.info(f"Skipped {skipped_existing} images with existing output files")
     logging.info(f"Skipped {skipped_filtered} images not matching filters")
     logging.info(f"Processing {len(png_files)} images")
     
@@ -757,6 +768,8 @@ if __name__ == "__main__":
     parser.add_argument("--chapter-end", "-ce", type=int, help="End chapter (inclusive)")
     parser.add_argument("--workers", "-w", type=int, default=1,
                        help="Number of concurrent workers (default: 1). Use 2-4 for parallel processing.")
+    parser.add_argument("--no-skip", action="store_true",
+                       help="Process all images even if output files already exist (default: skip existing)")
     
     args = parser.parse_args()
     
@@ -786,5 +799,6 @@ if __name__ == "__main__":
         book_filter=args.book,
         chapter_start=args.chapter_start,
         chapter_end=args.chapter_end,
-        max_workers=args.workers
+        max_workers=args.workers,
+        skip_existing=not args.no_skip
     )
