@@ -185,12 +185,36 @@ def load_ocr_markdown(image_path):
 
 
 def format_hebrew_verses(hebrew_dict):
-    """Format Hebrew verses from metadata."""
+    """Format Hebrew verses from metadata.
+    
+    Handles both simple verse numbers (e.g., "1", "2") and chapter-spanning
+    verse references (e.g., "7:22", "27:42-46").
+    """
     if not hebrew_dict:
         return ""
     
+    def verse_sort_key(verse_key):
+        """Create a sort key that handles both simple and chapter:verse formats."""
+        try:
+            # Try simple integer parsing first
+            return (0, int(verse_key), 0)
+        except ValueError:
+            # Handle chapter:verse format (e.g., "7:22" or "27:42-46")
+            if ':' in verse_key:
+                parts = verse_key.split(':')
+                try:
+                    chapter = int(parts[0])
+                    # Extract first verse number (handle ranges like "42-46")
+                    verse_part = parts[1].split('-')[0].split(',')[0]
+                    verse = int(verse_part)
+                    return (chapter, verse, 0)
+                except (ValueError, IndexError):
+                    pass
+            # Fallback: use string sorting
+            return (999999, 0, verse_key)
+    
     verses = []
-    for verse_num, verse_text in sorted(hebrew_dict.items(), key=lambda x: int(x[0])):
+    for verse_num, verse_text in sorted(hebrew_dict.items(), key=lambda x: verse_sort_key(x[0])):
         verses.append(f"{verse_num}. {verse_text}")
     
     return "\n".join(verses)
