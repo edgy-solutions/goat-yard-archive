@@ -343,26 +343,38 @@ def extract_metrics_from_collector(collector, model_pricing):
         dict: Metrics including tokens and cost, or None if unavailable
     """
     try:
-        if not collector or not collector.last:
+        if not collector:
             return None
         
-        last_log = collector.last
-        usage = last_log.usage
+        # Try using collector.usage directly (newer BAML API)
+        usage = collector.usage
+        
+        if not usage:
+            # Fall back to collector.last.usage if needed
+            if hasattr(collector, 'last') and collector.last:
+                usage = collector.last.usage
         
         if not usage:
             return None
         
-        # Extract token counts from usage
-        prompt_tokens = usage.input_tokens or 0
-        completion_tokens = usage.output_tokens or 0
-        total_tokens = usage.total_tokens or (prompt_tokens + completion_tokens)
+        # Extract token counts from usage object
+        # Try different attribute names that OpenRouter might use
+        prompt_tokens = (getattr(usage, 'input_tokens', None) or 
+                        getattr(usage, 'prompt_tokens', None) or 0)
+        completion_tokens = (getattr(usage, 'output_tokens', None) or 
+                            getattr(usage, 'completion_tokens', None) or 0)
+        total_tokens = getattr(usage, 'total_tokens', None) or (prompt_tokens + completion_tokens)
         
         # Calculate cost
         cost = calculate_cost(prompt_tokens, completion_tokens, model_pricing)
         
-        # Get latency in seconds
-        latency_ms = last_log.latency_ms or 0
-        latency_s = latency_ms / 1000.0
+        # Get latency from collector.last if available
+        latency_s = 0
+        model_name = 'unknown'
+        if hasattr(collector, 'last') and collector.last:
+            latency_ms = getattr(collector.last, 'latency_ms', 0) or 0
+            latency_s = latency_ms / 1000.0
+            model_name = getattr(collector.last, 'model_name', 'unknown') or 'unknown'
         
         return {
             'prompt_tokens': prompt_tokens,
@@ -370,7 +382,7 @@ def extract_metrics_from_collector(collector, model_pricing):
             'total_tokens': total_tokens,
             'cost': cost,
             'latency_s': latency_s,
-            'model': last_log.model_name or 'unknown'
+            'model': model_name
         }
     except Exception as e:
         logging.debug(f"Error extracting metrics from collector: {e}")
