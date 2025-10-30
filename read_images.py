@@ -598,7 +598,7 @@ def get_fallback_models():
     }
 
 # Configuration
-API_KEY = "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"     # Replace with your actual API key
+API_KEY = os.getenv("OPENROUTER_API_KEY")
 DIRECTORY_PATH = "./extracted_images"  # Replace with your directory path
 
 if __name__ == "__main__":

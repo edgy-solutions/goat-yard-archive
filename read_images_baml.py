@@ -779,7 +779,7 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
 
 
 # Load API key from environment variables
-API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract text from images using BAML and OpenRouter")
