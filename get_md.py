@@ -154,11 +154,105 @@ BOOK_NAME_TO_USFM = {
     'Malachi': '40-MALhbo.usfm',
 }
 
+BOOK_NAME_TO_GREEK_USFM = {
+    'Matthew': '46-MATgrctr.usfm',
+    'Mark': '47-MRKgrctr.usfm',
+    'Luke': '48-LUKgrctr.usfm',
+    'John': '49-JHNgrctr.usfm',
+    'Acts': '50-ACTgrctr.usfm',
+    'Romans': '51-ROMgrctr.usfm',
+    '1Corinthians': '52-1COgrctr.usfm',
+    '1 Corinthians': '52-1COgrctr.usfm',
+    '2Corinthians': '53-2COgrctr.usfm',
+    '2 Corinthians': '53-2COgrctr.usfm',
+    'Galatians': '54-GALgrctr.usfm',
+    'Ephesians': '55-EPHgrctr.usfm',
+    'Philippians': '56-PHPgrctr.usfm',
+    'Colossians': '57-COLgrctr.usfm',
+    '1Thessalonians': '58-1THgrctr.usfm',
+    '1 Thessalonians': '58-1THgrctr.usfm',
+    '2Thessalonians': '59-2THgrctr.usfm',
+    '2 Thessalonians': '59-2THgrctr.usfm',
+    '1Timothy': '60-1TIgrctr.usfm',
+    '1 Timothy': '60-1TIgrctr.usfm',
+    '2Timothy': '61-2TIgrctr.usfm',
+    '2 Timothy': '61-2TIgrctr.usfm',
+    'Titus': '62-TITgrctr.usfm',
+    'Philemon': '63-PHMgrctr.usfm',
+    'Hebrews': '64-HEBgrctr.usfm',
+    'James': '65-JASgrctr.usfm',
+    '1Peter': '66-1PEgrctr.usfm',
+    '1 Peter': '66-1PEgrctr.usfm',
+    '2Peter': '67-2PEgrctr.usfm',
+    '2 Peter': '67-2PEgrctr.usfm',
+    '1John': '68-1JNgrctr.usfm',
+    '1 John': '68-1JNgrctr.usfm',
+    '2John': '69-2JNgrctr.usfm',
+    '2 John': '69-2JNgrctr.usfm',
+    '3John': '70-3JNgrctr.usfm',
+    '3 John': '70-3JNgrctr.usfm',
+    'Jude': '71-JUDgrctr.usfm',
+    'Revelation': '72-REVgrctr.usfm',
+}
+
+# Old Testament books (end at Malachi)
+OLD_TESTAMENT_BOOKS = [
+    'GENESIS', 'EXODUS', 'LEVITICUS', 'NUMBERS', 'DEUTERONOMY',
+    'JOSHUA', 'JUDGES', 'RUTH', '1 SAMUEL', '2 SAMUEL',
+    '1 KINGS', '2 KINGS', '1 CHRONICLES', '2 CHRONICLES',
+    'EZRA', 'NEHEMIAH', 'ESTHER', 'JOB', 'PSALMS',
+    'PROVERBS', 'ECCLESIASTES', 'SONG OF SOLOMON', 'ISAIAH',
+    'JEREMIAH', 'LAMENTATIONS', 'EZEKIEL', 'DANIEL',
+    'HOSEA', 'JOEL', 'AMOS', 'OBADIAH', 'JONAH',
+    'MICAH', 'NAHUM', 'HABAKKUK', 'ZEPHANIAH', 'HAGGAI',
+    'ZECHARIAH', 'MALACHI'
+]
+
+# New Testament books (start at Matthew)
+NEW_TESTAMENT_BOOKS = [
+    'MATTHEW', 'MARK', 'LUKE', 'JOHN', 'ACTS',
+    'ROMANS', '1 CORINTHIANS', '2 CORINTHIANS', 'GALATIANS',
+    'EPHESIANS', 'PHILIPPIANS', 'COLOSSIANS', '1 THESSALONIANS',
+    '2 THESSALONIANS', '1 TIMOTHY', '2 TIMOTHY', 'TITUS',
+    'PHILEMON', 'HEBREWS', 'JAMES', '1 PETER', '2 PETER',
+    '1 JOHN', '2 JOHN', '3 JOHN', 'JUDE', 'REVELATION'
+]
+
+def is_new_testament(book_name):
+    """Check if a book is in the New Testament."""
+    if not book_name:
+        return False
+    return book_name.upper() in NEW_TESTAMENT_BOOKS
+
+def is_old_testament(book_name):
+    """Check if a book is in the Old Testament."""
+    if not book_name:
+        return False
+    return book_name.upper() in OLD_TESTAMENT_BOOKS
+
 def get_usfm_directory():
     """Get the path to the hbo_usfm directory."""
     script_dir = Path(__file__).parent
     usfm_dir = script_dir / 'hbo_usfm'
     return usfm_dir if usfm_dir.exists() else None
+
+def get_greek_usfm_directory(version='grctr'):
+    """Get the path to the Greek USFM directory."""
+    script_dir = Path(__file__).parent
+    usfm_dir = script_dir / 'grctr_usfm'
+    return usfm_dir if usfm_dir.exists() else None
+
+def get_available_greek_versions():
+    """Get list of available Greek USFM versions."""
+    script_dir = Path(__file__).parent
+    greek_dir = script_dir / 'grctr_usfm'
+    if not greek_dir.exists():
+        return []
+    
+    # Check for version-specific directories or extract from filenames
+    # Currently only one version (grctr) available
+    versions = ['grctr']  # Greek Text Receptus
+    return versions
 
 def get_english_usfm_directory():
     """Get the path to the eng-kjv2006_usfm directory."""
@@ -564,6 +658,158 @@ def get_hebrew_verse(book_name, chapter, verse):
             pass
     
     return result if result else None
+
+
+def get_greek_verse_spanning(book_name, verse_notation, greek_version='grctr'):
+    """
+    Extract Greek verses from USFM files using chapter-spanning notation.
+    
+    Args:
+        book_name: Name of the book (English)
+        verse_notation: Chapter-spanning notation (e.g., "27:42-46,28:1")
+        greek_version: Greek USFM version to use (default: 'grctr')
+    
+    Returns:
+        Dictionary with verse text organized by chapter:verse keys or None if not found
+        Example: {"27:42": "text", "27:43": "text", ..., "28:1": "text"}
+    """
+    from verse_notation import parse_verse_notation
+    
+    parsed = parse_verse_notation(verse_notation)
+    if not parsed:
+        log_print(f"Warning: Could not parse verse notation: {verse_notation}")
+        return None
+    
+    usfm_dir = get_greek_usfm_directory(greek_version)
+    if not usfm_dir:
+        log_print(f"Warning: Greek USFM directory not found for version '{greek_version}'")
+        return None
+    
+    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    usfm_filename = None
+    for key, value in BOOK_NAME_TO_GREEK_USFM.items():
+        if key.lower() == book_name_normalized:
+            usfm_filename = value
+            break
+    
+    if not usfm_filename:
+        log_print(f"Warning: Could not find Greek USFM file for book '{book_name}'")
+        return None
+    
+    usfm_path = usfm_dir / usfm_filename
+    if not usfm_path.exists():
+        log_print(f"Warning: Greek USFM file not found: {usfm_path}")
+        return None
+    
+    chapters_data = parse_usfm_file(usfm_path)
+    result = {}
+    
+    for span in parsed:
+        chapter_num = span['chapter']
+        verse_list = span['verses']
+        
+        if chapter_num not in chapters_data:
+            log_print(f"Warning: Chapter {chapter_num} not found in {book_name}")
+            continue
+        
+        chapter_verses = chapters_data[chapter_num]
+        
+        for v in verse_list:
+            if v in chapter_verses:
+                key = f"{chapter_num}:{v}"
+                result[key] = chapter_verses[v]
+    
+    return result if result else None
+
+
+def get_greek_verse(book_name, chapter, verse, greek_version='grctr'):
+    """
+    Extract Greek verse(s) from USFM files.
+    
+    Args:
+        book_name: Name of the book (English)
+        chapter: Chapter number (int) - may be ignored if verse contains chapter notation
+        verse: Verse number or range/list (str or int)
+                Examples: 
+                - Single chapter: "3", "3-5", "3,4,5"
+                - Chapter-spanning: "27:42-46,28:1" (new notation)
+        greek_version: Greek USFM version to use (default: 'grctr')
+    
+    Returns:
+        Dictionary with verse text or None if not found
+    """
+    if not book_name or not verse:
+        return None
+    
+    # Check if verse contains chapter-spanning notation
+    verse_str = str(verse)
+    if ':' in verse_str:
+        log_print(f"DEBUG: Detected chapter-spanning notation for Greek: {verse_str}")
+        return get_greek_verse_spanning(book_name, verse_str, greek_version)
+    
+    usfm_dir = get_greek_usfm_directory(greek_version)
+    if not usfm_dir:
+        log_print(f"Warning: Greek USFM directory not found for version '{greek_version}'")
+        return None
+    
+    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    usfm_filename = None
+    for key, value in BOOK_NAME_TO_GREEK_USFM.items():
+        if key.lower() == book_name_normalized:
+            usfm_filename = value
+            break
+    
+    if not usfm_filename:
+        log_print(f"Warning: Could not find Greek USFM file for book '{book_name}'")
+        return None
+    
+    usfm_path = usfm_dir / usfm_filename
+    if not usfm_path.exists():
+        log_print(f"Warning: Greek USFM file not found: {usfm_path}")
+        return None
+    
+    chapters_data = parse_usfm_file(usfm_path)
+    
+    if chapter not in chapters_data:
+        log_print(f"Warning: Chapter {chapter} not found in {book_name}")
+        return None
+    
+    chapter_verses = chapters_data[chapter]
+    result = {}
+    verse_str = str(verse)
+    
+    if '-' in verse_str:
+        parts = verse_str.split('-')
+        if len(parts) == 2:
+            try:
+                start_verse = int(parts[0])
+                end_verse = int(parts[1])
+                for v in range(start_verse, end_verse + 1):
+                    if v in chapter_verses:
+                        result[str(v)] = chapter_verses[v]
+            except ValueError:
+                pass
+    
+    elif ',' in verse_str:
+        verse_nums = verse_str.split(',')
+        for v_str in verse_nums:
+            try:
+                v = int(v_str.strip())
+                if v in chapter_verses:
+                    result[str(v)] = chapter_verses[v]
+            except ValueError:
+                continue
+    
+    else:
+        try:
+            v = int(verse_str)
+            if v in chapter_verses:
+                result[str(v)] = chapter_verses[v]
+        except ValueError:
+            pass
+    
+    return result if result else None
+
 
 def validate_metadata_with_ollama(image_path, metadata):
     """
@@ -2331,19 +2577,45 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         # Pass found_verses from Step 2 to avoid re-finding them
         metadata = validate_and_correct_metadata(metadata, prev_metadata, tsv_data_eng, found_verses)
     
-    # Step 6: Add Hebrew verses to validated metadata
-    log_print("\nStep 6: Extracting Hebrew verses from USFM...")
+    # Step 6: Add Hebrew or Greek verses to validated metadata based on book
+    book_name = metadata.get('book_name')
+    chapter = metadata.get('chapter')
+    verse = metadata.get('verse')
+    
     hebrew_verses = None
-    if metadata.get('book_name') and metadata.get('chapter') and metadata.get('verse'):
-        hebrew_verses = get_hebrew_verse(
-            metadata['book_name'],
-            metadata['chapter'],
-            metadata['verse']
-        )
-        if hebrew_verses:
-            log_print(f"Found {len(hebrew_verses)} Hebrew verse(s)")
+    greek_verses = None
+    
+    if book_name and chapter and verse:
+        if is_old_testament(book_name):
+            log_print("\nStep 6: Extracting Hebrew verses from USFM...")
+            hebrew_verses = get_hebrew_verse(book_name, chapter, verse)
+            if hebrew_verses:
+                log_print(f"Found {len(hebrew_verses)} Hebrew verse(s)")
+        elif is_new_testament(book_name):
+            log_print("\nStep 6: Extracting Greek verses from USFM...")
+            # Check for available Greek versions
+            available_versions = get_available_greek_versions()
+            if not available_versions:
+                log_print("Warning: No Greek USFM versions available")
+            elif len(available_versions) == 1:
+                greek_version = available_versions[0]
+                log_print(f"Using Greek version: {greek_version}")
+                greek_verses = get_greek_verse(book_name, chapter, verse, greek_version)
+                if greek_verses:
+                    log_print(f"Found {len(greek_verses)} Greek verse(s)")
+            else:
+                # Multiple versions available - prompt user
+                log_print(f"\nAvailable Greek versions: {', '.join(available_versions)}")
+                log_print("Using default version: grctr")
+                greek_version = 'grctr'
+                greek_verses = get_greek_verse(book_name, chapter, verse, greek_version)
+                if greek_verses:
+                    log_print(f"Found {len(greek_verses)} Greek verse(s)")
+        else:
+            log_print(f"\nStep 6: Book '{book_name}' not recognized as OT or NT, skipping original language extraction")
     
     metadata['hebrew_text'] = hebrew_verses
+    metadata['greek_text'] = greek_verses
     
     # Step 7: Save final metadata
     json_path = base_name + '_metadata.json'

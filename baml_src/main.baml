@@ -84,6 +84,7 @@ function ExtractTextFromImage(
   verse: string?,
   page_number: string?,
   hebrew_text: string?,
+  greek_text: string?,
   ocr_text: string?
 ) -> string {
   client OpenRouter
@@ -100,7 +101,11 @@ function ExtractTextFromImage(
     {% endif %}
     
     {% if hebrew_text %}
-    Original Hebrew verse the commentary is referring to is provided as a reference to use the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.
+    Original Hebrew verse the commentary is referring to is provided as a reference to ensure the Hebrew in the text is properly interpreted. Please match the Hebrew letter order as it is in the image and reference.
+    {% endif %}
+    
+    {% if greek_text %}
+    Original Greek verse the commentary is referring to is provided as a reference to ensure the Greek in the text is properly interpreted. Please match the Greek letter order as it is in the image and reference.
     {% endif %}
     
     {% if book or chapter or verse or page_number %}
@@ -116,6 +121,12 @@ function ExtractTextFromImage(
     
     === ORIGINAL HEBREW VERSES ===
     {{ hebrew_text }}
+    {% endif %}
+    
+    {% if greek_text %}
+    
+    === ORIGINAL GREEK VERSES ===
+    {{ greek_text }}
     {% endif %}
     
     {% if ocr_text %}

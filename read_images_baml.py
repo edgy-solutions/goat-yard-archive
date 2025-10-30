@@ -240,13 +240,13 @@ def matches_filter(metadata, book_filter, chapter_start, chapter_end):
     return True
 
 
-def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, ocr_text, collector, max_retries=10):
+def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_text, greek_text, ocr_text, collector, max_retries=10):
     """Call BAML ExtractTextFromImage with robust retry logic and exponential backoff with jitter.
     
     Args:
         baml_image: BAML image object
         book, chapter, verse, page_number: Metadata strings
-        hebrew_text, ocr_text: Optional context strings
+        hebrew_text, greek_text, ocr_text: Optional context strings
         collector: BAML Collector instance for tracking metrics
         max_retries: Maximum number of retry attempts (default: 10)
         
@@ -271,6 +271,7 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
                 verse=verse,
                 page_number=page_number,
                 hebrew_text=hebrew_text,
+                greek_text=greek_text,
                 ocr_text=ocr_text,
                 baml_options={"collector": collector}
             )
@@ -460,11 +461,17 @@ def process_single_image(png_file, metadata, output_dir, model_pricing, baml_cap
         if ocr_markdown:
             logging.debug(f"Loaded OCR markdown ({len(ocr_markdown)} characters)")
         
-        # Extract and format Hebrew verses from metadata
+        # Extract and format Hebrew verses from metadata (for OT books)
         hebrew_text_dict = metadata.get('hebrew_text', {})
         hebrew_verses = format_hebrew_verses(hebrew_text_dict)
         if hebrew_verses:
             logging.debug(f"Loaded Hebrew text for {len(hebrew_text_dict)} verse(s)")
+        
+        # Extract and format Greek verses from metadata (for NT books)
+        greek_text_dict = metadata.get('greek_text', {})
+        greek_verses = format_hebrew_verses(greek_text_dict)  # Reuse format function, works for Greek too
+        if greek_verses:
+            logging.debug(f"Loaded Greek text for {len(greek_text_dict)} verse(s)")
         
         # Create BAML image from file
         with open(png_file, 'rb') as f:
@@ -484,6 +491,7 @@ def process_single_image(png_file, metadata, output_dir, model_pricing, baml_cap
             verse=str(verse),
             page_number=str(page_number),
             hebrew_text=hebrew_verses if hebrew_verses else None,
+            greek_text=greek_verses if greek_verses else None,
             ocr_text=ocr_markdown if ocr_markdown else None,
             collector=collector,
             max_retries=10
