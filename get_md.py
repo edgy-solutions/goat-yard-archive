@@ -156,9 +156,21 @@ BOOK_NAME_TO_USFM = {
 
 BOOK_NAME_TO_GREEK_USFM = {
     'Matthew': '46-MATgrctr.usfm',
+    'St.Matthew': '46-MATgrctr.usfm',
+    'St. Matthew': '46-MATgrctr.usfm',
+    'StMatthew': '46-MATgrctr.usfm',
     'Mark': '47-MRKgrctr.usfm',
+    'St.Mark': '47-MRKgrctr.usfm',
+    'St. Mark': '47-MRKgrctr.usfm',
+    'StMark': '47-MRKgrctr.usfm',
     'Luke': '48-LUKgrctr.usfm',
+    'St.Luke': '48-LUKgrctr.usfm',
+    'St. Luke': '48-LUKgrctr.usfm',
+    'StLuke': '48-LUKgrctr.usfm',
     'John': '49-JHNgrctr.usfm',
+    'St.John': '49-JHNgrctr.usfm',
+    'St. John': '49-JHNgrctr.usfm',
+    'StJohn': '49-JHNgrctr.usfm',
     'Acts': '50-ACTgrctr.usfm',
     'Romans': '51-ROMgrctr.usfm',
     '1Corinthians': '52-1COgrctr.usfm',
@@ -181,6 +193,9 @@ BOOK_NAME_TO_GREEK_USFM = {
     'Philemon': '63-PHMgrctr.usfm',
     'Hebrews': '64-HEBgrctr.usfm',
     'James': '65-JASgrctr.usfm',
+    'St.James': '65-JASgrctr.usfm',
+    'St. James': '65-JASgrctr.usfm',
+    'StJames': '65-JASgrctr.usfm',
     '1Peter': '66-1PEgrctr.usfm',
     '1 Peter': '66-1PEgrctr.usfm',
     '2Peter': '67-2PEgrctr.usfm',
@@ -192,6 +207,9 @@ BOOK_NAME_TO_GREEK_USFM = {
     '3John': '70-3JNgrctr.usfm',
     '3 John': '70-3JNgrctr.usfm',
     'Jude': '71-JUDgrctr.usfm',
+    'St.Jude': '71-JUDgrctr.usfm',
+    'St. Jude': '71-JUDgrctr.usfm',
+    'StJude': '71-JUDgrctr.usfm',
     'Revelation': '72-REVgrctr.usfm',
 }
 
@@ -218,17 +236,46 @@ NEW_TESTAMENT_BOOKS = [
     '1 JOHN', '2 JOHN', '3 JOHN', 'JUDE', 'REVELATION'
 ]
 
+def normalize_book_name(book_name):
+    """
+    Normalize book name by removing common prefixes and cleaning up.
+    
+    Args:
+        book_name: Raw book name from OCR (e.g., "ST. MATTHEW", "St. John", "GENESIS")
+    
+    Returns:
+        Normalized book name in uppercase (e.g., "MATTHEW", "JOHN", "GENESIS")
+    """
+    if not book_name:
+        return None
+    
+    # Convert to uppercase and strip whitespace
+    normalized = book_name.upper().strip()
+    
+    # Remove "ST." or "ST" prefix (common for New Testament books)
+    if normalized.startswith("ST."):
+        normalized = normalized[3:].strip()
+    elif normalized.startswith("ST "):
+        normalized = normalized[2:].strip()
+    
+    # Remove trailing punctuation
+    normalized = normalized.rstrip('.,;:!? ')
+    
+    return normalized
+
 def is_new_testament(book_name):
     """Check if a book is in the New Testament."""
     if not book_name:
         return False
-    return book_name.upper() in NEW_TESTAMENT_BOOKS
+    normalized = normalize_book_name(book_name)
+    return normalized in NEW_TESTAMENT_BOOKS
 
 def is_old_testament(book_name):
     """Check if a book is in the Old Testament."""
     if not book_name:
         return False
-    return book_name.upper() in OLD_TESTAMENT_BOOKS
+    normalized = normalize_book_name(book_name)
+    return normalized in OLD_TESTAMENT_BOOKS
 
 def get_usfm_directory():
     """Get the path to the hbo_usfm directory."""
@@ -383,8 +430,8 @@ def validate_bible_reference(book_name, chapter, verse):
     bible = build_bible_structure()
     errors = []
     
-    # Normalize book name
-    book_name_upper = book_name.upper() if book_name else None
+    # Normalize book name (strips ST. prefix, etc.)
+    book_name_upper = normalize_book_name(book_name) if book_name else None
     
     # Check if book exists
     if not book_name_upper or book_name_upper not in bible:
@@ -533,10 +580,13 @@ def get_hebrew_verse_spanning(book_name, verse_notation):
         log_print("Warning: hbo_usfm directory not found")
         return None
     
-    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    # Normalize book name (strips ST. prefix, etc.)
+    book_name_clean = normalize_book_name(book_name)
+    book_name_normalized = book_name_clean.replace(' ', '').lower() if book_name_clean else ""
     usfm_filename = None
     for key, value in BOOK_NAME_TO_USFM.items():
-        if key.lower() == book_name_normalized:
+        key_normalized = key.replace(' ', '').lower()
+        if key_normalized == book_name_normalized:
             usfm_filename = value
             break
     
@@ -601,10 +651,13 @@ def get_hebrew_verse(book_name, chapter, verse):
         log_print("Warning: hbo_usfm directory not found")
         return None
     
-    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    # Normalize book name (strips ST. prefix, etc.)
+    book_name_clean = normalize_book_name(book_name)
+    book_name_normalized = book_name_clean.replace(' ', '').lower() if book_name_clean else ""
     usfm_filename = None
     for key, value in BOOK_NAME_TO_USFM.items():
-        if key.lower() == book_name_normalized:
+        key_normalized = key.replace(' ', '').lower()
+        if key_normalized == book_name_normalized:
             usfm_filename = value
             break
     
@@ -685,10 +738,13 @@ def get_greek_verse_spanning(book_name, verse_notation, greek_version='grctr'):
         log_print(f"Warning: Greek USFM directory not found for version '{greek_version}'")
         return None
     
-    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    # Normalize book name (strips ST. prefix, etc.)
+    book_name_clean = normalize_book_name(book_name)
+    book_name_normalized = book_name_clean.replace(' ', '').lower() if book_name_clean else ""
     usfm_filename = None
     for key, value in BOOK_NAME_TO_GREEK_USFM.items():
-        if key.lower() == book_name_normalized:
+        key_normalized = key.replace(' ', '').lower()
+        if key_normalized == book_name_normalized:
             usfm_filename = value
             break
     
@@ -752,10 +808,13 @@ def get_greek_verse(book_name, chapter, verse, greek_version='grctr'):
         log_print(f"Warning: Greek USFM directory not found for version '{greek_version}'")
         return None
     
-    book_name_normalized = book_name.strip().replace(' ', '').lower()
+    # Normalize book name (strips ST. prefix, etc.)
+    book_name_clean = normalize_book_name(book_name)
+    book_name_normalized = book_name_clean.replace(' ', '').lower() if book_name_clean else ""
     usfm_filename = None
     for key, value in BOOK_NAME_TO_GREEK_USFM.items():
-        if key.lower() == book_name_normalized:
+        key_normalized = key.replace(' ', '').lower()
+        if key_normalized == book_name_normalized:
             usfm_filename = value
             break
     
@@ -862,8 +921,8 @@ def validate_metadata_with_ollama(image_path, metadata):
         )
         
         # Convert back to dictionary
-        # Clean book name: strip trailing punctuation that Ollama sometimes adds
-        book_name = validated.book_name.upper().rstrip('.,;:!? ') if validated.book_name else None
+        # Normalize book name: strip ST. prefix and trailing punctuation
+        book_name = normalize_book_name(validated.book_name) if validated.book_name else None
         
         result = {
             'book_name': book_name,
