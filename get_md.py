@@ -527,6 +527,40 @@ def validate_bible_reference(book_name, chapter, verse):
     
     return {'valid': len(errors) == 0, 'errors': errors, 'max_chapter': max_chapter, 'max_verse': None}
 
+def clean_usfm_text(text):
+    """
+    Remove USFM markup and Strong's numbers from text, keeping only the actual words.
+    
+    Args:
+        text: Raw USFM text with markup like \\w word|strong="G1234"\\w*
+    
+    Returns:
+        Clean text with only the original language words
+    
+    Example:
+        Input:  "\\w Βίβλος|strong=\"G0976\"\\w* \\w γενέσεως|strong=\"G1078\"\\w*"
+        Output: "Βίβλος γενέσεως"
+    """
+    import re
+    
+    if not text:
+        return text
+    
+    # Remove \w tags with Strong's numbers: \w word|strong="G####"\w*
+    # Pattern: \w followed by word, optional |strong="...", then \w*
+    text = re.sub(r'\\w\s+([^|\\]+)\|strong="[^"]+"\s*\\w\*', r'\1', text)
+    
+    # Remove any remaining \w tags without Strong's numbers
+    text = re.sub(r'\\w\s+([^\\]+?)\\w\*', r'\1', text)
+    
+    # Remove standalone \w and \w* tags
+    text = re.sub(r'\\w\*?', '', text)
+    
+    # Clean up multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    
+    return text.strip()
+
 def parse_usfm_file(usfm_path):
     """Parse a USFM file and return a dictionary of chapters and verses."""
     chapters = {}
@@ -546,6 +580,8 @@ def parse_usfm_file(usfm_path):
                     if len(parts) == 2:
                         verse_num = parts[0]
                         verse_text = parts[1].strip()
+                        # Clean USFM markup from verse text
+                        verse_text = clean_usfm_text(verse_text)
                         try:
                             chapters[current_chapter][int(verse_num)] = verse_text
                         except ValueError:
