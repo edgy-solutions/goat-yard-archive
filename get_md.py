@@ -546,6 +546,10 @@ def clean_usfm_text(text):
     if not text:
         return text
     
+    # Remove footnotes: \f + \fr 2:11 \ft text variant\f*
+    # These are textual variant notes that should not appear in the main text
+    text = re.sub(r'\\f\s+\+\s+\\fr\s+[^\\]+\\ft\s+[^\\]+\\f\*', '', text)
+    
     # Remove \w tags with Strong's numbers: \w word|strong="G####"\w*
     # Pattern: \w followed by word, optional |strong="...", then \w*
     text = re.sub(r'\\w\s+([^|\\]+)\|strong="[^"]+"\s*\\w\*', r'\1', text)
