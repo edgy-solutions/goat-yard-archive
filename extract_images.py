@@ -1,15 +1,60 @@
 import fitz  # PyMuPDF library
 import io
+import os
+import argparse
+from pathlib import Path
 from PIL import Image
 
-def extract_images_from_pdf(pdf_path, output_dir="extracted_images"):
+
+def find_volume_pdf(volume: int, docs_dir: str = "docs") -> str:
+    """
+    Find the PDF file for a specific volume in the docs directory.
+    
+    Args:
+        volume (int): Volume number to find
+        docs_dir (str): Directory containing PDF files
+        
+    Returns:
+        str: Path to the PDF file
+        
+    Raises:
+        FileNotFoundError: If no matching PDF is found
+    """
+    docs_path = Path(docs_dir)
+    
+    if not docs_path.exists():
+        raise FileNotFoundError(f"Docs directory not found: {docs_dir}")
+    
+    # Search for PDF with volume number in filename
+    # Expected format: "...Volume {volume}.pdf" or "...Vol {volume}.pdf"
+    for pdf_file in docs_path.glob("*.pdf"):
+        filename = pdf_file.name.lower()
+        
+        # Check for "volume X" or "vol X" patterns
+        if f"volume {volume}" in filename or f"vol {volume}" in filename or f"volume{volume}" in filename:
+            print(f"Found PDF for Volume {volume}: {pdf_file.name}")
+            return str(pdf_file)
+    
+    raise FileNotFoundError(
+        f"Could not find PDF for Volume {volume} in {docs_dir}. "
+        f"Expected filename to contain 'Volume {volume}' or 'Vol {volume}'"
+    )
+
+
+def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
     """
     Extracts images from a PDF file and saves them to a specified directory.
 
     Args:
         pdf_path (str): The path to the input PDF file.
+        volume (int): Volume number (used in output directory naming).
         output_dir (str): The directory where extracted images will be saved.
+                         If None, uses "extracted_images_<volume>".
     """
+    # Default output directory based on volume
+    if output_dir is None:
+        output_dir = f"extracted_images_{volume}"
+    
     try:
         doc = fitz.open(pdf_path)
     except fitz.fitz.FileError:
@@ -17,9 +62,9 @@ def extract_images_from_pdf(pdf_path, output_dir="extracted_images"):
         return
 
     # Create output directory if it doesn't exist
-    import os
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
 
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -41,16 +86,66 @@ def extract_images_from_pdf(pdf_path, output_dir="extracted_images"):
                 # Open the image using PIL (Pillow)
                 image = Image.open(io.BytesIO(image_bytes))
 
-                # Save the image
-                image_filename = os.path.join(output_dir, f"page{page_num + 1}_image{img_index + 1}.{image_ext}")
+                # Save the image with volume-aware naming
+                # Format: page{page_num}_image{volume}.{ext}
+                # This matches the expected format for ingestion pipeline
+                image_filename = os.path.join(
+                    output_dir, 
+                    f"page{page_num + 1}_image{volume}.{image_ext}"
+                )
                 image.save(image_filename)
                 print(f"Saved: {image_filename}")
             except Exception as e:
                 print(f"Error processing image {img_index + 1} on page {page_num + 1}: {e}")
 
     doc.close()
+    print(f"\n✅ Extraction complete: {len(doc)} pages processed")
+    print(f"   Output directory: {output_dir}")
 
-# Example usage:
+
 if __name__ == "__main__":
-    pdf_file = "9781579784768_An Exposition of the Old and New Testaments - Volume 1.pdf"  # Replace with your PDF file name
-    extract_images_from_pdf(pdf_file)
+    parser = argparse.ArgumentParser(
+        description="Extract images from Gill Commentary PDF volumes"
+    )
+    parser.add_argument(
+        "volume",
+        type=int,
+        help="Volume number to extract (e.g., 1 for Volume 1, 7 for Volume 7)"
+    )
+    parser.add_argument(
+        "--docs-dir",
+        default="docs",
+        help="Directory containing PDF files (default: docs)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        help="Output directory (default: extracted_images_<volume>)"
+    )
+    parser.add_argument(
+        "--pdf-path",
+        help="Direct path to PDF file (bypasses auto-detection)"
+    )
+    
+    args = parser.parse_args()
+    
+    try:
+        # Get PDF path (either from argument or auto-detect)
+        if args.pdf_path:
+            pdf_path = args.pdf_path
+            print(f"Using specified PDF: {pdf_path}")
+        else:
+            pdf_path = find_volume_pdf(args.volume, args.docs_dir)
+        
+        # Extract images
+        extract_images_from_pdf(
+            pdf_path=pdf_path,
+            volume=args.volume,
+            output_dir=args.output_dir
+        )
+        
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        exit(1)
