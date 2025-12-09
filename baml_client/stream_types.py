@@ -23,17 +23,27 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (2)
+# Generated classes (4)
 # #########################################################################
 
 class ExtractedText(BaseModel):
     text: typing.Optional[str] = None
+
+class GillEntity(BaseModel):
+    name: typing.Optional[str] = None
+    category: typing.Optional[types.EntityCategory] = None
+    normalized_name: typing.Optional[str] = None
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None
     chapter: typing.Optional[int] = None
     verse: typing.Optional[str] = None
     page_number: typing.Optional[int] = None
+
+class VerseChunk(BaseModel):
+    verse_ref: typing.Optional[str] = None
+    start_phrase: typing.Optional[str] = None
+    end_phrase: typing.Optional[str] = None
 
 # #########################################################################
 # Generated type aliases (0)

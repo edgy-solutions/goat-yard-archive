@@ -24,11 +24,23 @@ class LlmResponseParser:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def ExtractGillKnowledge(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> typing.List["types.GillEntity"]:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractGillKnowledge", llm_response=llm_response, mode="request")
+        return typing.cast(typing.List["types.GillEntity"], result)
+
     def ExtractTextFromImage(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> str:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTextFromImage", llm_response=llm_response, mode="request")
         return typing.cast(str, result)
+
+    def ExtractVersesFromMarkdown(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> typing.List["types.VerseChunk"]:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractVersesFromMarkdown", llm_response=llm_response, mode="request")
+        return typing.cast(typing.List["types.VerseChunk"], result)
 
     def ValidateOCRMetadata(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -44,11 +56,23 @@ class LlmStreamParser:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def ExtractGillKnowledge(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> typing.List["stream_types.GillEntity"]:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractGillKnowledge", llm_response=llm_response, mode="stream")
+        return typing.cast(typing.List["stream_types.GillEntity"], result)
+
     def ExtractTextFromImage(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> str:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractTextFromImage", llm_response=llm_response, mode="stream")
         return typing.cast(str, result)
+
+    def ExtractVersesFromMarkdown(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> typing.List["stream_types.VerseChunk"]:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractVersesFromMarkdown", llm_response=llm_response, mode="stream")
+        return typing.cast(typing.List["stream_types.VerseChunk"], result)
 
     def ValidateOCRMetadata(
         self, llm_response: str, baml_options: BamlCallOptions = {},

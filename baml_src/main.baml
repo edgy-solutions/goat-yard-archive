@@ -37,6 +37,16 @@ client<llm> OpenRouter {
   }
 }
 
+// Define the OpenRouter client for text-only tasks
+client<llm> OpenRouterText {
+  provider openai
+  options {
+    base_url "https://openrouter.ai/api/v1"
+    api_key env.OPENROUTER_API_KEY
+    model "x-ai/grok-4.1-fast"
+  }
+}
+
 // Define the validation function
 function ValidateOCRMetadata(
   image: image,
@@ -137,5 +147,46 @@ function ExtractTextFromImage(
     
     {{ _.role("user") }}
     {{ image }}
+  "#
+}
+
+// Define the verse chunk structure for alignment
+class VerseChunk {
+  verse_ref string @description("Standardized verse reference, e.g., 'MAT 03:16'. Use 3-letter book codes (GEN, EXO, MAT, etc.)")
+  start_phrase string @description("Unique starting phrase of the commentary for this verse (approx 5-10 words). Must be verbatim from the text.")
+  end_phrase string @description("Unique ending phrase of the commentary for this verse (approx 5-10 words). Must be verbatim from the text.")
+}
+
+// Define the verse extraction function
+function ExtractVersesFromMarkdown(
+  markdown_text: string
+) -> VerseChunk[] {
+  client OpenRouterText
+  
+  prompt #"
+    Analyze the following commentary text and split it into verse chunks. Each chunk corresponds to a specific verse reference (e.g., "Ver. 1.", "Ver. 2.").
+    
+    CRITICAL: You must extract EVERY single verse found in the text. Do not skip any.
+    
+    - Look for explicit markers like "Ver. 31."
+    - If there is text before the first explicit marker that belongs to a previous verse, extract it as a separate chunk and infer the verse reference (e.g., if "Ver. 31" follows, the previous text is likely "Ver. 30").
+    - Do not stop after the first verse. Process the entire text.
+    
+    For each verse chunk:
+    1. Identify the verse reference. Convert it to a standardized format (e.g., "GEN 01:01").
+    2. Extract the first 5-10 words of the commentary text for that verse as the `start_phrase`.
+    3. Extract the last 5-10 words of the commentary text for that verse as the `end_phrase`.
+    
+    CRITICAL: The `start_phrase` and `end_phrase` MUST be EXACT substrings from the provided text. Do not paraphrase or modify them. They will be used for fuzzy matching against the original OCR data.
+    
+    If a chunk covers multiple verses (e.g., "Ver. 4, 5."), create a separate entry for each verse if possible, or one entry with the combined range if the text is merged. Ideally, split them if the text clearly delineates them. If the text is a single block for multiple verses, use the range in the ref (e.g., "GEN 01:04-05").
+    
+    Input Text:
+    {{ markdown_text }}
+    
+    {{ _.role("user") }}
+    Extract the verse chunks.
+    
+    {{ ctx.output_format }}
   "#
 }

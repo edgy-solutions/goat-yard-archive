@@ -37,21 +37,44 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (0)
+# Generated enums (1)
 # #########################################################################
 
+class EntityCategory(str, Enum):
+    Doctrine = "Doctrine"
+    Heresy = "Heresy"
+    TypeOrSymbol = "TypeOrSymbol"
+    BiblicalFigure = "BiblicalFigure"
+    HistoricalFigure = "HistoricalFigure"
+    CitedAuthority = "CitedAuthority"
+    PeopleGroup = "PeopleGroup"
+    Location = "Location"
+    TimePeriod = "TimePeriod"
+    OriginalWord = "OriginalWord"
+    ManuscriptOrVersion = "ManuscriptOrVersion"
+
 # #########################################################################
-# Generated classes (2)
+# Generated classes (4)
 # #########################################################################
 
 class ExtractedText(BaseModel):
     text: str
+
+class GillEntity(BaseModel):
+    name: str
+    category: EntityCategory
+    normalized_name: typing.Optional[str] = None
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None
     chapter: typing.Optional[int] = None
     verse: typing.Optional[str] = None
     page_number: typing.Optional[int] = None
+
+class VerseChunk(BaseModel):
+    verse_ref: str
+    start_phrase: str
+    end_phrase: str
 
 # #########################################################################
 # Generated type aliases (0)

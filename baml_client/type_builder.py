@@ -20,18 +20,22 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","Metadata",]
+          ["ExtractedText","GillEntity","Metadata","VerseChunk",]
         ), enums=set(
-          []
+          ["EntityCategory",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 0
+    # Generated enums 1
     # #########################################################################
+
+    @property
+    def EntityCategory(self) -> "EntityCategoryViewer":
+        return EntityCategoryViewer(self)
 
 
     # #########################################################################
-    # Generated classes 2
+    # Generated classes 4
     # #########################################################################
 
     @property
@@ -39,18 +43,104 @@ class TypeBuilder(type_builder.TypeBuilder):
         return ExtractedTextViewer(self)
 
     @property
+    def GillEntity(self) -> "GillEntityViewer":
+        return GillEntityViewer(self)
+
+    @property
     def Metadata(self) -> "MetadataViewer":
         return MetadataViewer(self)
 
+    @property
+    def VerseChunk(self) -> "VerseChunkViewer":
+        return VerseChunkViewer(self)
+
 
 
 # #########################################################################
-# Generated enums 0
+# Generated enums 1
 # #########################################################################
 
+class EntityCategoryAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("EntityCategory")
+        self._values: typing.Set[str] = set([  "Doctrine",  "Heresy",  "TypeOrSymbol",  "BiblicalFigure",  "HistoricalFigure",  "CitedAuthority",  "PeopleGroup",  "Location",  "TimePeriod",  "OriginalWord",  "ManuscriptOrVersion",  ])
+        self._vals = EntityCategoryValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "EntityCategoryValues":
+        return self._vals
+
+
+class EntityCategoryViewer(EntityCategoryAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class EntityCategoryValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def Doctrine(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Doctrine"))
+    
+    @property
+    def Heresy(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Heresy"))
+    
+    @property
+    def TypeOrSymbol(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("TypeOrSymbol"))
+    
+    @property
+    def BiblicalFigure(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("BiblicalFigure"))
+    
+    @property
+    def HistoricalFigure(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("HistoricalFigure"))
+    
+    @property
+    def CitedAuthority(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("CitedAuthority"))
+    
+    @property
+    def PeopleGroup(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("PeopleGroup"))
+    
+    @property
+    def Location(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Location"))
+    
+    @property
+    def TimePeriod(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("TimePeriod"))
+    
+    @property
+    def OriginalWord(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("OriginalWord"))
+    
+    @property
+    def ManuscriptOrVersion(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ManuscriptOrVersion"))
+    
+    
+
+
 
 # #########################################################################
-# Generated classes 2
+# Generated classes 4
 # #########################################################################
 
 class ExtractedTextAst:
@@ -88,6 +178,53 @@ class ExtractedTextProperties:
     @property
     def text(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("text"))
+    
+    
+
+
+class GillEntityAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("GillEntity")
+        self._properties: typing.Set[str] = set([  "name",  "category",  "normalized_name",  ])
+        self._props = GillEntityProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "GillEntityProperties":
+        return self._props
+
+
+class GillEntityViewer(GillEntityAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class GillEntityProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def name(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("name"))
+    
+    @property
+    def category(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("category"))
+    
+    @property
+    def normalized_name(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("normalized_name"))
     
     
 
@@ -139,6 +276,53 @@ class MetadataProperties:
     @property
     def page_number(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("page_number"))
+    
+    
+
+
+class VerseChunkAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("VerseChunk")
+        self._properties: typing.Set[str] = set([  "verse_ref",  "start_phrase",  "end_phrase",  ])
+        self._props = VerseChunkProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "VerseChunkProperties":
+        return self._props
+
+
+class VerseChunkViewer(VerseChunkAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class VerseChunkProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def verse_ref(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("verse_ref"))
+    
+    @property
+    def start_phrase(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("start_phrase"))
+    
+    @property
+    def end_phrase(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("end_phrase"))
     
     
 

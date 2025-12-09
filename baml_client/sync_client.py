@@ -91,6 +91,20 @@ class BamlSyncClient:
     def parse_stream(self):
       return self.__llm_stream_parser
     
+    def ExtractGillKnowledge(self, commentary_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> typing.List["types.GillEntity"]:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            stream = self.stream.ExtractGillKnowledge(commentary_text=commentary_text,
+                baml_options=baml_options)
+            return stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractGillKnowledge", args={
+                "commentary_text": commentary_text,
+            })
+            return typing.cast(typing.List["types.GillEntity"], result.cast_to(types, types, stream_types, False, __runtime__))
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> str:
@@ -105,6 +119,20 @@ class BamlSyncClient:
                 "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"greek_text": greek_text,"ocr_text": ocr_text,
             })
             return typing.cast(str, result.cast_to(types, types, stream_types, False, __runtime__))
+    def ExtractVersesFromMarkdown(self, markdown_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> typing.List["types.VerseChunk"]:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            stream = self.stream.ExtractVersesFromMarkdown(markdown_text=markdown_text,
+                baml_options=baml_options)
+            return stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractVersesFromMarkdown", args={
+                "markdown_text": markdown_text,
+            })
+            return typing.cast(typing.List["types.VerseChunk"], result.cast_to(types, types, stream_types, False, __runtime__))
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
         baml_options: BamlCallOptions = {},
     ) -> types.Metadata:
@@ -128,6 +156,18 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def ExtractGillKnowledge(self, commentary_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[typing.List["stream_types.GillEntity"], typing.List["types.GillEntity"]]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractGillKnowledge", args={
+            "commentary_text": commentary_text,
+        })
+        return baml_py.BamlSyncStream[typing.List["stream_types.GillEntity"], typing.List["types.GillEntity"]](
+          result,
+          lambda x: typing.cast(typing.List["stream_types.GillEntity"], x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(typing.List["types.GillEntity"], x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[str, str]:
@@ -138,6 +178,18 @@ class BamlStreamClient:
           result,
           lambda x: typing.cast(str, x.cast_to(types, types, stream_types, True, __runtime__)),
           lambda x: typing.cast(str, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def ExtractVersesFromMarkdown(self, markdown_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[typing.List["stream_types.VerseChunk"], typing.List["types.VerseChunk"]]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractVersesFromMarkdown", args={
+            "markdown_text": markdown_text,
+        })
+        return baml_py.BamlSyncStream[typing.List["stream_types.VerseChunk"], typing.List["types.VerseChunk"]](
+          result,
+          lambda x: typing.cast(typing.List["stream_types.VerseChunk"], x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(typing.List["types.VerseChunk"], x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
@@ -160,11 +212,25 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def ExtractGillKnowledge(self, commentary_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractGillKnowledge", args={
+            "commentary_text": commentary_text,
+        }, mode="request")
+        return result
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractTextFromImage", args={
             "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"greek_text": greek_text,"ocr_text": ocr_text,
+        }, mode="request")
+        return result
+    def ExtractVersesFromMarkdown(self, markdown_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractVersesFromMarkdown", args={
+            "markdown_text": markdown_text,
         }, mode="request")
         return result
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
@@ -182,11 +248,25 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def ExtractGillKnowledge(self, commentary_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractGillKnowledge", args={
+            "commentary_text": commentary_text,
+        }, mode="stream")
+        return result
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractTextFromImage", args={
             "image": image,"book": book,"chapter": chapter,"verse": verse,"page_number": page_number,"hebrew_text": hebrew_text,"greek_text": greek_text,"ocr_text": ocr_text,
+        }, mode="stream")
+        return result
+    def ExtractVersesFromMarkdown(self, markdown_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractVersesFromMarkdown", args={
+            "markdown_text": markdown_text,
         }, mode="stream")
         return result
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,

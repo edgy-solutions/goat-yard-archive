@@ -19,8 +19,16 @@ type_map = {
     "types.ExtractedText": types.ExtractedText,
     "stream_types.ExtractedText": stream_types.ExtractedText,
 
+    "types.GillEntity": types.GillEntity,
+    "stream_types.GillEntity": stream_types.GillEntity,
+
     "types.Metadata": types.Metadata,
     "stream_types.Metadata": stream_types.Metadata,
 
+    "types.VerseChunk": types.VerseChunk,
+    "stream_types.VerseChunk": stream_types.VerseChunk,
+
+
+    "types.EntityCategory": types.EntityCategory,
 
 }

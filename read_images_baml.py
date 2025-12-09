@@ -564,7 +564,7 @@ def process_single_image(png_file, metadata, output_dir, model_pricing, baml_cap
 
 
 def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
-                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, max_workers=1, skip_existing=True):
+                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, filename_filter=None, max_workers=1, skip_existing=True):
     """Process images using BAML for text extraction.
     
     Args:
@@ -618,6 +618,11 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
         else:
             # No filters - process all images that have metadata
             png_files.append(png_file)
+            
+    # Apply filename filter if provided (matches if filename contains the string)
+    if filename_filter:
+        png_files = [f for f in png_files if filename_filter in f.name]
+        logging.info(f"Filtered to {len(png_files)} images matching '{filename_filter}'")
     
     if not png_files:
         pass
@@ -798,6 +803,8 @@ if __name__ == "__main__":
     parser.add_argument("--book", "-b", help="Filter by book name (e.g., Genesis)")
     parser.add_argument("--chapter-start", "-cs", type=int, help="Start chapter (inclusive)")
     parser.add_argument("--chapter-end", "-ce", type=int, help="End chapter (inclusive)")
+    parser.add_argument("--filename", "-f", help="Filter by filename (e.g., page100_image1)")
+    parser.add_argument("--force", action="store_true", help="Force re-processing even if output exists")
     parser.add_argument("--workers", "-w", type=int, default=1,
                        help="Number of concurrent workers (default: 1). Use 2-4 for parallel processing.")
     parser.add_argument("--no-skip", action="store_true",
@@ -831,6 +838,7 @@ if __name__ == "__main__":
         book_filter=args.book,
         chapter_start=args.chapter_start,
         chapter_end=args.chapter_end,
-        max_workers=args.workers,
-        skip_existing=not args.no_skip
+        filename_filter=args.filename,
+        max_workers=5,  # Use parallel processing
+        skip_existing=not args.force
     )
