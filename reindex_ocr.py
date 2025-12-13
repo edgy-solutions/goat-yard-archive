@@ -65,8 +65,9 @@ def detect_layout(words: List[Dict]) -> Dict:
     # Column split at approximately 48% of page width (matching run_left_analysis.py)
     column_split = all_left + (page_width * 0.48)
     
-    # Header zone: top ~3% of page (just the top header line with page number, book name)
-    header_y = all_top + (page_height * 0.03)
+    # Header zone: top ~1.5% of page (just the very top line with page number, book name)
+    # Using a smaller percentage to avoid classifying first body line as header on skewed pages
+    header_y = all_top + (page_height * 0.015)
     
     return {
         'page_left': all_left,
@@ -141,14 +142,10 @@ def is_verse_line(line: List[Dict]) -> bool:
     return first_word.startswith('ver')
 
 
-def find_footnote_start(lines: List[List[Dict]], margin: float, indent_threshold: float = 40, max_search_lines: int = 12) -> int:
+def find_footnote_start(lines: List[List[Dict]], margin: float, indent_threshold: float = 40, max_search_lines: int = 20) -> int:
     """
-    Find the first footnote line using improved algorithm:
-    1. Walk backwards from bottom (max 12 lines)
-    2. Skip 'Ver' lines (verse markers are body text)
-    3. Find first indent, then continue to find topmost indent = footnote start
-    4. Non-indented continuation lines are part of footnotes
-    5. If no indents found in search range, all is body text
+    Find the first footnote line by scanning backwards from bottom.
+    Footnotes are identified by indentation from the margin.
     
     Returns the index of the first footnote line, or len(lines) if no footnotes.
     """
