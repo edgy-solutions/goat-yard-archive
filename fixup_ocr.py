@@ -31,18 +31,45 @@ def load_markdown(page_name: str, markdown_dir: Path) -> str:
         return f.read()
 
 
-def tokenize_markdown(markdown: str) -> List[str]:
-    """Extract words from markdown, preserving order."""
-    text = markdown
-    text = re.sub(r'\[.*?\]\(.*?\)', '', text)  # links
-    text = re.sub(r'\[\^.*?\]', '', text)  # footnote refs
-    text = re.sub(r'\*\*?|__?', '', text)  # bold/italic
-    text = re.sub(r'#+\s*', '', text)  # headers
-    text = re.sub(r'`.*?`', '', text)  # code
-    text = re.sub(r'<[^>]+>', '', text)  # HTML tags
+def tokenize_markdown(markdown: str) -> Tuple[List[str], List[str]]:
+    """
+    Extract words from markdown, separating body text from footnote content.
     
-    words = re.findall(r"[\w'-]+[.,;:!?]?|[.,;:!?]", text)
-    return [w for w in words if w and len(w) > 0]
+    Footnote lines are those starting with ^a, ^b, etc. (footnote definitions).
+    These are separated so we can match OCR body to markdown body first,
+    then match OCR footnotes to markdown footnotes.
+    
+    Returns (body_words, footnote_words).
+    """
+    lines = markdown.split('\n')
+    body_lines = []
+    footnote_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        # Footnote definition lines start with ^letter or ^number
+        if re.match(r'^\^[a-zA-Z0-9]', stripped):
+            footnote_lines.append(line)
+        else:
+            # Remove inline footnote references like ^a, ^b from body
+            clean_line = re.sub(r'\^[a-zA-Z0-9]+', '', line)
+            body_lines.append(clean_line)
+    
+    def clean_and_tokenize(text: str) -> List[str]:
+        text = re.sub(r'\[.*?\]\(.*?\)', '', text)  # links
+        text = re.sub(r'\[\^.*?\]', '', text)  # footnote refs
+        text = re.sub(r'\*\*?|__?', '', text)  # bold/italic
+        text = re.sub(r'#+\s*', '', text)  # headers
+        text = re.sub(r'`.*?`', '', text)  # code
+        text = re.sub(r'<[^>]+>', '', text)  # HTML tags
+        words = re.findall(r"[\w'-]+[.,;:!?]?|[.,;:!?]", text)
+        return [w for w in words if w and len(w) > 0]
+    
+    body_words = clean_and_tokenize('\n'.join(body_lines))
+    footnote_words = clean_and_tokenize('\n'.join(footnote_lines))
+    
+    return body_words, footnote_words
+
 
 
 def word_match_score(ocr_word: str, md_word: str) -> float:
@@ -150,7 +177,47 @@ def fixup_ocr(ocr_words: List[Dict], md_words: List[str]) -> Tuple[List[Dict], i
             body_words.append(fixed_word)
             ocr_idx += 1
             md_idx += 1
-        else:
+        
+        # Check for hyphenated word: OCR "some-" + "thing" = MD "something"
+        elif word_text.endswith('-') and ocr_idx + 1 < len(ocr_words) and md_idx < len(md_words):
+            next_ocr = ocr_words[ocr_idx + 1]['text']
+            combined = word_text.rstrip('-') + next_ocr
+            combined_score = word_match_score(combined, md_words[md_idx])
+            
+            if combined_score >= 60:
+                # Match! Keep both OCR words separate (preserve spatial order)
+                # but mark as body text
+                fixed_word1 = ocr_word.copy()
+                fixed_word2 = ocr_words[ocr_idx + 1].copy()
+                body_words.append(fixed_word1)
+                body_words.append(fixed_word2)
+                ocr_idx += 2
+                md_idx += 1
+            else:
+                # Try other matching strategies
+                score = 0  # Reset to trigger fallback below
+        
+        # Check for fused word: OCR "wordword" = MD "word" + "word"
+        elif md_idx + 1 < len(md_words):
+            fused_md = md_words[md_idx] + md_words[md_idx + 1]
+            fused_score = word_match_score(word_text, fused_md)
+            
+            if fused_score >= 60:
+                # Match! Add space to OCR word text but keep same coords
+                fixed_word = ocr_word.copy()
+                # Insert space at the likely split point
+                split_pos = len(md_words[md_idx])
+                if split_pos < len(word_text):
+                    fixed_word['text'] = word_text[:split_pos] + ' ' + word_text[split_pos:]
+                    fixed_word['original_text'] = word_text
+                    num_spelling_fixes += 1
+                body_words.append(fixed_word)
+                ocr_idx += 1
+                md_idx += 2  # Skip both MD words
+            else:
+                score = 0  # Reset to trigger fallback
+        
+        if score < 60:
             # No match - this could be a footnote word mixed in
             # Try to find where we can resync with markdown
             resync = find_sequence_match(ocr_words, ocr_idx + 1, md_words, md_idx, 
@@ -171,6 +238,12 @@ def fixup_ocr(ocr_words: List[Dict], md_words: List[str]) -> Tuple[List[Dict], i
                 footnote_candidates.append(ocr_word.copy())
                 ocr_idx += 1
                 # Don't advance md_idx - try to match next OCR word to same md position
+    
+    # Mark words with is_footnote flag
+    for word in body_words:
+        word['is_footnote'] = False
+    for word in footnote_candidates:
+        word['is_footnote'] = True
     
     # Combine: body first, then footnotes
     result = body_words + footnote_candidates
@@ -210,12 +283,12 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path):
         print(f"  ERROR: Markdown not found at {markdown_dir}")
         return
     
-    # Tokenize markdown
-    md_words = tokenize_markdown(markdown)
-    print(f"  Markdown: {len(md_words)} words")
+    # Tokenize markdown - separate body from footnotes
+    body_md_words, footnote_md_words = tokenize_markdown(markdown)
+    print(f"  Markdown: {len(body_md_words)} body words, {len(footnote_md_words)} footnote words")
     
-    # Fix up OCR
-    fixed_words, num_spelling, num_footnotes = fixup_ocr(ocr_words, md_words)
+    # Fix up OCR - match against body markdown only
+    fixed_words, num_spelling, num_footnotes = fixup_ocr(ocr_words, body_md_words)
     print(f"  Fixed {num_spelling} spelling errors ({100*num_spelling/len(ocr_words):.1f}%)")
     print(f"  Moved {num_footnotes} words to footnotes ({100*num_footnotes/len(ocr_words):.1f}%)")
     

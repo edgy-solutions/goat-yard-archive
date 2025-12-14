@@ -233,10 +233,13 @@ class VerseAligner:
         if len(phrase_words) == 0:
             return -1, -1, 0.0
         
-        # Filter to body words only
+        # Filter to body words only (skip footnotes and headers)
         body_indices = []
         for i, w in enumerate(words):
             if i >= start_idx:
+                # Skip words marked as footnotes
+                if w.get('is_footnote', False):
+                    continue
                 if bounds is None or self.is_body_word(w, bounds):
                     body_indices.append(i)
         
@@ -329,10 +332,13 @@ class VerseAligner:
         if len(phrase_words) == 0:
             return -1, -1, 0.0
         
-        # Filter to body words within the range
+        # Filter to body words within the range (skip footnotes and headers)
         body_indices = []
         for i, w in enumerate(words):
             if start_idx <= i <= max_end_idx:
+                # Skip words marked as footnotes
+                if w.get('is_footnote', False):
+                    continue
                 if bounds is None or self.is_body_word(w, bounds):
                     body_indices.append(i)
         
@@ -394,9 +400,19 @@ class VerseAligner:
         start_col = self.get_word_column(start_word, bounds)
         end_col = self.get_word_column(end_word, bounds)
         
-        # Collect all words in range
-        range_words = [words[i] for i in range(start_idx, end_idx + 1)
-                       if self.is_body_word(words[i], bounds)]
+        # Collect all words in range, excluding footnotes
+        # Only skip words that are marked as footnotes by the fixup algorithm
+        # Don't use hardcoded Y threshold since body text can extend past Y=4000
+        range_words = []
+        for i in range(start_idx, end_idx + 1):
+            w = words[i]
+            # Skip if marked as footnote
+            if w.get('is_footnote', False):
+                continue
+            # Skip if not body word (header check)
+            if not self.is_body_word(w, bounds):
+                continue
+            range_words.append(w)
         
         if not range_words:
             return []
