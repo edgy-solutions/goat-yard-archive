@@ -239,6 +239,48 @@ def fixup_ocr(ocr_words: List[Dict], md_words: List[str]) -> Tuple[List[Dict], i
                 ocr_idx += 1
                 # Don't advance md_idx - try to match next OCR word to same md position
     
+    return body_words, footnote_candidates, num_spelling_fixes
+
+
+def fixup_ocr_with_footnotes(ocr_words: List[Dict], body_md_words: List[str], 
+                              footnote_md_words: List[str]) -> Tuple[List[Dict], int, int]:
+    """
+    Fix up OCR with footnote content checking.
+    
+    After initial matching, checks if any body words match the markdown footnote
+    content. Words that match footnote content are moved to the footnote section.
+    """
+    # First pass: match against body markdown
+    body_words, footnote_candidates, num_spelling = fixup_ocr(ocr_words, body_md_words)
+    
+    # Second pass: detect words with Y position significantly out of sequence
+    # If a word's Y is far from its neighbors in the body sequence, it's likely a footnote
+    # that matched body text but is spatially in the footnote region
+    if len(body_words) > 3:
+        y_gap_threshold = 500  # Pixels - if Y jumps by more than this, likely footnote
+        
+        new_body = []
+        for i, word in enumerate(body_words):
+            # Get the expected Y from neighboring words
+            neighbor_ys = []
+            for offset in [-3, -2, -1, 1, 2, 3]:
+                ni = i + offset
+                if 0 <= ni < len(body_words):
+                    neighbor_ys.append(body_words[ni]['top'])
+            
+            if neighbor_ys:
+                avg_neighbor_y = sum(neighbor_ys) / len(neighbor_ys)
+                y_diff = abs(word['top'] - avg_neighbor_y)
+                
+                # If this word's Y is way off from neighbors, it's probably a footnote
+                if y_diff > y_gap_threshold:
+                    footnote_candidates.append(word)
+                else:
+                    new_body.append(word)
+            else:
+                new_body.append(word)
+        body_words = new_body
+    
     # Mark words with is_footnote flag
     for word in body_words:
         word['is_footnote'] = False
@@ -252,7 +294,7 @@ def fixup_ocr(ocr_words: List[Dict], md_words: List[str]) -> Tuple[List[Dict], i
     for i, word in enumerate(result):
         word['reading_index'] = i
     
-    return result, num_spelling_fixes, len(footnote_candidates)
+    return result, num_spelling, len(footnote_candidates)
 
 
 def save_fixedup(words: List[Dict], page_name: str, output_dir: Path):
@@ -287,8 +329,9 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path):
     body_md_words, footnote_md_words = tokenize_markdown(markdown)
     print(f"  Markdown: {len(body_md_words)} body words, {len(footnote_md_words)} footnote words")
     
-    # Fix up OCR - match against body markdown only
-    fixed_words, num_spelling, num_footnotes = fixup_ocr(ocr_words, body_md_words)
+    # Fix up OCR - match against body markdown, then check against footnote markdown
+    fixed_words, num_spelling, num_footnotes = fixup_ocr_with_footnotes(
+        ocr_words, body_md_words, footnote_md_words)
     print(f"  Fixed {num_spelling} spelling errors ({100*num_spelling/len(ocr_words):.1f}%)")
     print(f"  Moved {num_footnotes} words to footnotes ({100*num_footnotes/len(ocr_words):.1f}%)")
     
