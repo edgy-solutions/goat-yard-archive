@@ -4,7 +4,10 @@ backup/
 *_usfm/
 ocr/
 outputs/
+debug/
+batch_logs/
 .venv/
 *.pyc
 *.pdf
 .env
+*.log
