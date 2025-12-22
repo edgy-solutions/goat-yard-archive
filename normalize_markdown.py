@@ -378,19 +378,20 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     unauthorized_changes = []
     
     # Pattern to strip footnote markers for segment extraction
-    # Includes: [^N], ^a^, ^a, superscript letters (ᵃᵇᶜ...), <sup> tags, degree symbol, and ALL superscript numbers (⁰¹²³⁴⁵⁶⁷⁸⁹)
-    all_footnote_markers = re.compile(r'\[\^\d+\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
+    # Includes: [^N], ^[letter], ^a^, ^a, superscript letters (ᵃᵇᶜ...), <sup> tags, degree symbol, and ALL superscript numbers (⁰¹²³⁴⁵⁶⁷⁸⁹)
+    all_footnote_markers = re.compile(r'\[\^\d+\]|\^\[[a-zA-Z]\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
     # Pattern to detect headings (should be skipped)
     # Includes "C H A P. V." or "CHAP. V." or "GENESIS."
     heading_pattern = re.compile(r'^#.*$|^\*?\*?C\s*H\s*A\s*P\.\s*[IVX\d]+.*$|^[A-Z]+\.\s*CH\.\s*[IVX\d]+', re.MULTILINE | re.IGNORECASE)
     # Pattern to detect footnote definition lines (various formats):
     # - "^a Some text" (caret prefixed)
+    # - "^[z]: text" or "^[a]: text" (caret bracket letter style)
     # - "[^1]: text" or "[^a]: text" (markdown style with numbers or letters)
     # - "a Some text" or "b Hebrew..." (single letter at line start, common in OCR)
     # - "<sup>a</sup> Some text" (superscript tag at line start)
     # - "° Some text" (degree symbol at line start)
     # - "¹ Some text" or " ¹..." (any superscript number at line start, with optional leading space)
-    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^[a-z]\s+\S.*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$', re.MULTILINE)
+    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\[\^[a-z0-9]+\]:.*$|^[a-z]\s+\S.*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$', re.MULTILINE)
     
     def normalize_text(text: str) -> str:
         """Normalize text for comparison - remove footnotes, headings, definitions, and normalize whitespace."""
@@ -603,13 +604,15 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retries: int = 5) -> str:
+def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retries: int = 5, output_path: str = None) -> str:
     """Call normalization backend with retry logic and exponential backoff.
     
     Args:
         backend: The normalization backend to use
         raw_markdown: The raw markdown text to normalize
         max_retries: Maximum number of retry attempts
+        output_path: Optional path to save output. If provided, each attempt
+                     is saved with _1, _2, etc. suffixes for debugging.
         
     Returns:
         str: Normalized markdown text
@@ -619,6 +622,8 @@ def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retr
     """
     base_delay = 2
     max_delay = 60
+    best_result = None
+    best_verification = None
     
     for attempt in range(max_retries):
         try:
@@ -657,8 +662,42 @@ def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retr
             if removed_headings:
                 logging.info(f"Removed {len(removed_headings)} mid-document heading(s)")
             
+            # Save intermediate attempt if output_path is provided
+            if output_path:
+                attempt_path = output_path.replace('_normalized.md', f'_normalized_{attempt + 1}.md')
+                try:
+                    with open(attempt_path, 'w', encoding='utf-8') as f:
+                        f.write(normalized_text)
+                    logging.info(f"Saved attempt {attempt + 1} to {os.path.basename(attempt_path)}")
+                except Exception as e:
+                    logging.warning(f"Failed to save attempt {attempt + 1}: {e}")
+            
             # Verify output
             verification = verify_normalization(raw_markdown, normalized_text)
+            
+            # Keep track of best result - prefer the one with closest word count to source
+            # This ensures we don't accidentally select a result that's missing content
+            source_words = len(raw_markdown.split())
+            current_words = len(normalized_text.split())
+            current_diff = abs(source_words - current_words)
+            
+            if best_result is None:
+                # First result
+                best_result = normalized_text
+                best_verification = verification
+                best_word_diff = current_diff
+            elif verification.passed and not (best_verification and best_verification.passed):
+                # Current passed, previous didn't - prefer current
+                best_result = normalized_text
+                best_verification = verification
+                best_word_diff = current_diff
+            elif not verification.passed and not (best_verification and best_verification.passed):
+                # Neither passed - prefer the one with closest word count to source
+                if current_diff < best_word_diff:
+                    logging.info(f"Attempt {attempt + 1} has closer word count ({current_words} vs source {source_words}, diff={current_diff})")
+                    best_result = normalized_text
+                    best_verification = verification
+                    best_word_diff = current_diff
             
             if not verification.passed:
                 logging.warning(f"Verification issues: {verification}")
@@ -678,8 +717,9 @@ def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retr
                     time.sleep(delay)
                     continue
                 else:
-                    # Out of retries - return anyway but log warning
+                    # Out of retries - return best result
                     logging.warning(f"Verification issues persist after {max_retries} attempts, using best result")
+                    return best_result
             
             if attempt > 0:
                 logging.info(f"[OK] Succeeded after {attempt} retries")
@@ -755,8 +795,8 @@ def normalize_single_file(backend: NormalizerBackend, input_path: Path, force: b
         
         logging.info(f"Normalizing {input_path.name} ({len(raw_markdown)} chars) using {backend.name}...")
         
-        # Call backend to normalize
-        normalized_text = normalize_with_retry(backend, raw_markdown)
+        # Call backend to normalize (pass output_path to save intermediate attempts)
+        normalized_text = normalize_with_retry(backend, raw_markdown, output_path=str(output_path))
         
         # Write output file
         with open(output_path, 'w', encoding='utf-8') as f:
