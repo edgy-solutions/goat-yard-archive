@@ -42,6 +42,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractVersesFromMarkdown", llm_response=llm_response, mode="request")
         return typing.cast(typing.List["types.VerseChunk"], result)
 
+    def NormalizeGillMarkdown(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> str:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="NormalizeGillMarkdown", llm_response=llm_response, mode="request")
+        return typing.cast(str, result)
+
     def ValidateOCRMetadata(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.Metadata:
@@ -73,6 +79,12 @@ class LlmStreamParser:
     ) -> typing.List["stream_types.VerseChunk"]:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractVersesFromMarkdown", llm_response=llm_response, mode="stream")
         return typing.cast(typing.List["stream_types.VerseChunk"], result)
+
+    def NormalizeGillMarkdown(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> str:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="NormalizeGillMarkdown", llm_response=llm_response, mode="stream")
+        return typing.cast(str, result)
 
     def ValidateOCRMetadata(
         self, llm_response: str, baml_options: BamlCallOptions = {},

@@ -27,6 +27,17 @@ client<llm> Ollama {
   }
 }
 
+// Define the Ollama client for oss-gpt:20b (text normalization)
+client<llm> OllamaGPT {
+  provider openai
+  options {
+    model "qwen3-8k:32b"
+    base_url "http://192.168.1.188:11434/v1"
+    api_key "ollama"
+    temperature 0.1
+  }
+}
+
 // Define the OpenRouter client
 client<llm> OpenRouter {
   provider openai
@@ -174,8 +185,8 @@ function ExtractVersesFromMarkdown(
     
     For each verse chunk:
     1. Identify the verse reference. Convert it to a standardized format (e.g., "GEN 01:01").
-    2. Extract the first 5-10 words of the commentary text for that verse as the `start_phrase`.
-    3. Extract the last 5-10 words of the commentary text for that verse as the `end_phrase`.
+    2. Extract the first 10-15 words IMMEDIATELY after the verse marker (e.g., "Ver. 31.") as the `start_phrase`. This often includes the QUOTED VERSE TEXT (which may be in italics or marked with * or brackets) followed by commentary. DO NOT skip the verse quotation.
+    3. Extract the last 10-15 words of the commentary text for that verse as the `end_phrase`.
     
     CRITICAL: The `start_phrase` and `end_phrase` MUST be EXACT substrings from the provided text. Do not paraphrase or modify them. They will be used for fuzzy matching against the original OCR data.
     
@@ -188,5 +199,83 @@ function ExtractVersesFromMarkdown(
     Extract the verse chunks.
     
     {{ ctx.output_format }}
+  "#
+}
+
+// Define the markdown normalization function for John Gill Commentary
+function NormalizeGillMarkdown(raw_markdown: string) -> string {
+  client OllamaGPT
+  
+  prompt #"
+    You are a specialized theological editor responsible for formatting John Gill's Bible Commentary.
+    
+    Objective: Normalize the raw OCR text into clean, structured Markdown while strictly preserving the 18th-century stylistic conventions (specifically the Verse Lemma format).
+    
+    Input: Raw Markdown text derived from OCR/Vision models (which may contain page headers, varying footnote markers, and layout artifacts).
+    Output: Clean, consistent Markdown ready for database ingestion.
+    
+    === 1. STRUCTURAL RULES (STRICT) ===
+    
+    A. Remove ONLY Metadata Headers (at the very top of the page):
+    - Page numbers (e.g., "90", "page 90")
+    - Book/chapter markers like "GENESIS", "CH. I. V. 3"
+    - These are typically short lines at the very beginning, NOT part of the commentary.
+    
+    B. PRESERVE ALL Commentary Text:
+    - CRITICAL: Text that starts mid-sentence (spillover from previous page) MUST be preserved.
+    - Example: If the file starts with "triarchs: but yet such a variety..." this is continuation text from the previous page and MUST be kept.
+    - Only remove obvious page metadata, never remove actual commentary content.
+    
+    C. Chapter Headings:
+    - Format Chapter starts as a standard Markdown Header 1.
+    - Input: **CHAP. I.** or CHAP. 1.
+    - Output: # Chapter 1
+    
+    D. Verse Commentary (The Lemma Style):
+    - Constraint: Do NOT use ### Verse 3. Keep the archaic format.
+    - Format: Start every verse commentary on a new line with the exact pattern: Ver. {number}.
+    - Normalization:
+      - If input is V. 6., change to Ver. 6.
+      - If input is Verse 6., change to Ver. 6.
+      - If input is Ver 6, change to Ver. 6. (ensure periods are present).
+    - The Lemma: Ensure the bracketed lemma text follows immediately.
+      - Example: Ver. 6. And Jesus went, &c.]
+    
+    E. Paragraphs:
+    - Remove excessive newlines. Paragraphs should be separated by a single blank line.
+    
+    === 2. FOOTNOTE NORMALIZATION RULES (CRUCIAL) ===
+    
+    The raw text uses inconsistent markers (e.g., ^a^, ᵃ, (1), *, †, <sup>). You must standardize them to Markdown.
+    
+    CRITICAL: Do NOT invent or add new footnote markers. Only normalize markers that ALREADY EXIST in the original text.
+    
+    A. In-Text Markers:
+    - Convert EXISTING footnote markers in the body text to standard numerical Markdown citations: [^1], [^2], [^3].
+    - Number them sequentially starting from 1 for the page.
+    - Example: "...as Aben Ezra observes^a^" → "...as Aben Ezra observes[^1]"
+    - If there is NO footnote marker in the original (e.g., "Aben Ezra observes" with no ^a^ or superscript), do NOT add one.
+    
+    B. Footnote Definitions:
+    - Move ALL footnote definitions to the very bottom of the text.
+    - Format them as: [^1]: {Content}
+    - Matching: You must intelligently match the in-text marker to the correct definition based on context or the original marker symbol (e.g., if text has ^a^ and footer has a Vid. Josephus, link them as [^1]).
+    - Formatting: Remove the original marker letters (a, b, *) from the definition text.
+      - Bad: [^1]: a Vid. Josephus...
+      - Good: [^1]: Vid. Josephus...
+    - New section markers should start with letter 'a' unless the conversion interpreted them wrong. Spill over markers will follow the lettering order from the previous page potentially resulting in duplicate letters. BE CAREFUL to match them correctly.
+    
+    === 3. CONTENT INTEGRITY RULES ===
+    
+    - Hebrew/Greek: NEVER alter or remove Hebrew, Greek, or Arabic text. Keep it exactly as is.
+    - Italics: Ensure Bible quotations or emphasized words use *asterisks* (not _underscores_).
+    - Spelling: Do not modernize 18th-century spelling (e.g., "shewn", "hath")
+    - Spillover Text: ALWAYS preserve text that continues from a previous page, even if it starts mid-sentence.
+    
+    {{ _.role("user") }}
+    
+    Please normalize the following raw OCR markdown:
+    
+    {{ raw_markdown }}
   "#
 }

@@ -31,6 +31,57 @@ def load_markdown(page_name: str, markdown_dir: Path) -> str:
         return f.read()
 
 
+def load_metadata(page_name: str, extracted_dir: Path) -> Optional[Dict]:
+    """Load page metadata JSON if available."""
+    meta_path = extracted_dir / f"{page_name}_metadata.json"
+    if meta_path.exists():
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+
+def is_header_word(word: Dict, metadata: Optional[Dict], header_y_threshold: float) -> bool:
+    """
+    Check if a word is likely a header word based on metadata and position.
+    
+    Header words are:
+    - Page numbers (match metadata page_number)
+    - Book name (match metadata book_name like "GENESIS")
+    - Chapter/verse indicators (like "CH. II. V. 9")
+    - Words in the top region of the page (above header_y_threshold)
+    """
+    if word.get('top', 0) > header_y_threshold:
+        return False  # Not in header region
+    
+    word_text = word.get('text', '').upper().strip('.,;:!?"\'')
+    
+    # Check against metadata if available
+    if metadata:
+        # Check page number
+        page_num = str(metadata.get('page_number', ''))
+        if word_text == page_num:
+            return True
+        
+        # Check book name
+        book_name = metadata.get('book_name', '').upper()
+        if word_text == book_name or word_text.rstrip('.') == book_name:
+            return True
+        
+        # Check chapter (roman numeral or number)
+        chapter = metadata.get('chapter')
+        if chapter:
+            roman_numerals = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 
+                            6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X'}
+            if str(chapter) == word_text or roman_numerals.get(chapter, '') == word_text:
+                return True
+    
+    # Common header patterns regardless of metadata
+    if word_text in ['CH', 'CH.', 'V', 'V.', 'VER', 'VER.']:
+        return True
+    
+    return False
+
+
 def tokenize_markdown(markdown: str) -> Tuple[List[str], List[str]]:
     """
     Extract words from markdown, separating body text from footnote content.
@@ -47,12 +98,13 @@ def tokenize_markdown(markdown: str) -> Tuple[List[str], List[str]]:
     
     for line in lines:
         stripped = line.strip()
-        # Footnote definition lines start with ^letter or ^number
-        if re.match(r'^\^[a-zA-Z0-9]', stripped):
+        # Footnote definition lines: either "^letter" or "[^letter]:" format
+        if re.match(r'^\^[a-zA-Z0-9]', stripped) or re.match(r'^\[\^[a-zA-Z0-9]+\]:', stripped):
             footnote_lines.append(line)
         else:
-            # Remove inline footnote references like ^a, ^b from body
+            # Remove inline footnote references like ^a, ^b, [^c] from body
             clean_line = re.sub(r'\^[a-zA-Z0-9]+', '', line)
+            clean_line = re.sub(r'\[\^[a-zA-Z0-9]+\]', '', clean_line)
             body_lines.append(clean_line)
     
     def clean_and_tokenize(text: str) -> List[str]:
@@ -318,6 +370,11 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path):
         return
     print(f"  Loaded {len(ocr_words)} OCR words")
     
+    # Load metadata for header detection
+    metadata = load_metadata(page_name, extracted_dir)
+    if metadata:
+        print(f"  Metadata: page={metadata.get('page_number')}, book={metadata.get('book_name')}")
+    
     # Load markdown
     try:
         markdown = load_markdown(page_name, markdown_dir)
@@ -325,18 +382,53 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path):
         print(f"  ERROR: Markdown not found at {markdown_dir}")
         return
     
+    # Pre-filter header words using metadata
+    # Header words are in the top 3% of the page and match metadata patterns
+    if ocr_words:
+        all_y = [w['top'] for w in ocr_words]
+        min_y = min(all_y)
+        max_y = max(all_y)
+        header_y_threshold = min_y + ((max_y - min_y) * 0.03)  # Top 3%
+        
+        body_ocr_words = []
+        header_words = []
+        for word in ocr_words:
+            if is_header_word(word, metadata, header_y_threshold):
+                word_copy = word.copy()
+                word_copy['is_header'] = True
+                header_words.append(word_copy)
+            else:
+                body_ocr_words.append(word)
+        
+        if header_words:
+            print(f"  Excluded {len(header_words)} header words: {[w['text'][:10] for w in header_words[:5]]}")
+    else:
+        body_ocr_words = ocr_words
+        header_words = []
+    
     # Tokenize markdown - separate body from footnotes
     body_md_words, footnote_md_words = tokenize_markdown(markdown)
     print(f"  Markdown: {len(body_md_words)} body words, {len(footnote_md_words)} footnote words")
     
-    # Fix up OCR - match against body markdown, then check against footnote markdown
+    # Fix up OCR - match body OCR against body markdown, then check footnotes
     fixed_words, num_spelling, num_footnotes = fixup_ocr_with_footnotes(
-        ocr_words, body_md_words, footnote_md_words)
+        body_ocr_words, body_md_words, footnote_md_words)
+    
+    # Add header words back at the beginning, marked as is_header=True
+    # They stay at their original positions for bounding box calculation
+    for word in header_words:
+        word['is_footnote'] = False
+    result_words = header_words + fixed_words
+    
+    # Update reading indices
+    for i, word in enumerate(result_words):
+        word['reading_index'] = i
+    
     print(f"  Fixed {num_spelling} spelling errors ({100*num_spelling/len(ocr_words):.1f}%)")
     print(f"  Moved {num_footnotes} words to footnotes ({100*num_footnotes/len(ocr_words):.1f}%)")
     
     # Save
-    save_fixedup(fixed_words, page_name, extracted_dir)
+    save_fixedup(result_words, page_name, extracted_dir)
 
 
 def main():

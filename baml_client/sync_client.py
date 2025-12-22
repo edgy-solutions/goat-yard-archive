@@ -133,6 +133,20 @@ class BamlSyncClient:
                 "markdown_text": markdown_text,
             })
             return typing.cast(typing.List["types.VerseChunk"], result.cast_to(types, types, stream_types, False, __runtime__))
+    def NormalizeGillMarkdown(self, raw_markdown: str,
+        baml_options: BamlCallOptions = {},
+    ) -> str:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            stream = self.stream.NormalizeGillMarkdown(raw_markdown=raw_markdown,
+                baml_options=baml_options)
+            return stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = self.__options.merge_options(baml_options).call_function_sync(function_name="NormalizeGillMarkdown", args={
+                "raw_markdown": raw_markdown,
+            })
+            return typing.cast(str, result.cast_to(types, types, stream_types, False, __runtime__))
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
         baml_options: BamlCallOptions = {},
     ) -> types.Metadata:
@@ -192,6 +206,18 @@ class BamlStreamClient:
           lambda x: typing.cast(typing.List["types.VerseChunk"], x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def NormalizeGillMarkdown(self, raw_markdown: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[str, str]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="NormalizeGillMarkdown", args={
+            "raw_markdown": raw_markdown,
+        })
+        return baml_py.BamlSyncStream[str, str](
+          result,
+          lambda x: typing.cast(str, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(str, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.Metadata, types.Metadata]:
@@ -233,6 +259,13 @@ class BamlHttpRequestClient:
             "markdown_text": markdown_text,
         }, mode="request")
         return result
+    def NormalizeGillMarkdown(self, raw_markdown: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="NormalizeGillMarkdown", args={
+            "raw_markdown": raw_markdown,
+        }, mode="request")
+        return result
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -267,6 +300,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractVersesFromMarkdown", args={
             "markdown_text": markdown_text,
+        }, mode="stream")
+        return result
+    def NormalizeGillMarkdown(self, raw_markdown: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="NormalizeGillMarkdown", args={
+            "raw_markdown": raw_markdown,
         }, mode="stream")
         return result
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
