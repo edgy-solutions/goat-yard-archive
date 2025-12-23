@@ -100,7 +100,7 @@ def format_hebrew_verses(hebrew_text_dict):
         lines.append(f"Verse {verse_num}: {hebrew}")
     return "\n".join(lines)
 
-def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=None):
+def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=None, pages=None, filename=None):
     """Check if metadata matches the given filters.
     
     Args:
@@ -108,12 +108,29 @@ def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=N
         book_filter (str): Book name to filter by (case-insensitive)
         chapter_start (int): Starting chapter (inclusive)
         chapter_end (int): Ending chapter (inclusive)
+        pages (list): List of page numbers to filter by (e.g., [337, 341, 386, 389])
+        filename (str): Filename for page number extraction when pages filter is used
         
     Returns:
         bool: True if metadata matches all filters
     """
     if not metadata:
         return False
+    
+    # Check pages filter first (most specific)
+    if pages:
+        # Try to extract page number from metadata or filename
+        page_num = metadata.get('page_number')
+        if page_num is None and filename:
+            # Try to extract from filename like "page337_image1.png"
+            import re
+            match = re.search(r'page(\d+)', filename, re.IGNORECASE)
+            if match:
+                page_num = int(match.group(1))
+        if page_num is None or page_num not in pages:
+            return False
+        # If pages filter matches, return True (skip other filters)
+        return True
     
     # Check book filter
     if book_filter:
@@ -134,7 +151,7 @@ def matches_filter(metadata, book_filter=None, chapter_start=None, chapter_end=N
     return True
 
 def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwen3-vl-235b-a22b-thinking", model_pricing=None, 
-                                  book_filter=None, chapter_start=None, chapter_end=None):
+                                  book_filter=None, chapter_start=None, chapter_end=None, pages=None):
     """
     Process all PNG images in a directory using OpenRouter API via BAML
     
@@ -146,6 +163,7 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
         book_filter (str): Optional book name filter
         chapter_start (int): Optional starting chapter (inclusive)
         chapter_end (int): Optional ending chapter (inclusive)
+        pages (list): Optional list of specific page numbers to process
     """
     
     # Get all PNG files in the directory
@@ -167,7 +185,7 @@ def process_images_with_openrouter(api_key, directory_path, model_name="qwen/qwe
             skipped_no_metadata += 1
             continue
         
-        if matches_filter(metadata, book_filter, chapter_start, chapter_end):
+        if matches_filter(metadata, book_filter, chapter_start, chapter_end, pages=pages, filename=png_file.name):
             png_files.append((png_file, metadata))
         else:
             skipped_filtered += 1

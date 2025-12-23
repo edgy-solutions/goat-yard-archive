@@ -564,7 +564,7 @@ def process_single_image(png_file, metadata, output_dir, model_pricing, baml_cap
 
 
 def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
-                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, filename_filter=None, max_workers=1, skip_existing=True):
+                             model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, filename_filter=None, pages=None, max_workers=1, skip_existing=True):
     """Process images using BAML for text extraction.
     
     Args:
@@ -623,6 +623,14 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
     if filename_filter:
         png_files = [f for f in png_files if filename_filter in f.name]
         logging.info(f"Filtered to {len(png_files)} images matching '{filename_filter}'")
+    
+    # Apply pages filter if provided (matches specific page numbers)
+    if pages:
+        def extract_page_num(filepath):
+            match = re.search(r'page(\d+)', filepath.name, re.IGNORECASE)
+            return int(match.group(1)) if match else None
+        png_files = [f for f in png_files if extract_page_num(f) in pages]
+        logging.info(f"Filtered to {len(png_files)} images matching pages {pages}")
     
     if not png_files:
         pass
@@ -804,6 +812,7 @@ if __name__ == "__main__":
     parser.add_argument("--chapter-start", "-cs", type=int, help="Start chapter (inclusive)")
     parser.add_argument("--chapter-end", "-ce", type=int, help="End chapter (inclusive)")
     parser.add_argument("--filename", "-f", help="Filter by filename (e.g., page100_image1)")
+    parser.add_argument("--pages", "-p", help="Comma-separated list of page numbers to process (e.g., 337,341,386,389)")
     parser.add_argument("--force", action="store_true", help="Force re-processing even if output exists")
     parser.add_argument("--workers", "-w", type=int, default=1,
                        help="Number of concurrent workers (default: 1). Use 2-4 for parallel processing.")
@@ -830,6 +839,15 @@ if __name__ == "__main__":
         'image': 0.0  # Additional per-image cost if any
     }
     
+    # Parse pages argument if provided
+    pages_list = None
+    if args.pages:
+        try:
+            pages_list = [int(p.strip()) for p in args.pages.split(',')]
+        except ValueError:
+            print(f"Error: Invalid pages format '{args.pages}'. Use comma-separated numbers like 337,341,386,389")
+            exit(1)
+    
     process_images_with_baml(
         api_key=API_KEY,
         directory_path=args.directory,
@@ -839,6 +857,7 @@ if __name__ == "__main__":
         chapter_start=args.chapter_start,
         chapter_end=args.chapter_end,
         filename_filter=args.filename,
+        pages=pages_list,
         max_workers=5,  # Use parallel processing
         skip_existing=not args.force
     )

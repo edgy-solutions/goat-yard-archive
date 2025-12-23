@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Script to normalize OCR-extracted markdown from John Gill's Bible Commentary.
 
 Supports two backends:
@@ -85,6 +85,9 @@ B. Footnote Definitions:
 === 3. CONTENT INTEGRITY RULES ===
 
 - Hebrew/Greek/Aramaic: CRITICAL - NEVER alter, add to, or remove Hebrew (עברית), Greek (Ελληνικά), or Aramaic text. Copy these EXACTLY character-for-character from the source. Do not "fix" or "correct" them.
+  - Correct: "The word is בְּרֵאשִׁית, Bereshith." -> "The word is בְּרֵאשִׁית, Bereshith."
+  - Incorrect: "The word is בְּרֵאשִׁית, Bereshith." -> "The word is Bereshith."
+  - Incorrect: "The word is בְּרֵאשִׁית, Bereshith." -> "The word is שִׁית אשִׁית, Bereshith."
 - Italics: Ensure Bible quotations or emphasized words use *asterisks* (not _underscores_).
 - Spelling: Do not modernize 18th-century spelling (e.g., "shewn", "hath")
 - Spillover Text: ALWAYS preserve text that continues from a previous page, even if it starts mid-sentence."""
@@ -355,7 +358,8 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     def_count = len(definition_footnotes)
     
     # Count "ibid" footnotes in source - LLM may combine these with their references
-    ibid_count = len(re.findall(r'\bibid\.?\b', source, re.IGNORECASE))
+    # expanded to include ib., id., idem
+    ibid_count = len(re.findall(r'\b(ib|ibid|idem|id)\.?\b', source, re.IGNORECASE))
     
     # Allow mismatch if difference matches ibid count (LLM combined duplicate refs)
     footnote_count_match = (body_count == def_count) or (body_count == def_count + ibid_count) or (body_count + ibid_count >= def_count)
@@ -371,7 +375,28 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     if missing_definitions:
         footnote_issues.append(f"Missing definitions for: {sorted(missing_definitions)}")
     if extra_definitions:
-        footnote_issues.append(f"Extra definitions without markers: {sorted(extra_definitions)}")
+        # If we successfully matched counts (likely due to Ibid merging logic) AND we have more definitions than body markers,
+        # then the extra definitions are expected artifacts of the merge.
+        is_merge_artifact = footnote_count_match and (def_count > body_count)
+        
+        if not is_merge_artifact:
+            # Check if the extra definitions are just "Ibid" citations that might have been merged
+            # or left over. If they are Ibid, we might tolerate them if footnote counts roughly align.
+            real_extra = []
+            for def_id in extra_definitions:
+                # Find the content of this definition
+                # Regex to find [^N]: content
+                def_match = re.search(r'^\s*\[\^' + str(def_id) + r'\]:(.*)$', output, re.MULTILINE)
+                if def_match:
+                    content = def_match.group(1).strip().lower()
+                    # If it's an "ibid" type definition, ignore it for the error list
+                    if not re.search(r'^\s*(ib|ibid|idem|id)\.?\b', content):
+                        real_extra.append(def_id)
+                else:
+                    real_extra.append(def_id)
+            
+            if real_extra:
+                footnote_issues.append(f"Extra definitions without markers: {sorted(real_extra)}")
     
     # Detect unauthorized changes using segment matching
     # Algorithm: split output by [^N], verify each text segment exists in source
@@ -382,19 +407,26 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     all_footnote_markers = re.compile(r'\[\^\d+\]|\^\[[a-zA-Z]\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
     # Pattern to detect headings (should be skipped)
     # Includes "C H A P. V." or "CHAP. V." or "GENESIS."
-    heading_pattern = re.compile(r'^#.*$|^\*?\*?C\s*H\s*A\s*P\.\s*[IVX\d]+.*$|^[A-Z]+\.\s*CH\.\s*[IVX\d]+', re.MULTILINE | re.IGNORECASE)
+    heading_pattern = re.compile(r'^#.*$|^\*?\*?C\s*H\s*A\s*P\.?\s*[IVX\d]+.*$|^[A-Z]+\.\s*CH\.\s*[IVX\d]+|CHAP\.?\s*[IVXLCD]+\.?', re.MULTILINE | re.IGNORECASE)
     # Pattern to detect footnote definition lines (various formats):
     # - "^a Some text" (caret prefixed)
-    # - "^[z]: text" or "^[a]: text" (caret bracket letter style)
+    # - "^a^ Some text" (caret-letter-caret prefixed)
+    # - "^[z]: text" or "^[a]: text" (caret bracket letter style with colon)
+    # - "^[z] text" or "^[a] text" (caret bracket letter style WITHOUT colon)
     # - "[^1]: text" or "[^a]: text" (markdown style with numbers or letters)
+    # - "[a]: text" or "[b]: text" (bracket-letter-colon style WITHOUT caret)
     # - "a Some text" or "b Hebrew..." (single letter at line start, common in OCR)
     # - "<sup>a</sup> Some text" (superscript tag at line start)
     # - "° Some text" (degree symbol at line start)
     # - "¹ Some text" or " ¹..." (any superscript number at line start, with optional leading space)
-    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\[\^[a-z0-9]+\]:.*$|^[a-z]\s+\S.*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$', re.MULTILINE)
+    # - "Erato, sive..." (bibliographic continuations with Latin abbreviations like "l.", "c.", "fol.", "sive")
+    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$', re.MULTILINE)
     
     def normalize_text(text: str) -> str:
         """Normalize text for comparison - remove footnotes, headings, definitions, and normalize whitespace."""
+        # FIRST: Join cross-line hyphens before any other processing (e.g., "ima-\ngine" -> "imagine")
+        # Conservative pattern: only when hyphen immediately precedes newline and next line starts with word char
+        text = re.sub(r'(\w)-[\r\n]+(\w)', r'\1\2', text)
         text = footnote_def_line_pattern.sub(' ', text)  # Remove footnote definition lines
         text = all_footnote_markers.sub(' ', text)
         text = heading_pattern.sub(' ', text)  # Remove headings
@@ -403,6 +435,15 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
         text = re.sub(r'([(])\s+', r'\1', text)
         # Remove quotes/apostrophes/asterisks for comparison (handles smart quotes/apostrophes/emphasis mismatches)
         text = re.sub(r'["“”\'‘’*]', '', text)
+        # Remove hyphens between word chars (OCR artifacts like "con-cerned" -> "concerned")
+        text = re.sub(r'(\w)-(\w)', r'\1\2', text)
+        # Handle end-of-line hyphens: "ima-\ngine" -> "imagine" (remove trailing hyphen before newline)
+        text = re.sub(r'(\w)-\s*\n\s*(\w)', r'\1\2', text)
+        # Also handle line-break hyphens: "con- cerned" or "crea- tures" -> "concerned"/"creatures"
+        text = re.sub(r'(\w)-\s+(\w)', r'\1\2', text)
+        # Normalize verse markers: "Ver 16." or "Ver. 16." or "ver. 16" -> consistent format
+        # Remove entirely for comparison since LLM may fix punctuation (Ver 16 -> Ver. 16.)
+        text = re.sub(r'\bver\.?\s*\d+\.?', '', text, flags=re.IGNORECASE)
         return ' '.join(text.split()).lower()
     
     # Normalize source for comparison
@@ -444,15 +485,20 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
                 if window not in source_normalized:
                     consecutive_failures += 1
                     if consecutive_failures >= failure_threshold:
-                        # Found sustained mismatch - likely real corruption
+                        # Found sustained mismatch - get context for logging
                         mismatch_context = ' '.join(segment_words[max(0, j-5):j + window_size + 2])
                         before_context = ' '.join(segment_words[max(0, j-3):j])
                         after_context = ' '.join(segment_words[j + window_size:j + window_size + 3])
+                        
+                        # Find best matching source window for comparison
+                        search_start = max(0, source_normalized.find(before_context) if before_context else 0)
+                        source_context = source_normalized[search_start:search_start + len(mismatch_context) + 40]
                         
                         unauthorized_changes.append({
                             'type': 'text_mismatch',
                             'segment_index': i,
                             'output_text': mismatch_context,
+                            'source_text': source_context[:80] if source_context else '(not found)',
                             'context_before': before_context,
                             'context_after': after_context,
                         })
@@ -470,7 +516,8 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     for line in source_lines:
         line_normalized = normalize_text(line)
         # Skip short lines (likely page numbers/headers) and actual chapter headings
-        if len(line_normalized) > 40 and not re.match(r'^\d+\s*$|^[a-z]+\.\s*ch\.\s*', line_normalized):
+        # Also skip page headers like "276 genesis. ch. xliii." or "114 GENESIS CH XV"
+        if len(line_normalized) > 40 and not re.match(r'^\d+\s*$|^\d*\s*[a-z]+\.?\s*ch\.?\s*[ivxlcd\d]+', line_normalized, re.IGNORECASE):
             first_content_line = line_normalized
             break
     
@@ -791,6 +838,20 @@ def normalize_single_file(backend: NormalizerBackend, input_path: Path, force: b
         
         if not raw_markdown.strip():
             logging.warning(f"Skipping {input_path.name} - file is empty")
+            return False
+        
+        # Check for modern web URLs (vision model hallucinations)
+        url_pattern = re.compile(r'https?://[^\s\)\]]+', re.IGNORECASE)
+        urls_found = url_pattern.findall(raw_markdown)
+        if urls_found:
+            logging.warning(f"[HALLUCINATION] {input_path.name} contains {len(urls_found)} modern web URL(s) - vision model hallucination detected!")
+            for url in urls_found[:5]:  # Log first 5 URLs
+                logging.warning(f"  URL: {url[:80]}...")
+            # Write to hallucination log file for later re-processing
+            hallucination_log = input_path.parent / "hallucination_pages.txt"
+            with open(hallucination_log, 'a', encoding='utf-8') as f:
+                f.write(f"{input_path.name}: {', '.join(urls_found[:3])}\n")
+            logging.warning(f"Skipping {input_path.name} - needs vision model re-run. Logged to {hallucination_log.name}")
             return False
         
         logging.info(f"Normalizing {input_path.name} ({len(raw_markdown)} chars) using {backend.name}...")
