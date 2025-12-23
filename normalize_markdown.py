@@ -404,7 +404,7 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     
     # Pattern to strip footnote markers for segment extraction
     # Includes: [^N], ^[letter], ^a^, ^a, superscript letters (ᵃᵇᶜ...), <sup> tags, degree symbol, and ALL superscript numbers (⁰¹²³⁴⁵⁶⁷⁸⁹)
-    all_footnote_markers = re.compile(r'\[\^\d+\]|\^\[[a-zA-Z]\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
+    all_footnote_markers = re.compile(r'\[\^\d+\]|\^\[\]\^|\^\[\*\]\^|\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^|\^\s+|\^\[[a-zA-Z]\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
     # Pattern to detect headings (should be skipped)
     # Includes "C H A P. V." or "CHAP. V." or "GENESIS."
     heading_pattern = re.compile(r'^#.*$|^\*?\*?C\s*H\s*A\s*P\.?\s*[IVX\d]+.*$|^[A-Z]+\.\s*CH\.\s*[IVX\d]+|CHAP\.?\s*[IVXLCD]+\.?', re.MULTILINE | re.IGNORECASE)
@@ -420,14 +420,19 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     # - "° Some text" (degree symbol at line start)
     # - "¹ Some text" or " ¹..." (any superscript number at line start, with optional leading space)
     # - "Erato, sive..." (bibliographic continuations with Latin abbreviations like "l.", "c.", "fol.", "sive")
-    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$', re.MULTILINE)
+    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\^\[\*\]\^.*$|^\s*\^\[\]\^.*$|^\s*\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^.*$|^\s*\^\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$', re.MULTILINE)
     
+    # Pattern for inline Rabbinic citations often found in text (e.g. "^ T. Bab. Sanhedrin")
+    # Matches " ^ T. Bab." or " ^ Bemidbar Rabba" and the rest of the sentence/line
+    inline_citation_pattern = re.compile(r'\s*\^\s*(?:T\.\s*Bab\.|Bemidbar\s*Rabba|Bereshit\s*Rabba|Vayikra\s*Rabba|Debarim\s*Rabba|Echa\s*Rabbati|Midrash\s*Kohelet).*', re.IGNORECASE)
+
     def normalize_text(text: str) -> str:
         """Normalize text for comparison - remove footnotes, headings, definitions, and normalize whitespace."""
         # FIRST: Join cross-line hyphens before any other processing (e.g., "ima-\ngine" -> "imagine")
         # Conservative pattern: only when hyphen immediately precedes newline and next line starts with word char
         text = re.sub(r'(\w)-[\r\n]+(\w)', r'\1\2', text)
         text = footnote_def_line_pattern.sub(' ', text)  # Remove footnote definition lines
+        text = inline_citation_pattern.sub(' ', text)    # Remove inline Rabbinic citations
         text = all_footnote_markers.sub(' ', text)
         text = heading_pattern.sub(' ', text)  # Remove headings
         # Normalize spaces around punctuation (allow "word ." -> "word.")
@@ -448,6 +453,12 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     
     # Normalize source for comparison
     source_normalized = normalize_text(source)
+    
+    if "king of Zion" in source or "page387" in source: # Attempt to identify page 387
+         with open("debug_nm_source.txt", "w", encoding="utf-8") as f:
+             f.write(source_normalized)
+         with open("debug_nm_output.txt", "w", encoding="utf-8") as f:
+             f.write(output)
     
     # Split output into segments by [^N] markers (excluding footnote definitions at bottom)
     footnote_def_start = re.search(r'^\[\^\d+\]:', output, re.MULTILINE)

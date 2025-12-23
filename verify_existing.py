@@ -26,8 +26,16 @@ for img_dir in dirs_to_scan:
     
     normalized_files = sorted(list(img_dir.rglob('*_normalized.md')))
     
+    # Filter files if argument provided
+    if len(sys.argv) > 1:
+        filter_str = sys.argv[1]
+        normalized_files = [f for f in normalized_files if filter_str in f.name]
+    
     if not normalized_files:
-        print("  No normalized files found.")
+        if len(sys.argv) > 1:
+            print(f"  No files matching '{sys.argv[1]}' found in {img_dir.name}.")
+        else:
+            print("  No normalized files found.")
         continue
         
     local_passed = 0
@@ -45,12 +53,16 @@ for img_dir in dirs_to_scan:
             print(f"Error reading {norm_file.name}: {e}")
             local_failed += 1
             continue
-        
+
         # Run verification
         result = verify_normalization(source, output)
         
         status = '✓' if result.passed else '✗'
         print(f'{status} {norm_file.name}: {result}')
+        
+        if 'page387' in norm_file.name: # Changed from str(source) to norm_file.name as per instruction
+            # Debug print - masked
+            pass
         
         if result.passed:
             local_passed += 1
