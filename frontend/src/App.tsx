@@ -12,7 +12,7 @@ interface EvidenceItem {
     citation: string;
     vol: number;
     page: number;
-    scan: { x: number; y: number; w: number; h: number } | null;
+    scan: { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; h: number }[] | null;
     score: number;
     footnotes?: string[];
     entities?: string[];
@@ -51,39 +51,44 @@ function App() {
             const res = await fetch('http://localhost:8000/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query })
+                body: JSON.stringify({ query }),
             });
 
-            if (!res.ok) throw new Error("API call failed");
-
-            const data: SearchResponse = await res.json();
-            setResponse(data);
-
-            // Auto-select first evidence if available
-            if (data.evidence.length > 0) {
-                setActiveEvidence(data.evidence[0]);
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Server Error: ${res.status} ${errText}`);
             }
 
+            const data = await res.json();
+            setResponse(data);
+            if (data.evidence && data.evidence.length > 0) {
+                setActiveEvidence(data.evidence[0]);
+            }
         } catch (err) {
-            console.error(err);
-            setError("Backend unavailable. Showing Mock Mode.");
-            // Fallback to Mock
-            const mockEv = {
-                chunk_id: "mock1",
-                content: MOCK_CITATION.text,
-                citation: "[Vol 1, p. 287]",
-                vol: 1,
-                page: 287,
-                scan: MOCK_CITATION.scan_json,
-                score: 1.0
-            };
-            setResponse({
-                answer: "This is a mock response because the backend is not connected. " + MOCK_CITATION.text,
-                citations: ["[Vol 1, p. 287]"],
-                evidence: [mockEv],
-                verified: true
-            });
-            setActiveEvidence(mockEv);
+            console.error("Search failed, falling back to mock:", err);
+            setError(err instanceof Error ? err.message : "Unknown error");
+            // MOCK FALLBACK for demo/testing
+            setTimeout(() => {
+                const mockEv: EvidenceItem = {
+                    chunk_id: "mock1",
+                    content: MOCK_CITATION.text || "Mock content not found",
+                    citation: "[Vol 1, p. 287]",
+                    vol: 1,
+                    page: 287,
+                    scan: MOCK_CITATION.scan_json || { x: 0, y: 0, w: 0, h: 0 },
+                    score: 1.0,
+                    footnotes: ["Mock footnote 1"],
+                    entities: ["Mock Entity"]
+                };
+
+                setResponse({
+                    answer: "Backend unavailable. (Mock Answer) Gill discusses this in his Exposition of the Old and New Testaments...",
+                    citations: ["[Vol 1, p. 123]"],
+                    evidence: [mockEv],
+                    verified: false
+                });
+                setActiveEvidence(mockEv);
+            }, 500);
         } finally {
             setLoading(false);
         }
@@ -101,64 +106,86 @@ function App() {
     // In a real app, this should come from Metadata or config. 
     // We'll hardcode or use MOCK_CITATION dims for now as a default
     const getOriginalDims = (ev: EvidenceItem | null) => {
-        return { w: 2500, h: 3800 }; // Standard size for now
+        if (!ev) return null;
+
+        // Dimensions specific to each volume based on original scans
+        if (ev.vol === 1) {
+            return { w: 3584, h: 5400 };
+        } else if (ev.vol === 7) {
+            return { w: 3360, h: 5400 };
+        }
+
+        // Default / Fallback (Let logic default to naturalWidth or these dims)
+        return { w: 3360, h: 5400 };
     };
 
     return (
-        <div className="flex h-screen bg-white font-sans text-gray-800">
+        <div className="flex h-screen overflow-hidden font-serif bg-parchment text-amber-950">
 
             {/* Left Pane: Chat & Context */}
-            <div className="w-1/2 flex flex-col border-r border-gray-200">
+            <div className="w-1/2 flex flex-col border-r border-[#8D6E63] shadow-2xl z-10">
 
                 {/* Header */}
-                <div className="p-4 border-b bg-gray-50">
-                    <h1 className="text-xl font-bold text-blue-900">Dr. Voluminous</h1>
-                    <p className="text-xs text-gray-500">Grounded Theological AI</p>
+                <div className="p-4 border-b border-[#5D4037] bg-wood text-gold shadow-md">
+                    <h1 className="text-2xl font-bold tracking-wide">Dr. Voluminous</h1>
+                    <p className="text-xs text-amber-200/80 italic">Grounded Theological AI</p>
                 </div>
 
-                {/* Chat / Content Area */}
-                <div className="flex-1 overflow-auto p-6 space-y-6">
-                    {/* User Query Input (if empty state) */}
-                    {!response && !loading && (
-                        <div className="text-center mt-20 text-gray-400">
-                            <p>Ask a question about the Scriptures or Theology.</p>
+                {/* Main Content Area */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#FDFBF7]">
+
+                    {/* Error Banner */}
+                    {error && (
+                        <div className="bg-red-50 border-l-4 border-red-800 text-red-900 p-4 rounded shadow-sm text-sm">
+                            <strong>Connection Error:</strong> {error}
+                            <div className="text-xs mt-1 text-red-700">Using mock data for demonstration.</div>
                         </div>
                     )}
 
-                    {loading && <div className="text-center text-blue-500">Searching the Archives...</div>}
+                    {/* Chat Interaction */}
+                    {loading && (
+                        <div className="flex items-center space-x-3 text-amber-800 animate-pulse">
+                            <div className="w-2 h-2 bg-amber-800 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                            <div className="w-2 h-2 bg-amber-800 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-2 h-2 bg-amber-800 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                            <span className="text-sm font-medium italic">Consulting the library...</span>
+                        </div>
+                    )}
 
                     {response && (
-                        <div className="space-y-4">
-                            {/* Answer */}
-                            <div className="bg-blue-50 p-4 rounded-lg">
-                                {/* Status Header */}
+                        <div className="space-y-6">
+                            {/* Answer Card */}
+                            <div className="bg-[#FFFDF5] p-5 rounded-lg shadow-sm border border-[#D7CCC8]">
                                 <div className="flex justify-end mb-2">
                                     {response.verified ? (
-                                        <span className="flex items-center text-xs text-green-700 bg-green-100 px-2 py-1 rounded-full">
-                                            ✓ Verified
+                                        <span className="flex items-center text-xs text-green-800 bg-green-100 px-2 py-1 rounded-full border border-green-200 font-bold uppercase tracking-wider">
+                                            ✓ Verified Source
                                         </span>
                                     ) : (
-                                        <span className="text-xs text-red-700 bg-red-100 px-2 py-1 rounded-full text-center">
-                                            ⚠ Unverified
+                                        <span className="text-xs text-amber-800 bg-amber-100 px-2 py-1 rounded-full border border-amber-200">
+                                            ⚠️ Potential Hallucination
                                         </span>
                                     )}
                                 </div>
-                                <div className="prose max-w-none">
-                                    <p>{response.answer}</p>
+                                <div className="prose prose-sm max-w-none text-[#3E2723] leading-relaxed">
+                                    {response.answer.split('\n').map((line, i) => (
+                                        <p key={i} className="mb-2">{line}</p>
+                                    ))}
                                 </div>
                             </div>
 
-                            {/* Citations Buttons */}
+                            {/* Citations / Sources */}
                             <div className="flex flex-wrap gap-2">
-                                {response.evidence.map((ev) => (
+                                {response.evidence.map((ev, idx) => (
                                     <button
-                                        key={ev.chunk_id}
+                                        key={idx}
                                         onClick={() => setActiveEvidence(ev)}
-                                        className={`px-3 py-1 rounded text-sm border transition-colors
-                                    ${activeEvidence?.chunk_id === ev.chunk_id
-                                                ? 'bg-blue-600 text-white border-blue-600'
-                                                : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}
-                                `}
+                                        className={`px-3 py-1 rounded text-sm transition-all duration-200 font-serif border
+                                            ${activeEvidence?.chunk_id === ev.chunk_id
+                                                ? 'bg-[#5D4037] text-amber-50 border-[#3E2723] shadow-md'
+                                                : 'bg-white/50 text-[#5D4037] border-[#D7CCC8] hover:bg-[#D7CCC8]/30 hover:shadow-sm'
+                                            }
+                                        `}
                                     >
                                         {ev.citation}
                                     </button>
@@ -167,34 +194,34 @@ function App() {
 
                             {/* Active Context Snippet */}
                             {activeEvidence && (
-                                <div className="mt-6 border-t pt-4">
-                                    <h3 className="text-sm font-bold uppercase text-gray-500 mb-2">
+                                <div className="mt-6 border-t border-[#D7CCC8] pt-4">
+                                    <h3 className="text-sm font-bold uppercase text-[#5D4037] mb-2 tracking-widest border-b border-[#D7CCC8] pb-1 inline-block">
                                         Evidence Source: {activeEvidence.verse_ref || "Unknown Verse"}
                                     </h3>
 
                                     {/* Entity Tags */}
                                     {activeEvidence.entities && activeEvidence.entities.length > 0 && (
-                                        <div className="flex flex-wrap gap-2 mb-3">
+                                        <div className="flex flex-wrap gap-2 mb-3 mt-2">
                                             {activeEvidence.entities.map((ent, idx) => (
-                                                <span key={idx} className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full font-semibold border border-indigo-200">
+                                                <span key={idx} className="bg-[#EFEBE9] text-[#4E342E] text-xs px-2 py-1 rounded font-semibold border border-[#D7CCC8] shadow-sm">
                                                     {ent}
                                                 </span>
                                             ))}
                                         </div>
                                     )}
 
-                                    <div className="p-3 bg-gray-50 border rounded text-sm text-gray-700">
-                                        <div className="prose prose-sm max-w-none">
+                                    <div className="p-4 bg-[#FFFDF5] border border-[#D7CCC8] rounded text-sm text-[#3E2723] shadow-inner font-merriweather leading-relaxed">
+                                        <div className="prose prose-sm max-w-none prose-p:my-1 prose-p:text-[#3E2723]">
                                             <ReactMarkdown>{activeEvidence.content}</ReactMarkdown>
                                         </div>
 
                                         {/* Footnotes Display */}
                                         {activeEvidence.footnotes && activeEvidence.footnotes.length > 0 && (
-                                            <div className="mt-3 pt-3 border-t border-gray-200">
-                                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Original Footnotes</h4>
-                                                <ul className="space-y-1 text-xs text-gray-600">
+                                            <div className="mt-4 pt-3 border-t border-[#EFEBE9] text-xs">
+                                                <h4 className="font-bold text-[#8D6E63] uppercase mb-1">Original Footnotes</h4>
+                                                <ul className="space-y-1 text-[#5D4037] list-disc list-inside">
                                                     {activeEvidence.footnotes.map((fn, idx) => (
-                                                        <li key={idx} className="text-gray-600">
+                                                        <li key={idx} className="italic opacity-80">
                                                             <span>{fn}</span>
                                                         </li>
                                                     ))}
@@ -209,11 +236,11 @@ function App() {
                 </div>
 
                 {/* Input Area */}
-                <div className="p-4 border-t bg-white">
-                    <div className="flex gap-2">
+                <div className="p-4 border-t border-[#8D6E63] bg-[#EFEBE9] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                    <div className="flex gap-3">
                         <input
-                            className="flex-1 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="e.g. What does he say about the covenant of grace?"
+                            className="flex-1 p-3 border border-[#BCAAA4] rounded bg-white text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:ring-2 focus:ring-[#8D6E63] focus:border-transparent font-serif shadow-inner"
+                            placeholder="Ask Dr. Gill a theological question..."
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -221,7 +248,7 @@ function App() {
                         <button
                             onClick={handleSearch}
                             disabled={loading}
-                            className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                            className="bg-wood text-gold px-8 py-2 rounded font-bold uppercase tracking-wide hover:bg-[#2D1B18] disabled:opacity-50 transition-colors shadow-md border border-[#2D1B18]"
                         >
                             Search
                         </button>
@@ -230,16 +257,19 @@ function App() {
             </div>
 
             {/* Right Pane: Scan Verification */}
-            <div className="w-1/2 bg-gray-100 relative">
-                <ScanViewer
-                    imageUrl={activeEvidence ? `/scans/vol${activeEvidence.vol}_page${activeEvidence.page}_image1.jpeg` : defaultImage}
-                    highlightBox={activeEvidence?.scan || null}
-                    originalDims={getOriginalDims(activeEvidence)}
-                />
+            <div className="w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner flex items-center justify-center p-8">
+                {/* Background pattern or texture could go here */}
+                <div className="w-full h-full relative shadow-2xl rounded overflow-hidden border border-[#5D4037]">
+                    <ScanViewer
+                        imageUrl={activeEvidence ? `/scans/vol${activeEvidence.vol}_page${activeEvidence.page}_image1.png` : defaultImage}
+                        highlightBox={activeEvidence?.scan || null}
+                        originalDims={getOriginalDims(activeEvidence)}
+                    />
 
-                {/* Verification Overlay Label */}
-                <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-1 rounded text-sm pointer-events-none">
-                    Original Scan {activeEvidence ? `(Vol ${activeEvidence.vol}, p. ${activeEvidence.page})` : ""}
+                    {/* Verification Overlay Label */}
+                    <div className="absolute top-4 left-4 bg-[#2D1B18]/90 text-gold px-4 py-2 rounded-sm text-sm pointer-events-none shadow-lg border border-[#5D4037] font-serif">
+                        {activeEvidence ? `Vol ${activeEvidence.vol}, Page ${activeEvidence.page}` : "Library Archive"}
+                    </div>
                 </div>
             </div>
 

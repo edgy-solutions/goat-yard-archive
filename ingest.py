@@ -216,8 +216,8 @@ class GillIngestionEngine:
 
     def extract_footnotes(self, text: str, context_text: str) -> List[str]:
         """Extract footnote definitions for references found in the text."""
-        # Find refs like [^1], [^12]
-        refs = re.findall(r'\[\^(\d+)\]', text)
+        # Find refs like [^1], [^12] but NOT followed by a colon (which would indicate a definition)
+        refs = re.findall(r'\[\^(\d+)\](?!:)', text)
         footnotes = []
         unique_refs = sorted(list(set(refs)), key=lambda x: int(x))
         
@@ -335,20 +335,17 @@ class GillIngestionEngine:
              logging.warning(f"No alignments found for {page_name}")
              return 0
 
+        # Get file-specific volume for filename construction
+        file_volume, _ = self.parse_page_info(page_name) 
+
         # Load previous page alignments (to detect spillover)
-        prev_page_name = f"page{page_num - 1}_image{volume}" # This might still default to "image1" if we don't have better naming.
-        # Ideally we should construct filename based on knowledge. 
-        # But wait, if volume_override is 7, filename is still "page99_image1"?
-        # YES. Because filenames in extracted_images_7 are pageX_image1.
-        # So construction logic needs care if we want previous page.
-        # If we assume filenames are consistent:
-        prev_page_name = f"page{page_num - 1}_image1" 
+        prev_page_name = f"page{page_num - 1}_image{file_volume}"
         
         prev_alignments = self.load_alignment_json(prev_page_name, alignment_dir)
         prev_verse_refs = {a.get("verse_ref") for a in prev_alignments if a.get("verse_ref")}
 
         # Load next page alignments for lookahead
-        next_page_name = f"page{page_num + 1}_image{volume}"
+        next_page_name = f"page{page_num + 1}_image{file_volume}"
         next_alignments = self.load_alignment_json(next_page_name, alignment_dir)
         
         # Load Markdown Text (Current + Next for spanning)
@@ -372,18 +369,11 @@ class GillIngestionEngine:
             highlight_box = alignment.get("highlight_box")
             boxes = alignment.get("boxes")
             
-            if not highlight_box and boxes and isinstance(boxes, list) and len(boxes) > 0:
-                # Calculate union of all boxes
-                min_x = min(b['x'] for b in boxes)
-                min_y = min(b['y'] for b in boxes)
-                max_x = max(b['x'] + b['w'] for b in boxes)
-                max_y = max(b['y'] + b['h'] for b in boxes)
-                highlight_box = {
-                    "x": min_x,
-                    "y": min_y,
-                    "w": max_x - min_x,
-                    "h": max_y - min_y
-                }
+            scan_data = None
+            if boxes and isinstance(boxes, list) and len(boxes) > 0:
+                scan_data = boxes
+            elif highlight_box:
+                scan_data = highlight_box
             
             if not all([verse_ref, start_phrase]):
                 continue
@@ -446,7 +436,7 @@ class GillIngestionEngine:
                     "volume": volume,
                     "page_number": page_num,
                     "original_text_snippet": original_snippet,
-                    "scan_json": json.dumps(highlight_box) if highlight_box else None,
+                    "scan_json": json.dumps(scan_data) if scan_data else None,
                     "sentence_data": sentence_data,
                     "footnotes": footnotes
                 }, references={
@@ -499,7 +489,39 @@ class GillIngestionEngine:
         # 1. Remove footnote definitions
         cleaned = re.sub(r'^\s*\[\^\d+\]:.*$', '', text, flags=re.MULTILINE)
         
-        # 2. Remove trailing Verse headers (e.g. "Ver. 35." at end of string)
+        # 2. Collapse excessive newlines (often left by footnote removal)
+        # 3 or more newlines -> 2 newlines (max 1 blank line)
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        
+        # 3. Merge split sentences (Basic Heuristic)
+        # If line ends with non-terminal punctuation (char other than . ? ! " ' : or ]) 
+        # AND next line starts with a word char (and not a bullet point or header), join them.
+        # This fixes "as the \n\n Persic" -> "as the Persic" 
+        # (Looking for spaces between newlines too)
+        
+        def merge_match(match):
+            # match.group(1) is the preceding char
+            # match.group(2) is the following char
+            return f"{match.group(1)} {match.group(2)}"
+
+        # Negative lookbehind for terminal chars: (?<![.?!;:"\]])
+        # Followed by 1+ newlines and whitespace
+        # Followed by a word char (but not a dash/bullet)
+        # This is tricky with regex lookbehinds. Simpler to match the gap context.
+        
+        # Match: (Non-terminal char) (newlines) (Start of word)
+        # Exclude common abbreviations if needed, but for now assuming clean text.
+        # Using [^\.?!;:"\]] to match any char that is NOT a sentence ender. 
+        # But we need to capture it to put it back.
+        
+        cleaned = re.sub(
+            r'([^\.\?!;:"\]\)\s])\s*\n+\s*([a-zA-Z0-9])', 
+            r'\1 \2', 
+            cleaned
+        )
+
+        
+        # 4. Remove trailing Verse headers (e.g. "Ver. 35." at end of string)
         # Matches "Ver. 35." or "Verse 35." optionally preceded by newlines, at the very end
         cleaned = re.sub(r'\n+\s*(?:Ver|Verse)\.?\s*\d+\.?\s*$', '', cleaned, flags=re.IGNORECASE)
         

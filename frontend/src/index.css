@@ -1,4 +1,34 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    html {
+        font-family: 'Merriweather', serif;
+        background-color: #FDFBF7;
+        /* Light Parchment */
+        color: #3E2723;
+        /* Dark Wood/Leather Text */
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        font-family: 'Playfair Display', serif;
+    }
+}
+
+.bg-parchment {
+    background-color: #FDFBF7;
+}
+
+.bg-wood {
+    background-color: #3E2723;
+}
+
+.text-gold {
+    color: #FFECB3;
+}

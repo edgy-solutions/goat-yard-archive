@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 
 interface ScanViewerProps {
     imageUrl: string;
-    highlightBox: { x: number; y: number; w: number; h: number } | null;
+    highlightBox: { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; h: number }[] | null;
     originalDims: { w: number; h: number } | null;
 }
 
@@ -12,6 +12,11 @@ const ScanViewer: React.FC<ScanViewerProps> = ({ imageUrl, highlightBox, origina
     const imgRef = useRef<HTMLImageElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [loaded, setLoaded] = useState(false);
+
+    // Reset loaded state when image URL changes
+    useEffect(() => {
+        setLoaded(false);
+    }, [imageUrl]);
 
     // Draw Highlight when image loads or box changes
     useEffect(() => {
@@ -30,42 +35,47 @@ const ScanViewer: React.FC<ScanViewerProps> = ({ imageUrl, highlightBox, origina
         // Calculate Scale
         // We use natural dimensions of the image as the source of truth for the coordinate system
         // This assumes the OCR was run on the exact same image resolution as what we are displaying.
-        const sourceW = img.naturalWidth || (originalDims ? originalDims.w : 2500);
-        const sourceH = img.naturalHeight || (originalDims ? originalDims.h : 3800);
+        // We use originalDims as the source of truth for the coordinate system if provided,
+        // otherwise fall back to natural dimensions.
+        const sourceW = (originalDims ? originalDims.w : img.naturalWidth) || 2500;
+        const sourceH = (originalDims ? originalDims.h : img.naturalHeight) || 3800;
 
         const scaleX = img.clientWidth / sourceW;
         const scaleY = img.clientHeight / sourceH;
 
-        // Manual Offset Correction (based on user feedback)
-        // Tune 12: +2px Down (Screen) -> +4 Y source.
-        // Tune 12: +2px Down (Screen) -> +4 Y source. Final: 195/109.
-        const OFFSET_X = 195;
-        const OFFSET_Y = 109;
+        // Pure Scaling based on ratio of displayed size to original source size
 
-        // Tune 17: Another +5px (screen). Total +65 screen -> +130 source.
-        const PADDING_H = 130;
-        // Tune 19: Another +5px (screen). Total +10 screen -> +20 source.
-        const PADDING_W = 20;
+        // Normalize to array (handle both single object and array of objects)
+        const boxes = Array.isArray(highlightBox) ? highlightBox : [highlightBox];
 
-        const x = (highlightBox.x + OFFSET_X) * scaleX;
-        const y = (highlightBox.y + OFFSET_Y) * scaleY;
-        const w = (highlightBox.w + PADDING_W) * scaleX;
-        const h = (highlightBox.h + PADDING_H) * scaleY;
-
-        // Clear & Draw
+        // Clear
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Semi-transparent yellow fill
-        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
-        ctx.fillRect(x, y, w, h);
+        boxes.forEach(box => {
+            const x = box.x * scaleX;
+            const y = box.y * scaleY;
+            const w = box.w * scaleX;
+            const h = box.h * scaleY;
 
-        // Solid border
-        ctx.strokeStyle = '#F59E0B'; // Amber-500
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, w, h);
+            // Semi-transparent yellow fill
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+            ctx.fillRect(x, y, w, h);
 
-        // Auto-scroll to center the highlight
-        if (containerRef.current) {
+            // Solid border
+            ctx.strokeStyle = '#F59E0B'; // Amber-500
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, w, h);
+        });
+
+
+
+        // Auto-scroll to center the highlight (focus on first box)
+        if (containerRef.current && boxes.length > 0) {
+            const firstBox = boxes[0];
+            const x = firstBox.x * scaleX;
+            const y = firstBox.y * scaleY;
+            const h = firstBox.h * scaleY;
+
             const containerBy = containerRef.current.clientHeight;
             // Center of box
             const centerY = y + (h / 2);
@@ -94,7 +104,7 @@ const ScanViewer: React.FC<ScanViewerProps> = ({ imageUrl, highlightBox, origina
                 {/* Canvas Overlay */}
                 <canvas
                     ref={canvasRef}
-                    className="absolute top-0 left-0 pointer-events-none z-10"
+                    className={`absolute top-0 left-0 pointer-events-none z-10 transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
                 />
 
                 {/* Placeholder if no image */}
