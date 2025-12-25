@@ -4,14 +4,17 @@ Weaviate Ingestion Pipeline for Gill Commentary.
 
 This script processes aligned commentary pages and ingests them into Weaviate with:
 - Fuzzy slicing to extract verse-specific commentary
+- Handling of spanning verses across pages
 - Sentence segmentation using NLTK
 - Entity extraction via BAML
+- Footnote extraction and resolution
 - Knowledge graph construction
 """
 
 import os
 import json
 import logging
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 import nltk
@@ -19,6 +22,9 @@ from rapidfuzz import fuzz, process as fuzz_process
 import weaviate
 import weaviate.classes as wvc
 from dotenv import load_dotenv
+import networkx as nx
+import matplotlib.pyplot as plt
+
 
 # Import BAML client
 from baml_client.sync_client import b
@@ -54,7 +60,7 @@ class GillIngestionEngine:
         weaviate_url = os.getenv("WEAVIATE_URL")
         weaviate_api_key = os.getenv("WEAVIATE_API_KEY")
         
-        # Prepare headers for modules (e.g. text2vec-openai via OpenRouter)
+        # Prepare headers for modules
         headers = {}
         if os.getenv("OPENROUTER_API_KEY"):
             headers["X-OpenAI-Api-Key"] = os.getenv("OPENROUTER_API_KEY")
@@ -98,17 +104,7 @@ class GillIngestionEngine:
             self.client.close()
     
     def parse_page_info(self, page_name: str) -> Tuple[int, int]:
-        """
-        Parse volume and page number from filename.
-        
-        Args:
-            page_name: e.g., "page100_image1" (volume 1) or "page250_image7" (volume 7)
-            
-        Returns:
-            Tuple of (volume, page_number)
-        """
-        # Extract image number as volume indicator
-        # Format: page{number}_image{volume}
+        """Parse volume and page number from filename."""
         parts = page_name.split("_")
         if len(parts) >= 2:
             page_num = int(parts[0].replace("page", ""))
@@ -119,110 +115,113 @@ class GillIngestionEngine:
     def load_adjacent_markdown(self, page_name: str, qwen_dir: Path) -> Tuple[str, str, str]:
         """
         Load current page and adjacent pages for cross-page verse handling.
-        
-        Args:
-            page_name: Current page identifier
-            qwen_dir: Directory containing markdown files
-            
-        Returns:
-            Tuple of (previous_md, current_md, next_md)
+        Prioritizes _normalized.md files if they exist, falling back to .md.
         """
+        def load_file(p_name: str) -> str:
+            # Try normalized first
+            norm_path = qwen_dir / f"{p_name}_normalized.md"
+            if norm_path.exists():
+                with open(norm_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            
+            # Fallback to raw
+            raw_path = qwen_dir / f"{p_name}.md"
+            if raw_path.exists():
+                with open(raw_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            return ""
+
         # Parse page number
         volume, page_num = self.parse_page_info(page_name)
         
-        # Load current page
-        current_path = qwen_dir / f"{page_name}.md"
-        current_md = ""
-        if current_path.exists():
-            with open(current_path, 'r', encoding='utf-8') as f:
-                current_md = f.read()
+        # Load pages
+        current_md = load_file(page_name)
         
-        # Load previous page (if exists)
         prev_page_name = f"page{page_num - 1}_image{volume}"
-        prev_path = qwen_dir / f"{prev_page_name}.md"
-        prev_md = ""
-        if prev_path.exists():
-            with open(prev_path, 'r', encoding='utf-8') as f:
-                prev_md = f.read()
+        prev_md = load_file(prev_page_name)
         
-        # Load next page (if exists)
         next_page_name = f"page{page_num + 1}_image{volume}"
-        next_path = qwen_dir / f"{next_page_name}.md"
-        next_md = ""
-        if next_path.exists():
-            with open(next_path, 'r', encoding='utf-8') as f:
-                next_md = f.read()
+        next_md = load_file(next_page_name)
         
         return prev_md, current_md, next_md
-    
-    def fuzzy_slice_text(self, full_text: str, start_phrase: str, end_phrase: str, 
-                         prev_text: str = "", next_text: str = "") -> Optional[str]:
-        """
-        Use fuzzy matching to extract text between start_phrase and end_phrase.
-        Handles cross-page verses by searching in adjacent page text.
-        
-        Args:
-            full_text: The complete page markdown text
-            start_phrase: The phrase marking the start of the verse commentary
-            end_phrase: The phrase marking the end
-            prev_text: Previous page markdown (for cross-page start)
-            next_text: Next page markdown (for cross-page end)
+
+    def find_phrase_index(self, text: str, phrase: str, start_search_idx: int = 0) -> int:
+        """Find the starting index of a fuzzy match for a phrase."""
+        if not phrase:
+            return -1
             
-        Returns:
-            Extracted text or None if not found
+        remaining_text = text[start_search_idx:]
+        if not remaining_text:
+            return -1
+            
+        # Use rapidfuzz alignment for O(N) matching
+        alignment = fuzz.partial_ratio_alignment(phrase.lower(), remaining_text.lower())
+        
+        if alignment and alignment.score >= 80:
+            return start_search_idx + alignment.dest_start
+            
+        return -1
+
+    def slice_verse_text(self, full_text: str, start_phrase: str, stop_phrase: Optional[str], end_fallback: str) -> Optional[str]:
         """
-        # Combine with adjacent pages for better boundary detection
-        extended_text = prev_text[-500:] + full_text + next_text[:500] if prev_text or next_text else full_text
-        offset = len(prev_text[-500:]) if prev_text else 0
-        
-        # Find start position using partial ratio
-        start_result = fuzz_process.extractOne(
-            start_phrase.lower(),
-            [extended_text[i:i+len(start_phrase)+50].lower() for i in range(len(extended_text))],
-            scorer=fuzz.partial_ratio
-        )
-        
-        if not start_result or start_result[1] < 60:
-            logging.warning(f"Could not find start phrase: {start_phrase[:50]}...")
+        Extract text from start_phrase to stop_phrase (start of next verse).
+        If stop_phrase is None, uses end_fallback (end of current verse from alignment).
+        """
+        # Find Start
+        start_idx = self.find_phrase_index(full_text, start_phrase)
+        if start_idx == -1:
+            logging.warning(f"Could not find start phrase: {start_phrase[:30]}...")
             return None
+            
+        # Find Stop
+        end_idx = -1
+        if stop_phrase:
+            # Look for stop phrase AFTER start phrase
+            # We want to stop AT the stop phrase (start of next verse), so we don't include it.
+            # But duplicate headers happen? Assume next match is correct.
+            next_verse_start_idx = self.find_phrase_index(full_text, stop_phrase, start_search_idx=start_idx + len(start_phrase))
+            if next_verse_start_idx != -1:
+                end_idx = next_verse_start_idx
+            
+        if end_idx == -1:
+            # Fallback: Use alignment end phrase
+             # Look for end phrase
+             match_end_idx = self.find_phrase_index(full_text, end_fallback, start_search_idx=start_idx)
+             if match_end_idx != -1:
+                 # Include the end phrase
+                 end_idx = match_end_idx + len(end_fallback)
+             else:
+                 # Last resort: Take a reasonable chunk? Or fail.
+                 # Failing is better than hallucinating.
+                 # But if we found start, maybe take lines?
+                 pass
+
+        if end_idx != -1 and end_idx > start_idx:
+            extracted = full_text[start_idx:end_idx].strip()
+            return extracted
+            
+        return None
+
+    def extract_footnotes(self, text: str, context_text: str) -> List[str]:
+        """Extract footnote definitions for references found in the text."""
+        # Find refs like [^1], [^12]
+        refs = re.findall(r'\[\^(\d+)\]', text)
+        footnotes = []
+        unique_refs = sorted(list(set(refs)), key=lambda x: int(x))
         
-        start_idx = start_result[2]
+        for ref in unique_refs:
+            # Search for definition [^ref]: ... at start of line
+            pattern = re.compile(rf"^\[\^{ref}\]:\s*(.*)", re.MULTILINE)
+            match = pattern.search(context_text)
+            if match:
+                defn = match.group(1).strip()
+                footnotes.append(f"[{ref}] {defn}")
         
-        # Find end position (search from start)
-        remaining_text = extended_text[start_idx:]
-        end_result = fuzz_process.extractOne(
-            end_phrase.lower(),
-            [remaining_text[i:i+len(end_phrase)+50].lower() for i in range(len(remaining_text))],
-            scorer=fuzz.partial_ratio
-        )
-        
-        if not end_result or end_result[1] < 60:
-            logging.warning(f"Could not find end phrase: {end_phrase[:50]}...")
-            return None
-        
-        end_idx = start_idx + end_result[2] + len(end_phrase)
-        
-        # Extract and ensure we're within the actual page bounds (not in adjacent pages)
-        extracted = extended_text[start_idx:end_idx].strip()
-        
-        # If extraction spans into adjacent pages, include the cross-page text
-        return extracted
-    
+        return footnotes
+
     def process_sentences(self, verse_ref: str, full_text: str) -> List[Dict[str, Any]]:
-        """
-        Segment text into sentences and generate structured sentence data.
-        
-        Args:
-            verse_ref: Verse reference (e.g., "GEN 46:06")
-            full_text: The commentary text to segment
-            
-        Returns:
-            List of sentence dictionaries with id, text, and index
-        """
-        # Normalize ref: "GEN 46:06" -> "GEN_46_06"
+        """Segment text into sentences and generate structured sentence data."""
         safe_ref = verse_ref.replace(" ", "_").replace(":", "_")
-        
-        # Tokenize into sentences
         sentences = nltk.sent_tokenize(full_text)
         
         structured_data = []
@@ -236,40 +235,17 @@ class GillIngestionEngine:
         return structured_data
     
     def extract_verse_number(self, verse_ref: str) -> str:
-        """
-        Extract verse number from reference.
-        
-        Args:
-            verse_ref: e.g., "GEN 46:06"
-            
-        Returns:
-            Verse number as string (e.g., "6")
-        """
-        # Split by colon and get the verse part
+        """Extract verse number from reference."""
         if ":" in verse_ref:
-            return verse_ref.split(":")[1].lstrip("0")  # Remove leading zeros
+            return verse_ref.split(":")[1].lstrip("0")
         return ""
     
     def get_or_create_entity(self, name: str, category: str, normalized_name: Optional[str] = None) -> str:
-        """
-        Get existing entity UUID or create new entity.
-        
-        Args:
-            name: Entity name
-            category: Entity category
-            normalized_name: Normalized name for deduplication
-            
-        Returns:
-            Entity UUID
-        """
-        # Use normalized name for cache key if available
+        """Get existing entity UUID or create new entity."""
         cache_key = (normalized_name or name, category)
-        
-        # Check cache first
         if cache_key in self.entity_cache:
             return self.entity_cache[cache_key]
         
-        # Search for existing entity
         try:
             results = self.entities.query.fetch_objects(
                 filters=(
@@ -286,7 +262,6 @@ class GillIngestionEngine:
         except Exception as e:
             logging.warning(f"Error searching for entity: {e}")
         
-        # Create new entity
         try:
             uuid = self.entities.data.insert({
                 "name": name,
@@ -296,50 +271,31 @@ class GillIngestionEngine:
             
             uuid_str = str(uuid)
             self.entity_cache[cache_key] = uuid_str
-            logging.debug(f"Created entity: {name} ({category})")
             return uuid_str
-            
         except Exception as e:
             logging.error(f"Error creating entity {name}: {e}")
             return None
     
     def extract_entities(self, commentary_text: str) -> List[Any]:
-        """
-        Use BAML to extract entities from commentary text.
-        
-        Args:
-            commentary_text: The commentary text to analyze
-            
-        Returns:
-            List of GillEntity objects
-        """
+        """Use BAML to extract entities from commentary text."""
         try:
             entities = b.ExtractGillKnowledge(commentary_text)
             return entities if entities else []
         except BamlError as e:
             logging.error(f"BAML error extracting entities: {e}")
             return []
-    
-    def process_page(self, 
-                     page_name: str,
-                     data_dir: Path,
-                     alignment_dir: Path,
-                     qwen_dir: Path) -> int:
-        """
-        Process a single page and ingest into Weaviate.
-        
-        Args:
-            page_name: Page identifier (e.g., "page100_image1")
-            data_dir: Directory containing metadata files
-            alignment_dir: Directory containing alignment JSON files
-            qwen_dir: Directory containing Vision markdown files
             
-        Returns:
-            Number of chunks ingested
-        """
+    def load_alignment_json(self, page_name: str, alignment_dir: Path) -> List[Dict]:
+        path = alignment_dir / f"{page_name}_alignment.json"
+        if path.exists():
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+
+    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path) -> int:
+        """Process a single page and ingest into Weaviate."""
         logging.info(f"Processing {page_name}...")
         
-        # Parse volume and page number from filename
         volume, page_num = self.parse_page_info(page_name)
         
         # Load metadata
@@ -351,71 +307,87 @@ class GillIngestionEngine:
         with open(metadata_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         
-        # Load alignment data
-        alignment_path = alignment_dir / f"{page_name}_alignment.json"
-        if not alignment_path.exists():
-            logging.warning(f"Alignment not found: {alignment_path}")
-            return 0
+        # Load alignments
+        alignments = self.load_alignment_json(page_name, alignment_dir)
+        if not alignments:
+             logging.warning(f"No alignments found for {page_name}")
+             return 0
+
+        # Load previous page alignments (to detect spillover)
+        prev_page_name = f"page{page_num - 1}_image{volume}"
+        prev_alignments = self.load_alignment_json(prev_page_name, alignment_dir)
+        prev_verse_refs = {a.get("verse_ref") for a in prev_alignments if a.get("verse_ref")}
+
+        # Load next page alignments for lookahead
+        next_page_name = f"page{page_num + 1}_image{volume}"
+        next_alignments = self.load_alignment_json(next_page_name, alignment_dir)
         
-        with open(alignment_path, 'r', encoding='utf-8') as f:
-            alignments = json.load(f)
-        
-        # Load Vision markdown with adjacent pages for cross-page handling
-        prev_md, full_markdown, next_md = self.load_adjacent_markdown(page_name, qwen_dir)
+        # Load Markdown Text (Current + Next for spanning)
+        prev_md, current_md, next_md = self.load_adjacent_markdown(page_name, qwen_dir)
+        full_context_text = current_md + "\n" + next_md
         
         chunks_ingested = 0
         
-        # Process each verse alignment
-        for alignment in alignments:
+        for i, alignment in enumerate(alignments):
             verse_ref = alignment.get("verse_ref")
+            
+            # Skip if this verse started on the previous page
+            if verse_ref in prev_verse_refs:
+                logging.info(f"Skipping {verse_ref} on {page_name} (handled by previous page)")
+                continue
+                
             start_phrase = alignment.get("start_phrase")
-            end_phrase = alignment.get("end_phrase")
+            end_fallback = alignment.get("end_phrase") # Use this if we can't find next verse
             highlight_box = alignment.get("highlight_box")
             
-            if not all([verse_ref, start_phrase, end_phrase]):
-                logging.warning(f"Incomplete alignment data for {page_name}")
+            if not all([verse_ref, start_phrase]):
                 continue
+                
+            # Determine Stop Phrase (Start of next verse)
+            stop_phrase = None
+            if i + 1 < len(alignments):
+                stop_phrase = alignments[i+1].get("start_phrase")
+            elif next_alignments:
+                # If last verse on page, check next page first verse
+                stop_phrase = next_alignments[0].get("start_phrase")
             
-            # Fuzzy slice the commentary text (with cross-page support)
-            commentary_text = self.fuzzy_slice_text(
-                full_markdown, start_phrase, end_phrase,
-                prev_text=prev_md, next_text=next_md
-            )
+            # Slice Text
+            commentary_text = self.slice_verse_text(full_context_text, start_phrase, stop_phrase, end_fallback)
             
             if not commentary_text:
                 logging.warning(f"Could not extract text for {verse_ref}")
                 continue
             
+            # Extract Footnotes
+            # We look for definitions in both current and next page (as the ref could be anywhere)
+            footnotes = self.extract_footnotes(commentary_text, full_context_text)
+            
+            # Clean text (remove footnotes and next-verse headers)
+            commentary_text = self.clean_text(commentary_text)
+            
             # Process sentences
             sentence_data = self.process_sentences(verse_ref, commentary_text)
             
-            # Extract book and chapter from verse_ref
+            # Meta extraction
             parts = verse_ref.split()
             book = parts[0] if parts else metadata.get("book_name", "")
             chapter_verse = parts[1] if len(parts) > 1 else ":"
             chapter = int(chapter_verse.split(":")[0]) if ":" in chapter_verse else metadata.get("chapter", 0)
             
-            # Get Hebrew/Greek text if available
             verse_num = self.extract_verse_number(verse_ref)
-            hebrew_text = metadata.get("hebrew_text", {}).get(verse_num, "")
-            greek_text = metadata.get("greek_text", {}).get(verse_num, "")
-            original_snippet = hebrew_text or greek_text
+            hebrew_data = metadata.get("hebrew_text") or {}
+            greek_data = metadata.get("greek_text") or {}
+            original_snippet = hebrew_data.get(verse_num, "") or greek_data.get(verse_num, "")
             
-            # Extract entities
+            # Extract Entities
             entities = self.extract_entities(commentary_text)
-            
-            # Get or create entity UUIDs
             entity_uuids = []
             for entity in entities:
-                uuid = self.get_or_create_entity(
-                    name=entity.name,
-                    category=entity.category,
-                    normalized_name=entity.normalized_name
-                )
+                uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name)
                 if uuid:
                     entity_uuids.append(uuid)
             
-            # Create CommentaryChunk
+            # Ingest
             try:
                 self.chunks.data.insert({
                     "content": commentary_text,
@@ -425,94 +397,176 @@ class GillIngestionEngine:
                     "volume": volume,
                     "page_number": page_num,
                     "original_text_snippet": original_snippet,
-                    "scan_json": json.dumps(highlight_box),
-                    "sentence_data": sentence_data
+                    "scan_json": json.dumps(highlight_box) if highlight_box else None,
+                    "sentence_data": sentence_data,
+                    "footnotes": footnotes
                 }, references={
                     "mentions_entity": entity_uuids
                 } if entity_uuids else None)
                 
                 chunks_ingested += 1
-                logging.debug(f"Ingested {verse_ref} with {len(sentence_data)} sentences and {len(entity_uuids)} entities")
+                logging.debug(f"Ingested {verse_ref}")
                 
             except Exception as e:
                 logging.error(f"Error ingesting {verse_ref}: {e}")
         
         return chunks_ingested
     
-    def run_batch(self, 
-                  data_dir: str,
-                  alignment_dir: str, 
-                  qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking"):
-        """
-        Process all pages in the data directory.
-        
-        Args:
-            data_dir: Directory containing source data
-            alignment_dir: Directory containing alignment outputs
-            qwen_subdir: Subdirectory name for Vision markdown files
-        """
+    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking"):
+        """Process all pages."""
         data_path = Path(data_dir)
         alignment_path = Path(alignment_dir)
         qwen_path = data_path / qwen_subdir
         
-        # Find all alignment files
         alignment_files = list(alignment_path.glob("*_alignment.json"))
-        
-        logging.info(f"Found {len(alignment_files)} alignment files to process")
+        logging.info(f"Found {len(alignment_files)} alignment files")
         
         total_chunks = 0
         processed_pages = 0
         
         for align_file in alignment_files:
             page_name = align_file.name.replace("_alignment.json", "")
-            
             try:
-                chunks = self.process_page(
-                    page_name=page_name,
-                    data_dir=data_path,
-                    alignment_dir=alignment_path,
-                    qwen_dir=qwen_path
-                )
+                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path)
                 total_chunks += chunks
                 processed_pages += 1
-                
                 if processed_pages % 10 == 0:
-                    logging.info(f"Progress: {processed_pages}/{len(alignment_files)} pages, {total_chunks} chunks ingested")
-                    
+                    logging.info(f"Progress: {processed_pages}/{len(alignment_files)} pages, {total_chunks} chunks")
             except Exception as e:
                 logging.error(f"Error processing {page_name}: {e}")
-        
+                
         logging.info(f"✅ Ingestion complete: {processed_pages} pages, {total_chunks} chunks")
 
+    def clean_text(self, text: str) -> str:
+        """
+        Clean the commentary text:
+        1. Remove footnote definitions (e.g. [^1]: ...)
+        2. Remove trailing 'Ver. N.' or 'Verse N.' headers that belong to the next section.
+        """
+        # 1. Remove footnote definitions
+        cleaned = re.sub(r'^\s*\[\^\d+\]:.*$', '', text, flags=re.MULTILINE)
+        
+        # 2. Remove trailing Verse headers (e.g. "Ver. 35." at end of string)
+        # Matches "Ver. 35." or "Verse 35." optionally preceded by newlines, at the very end
+        cleaned = re.sub(r'\n+\s*(?:Ver|Verse)\.?\s*\d+\.?\s*$', '', cleaned, flags=re.IGNORECASE)
+        
+        return cleaned.strip()
+
+    def visualize_connections(self, limit: int = 50, output_file: str = "graph_debug.pdf"):
+        """
+        Generate a network graph visualization of chunks and their linked entities.
+        Uses networkx to build the graph and matplotlib to save it as PDF.
+        """
+        logging.info(f"Generating graph visualization (limit={limit})...")
+        
+        try:
+            # Fetch recent chunks with their entity references
+            response = self.chunks.query.fetch_objects(
+                limit=limit,
+                return_properties=["verse_ref", "book"],
+                return_references=[
+                    wvc.query.QueryReference(
+                        link_on="mentions_entity",
+                        return_properties=["name", "category"]
+                    )
+                ]
+            )
+            
+            if not response.objects:
+                logging.warning("No data found to visualize.")
+                return
+
+            G = nx.DiGraph()
+            
+            chunk_nodes = []
+            entity_nodes = []
+            
+            for obj in response.objects:
+                verse_ref = obj.properties.get("verse_ref", "Unknown")
+                
+                # Add Chunk Node
+                G.add_node(verse_ref, type="chunk", label=verse_ref)
+                chunk_nodes.append(verse_ref)
+                
+                # Add Edges to Entities
+                if obj.references.get("mentions_entity"):
+                    for ent in obj.references["mentions_entity"].objects:
+                        name = ent.properties.get("name")
+                        category = ent.properties.get("category")
+                        node_id = f"{name} ({category})"
+                        
+                        G.add_node(node_id, type="entity", label=name)
+                        entity_nodes.append(node_id)
+                        G.add_edge(verse_ref, node_id)
+            
+            logging.info(f"Graph built: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges.")
+            
+            if G.number_of_nodes() == 0:
+                logging.info("Graph is empty.")
+                return
+
+            # Draw
+            plt.figure(figsize=(12, 12))
+            try:
+                pos = nx.spring_layout(G, k=0.5, iterations=50)
+                
+                # Draw Chunks (Blue square)
+                nx.draw_networkx_nodes(G, pos, nodelist=[n for n in chunk_nodes if n in G], node_color='skyblue', node_size=1500, node_shape='s', alpha=0.8)
+                
+                # Draw Entities (Green circle)
+                nx.draw_networkx_nodes(G, pos, nodelist=[n for n in entity_nodes if n in G], node_color='lightgreen', node_size=1000, alpha=0.8)
+                
+                # Draw Edges
+                nx.draw_networkx_edges(G, pos, width=1.0, alpha=0.5, arrows=True)
+                
+                # Labels
+                labels = {n: n for n in G.nodes()}
+                nx.draw_networkx_labels(G, pos, labels, font_size=8)
+                
+                plt.title("Weaviate Connection Graph (Sample)")
+                plt.axis('off')
+                
+                plt.savefig(output_file, format="pdf", bbox_inches="tight")
+                plt.close()
+                logging.info(f"Graph saved to {output_file}")
+            except Exception as e:
+                 logging.error(f"Drawing failed: {e}")
+            
+        except Exception as e:
+            logging.error(f"Visualization failed: {e}")
 
 if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description="Ingest Gill Commentary into Weaviate")
+    parser = argparse.ArgumentParser(description="Ingest Gill Commentary")
     parser.add_argument("--data-dir", default="extracted_images", help="Source data directory")
     parser.add_argument("--alignment-dir", default="outputs/alignment/genesis", help="Alignment output directory")
     parser.add_argument("--weaviate-host", default="localhost", help="Weaviate host")
     parser.add_argument("--weaviate-port", type=int, default=8080, help="Weaviate port")
-    parser.add_argument("--test-page", help="Process only a specific page (for testing)")
+    parser.add_argument("--test-page", help="Process only a specific page")
+    parser.add_argument("--visualize", action="store_true", help="Generate PDF graph of current data")
     
     args = parser.parse_args()
     
-    with GillIngestionEngine(
-        weaviate_host=args.weaviate_host,
-        weaviate_port=args.weaviate_port
-    ) as engine:
-        if args.test_page:
-            # Test mode: process single page
-            chunks = engine.process_page(
-                page_name=args.test_page,
-                data_dir=Path(args.data_dir),
-                alignment_dir=Path(args.alignment_dir),
-                qwen_dir=Path(args.data_dir) / "qwen_qwen3-vl-235b-a22b-thinking"
-            )
-            print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
+    with GillIngestionEngine(args.weaviate_host, args.weaviate_port) as engine:
+        if args.visualize:
+            engine.visualize_connections()
+        elif args.test_page:
+             # Auto-detect qwen dir logic
+             # In verify_ingestion it was: extracted_images/qwen_qwen3-vl-235b-a22b-thinking
+             # Here we assume it's in data_dir.
+             base_data = Path(args.data_dir)
+             qwen_dir = next(base_data.glob("qwen*"), None)
+             if not qwen_dir:
+                 # Check if test_page exists?
+                 # Fallback to hardcoded for compatibility if glob fails or just warn
+                 qwen_dir = base_data / "qwen_qwen3-vl-235b-a22b-thinking"
+             
+             chunks = engine.process_page(
+                args.test_page,
+                base_data,
+                Path(args.alignment_dir),
+                qwen_dir
+             )
+             print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
         else:
-            # Batch mode: process all pages
-            engine.run_batch(
-                data_dir=args.data_dir,
-                alignment_dir=args.alignment_dir
-            )
+            engine.run_batch(args.data_dir, args.alignment_dir)

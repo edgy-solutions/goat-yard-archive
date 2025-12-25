@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from rapidfuzz import fuzz
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
 
@@ -43,6 +44,25 @@ class VerseAligner:
         self.header_y_threshold = 650  # Skip words above this Y
         self.footnote_indent = 50  # Footnotes are indented this much from margin
         self.fuzzy_threshold = 50  # Match score threshold
+        
+        # Regex for verse markers in normalized markdown
+        # Matches "Ver. 1." or "Ver. 12." and captures content until next "Ver." or end of string
+        self.verse_pattern = re.compile(r'Ver\.\s*(\d+)\.\s*(.*?)(?=Ver\.\s*\d+\.|$)', re.DOTALL)
+    
+    def load_metadata(self, page_name: str) -> Dict:
+        """Load metadata JSON for a page to get book/chapter info."""
+        meta_path = self.extracted_dir / f"{page_name}_metadata.json"
+        
+        if not meta_path.exists():
+            logging.warning(f"Metadata not found: {meta_path}")
+            return {}
+            
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Failed to load metadata: {e}")
+            return {}
     
     def load_ocr(self, page_name: str) -> List[Dict]:
         """
@@ -57,14 +77,29 @@ class VerseAligner:
         if fixedup_path.exists():
             ocr_path = fixedup_path
             logging.info(f"Using fixed-up OCR: {fixedup_path}")
-        elif reindexed_path.exists():
-            ocr_path = reindexed_path
-            logging.info(f"Using reindexed OCR: {reindexed_path}")
-        elif raw_path.exists():
-            ocr_path = raw_path
-            logging.info(f"Using raw OCR: {raw_path}")
         else:
-            raise FileNotFoundError(f"OCR not found: {raw_path}")
+            # If fixedup doesn't exist, ensure reindexed exists (generating from raw if necessary)
+            if not reindexed_path.exists():
+                if raw_path.exists():
+                    logging.warning(f"Reindexed OCR not found for {page_name}. Auto-generating...")
+                    try:
+                        import reindex_ocr
+                        # We need to make sure reindex_ocr can be imported or is in path
+                        # Assuming it's in the same directory
+                        reindex_ocr.process_page(page_name, self.extracted_dir)
+                        
+                        if not reindexed_path.exists():
+                            raise FileNotFoundError(f"Failed to generate reindexed OCR: {reindexed_path}")
+                            
+                        logging.info(f"Successfully generated: {reindexed_path}")
+                    except Exception as e:
+                        logging.error(f"Error running reindexer: {e}")
+                        raise
+                else:
+                    raise FileNotFoundError(f"Raw OCR not found for {page_name}: {raw_path}")
+            
+            logging.info(f"Using reindexed OCR: {reindexed_path}")
+            ocr_path = reindexed_path
         
         with open(ocr_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -92,6 +127,14 @@ class VerseAligner:
         # Try vision model output directory first (qwen subdirectory)
         vision_dirs = list(self.extracted_dir.glob("qwen*"))
         if vision_dirs:
+            # Try normalized markdown first
+            norm_md_path = vision_dirs[0] / f"{page_name}_normalized.md"
+            if norm_md_path.exists():
+                logging.info(f"Using normalized markdown: {norm_md_path}")
+                with open(norm_md_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+
+            # Fallback to raw markdown in vision dir
             md_path = vision_dirs[0] / f"{page_name}.md"
             if md_path.exists():
                 logging.info(f"Using vision model markdown: {md_path}")
@@ -106,13 +149,141 @@ class VerseAligner:
         with open(md_path, 'r', encoding='utf-8') as f:
             return f.read()
     
-    def extract_verses(self, markdown_text: str) -> List[Dict]:
+    def extract_verses_regex(self, text: str, metadata: Dict) -> List[Dict]:
         """
-        Extract verse chunks using BAML.
-        Always uses fresh BAML extraction to ensure accurate data.
+        Extract verses using Regex from normalized markdown.
+        Captures spillover text (before first marker) as the start verse from metadata.
+        """
+        logging.info(f"Extracting verses regex. Metadata keys: {list(metadata.keys())}")
+        verses = []
+        book = metadata.get('book_name', 'Unknown')
+        chapter = metadata.get('chapter', '?')
+        verse_range = metadata.get('verse', '')
+        
+        # Try to parse start verse from metadata (e.g. "18-22" -> "18")
+        start_verse_ref = "?"
+        if verse_range:
+            parts = verse_range.split('-')
+            if parts and parts[0].strip().isdigit():
+                start_verse_ref = parts[0].strip()
+        
+        # Remove footnote definitions from the end of the text
+        # They typically start with [^1]: ...
+        # Find the first occurrence of a footnote definition and truncate text there
+        footnote_match = re.search(r'\n\s*\[\^\d+\]:', text)
+        if footnote_match:
+            text = text[:footnote_match.start()]
+            
+        matches = list(self.verse_pattern.finditer(text))
+        
+        # Handle spillover text (content before first "Ver.")
+        if matches:
+            first_match_start = matches[0].start()
+            if first_match_start > 0:
+                spillover_content = text[:first_match_start].strip()
+                if spillover_content:
+                    # Determine verse number for spillover
+                    # It should be the verse BEFORE the first actual match
+                    try:
+                        first_verse_num = int(matches[0].group(1))
+                        # If first marked verse is 1, spillover is from previous chapter -> verse 0? 
+                        # Or just use metadata logic if available.
+                        # For now, simplistic N-1 logic.
+                        spillover_num = max(1, first_verse_num - 1)
+                        spillover_ref = f"{book} {chapter}:{spillover_num}"
+                    except ValueError:
+                        # Fallback to metadata start if parsing fails
+                        spillover_ref = f"{book} {chapter}:{start_verse_ref}"
+
+                    verses.append(self._create_verse_chunk(
+                        spillover_content, 
+                        spillover_ref
+                    ))
+        elif text.strip():
+            # No markers found, treat whole text as one chunk (belonging to start verse)
+            verses.append(self._create_verse_chunk(
+                text.strip(),
+                f"{book} {chapter}:{start_verse_ref}"
+            ))
+            return verses
+        
+        # Handle matches
+        found_verse_nums = set()
+        for match in matches:
+            verse_num = match.group(1)
+            content = match.group(2).strip()
+            
+            if not content:
+                continue
+            
+            found_verse_nums.add(int(verse_num))
+            verses.append(self._create_verse_chunk(
+                content,
+                f"{book} {chapter}:{verse_num}"
+            ))
+            
+        # Validation: Check for missing verses based on metadata range
+        if verse_range:
+            parts = verse_range.split('-')
+            if len(parts) >= 2 and parts[0].strip().isdigit() and parts[1].strip().isdigit():
+                start_v = int(parts[0].strip())
+                end_v = int(parts[1].strip())
+                expected_verses = set(range(start_v, end_v + 1))
+                
+                # Check what we found
+                missing_verses = expected_verses - found_verse_nums
+                
+                with open("debug_missing_verses.txt", "w") as df:
+                    df.write(f"Verse Range: {verse_range}\n")
+                    df.write(f"Expected: {expected_verses}\n")
+                    df.write(f"Found: {found_verse_nums}\n")
+                    df.write(f"Missing: {missing_verses}\n")
+                
+                if missing_verses:
+                    sorted_missing = sorted(list(missing_verses))
+                    logging.warning(f"  [Verify] Expected: {start_v}-{end_v}, Found: {sorted(list(found_verse_nums))}")
+                    logging.warning(f"  [Verify] Missing markers: {sorted_missing}")
+                    logging.warning(f"  (These may be merged into the previous verse or spillover due to missing 'Ver.' labels)")
+
+        return verses
+
+    def _create_verse_chunk(self, content: str, ref: str) -> Dict:
+        """Helper to create verse chunk dict."""
+        # Clean up content (remove newlines, extra spaces)
+        content_clean = ' '.join(content.split())
+        words = content_clean.split()
+        
+        if not words:
+            return None
+            
+        start_phrase = ' '.join(words[:15]) # First ~15 words
+        end_phrase = ' '.join(words[-15:])  # Last ~15 words
+        
+        return {
+            'verse_ref': ref,
+            'start_phrase': start_phrase,
+            'end_phrase': end_phrase
+        }
+
+    def extract_verses(self, markdown_text: str, page_name: str = None) -> List[Dict]:
+        """
+        Extract verse chunks using Regex first, falling back to BAML.
         """
         if not markdown_text:
             return []
+
+        # Try Regex first if we have page context
+        if page_name:
+            metadata = self.load_metadata(page_name)
+            regex_verses = self.extract_verses_regex(markdown_text, metadata)
+            
+            if regex_verses:
+                logging.info(f"Extracted {len(regex_verses)} verses via Regex")
+                return regex_verses
+            else:
+                logging.warning("Regex extraction returned no verses, falling back to BAML")
+
+        # Fallback to BAML
         try:
             # BAML function is async, wrap with asyncio.run()
             baml_verses = asyncio.run(b.ExtractVersesFromMarkdown(markdown_text))
@@ -201,6 +372,8 @@ class VerseAligner:
             'header_y': self.header_y_threshold
         }
     
+
+    
     def is_body_word(self, word: Dict, bounds: Dict) -> bool:
         """Check if word is in body text (not header).
         
@@ -261,6 +434,15 @@ class VerseAligner:
             # Slide window over body words
             for i in range(len(body_indices) - window_size + 1):
                 window_indices = body_indices[i:i + window_size]
+                
+                # First-word check: ensure the first word matches reasonably well
+                # This prevents 'who' from matching 'And' in phrase starts
+                #first_ocr = words[window_indices[0]]['text'].lower().strip('.,;:!?"\'')
+                #first_phrase = phrase_words[0].lower().strip('.,;:!?"\'')
+                #first_word_score = fuzz.ratio(first_ocr, first_phrase)
+                #if first_word_score < 60:  # First word must have decent match
+                #   continue
+                
                 window_text = ' '.join(words[idx]['text'] for idx in window_indices)
                 
                 score = fuzz.ratio(search_phrase.lower(), window_text.lower())
@@ -504,6 +686,69 @@ class VerseAligner:
                     x, y, w, h = box['x'], box['y'], box['w'], box['h']
                     draw.rectangle([x, y, x + w, y + h], fill=highlight_color, outline=outline_color, width=3)
             
+            # Draw verse markers (colored by confidence)
+            for result in results:
+                verse_ref = result.get('verse_ref', '')
+                start_idx = result.get('start_idx', 0)
+                score = result.get('score', 0)
+                
+                # High confidence -> Green, Low -> Red
+                if score >= 60:
+                    marker_color = (0, 255, 0, 255)  # Green
+                else:
+                    marker_color = (255, 0, 0, 255)  # Red
+                
+                # Extract verse number from ref (e.g. "GENESIS 48:18" -> "18")
+                match = re.search(r':(\d+)$', verse_ref)
+                if match and start_idx > 0:
+                    verse_num = match.group(1)
+                    
+                    # Search backwards for marker (Ver. N.)
+                    # Typically 1-3 words: "Ver.", "18." or "Ver", ".", "18", "."
+                    marker_words = []
+                    search_limit = 5
+                    found_num = False
+                    found_ver = False
+                    
+                    # Look back up to search_limit words
+                    current_idx = start_idx - 1
+                    words_checked = 0
+                    
+                    possible_marker_words = []
+                    
+                    while current_idx >= 0 and words_checked < search_limit:
+                        w = words[current_idx]
+                        txt = w['text'].strip('.,;:').lower()
+                        
+                        # Add to potential marker chain
+                        possible_marker_words.append(w)
+                        
+                        if txt == verse_num:
+                            found_num = True
+                        elif 'ver' in txt or 'v' == txt:
+                            found_ver = True
+                        
+                        # If we found both parts, stop
+                        if found_num and found_ver:
+                            marker_words = possible_marker_words
+                            break
+                            
+                        current_idx -= 1
+                        words_checked += 1
+                        
+                    if marker_words:
+                        # Calculate box for marker words
+                        min_x = min(w['left'] for w in marker_words)
+                        min_y = min(w['top'] for w in marker_words)
+                        max_x = max(w['right'] for w in marker_words)
+                        max_y = max(w['bottom'] for w in marker_words)
+                        
+                        # Draw box for "Ver. XX."
+                        draw.rectangle([min_x, min_y, max_x, max_y], 
+                                     outline=marker_color, width=4)
+                    else:
+                        logging.warning(f"  [Debug Image] Marker for {verse_ref} not found near index {start_idx}")
+
             # Composite overlay onto image
             img = Image.alpha_composite(img, overlay)
             
@@ -580,8 +825,8 @@ class VerseAligner:
         bounds = self.detect_column_bounds(words)
         logging.info(f"Column bounds: L={bounds['left_col']}, R={bounds['right_col']}")
         
-        # Extract verses using BAML
-        verses = self.extract_verses(markdown)
+        # Extract verses using Regex/BAML
+        verses = self.extract_verses(markdown, page_name)
         if not verses:
             logging.warning("No verses extracted")
             return []
@@ -610,6 +855,9 @@ class VerseAligner:
                 })
                 last_end_idx = start_idx + 1  # Move forward to avoid overlapping
                 logging.info(f"  Start found for {verse_ref}: idx={start_idx}, score={start_score:.0f}")
+                
+                if start_score < 60:
+                    logging.warning(f"  [Low Confidence] {verse_ref} matched with score {start_score:.1f}. Check OCR quality.")
             else:
                 logging.warning(f"  Start not found for {verse_ref} (score={start_score:.1f})")
         
@@ -653,6 +901,9 @@ class VerseAligner:
                     'end_phrase': end_phrase,
                     'start_idx': start_idx,
                     'end_idx': end_end,
+                    'start_idx': start_idx,
+                    'end_idx': end_end,
+                    'score': start_score,
                     'boxes': boxes
                 }
                 results.append(result)
