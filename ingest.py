@@ -103,8 +103,20 @@ class GillIngestionEngine:
         if self.client:
             self.client.close()
     
-    def parse_page_info(self, page_name: str) -> Tuple[int, int]:
+    def parse_page_info(self, page_name: str, volume_override: int = None) -> Tuple[int, int]:
         """Parse volume and page number from filename."""
+        if volume_override:
+             # If override is provided, use it for volume, parse page num from name
+             parts = page_name.split("_")
+             if len(parts) >= 1:
+                 # page100_image1 -> page100 -> 100
+                 # Try to extract number from first part
+                 try:
+                     page_str = parts[0].replace("page", "")
+                     return volume_override, int(page_str)
+                 except:
+                     pass
+
         parts = page_name.split("_")
         if len(parts) >= 2:
             page_num = int(parts[0].replace("page", ""))
@@ -292,11 +304,21 @@ class GillIngestionEngine:
                 return json.load(f)
         return []
 
-    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path) -> int:
+    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path, volume_override: int = None) -> int:
         """Process a single page and ingest into Weaviate."""
         logging.info(f"Processing {page_name}...")
         
-        volume, page_num = self.parse_page_info(page_name)
+        volume, page_num = self.parse_page_info(page_name, volume_override)
+        
+        # Delete existing chunks for this page to prevent duplicates
+        try:
+             self.chunks.data.delete_many(
+                where=wvc.query.Filter.by_property("page_number").equal(page_num) & 
+                      wvc.query.Filter.by_property("volume").equal(volume)
+            )
+             logging.info(f"Deleted existing chunks for Vol {volume} Page {page_num}")
+        except Exception as e:
+            logging.warning(f"Failed to delete existing chunks: {e}")
         
         # Load metadata
         metadata_path = data_dir / f"{page_name}_metadata.json"
@@ -314,7 +336,14 @@ class GillIngestionEngine:
              return 0
 
         # Load previous page alignments (to detect spillover)
-        prev_page_name = f"page{page_num - 1}_image{volume}"
+        prev_page_name = f"page{page_num - 1}_image{volume}" # This might still default to "image1" if we don't have better naming.
+        # Ideally we should construct filename based on knowledge. 
+        # But wait, if volume_override is 7, filename is still "page99_image1"?
+        # YES. Because filenames in extracted_images_7 are pageX_image1.
+        # So construction logic needs care if we want previous page.
+        # If we assume filenames are consistent:
+        prev_page_name = f"page{page_num - 1}_image1" 
+        
         prev_alignments = self.load_alignment_json(prev_page_name, alignment_dir)
         prev_verse_refs = {a.get("verse_ref") for a in prev_alignments if a.get("verse_ref")}
 
@@ -338,7 +367,23 @@ class GillIngestionEngine:
                 
             start_phrase = alignment.get("start_phrase")
             end_fallback = alignment.get("end_phrase") # Use this if we can't find next verse
+            
+            # Handle 'boxes' list (new format) or 'highlight_box' (old format)
             highlight_box = alignment.get("highlight_box")
+            boxes = alignment.get("boxes")
+            
+            if not highlight_box and boxes and isinstance(boxes, list) and len(boxes) > 0:
+                # Calculate union of all boxes
+                min_x = min(b['x'] for b in boxes)
+                min_y = min(b['y'] for b in boxes)
+                max_x = max(b['x'] + b['w'] for b in boxes)
+                max_y = max(b['y'] + b['h'] for b in boxes)
+                highlight_box = {
+                    "x": min_x,
+                    "y": min_y,
+                    "w": max_x - min_x,
+                    "h": max_y - min_y
+                }
             
             if not all([verse_ref, start_phrase]):
                 continue
@@ -416,14 +461,18 @@ class GillIngestionEngine:
         
         return chunks_ingested
     
-    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking"):
-        """Process all pages."""
+    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking", page_filter: str = None, volume_override: int = None):
+        """Process all pages, optionally filtering by page name."""
         data_path = Path(data_dir)
         alignment_path = Path(alignment_dir)
         qwen_path = data_path / qwen_subdir
         
         alignment_files = list(alignment_path.glob("*_alignment.json"))
-        logging.info(f"Found {len(alignment_files)} alignment files")
+        if page_filter:
+            alignment_files = [f for f in alignment_files if f.name.replace("_alignment.json", "") == page_filter]
+            logging.info(f"Filtered to {len(alignment_files)} files matching {page_filter}")
+        else:
+            logging.info(f"Found {len(alignment_files)} alignment files")
         
         total_chunks = 0
         processed_pages = 0
@@ -431,7 +480,7 @@ class GillIngestionEngine:
         for align_file in alignment_files:
             page_name = align_file.name.replace("_alignment.json", "")
             try:
-                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path)
+                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path, volume_override)
                 total_chunks += chunks
                 processed_pages += 1
                 if processed_pages % 10 == 0:
@@ -548,6 +597,36 @@ if __name__ == "__main__":
     parser.add_argument("--weaviate-port", type=int, default=8080, help="Weaviate port")
     parser.add_argument("--test-page", help="Process only a specific page")
     parser.add_argument("--visualize", action="store_true", help="Generate PDF graph of current data")
+    parser.add_argument("--volume", type=int, help="Override volume number")
+    
+    args = parser.parse_args()
+    
+    with GillIngestionEngine(args.weaviate_host, args.weaviate_port) as engine:
+        if args.visualize:
+            engine.visualize_connections()
+        elif args.test_page:
+             # Auto-detect qwen dir logic
+             # In verify_ingestion it was: extracted_images/qwen_qwen3-vl-235b-a22b-thinking
+             # Here we assume it's in data_dir.
+             base_data = Path(args.data_dir)
+             qwen_dir = next(base_data.glob("qwen*"), None)
+             if not qwen_dir:
+                 # Fallback
+                 qwen_dir = base_data / "qwen_qwen3-vl-235b-a22b-thinking"
+             
+             chunks = engine.process_page(
+                args.test_page,
+                base_data,
+                Path(args.alignment_dir),
+                qwen_dir,
+                args.volume
+             )
+             print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
+        else:
+             base_data = Path(args.data_dir)
+             qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
+             chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume)
+             print(f"✅ Batch complete: {chunks} chunks total")
     
     args = parser.parse_args()
     
