@@ -348,8 +348,12 @@ class GillIngestionEngine:
             if i + 1 < len(alignments):
                 stop_phrase = alignments[i+1].get("start_phrase")
             elif next_alignments:
-                # If last verse on page, check next page first verse
-                stop_phrase = next_alignments[0].get("start_phrase")
+                # If last verse on page, check next page for the *next distinct* verse
+                # (Skip verses that are just the current verse continuing)
+                for next_align in next_alignments:
+                    if next_align.get("verse_ref") != verse_ref:
+                        stop_phrase = next_align.get("start_phrase")
+                        break
             
             # Slice Text
             commentary_text = self.slice_verse_text(full_context_text, start_phrase, stop_phrase, end_fallback)
