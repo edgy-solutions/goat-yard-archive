@@ -8,10 +8,11 @@ from pydantic import BaseModel
 from typing import List, Optional, Any
 
 # Import our modules
-from .search_engine import GillSearchEngine
+from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot
 
 app = FastAPI(title="Gill Commentary API")
+print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
 
 # CORS (Allow Frontend)
 app.add_middleware(
@@ -28,6 +29,7 @@ bot = None
 
 @app.on_event("startup")
 def startup():
+    print("--- STARTUP EVENT FIRED ---")
     global search_engine, bot
     
     # 1. Search Engine
@@ -68,6 +70,8 @@ class EvidenceItem(BaseModel):
     vol: int
     page: int
     scan: Optional[Any]
+    footnotes: Optional[List[str]] = []
+    entities: Optional[List[str]] = []
     score: float
 
 class SearchResponse(BaseModel):
@@ -100,18 +104,20 @@ async def search(req: SearchRequest):
     if bot:
         try:
             # Forward pass
+            # Forward pass
+            # FORCE DEBUG CHECK
             pred = bot(question=req.query, context_chunks=raw_results)
             answer = pred.answer
             citations = pred.citations
-            verified = True # Assertions would have raised error if failed
+            verified = True
+                 
         except Exception as e:
-            # Check if it looks like an assertion error (dspy or standard)
             if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
-                 answer = f"Generated answer could not be verified against sources.\nError: {e}"
-                 verified = False
+                  answer = f"Generated answer could not be verified against sources.\nError: {e}"
+                  verified = False
             else:
-                 answer = f"Error generating answer: {e}"
-                 verified = False
+                  answer = f"Error generating answer: {e}"
+                  verified = False
     
     # Format Evidence
     evidence_list = []
@@ -124,8 +130,13 @@ async def search(req: SearchRequest):
             vol=int(r["vol"]) if r["vol"] else 0,
             page=int(r["page"]) if r["page"] else 0,
             scan=r["scan"],
+            footnotes=r.get("footnotes", []),
+            entities=r.get("entities", []),
             score=r["score"]
         ))
+
+    if evidence_list:
+        print(f"DEBUG: First Evidence Item Entities: {evidence_list[0].entities}")
 
     return SearchResponse(
         answer=answer,

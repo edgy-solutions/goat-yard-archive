@@ -1,0 +1,243 @@
+
+import os
+import re
+import json
+import logging
+import weaviate
+import weaviate.classes as wvc
+from typing import List, Dict, Any, Optional
+from .bible_mapping import BIBLE_BOOK_MAP
+
+class GillSearchEngine:
+    def __init__(self):
+        # reuse connection logic from ingest.py (simplified)
+        weaviate_url = os.getenv("WEAVIATE_URL", "localhost")
+        weaviate_port = int(os.getenv("WEAVIATE_PORT", 8080))
+        
+        headers = {}
+        if os.getenv("OPENROUTER_API_KEY"):
+            headers["X-OpenAI-Api-Key"] = os.getenv("OPENROUTER_API_KEY")
+
+        print(f"Connecting to Weaviate at {weaviate_url}:{weaviate_port}")
+        if weaviate_url != "localhost":
+             self.client = weaviate.connect_to_custom(
+                http_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
+                http_port=80,
+                http_secure=False,
+                grpc_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
+                grpc_port=50051,
+                grpc_secure=False,
+                headers=headers
+            )
+        else:
+            self.client = weaviate.connect_to_local(headers=headers)
+            
+        self.chunks = self.client.collections.get("CommentaryChunk")
+        self.entities = self.client.collections.get("TheologicalEntity")
+        
+    def close(self):
+        self.client.close()
+
+    def extract_potential_entities(self, query: str) -> List[str]:
+        """
+        Identify potential entities in the query.
+        For now, we look for Capitalized Words and verify if they exist in DB.
+        """
+        # Simple regex for Capitalized phrases (e.g. "John Gill", "Socinus", "God")
+        # Ignoring common stop words if necessary, but Weaviate handles that generally.
+        caps = re.findall(r'\b[A-Z][a-z]+\b', query)
+        verified_entities = []
+        
+        for cap in caps:
+            # Skip very short words (stopword risk)
+            if len(cap) < 3:
+                continue
+                
+            # Check existence in Weaviate (exact match for speed)
+            # This is the "Lightweight" check
+            try:
+                response = self.entities.query.fetch_objects(
+                    filters=wvc.query.Filter.by_property("name").equal(cap),
+                    limit=1
+                )
+                if response.objects:
+                    verified_entities.append(cap)
+            except Exception as e:
+                # If query fails (e.g. stopword error), just ignore
+                print(f"Warning: Entity check failed for '{cap}': {e}")
+                
+        return verified_entities
+
+    def search_gill(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Perform Hybrid Search + Graph Boost.
+        """
+        print(f"Searching for: {query}")
+        
+        # 1. Entity Extraction
+        entities = self.extract_potential_entities(query)
+        print(f"Detected entities: {entities}")
+        
+        filters = None
+        # 2. The Graph Boost (Filter)
+        # If entities found, we prioritize chunks mentioning them?
+        # The instruction says: "If an entity was found... apply a filter to the query to prioritize chunks..."
+        # Weaviate Hybrid search doesn't have "boost" via filter easily, 
+        # but we can use 'move_to' concept or just hard filter if the user *only* wants that entity.
+        # However, usually "prioritize" means boost.
+        # But let's follow the simple instruction: "apply a filter... to prioritize". 
+        # Maybe it implies filtering to *only* those that mention it? 
+        # Or maybe it means using the entity name in the hybrid search query with higher alpha?
+        # I will use a filter if entities are found, to narrow the scope. This is safer for "Grounding".
+        
+        if entities:
+            # Create a filter where 'mentions_entity' has 'name' equal to any found entity
+            entity_filters = []
+            for ent in entities:
+                entity_filters.append(
+                    wvc.query.Filter.by_ref("mentions_entity").by_property("name").equal(ent)
+                )
+            
+            if len(entity_filters) > 1:
+                filters = wvc.query.Filter.any_of(entity_filters)
+            else:
+                filters = entity_filters[0]
+
+        # 2b. Verse Reference Detection (Exact Lookup)
+        # Regex for "Book Chapter:Verse" (e.g. Matthew 7:27, Genesis 1:1)
+        # We try to match standard format. If found, we PRIORITIZE/FILTER by it.
+        # 2b. Verse Reference Detection (Exact Lookup)
+        # Regex for "Book Chapter:Verse" (e.g. Matthew 7:27, Mat 7:27, 2 Cor 1:1, Ecc 1:2)
+        # Matches: Optional digit prefix, followed by letters, optional dot, followed by numbers.
+        # Captures: 1. Full Ref string (ignored mostly), 2. Book Part, 3. Verse Part
+        
+        # Regex explanation:
+        # \b                Phrase boundary
+        # (                 Group 1: Capture whole thing for debugging logic if needed
+        #  ((?:\d\s*)?[A-Za-z]+)   Group 2: Book Name (Optional digit + space, then letters). E.g. "1 John", "Mat"
+        #  \.?                  Optional dot (Mat.)
+        #  \s+                  Space
+        #  (\d+:\d+)            Group 3: Chapter:Verse
+        # )
+        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+:\d+))\b', query, re.IGNORECASE)
+        
+        if ref_match:
+            raw_book = ref_match.group(2).lower() # Group 2 is the Book part
+            # handle cases like "1   john" -> "1 john" (normalize spaces)
+            raw_book = re.sub(r'\s+', ' ', raw_book)
+            
+            verse_part = ref_match.group(3)
+            
+            if raw_book in BIBLE_BOOK_MAP:
+                canonical_ref = f"{BIBLE_BOOK_MAP[raw_book]} {verse_part}"
+                print(f"Detected verse reference: {canonical_ref} (from {ref_match.group(0)})")
+                
+                ref_filter = wvc.query.Filter.by_property("verse_ref").equal(canonical_ref)
+                
+                print(f"Executing Direct Lookup for {canonical_ref}")
+                response = self.chunks.query.fetch_objects(
+                    filters=ref_filter,
+                    limit=limit,
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                     return_references=[
+                         wvc.query.QueryReference(
+                                link_on="mentions_entity",
+                                return_properties=["name"]
+                            )
+                    ]
+                )
+            else:
+                 # Fallback if map fails (unlikely due to regex)
+                 print(f"Warning: Could not map book '{raw_book}'")
+                 response = self.chunks.query.hybrid(
+                    query=query,
+                    query_properties=["content", "verse_ref"],
+                    filters=filters,
+                    limit=limit,
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                )
+        else:
+            # 3. Retrieval (Hybrid)
+            response = self.chunks.query.hybrid(
+                query=query,
+                query_properties=["content", "verse_ref"],
+                filters=filters,
+                limit=limit,
+                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                return_references=[
+                     wvc.query.QueryReference(
+                            link_on="mentions_entity",
+                            return_properties=["name"]
+                        )
+                ]
+            )
+        
+        if ref_match and 'canonical_ref' in locals():
+            # If we successfully identified a canonical reference (e.g. MATTHEW 7:27),
+            # we should strictly police the results to ensure we don't return "27:7" for "7:27".
+            target_ref = canonical_ref
+        elif ref_match:
+             # If we matched regex but failed map, we might rely on the raw string, 
+             # but "mat 7:27" != "MATTHEW 7:27", so strict equality fails.
+             # In fallback mode, we should probably disable strict post-filtering or handle it better.
+             target_ref = None # Disable strict filter if we couldn't map it canonical
+        else:
+             target_ref = None
+
+        results = []
+        for obj in response.objects:
+            # Post-filter for Exact Reference Match (if active)
+            extracted_ref = obj.properties.get("verse_ref")
+            
+            if target_ref:
+                if extracted_ref != target_ref:
+                     continue
+
+            # Parse scan_json safety
+            scan_box = None
+            if obj.properties.get("scan_json"):
+                try:
+                    scan_box = json.loads(obj.properties["scan_json"])
+                except:
+                    pass
+            
+            # Extract referenced entities
+            entity_names = []
+            if obj.references and "mentions_entity" in obj.references:
+                # Safe access for v4 client
+                ref_val = obj.references["mentions_entity"]
+                if hasattr(ref_val, 'objects'):
+                    for ref_obj in ref_val.objects:
+                       name = ref_obj.properties.get("name")
+                       if name:
+                           entity_names.append(name)
+            
+            # Deduplicate
+            entity_names = list(set(entity_names))
+
+            # Format output
+            results.append({
+                "chunk_id": str(obj.uuid),
+                "content": obj.properties.get("content"),
+                "verse_ref": extracted_ref,
+                "citation": f"[Vol {obj.properties.get('volume')}, p. {obj.properties.get('page_number')}]",
+                "vol": obj.properties.get('volume'),
+                "page": obj.properties.get('page_number'),
+                "scan": scan_box,
+                "footnotes": obj.properties.get("footnotes", []),
+                "entities": entity_names,
+                "score": obj.metadata.score if (obj.metadata and obj.metadata.score is not None) else 1.0 # Boost score for lookup
+            })
+            
+        return results
+
+if __name__ == "__main__":
+    # Test
+    from dotenv import load_dotenv
+    load_dotenv()
+    engine = GillSearchEngine()
+    results = engine.search_gill("What does he say about Cain?")
+    for r in results:
+        print(f"\n{r['verse_ref']} {r['citation']}")
+        print(r['content'][:100] + "...")
+    engine.close()

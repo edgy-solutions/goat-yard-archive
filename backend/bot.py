@@ -27,8 +27,9 @@ class GroundedGillBot(dspy.Module):
         for chunk in context_chunks:
             citation_tag = chunk.get("citation", "Unknown") # e.g. [Vol 1, p. 287]
             valid_citations.add(citation_tag)
+            verse_ref = chunk.get("verse_ref", "")
             text = chunk.get("content", "")
-            formatted_context += f"Source {citation_tag}: {text}\n\n"
+            formatted_context += f"Source {citation_tag} ({verse_ref}): {text}\n\n"
             
         # 2. Generate
         pred = self.generate_answer(context=formatted_context, question=question)

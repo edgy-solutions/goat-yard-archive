@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import ScanViewer from './components/ScanViewer';
+import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
 
 // Types (should actully be in types.ts but putting here for single-file portability if needed)
@@ -13,6 +14,8 @@ interface EvidenceItem {
     page: number;
     scan: { x: number; y: number; w: number; h: number } | null;
     score: number;
+    footnotes?: string[];
+    entities?: string[];
 }
 
 interface SearchResponse {
@@ -27,6 +30,12 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
+
+    // Default Image Rotation
+    const [defaultImage] = useState(() => {
+        const images = ['/gill1.png', '/gill2.png', '/gill3.png'];
+        return images[Math.floor(Math.random() * images.length)];
+    });
 
     // Default to MOCK if backend down/empty
     const [error, setError] = useState<string | null>(null);
@@ -103,7 +112,7 @@ function App() {
 
                 {/* Header */}
                 <div className="p-4 border-b bg-gray-50">
-                    <h1 className="text-xl font-bold text-blue-900">Dr. Gill's Assistant</h1>
+                    <h1 className="text-xl font-bold text-blue-900">Dr. Voluminous</h1>
                     <p className="text-xs text-gray-500">Grounded Theological AI</p>
                 </div>
 
@@ -121,19 +130,22 @@ function App() {
                     {response && (
                         <div className="space-y-4">
                             {/* Answer */}
-                            <div className="bg-blue-50 p-4 rounded-lg relative">
+                            <div className="bg-blue-50 p-4 rounded-lg">
+                                {/* Status Header */}
+                                <div className="flex justify-end mb-2">
+                                    {response.verified ? (
+                                        <span className="flex items-center text-xs text-green-700 bg-green-100 px-2 py-1 rounded-full">
+                                            ✓ Verified
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-red-700 bg-red-100 px-2 py-1 rounded-full text-center">
+                                            ⚠ Unverified
+                                        </span>
+                                    )}
+                                </div>
                                 <div className="prose max-w-none">
                                     <p>{response.answer}</p>
                                 </div>
-                                {response.verified ? (
-                                    <span className="absolute top-2 right-2 flex items-center text-xs text-green-700 bg-green-100 px-2 py-1 rounded-full">
-                                        ✓ Verified
-                                    </span>
-                                ) : (
-                                    <span className="absolute top-2 right-2 text-xs text-red-700 bg-red-100 px-2 py-1 rounded-full text-center">
-                                        ⚠ Unverified
-                                    </span>
-                                )}
                             </div>
 
                             {/* Citations Buttons */}
@@ -159,8 +171,36 @@ function App() {
                                     <h3 className="text-sm font-bold uppercase text-gray-500 mb-2">
                                         Evidence Source: {activeEvidence.verse_ref || "Unknown Verse"}
                                     </h3>
+
+                                    {/* Entity Tags */}
+                                    {activeEvidence.entities && activeEvidence.entities.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 mb-3">
+                                            {activeEvidence.entities.map((ent, idx) => (
+                                                <span key={idx} className="bg-indigo-100 text-indigo-700 text-xs px-2 py-1 rounded-full font-semibold border border-indigo-200">
+                                                    {ent}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+
                                     <div className="p-3 bg-gray-50 border rounded text-sm text-gray-700">
-                                        {activeEvidence.content}
+                                        <div className="prose prose-sm max-w-none">
+                                            <ReactMarkdown>{activeEvidence.content}</ReactMarkdown>
+                                        </div>
+
+                                        {/* Footnotes Display */}
+                                        {activeEvidence.footnotes && activeEvidence.footnotes.length > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-gray-200">
+                                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Original Footnotes</h4>
+                                                <ul className="space-y-1 text-xs text-gray-600">
+                                                    {activeEvidence.footnotes.map((fn, idx) => (
+                                                        <li key={idx} className="text-gray-600">
+                                                            <span>{fn}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -192,7 +232,7 @@ function App() {
             {/* Right Pane: Scan Verification */}
             <div className="w-1/2 bg-gray-100 relative">
                 <ScanViewer
-                    imageUrl={activeEvidence ? getImageUrl(activeEvidence) : ""}
+                    imageUrl={activeEvidence ? `/scans/vol${activeEvidence.vol}_page${activeEvidence.page}_image1.jpeg` : defaultImage}
                     highlightBox={activeEvidence?.scan || null}
                     originalDims={getOriginalDims(activeEvidence)}
                 />

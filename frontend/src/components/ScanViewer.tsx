@@ -94,7 +94,7 @@ const ScanViewer: React.FC<ScanViewerProps> = ({ imageUrl, highlightBox, origina
                 {/* Canvas Overlay */}
                 <canvas
                     ref={canvasRef}
-                    className="absolute top-0 left-0 pointer-events-none z-10 border border-red-500"
+                    className="absolute top-0 left-0 pointer-events-none z-10"
                 />
 
                 {/* Placeholder if no image */}
