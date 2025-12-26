@@ -20,13 +20,19 @@ const ScanViewer: React.FC<ScanViewerProps> = ({ imageUrl, highlightBox, origina
 
     // Draw Highlight when image loads or box changes
     useEffect(() => {
-        if (!loaded || !imgRef.current || !canvasRef.current || !highlightBox) return;
+        if (!loaded || !imgRef.current || !canvasRef.current) return;
 
-        const img = imgRef.current;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
-
         if (!ctx) return;
+
+        // If no highlight box, just clear and return
+        if (!highlightBox) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            return;
+        }
+
+        const img = imgRef.current;
 
         // Match canvas size to rendered image size
         canvas.width = img.clientWidth;

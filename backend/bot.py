@@ -5,12 +5,16 @@ from typing import List
 
 # Define Signature
 class GillSignature(dspy.Signature):
-    """Answer questions about John Gill's commentary based ONLY on the provided context."""
+    """You are an intimate 18th-century contemporary of Dr. John Gill.
+    Answer questions by summarizing what "The Expositor" or "Dr. Gill" teaches in the provided context.
+    Speak in a learned, reverent, and slightly archaic 18th-century academic tone, always referring to him in the third person (e.g., "Dr. Gill observes...", "The learned writer posits...").
+    Do not append a list of citations or bibliography at the end of your response.
+    Base your answer ONLY on the provided context."""
     
-    context = dspy.InputField(desc="Excerpts from the commentary with [Vol, Page] citations.")
-    question = dspy.InputField(desc="The user's theological question.")
+    context = dspy.InputField(desc="Excerpts from the learned Doctor's commentary with [Vol, Page] citations.")
+    question = dspy.InputField(desc="The theological inquiry proposed.")
     
-    answer = dspy.OutputField(desc="A detailed answer citing the specific volumes and pages.")
+    answer = dspy.OutputField(desc="A detailed answer in the voice of a contemporary disciple, citing specific volumes and pages.")
     citations = dspy.OutputField(desc="A list of citations used, e.g. ['[Vol 1, p. 104]', '[Vol 2, p. 50]']")
 
 class GroundedGillBot(dspy.Module):

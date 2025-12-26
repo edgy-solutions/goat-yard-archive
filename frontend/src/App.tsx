@@ -168,9 +168,34 @@ function App() {
                                     )}
                                 </div>
                                 <div className="prose prose-sm max-w-none text-[#3E2723] leading-relaxed">
-                                    {response.answer.split('\n').map((line, i) => (
-                                        <p key={i} className="mb-2">{line}</p>
-                                    ))}
+                                    {response.answer.split('\n').map((line, i) => {
+                                        // Regex to match [Vol X, p. Y]
+                                        const parts = line.split(/(\[Vol \d+, p\. \d+\])/g);
+                                        return (
+                                            <p key={i} className="mb-2">
+                                                {parts.map((part, partIdx) => {
+                                                    if (part.match(/^\[Vol \d+, p\. \d+\]$/)) {
+                                                        // Find matching evidence
+                                                        const match = response.evidence.find(ev => ev.citation === part);
+                                                        if (match) {
+                                                            return (
+                                                                <button
+                                                                    key={partIdx}
+                                                                    onClick={() => setActiveEvidence(match)}
+                                                                    className="text-amber-700 font-bold hover:underline cursor-pointer bg-amber-50 px-1 rounded mx-0.5 border border-amber-200 text-xs align-middle"
+                                                                    title="View Source"
+                                                                >
+                                                                    {part}
+                                                                </button>
+                                                            );
+                                                        }
+                                                        return <span key={partIdx} className="text-gray-500 text-xs">{part}</span>;
+                                                    }
+                                                    return <span key={partIdx}>{part}</span>;
+                                                })}
+                                            </p>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
