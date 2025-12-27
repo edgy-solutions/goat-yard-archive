@@ -1,5 +1,5 @@
 # Backend Dockerfile using S2I logic
-FROM registry.access.redhat.com/ubi10/python-312
+FROM registry.access.redhat.com/ubi9/python-312
 
 # 1. Copy application source
 # Switch to root to ensure we can write/mod files

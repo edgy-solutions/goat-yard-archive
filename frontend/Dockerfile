@@ -1,5 +1,5 @@
 # Frontend Dockerfile using S2I logic
-FROM registry.access.redhat.com/ubi10/nodejs-22
+FROM registry.access.redhat.com/ubi9/nodejs-22
 
 # 1. Copy application source
 # Switch to root to ensure we can write/mod files
