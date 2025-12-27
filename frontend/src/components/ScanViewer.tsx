@@ -78,7 +78,7 @@ const ScanViewer: React.FC<ScanViewerProps> = ({ imageUrl, highlightBox, origina
         // Auto-scroll to center the highlight (focus on first box)
         if (containerRef.current && boxes.length > 0) {
             const firstBox = boxes[0];
-            const x = firstBox.x * scaleX;
+            // x is unused for vertical scrolling
             const y = firstBox.y * scaleY;
             const h = firstBox.h * scaleY;
 

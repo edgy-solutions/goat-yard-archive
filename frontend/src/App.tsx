@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import { useState } from 'react';
 import ScanViewer from './components/ScanViewer';
 import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
@@ -56,7 +55,7 @@ function App() {
 
             if (!res.ok) {
                 const errText = await res.text();
-                throw new Error(`Server Error: ${res.status} ${errText}`);
+                throw new Error(`Server Error: ${res.status} ${errText} `);
             }
 
             const data = await res.json();
@@ -94,13 +93,6 @@ function App() {
         }
     };
 
-    // Helper to get Image URL (Placeholder logic)
-    // We now have images in /public/scans/vol{vol}_page{page}_image1.png
-    // This handles multi-volume support (e.g. Genesis=vol1, Matthew=vol7)
-    const getImageUrl = (ev: EvidenceItem | null) => {
-        if (!ev) return "";
-        return `/scans/vol${ev.vol}_page${ev.page}_image1.png`;
-    };
 
     // We need Original Dims for the scan. 
     // In a real app, this should come from Metadata or config. 
@@ -205,12 +197,12 @@ function App() {
                                     <button
                                         key={idx}
                                         onClick={() => setActiveEvidence(ev)}
-                                        className={`px-3 py-1 rounded text-sm transition-all duration-200 font-serif border
+                                        className={`px - 3 py - 1 rounded text - sm transition - all duration - 200 font - serif border
                                             ${activeEvidence?.chunk_id === ev.chunk_id
                                                 ? 'bg-[#5D4037] text-amber-50 border-[#3E2723] shadow-md'
                                                 : 'bg-white/50 text-[#5D4037] border-[#D7CCC8] hover:bg-[#D7CCC8]/30 hover:shadow-sm'
                                             }
-                                        `}
+`}
                                     >
                                         {ev.citation}
                                     </button>
@@ -286,14 +278,14 @@ function App() {
                 {/* Background pattern or texture could go here */}
                 <div className="w-full h-full relative shadow-2xl rounded overflow-hidden border border-[#5D4037]">
                     <ScanViewer
-                        imageUrl={activeEvidence ? `/scans/vol${activeEvidence.vol}_page${activeEvidence.page}_image1.png` : defaultImage}
+                        imageUrl={activeEvidence ? `/ scans / vol${activeEvidence.vol}_page${activeEvidence.page} _image1.png` : defaultImage}
                         highlightBox={activeEvidence?.scan || null}
                         originalDims={getOriginalDims(activeEvidence)}
                     />
 
                     {/* Verification Overlay Label */}
                     <div className="absolute top-4 left-4 bg-[#2D1B18]/90 text-gold px-4 py-2 rounded-sm text-sm pointer-events-none shadow-lg border border-[#5D4037] font-serif">
-                        {activeEvidence ? `Vol ${activeEvidence.vol}, Page ${activeEvidence.page}` : "Library Archive"}
+                        {activeEvidence ? `Vol ${activeEvidence.vol}, Page ${activeEvidence.page} ` : "Library Archive"}
                     </div>
                 </div>
             </div>
