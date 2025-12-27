@@ -54,7 +54,7 @@ except LookupError:
 class GillIngestionEngine:
     """Orchestrates the ingestion of Gill Commentary into Weaviate."""
     
-    def __init__(self, weaviate_host: str = "localhost", weaviate_port: int = 8080):
+    def __init__(self, weaviate_host: str = "localhost", weaviate_port: int = 80):
         """Initialize the ingestion engine."""
         # Connect to Weaviate with env var support
         weaviate_url = os.getenv("WEAVIATE_URL")
@@ -69,15 +69,25 @@ class GillIngestionEngine:
         if weaviate_url:
             logging.info(f"Connecting to Weaviate at {weaviate_url}")
             
+            http_host = weaviate_url.replace("http://", "").replace("https://", "").split(":")[0]
+            http_port = int(weaviate_url.split(":")[-1]) if ":" in weaviate_url else 80
+            
+            # Allow gRPC override
+            grpc_host = os.getenv("WEAVIATE_GRPC_HOST", http_host)
+            grpc_port = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
+            
+            logging.info(f"gRPC Target: {grpc_host}:{grpc_port}")
+
             self.client = weaviate.connect_to_custom(
-                http_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
-                http_port=int(weaviate_url.split(":")[-1]) if ":" in weaviate_url else 80,
+                http_host=http_host,
+                http_port=http_port,
                 http_secure=weaviate_url.startswith("https"),
-                grpc_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
-                grpc_port=50051,
+                grpc_host=grpc_host,
+                grpc_port=grpc_port,
                 grpc_secure=weaviate_url.startswith("https"),
                 headers=headers,
-                auth_credentials=weaviate.auth.AuthApiKey(weaviate_api_key) if weaviate_api_key else None
+                auth_credentials=weaviate.auth.AuthApiKey(weaviate_api_key) if weaviate_api_key else None,
+                skip_init_checks=True # Often needed for complex network setups
             )
         else:
             self.client = weaviate.connect_to_local(
@@ -616,7 +626,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", default="extracted_images", help="Source data directory")
     parser.add_argument("--alignment-dir", default="outputs/alignment/genesis", help="Alignment output directory")
     parser.add_argument("--weaviate-host", default="localhost", help="Weaviate host")
-    parser.add_argument("--weaviate-port", type=int, default=8080, help="Weaviate port")
+    parser.add_argument("--weaviate-port", type=int, default=80, help="Weaviate port")
     parser.add_argument("--test-page", help="Process only a specific page")
     parser.add_argument("--visualize", action="store_true", help="Generate PDF graph of current data")
     parser.add_argument("--volume", type=int, help="Override volume number")
@@ -627,51 +637,22 @@ if __name__ == "__main__":
         if args.visualize:
             engine.visualize_connections()
         elif args.test_page:
-             # Auto-detect qwen dir logic
-             # In verify_ingestion it was: extracted_images/qwen_qwen3-vl-235b-a22b-thinking
-             # Here we assume it's in data_dir.
-             base_data = Path(args.data_dir)
-             qwen_dir = next(base_data.glob("qwen*"), None)
-             if not qwen_dir:
-                 # Fallback
-                 qwen_dir = base_data / "qwen_qwen3-vl-235b-a22b-thinking"
+            # Auto-detect qwen dir logic
+            base_data = Path(args.data_dir)
+            qwen_dir = next(base_data.glob("qwen*"), None)
+            if not qwen_dir:
+                qwen_dir = base_data / "qwen_qwen3-vl-235b-a22b-thinking"
              
-             chunks = engine.process_page(
+            chunks = engine.process_page(
                 args.test_page,
                 base_data,
                 Path(args.alignment_dir),
                 qwen_dir,
                 args.volume
-             )
-             print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
+            )
+            print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
         else:
-             base_data = Path(args.data_dir)
-             qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
-             chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume)
-             print(f"✅ Batch complete: {chunks} chunks total")
-    
-    args = parser.parse_args()
-    
-    with GillIngestionEngine(args.weaviate_host, args.weaviate_port) as engine:
-        if args.visualize:
-            engine.visualize_connections()
-        elif args.test_page:
-             # Auto-detect qwen dir logic
-             # In verify_ingestion it was: extracted_images/qwen_qwen3-vl-235b-a22b-thinking
-             # Here we assume it's in data_dir.
-             base_data = Path(args.data_dir)
-             qwen_dir = next(base_data.glob("qwen*"), None)
-             if not qwen_dir:
-                 # Check if test_page exists?
-                 # Fallback to hardcoded for compatibility if glob fails or just warn
-                 qwen_dir = base_data / "qwen_qwen3-vl-235b-a22b-thinking"
-             
-             chunks = engine.process_page(
-                args.test_page,
-                base_data,
-                Path(args.alignment_dir),
-                qwen_dir
-             )
-             print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
-        else:
-            engine.run_batch(args.data_dir, args.alignment_dir)
+            base_data = Path(args.data_dir)
+            qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
+            chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume)
+            print(f"✅ Batch complete: {chunks} chunks total")
