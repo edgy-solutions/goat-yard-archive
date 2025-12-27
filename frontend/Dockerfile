@@ -9,7 +9,7 @@ COPY . /tmp/src
 # The builder looks for .s2i/bin/assemble in /tmp/src
 # BUT we removed custom assemble to use image native assemble which is cleaner
 # We must ensure permissions for scripts
-RUN chmod +x .s2i/bin/*
+RUN chmod +x /tmp/src/.s2i/bin/*
 RUN /usr/libexec/s2i/assemble
 
 # 3. Set Run Command

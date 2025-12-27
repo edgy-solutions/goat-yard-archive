@@ -7,7 +7,8 @@ COPY . /tmp/src
 # 2. Assemble (Install dependencies)
 # We use the standard S2I assemble script which handles PIP/Venv.
 # It uses our requirements.txt automatically.
-RUN chmod +x .s2i/bin/*
+# Fix: Use absolute path since WORKDIR usually differs from /tmp/src
+RUN chmod +x /tmp/src/.s2i/bin/*
 RUN /usr/libexec/s2i/assemble
 
 # 3. Set Run Command
