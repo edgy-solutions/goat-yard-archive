@@ -15,4 +15,5 @@ RUN /usr/libexec/s2i/assemble
 
 # 3. Set Run Command
 # This will invoke our custom .s2i/bin/run script if present, or we can call it directly.
+USER 1001
 CMD /usr/libexec/s2i/run

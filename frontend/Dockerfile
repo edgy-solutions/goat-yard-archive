@@ -16,4 +16,5 @@ RUN /usr/libexec/s2i/assemble
 
 # 3. Set Run Command
 # Uses our custom .s2i/bin/run script (which runs 'npx serve')
+USER 1001
 CMD /usr/libexec/s2i/run
