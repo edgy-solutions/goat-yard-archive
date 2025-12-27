@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+
+# S2I Run Script for Python Backend
+
+# Ensure env vars are set or default (though K8s will inject them)
+export UVI_HOST=${UVI_HOST:-0.0.0.0}
+export UVI_PORT=${UVI_PORT:-8000}
+
+echo "---> Starting Application with Uvicorn..."
+exec uvicorn backend.main:app --host $UVI_HOST --port $UVI_PORT

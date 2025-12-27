@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+
+# S2I Run Script for React Frontend
+
+echo "---> Starting Frontend Server..."
+# Using 'serve' (installed in assemble)
+# -s: Single-Page Application (rewrites 404 to index.html)
+# -l: Listen Port (default 3000, override via environment)
+PORT=${PORT:-3000}
+exec npx serve -s dist -l $PORT
