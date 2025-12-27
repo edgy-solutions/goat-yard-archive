@@ -15,23 +15,31 @@ from weaviate.classes.config import Configure, Property, DataType, ReferenceProp
 def setup_weaviate_schema():
     """Initialize Weaviate collections."""
     weaviate_url = os.getenv("WEAVIATE_URL", "localhost")
-    weaviate_port = int(os.getenv("WEAVIATE_PORT", 8080))
+    weaviate_port = int(os.getenv("WEAVIATE_PORT", 80))
     
     # Connect to Weaviate
-    print(f"Connecting to Weaviate at {weaviate_url}:{weaviate_port}...")
+    print(f"Connecting to Weaviate at {weaviate_url} (Port {weaviate_port})...")
     headers = {}
     if os.getenv("OPENROUTER_API_KEY"):
          headers["X-OpenAI-Api-Key"] = os.getenv("OPENROUTER_API_KEY")
     
     if weaviate_url != "localhost":
+         http_host = weaviate_url.replace("http://", "").replace("https://", "").split(":")[0]
+         http_port = int(weaviate_url.split(":")[-1]) if ":" in weaviate_url else 80
+         
+         grpc_host = os.getenv("WEAVIATE_GRPC_HOST", http_host)
+         grpc_port = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
+         print(f"gRPC Target: {grpc_host}:{grpc_port}")
+
          client = weaviate.connect_to_custom(
-            http_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
-            http_port=80,
-            http_secure=False,
-            grpc_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
-            grpc_port=50051,
-            grpc_secure=False,
-            headers=headers
+            http_host=http_host,
+            http_port=http_port,
+            http_secure=weaviate_url.startswith("https"),
+            grpc_host=grpc_host,
+            grpc_port=grpc_port,
+            grpc_secure=weaviate_url.startswith("https"),
+            headers=headers,
+            skip_init_checks=True
         )
     else:
         client = weaviate.connect_to_local(headers=headers)

@@ -12,24 +12,32 @@ class GillSearchEngine:
     def __init__(self):
         # reuse connection logic from ingest.py (simplified)
         weaviate_url = os.getenv("WEAVIATE_URL", "localhost")
-        weaviate_port = int(os.getenv("WEAVIATE_PORT", 8080))
         
         headers = {}
         if os.getenv("OPENROUTER_API_KEY"):
             headers["X-OpenAI-Api-Key"] = os.getenv("OPENROUTER_API_KEY")
 
-        print(f"Connecting to Weaviate at {weaviate_url}:{weaviate_port}")
         if weaviate_url != "localhost":
+             http_host = weaviate_url.replace("http://", "").replace("https://", "").split(":")[0]
+             http_port = int(weaviate_url.split(":")[-1]) if ":" in weaviate_url else int(os.getenv("WEAVIATE_PORT", 80))
+             
+             grpc_host = os.getenv("WEAVIATE_GRPC_HOST", http_host)
+             grpc_port = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
+             
+             print(f"Connecting to Weaviate at HTTP:{http_host}:{http_port} / gRPC:{grpc_host}:{grpc_port}")
+
              self.client = weaviate.connect_to_custom(
-                http_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
-                http_port=80,
-                http_secure=False,
-                grpc_host=weaviate_url.replace("http://", "").replace("https://", "").split(":")[0],
-                grpc_port=50051,
-                grpc_secure=False,
-                headers=headers
+                http_host=http_host,
+                http_port=http_port,
+                http_secure=weaviate_url.startswith("https"),
+                grpc_host=grpc_host,
+                grpc_port=grpc_port,
+                grpc_secure=weaviate_url.startswith("https"),
+                headers=headers,
+                skip_init_checks=True
             )
         else:
+            print("Connecting to Weaviate Local")
             self.client = weaviate.connect_to_local(headers=headers)
             
         self.chunks = self.client.collections.get("CommentaryChunk")
@@ -138,13 +146,7 @@ class GillSearchEngine:
                 response = self.chunks.query.fetch_objects(
                     filters=ref_filter,
                     limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
-                     return_references=[
-                         wvc.query.QueryReference(
-                                link_on="mentions_entity",
-                                return_properties=["name"]
-                            )
-                    ]
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"]
                 )
             else:
                  # Fallback if map fails (unlikely due to regex)
@@ -163,13 +165,7 @@ class GillSearchEngine:
                 query_properties=["content", "verse_ref"],
                 filters=filters,
                 limit=limit,
-                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
-                return_references=[
-                     wvc.query.QueryReference(
-                            link_on="mentions_entity",
-                            return_properties=["name"]
-                        )
-                ]
+                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"]
             )
         
         if ref_match and 'canonical_ref' in locals():
@@ -216,13 +212,22 @@ class GillSearchEngine:
             entity_names = list(set(entity_names))
 
             # Format output
+            # Format output
+            vol_val = obj.properties.get('volume')
+            page_val = obj.properties.get('page_number')
+            try:
+                if vol_val is not None: vol_val = int(vol_val)
+                if page_val is not None: page_val = int(page_val)
+            except:
+                pass
+
             results.append({
                 "chunk_id": str(obj.uuid),
                 "content": obj.properties.get("content"),
                 "verse_ref": extracted_ref,
-                "citation": f"[Vol {obj.properties.get('volume')}, p. {obj.properties.get('page_number')}]",
-                "vol": obj.properties.get('volume'),
-                "page": obj.properties.get('page_number'),
+                "citation": f"[Vol {vol_val}, p. {page_val}]",
+                "vol": vol_val,
+                "page": page_val,
                 "scan": scan_box,
                 "footnotes": obj.properties.get("footnotes", []),
                 "entities": entity_names,
