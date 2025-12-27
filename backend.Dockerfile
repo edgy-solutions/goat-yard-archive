@@ -2,6 +2,8 @@
 FROM registry.access.redhat.com/ubi8/python-39
 
 # 1. Copy application source
+# Switch to root to ensure we can write/mod files
+USER root
 COPY . /tmp/src
 
 # 2. Assemble (Install dependencies)
