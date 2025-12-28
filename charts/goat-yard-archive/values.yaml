@@ -74,6 +74,8 @@ ui:
 # MinIO Configuration (Official Chart)
 minio:
   enabled: true
+  mode: standalone # Force standalone mode
+  replicas: 1      # Force 1 replica
   rootUser: "minio"
   rootPassword: "minio123"
   buckets:
