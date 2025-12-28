@@ -18,8 +18,29 @@ class GillSearchEngine:
             headers["X-OpenAI-Api-Key"] = os.getenv("OPENROUTER_API_KEY")
 
         if weaviate_url != "localhost":
-             http_host = weaviate_url.replace("http://", "").replace("https://", "").split(":")[0]
-             http_port = int(weaviate_url.split(":")[-1]) if ":" in weaviate_url else int(os.getenv("WEAVIATE_PORT", 80))
+             from urllib.parse import urlparse
+             parsed = urlparse(weaviate_url)
+             
+             # Handle cases where user might provide just "host:port" without scheme
+             if not parsed.scheme and not parsed.netloc:
+                 # Fallback for bare "host:port"
+                 if "://" not in weaviate_url:
+                     if ":" in weaviate_url:
+                        http_host = weaviate_url.split(":")[0]
+                        try:
+                            http_port = int(weaviate_url.split(":")[-1])
+                        except:
+                            http_port = int(os.getenv("WEAVIATE_PORT", 80))
+                     else:
+                        http_host = weaviate_url
+                        http_port = int(os.getenv("WEAVIATE_PORT", 80))
+                 else:
+                     # Should have been caught by urlparse if it had scheme
+                     http_host = weaviate_url
+                     http_port = int(os.getenv("WEAVIATE_PORT", 80))
+             else:
+                 http_host = parsed.hostname
+                 http_port = parsed.port if parsed.port is not None else int(os.getenv("WEAVIATE_PORT", 80))
              
              grpc_host = os.getenv("WEAVIATE_GRPC_HOST", http_host)
              grpc_port = int(os.getenv("WEAVIATE_GRPC_PORT", "50051"))
