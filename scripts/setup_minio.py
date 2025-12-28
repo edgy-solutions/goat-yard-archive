@@ -1,0 +1,87 @@
+
+import os
+import glob
+import json
+import mimetypes
+from pathlib import Path
+from minio import Minio
+from minio.error import S3Error
+
+# Configuration (match values.yaml)
+MINIO_ENDPOINT = "localhost:9000" # Use port-forward or ingress
+ACCESS_KEY = "minio"
+SECRET_KEY = "minio123"
+BUCKET_NAME = "scans"
+SOURCE_DIR = Path("frontend/public/scans")
+
+def set_public_policy(client, bucket_name):
+    """Set Public Read Only policy for the bucket."""
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": "*"},
+                "Action": ["s3:GetObject"],
+                "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
+            }
+        ]
+    }
+    client.set_bucket_policy(bucket_name, json.dumps(policy))
+    print(f"✅ Public Read policy set for {bucket_name}")
+
+def main():
+    # Initialize Client
+    client = Minio(
+        MINIO_ENDPOINT,
+        access_key=ACCESS_KEY,
+        secret_key=SECRET_KEY,
+        secure=False
+    )
+
+    # Make bucket
+    try:
+        if not client.bucket_exists(BUCKET_NAME):
+            client.make_bucket(BUCKET_NAME)
+            print(f"✅ Created bucket: {BUCKET_NAME}")
+        else:
+            print(f"ℹ️ Bucket {BUCKET_NAME} already exists")
+    except S3Error as e:
+        print(f"❌ Error connecting to MinIO: {e}")
+        return
+
+    # Set Policy
+    try:
+        set_public_policy(client, BUCKET_NAME)
+    except S3Error as e:
+        print(f"❌ Error setting policy: {e}")
+
+    # Upload Files
+    print(f"📂 Scanning {SOURCE_DIR}...")
+    files = list(SOURCE_DIR.glob("**/*"))
+    files = [f for f in files if f.is_file()]
+    print(f"Found {len(files)} files to sync.")
+
+    for i, file_path in enumerate(files):
+        # Rel path in bucket
+        object_name = file_path.name 
+        
+        # Determine content type
+        content_type, _ = mimetypes.guess_type(file_path)
+        
+        try:
+            client.fput_object(
+                BUCKET_NAME, 
+                object_name, 
+                str(file_path),
+                content_type=content_type
+            )
+            if i % 100 == 0:
+                print(f"Uploaded {i}/{len(files)}: {object_name}")
+        except S3Error as e:
+            print(f"❌ Failed to upload {object_name}: {e}")
+
+    print("✅ Sync Complete!")
+
+if __name__ == "__main__":
+    main()

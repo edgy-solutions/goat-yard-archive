@@ -19,6 +19,9 @@ ingress:
         - path: /api
           pathType: Prefix
           service: api # maps to backend service
+        - path: /scans
+          pathType: Prefix
+          service: minio # maps to minio service (internal)
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
@@ -65,9 +68,18 @@ ui:
   # Mounts a local volume (HostPath) or PVC to /opt/app-root/src/dist/scans
   # This avoids bundling gigabytes of images into the Docker container.
   persistence:
-    enabled: false
-    # If true, creates a PVC or expects an existing one
-    # For local K3s/Docker Desktop, we often just want a HostPath bind.
-    # Below is a simplified HostPath config (often safer to do manually in PV, but we'll template it)
-    hostPath: "" # e.g. /home/user/images or C:/Users/...
-    # claimName: "my-existing-pvc"
+    enabled: false # Disabled in favor of MinIO
+    
+# MinIO Configuration (Bitnami Chart)
+minio:
+  enabled: true
+  auth:
+    rootUser: "minio"
+    rootPassword: "minio123"
+  defaultBuckets: "scans"
+  persistence:
+    enabled: true
+    size: 50Gi
+  service:
+    type: ClusterIP
+    port: 9000
