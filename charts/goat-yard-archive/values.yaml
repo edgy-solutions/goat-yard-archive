@@ -40,3 +40,14 @@ ui:
   service:
     type: ClusterIP
     port: 3000
+    
+  # Persistence for Scanned Images
+  # Mounts a local volume (HostPath) or PVC to /opt/app-root/src/dist/scans
+  # This avoids bundling gigabytes of images into the Docker container.
+  persistence:
+    enabled: false
+    # If true, creates a PVC or expects an existing one
+    # For local K3s/Docker Desktop, we often just want a HostPath bind.
+    # Below is a simplified HostPath config (often safer to do manually in PV, but we'll template it)
+    hostPath: "" # e.g. /home/user/images or C:/Users/...
+    # claimName: "my-existing-pvc"

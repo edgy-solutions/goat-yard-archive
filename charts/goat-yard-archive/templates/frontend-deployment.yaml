@@ -38,6 +38,19 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
-            limits:
+            limit:
               cpu: 500m
               memory: 512Mi
+          volumeMounts:
+            {{- if .Values.ui.persistence.enabled }}
+            - name: scans-volume
+              mountPath: /opt/app-root/src/dist/scans
+              readOnly: true
+            {{- end }}
+      volumes:
+        {{- if .Values.ui.persistence.enabled }}
+        - name: scans-volume
+          hostPath:
+            path: {{ .Values.ui.persistence.hostPath }}
+            type: Directory
+        {{- end }}
