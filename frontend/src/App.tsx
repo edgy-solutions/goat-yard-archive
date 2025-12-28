@@ -33,7 +33,7 @@ function App() {
 
     // Default Image Rotation
     const [defaultImage] = useState(() => {
-        const images = ['/gill1.png', '/gill2.png', '/gill3.png'];
+        const images = ['/scans/gill1.png', '/scans/gill2.png', '/scans/gill3.png'];
         return images[Math.floor(Math.random() * images.length)];
     });
 

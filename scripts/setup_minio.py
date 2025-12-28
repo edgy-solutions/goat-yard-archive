@@ -10,7 +10,7 @@ from minio.error import S3Error
 # Configuration (match values.yaml)
 MINIO_ENDPOINT = "localhost:9000" # Use port-forward or ingress
 ACCESS_KEY = "minio"
-SECRET_KEY = "minio123"
+SECRET_KEY = "!mandy77"
 BUCKET_NAME = "scans"
 SOURCE_DIR = Path("frontend/public/scans")
 
@@ -56,15 +56,25 @@ def main():
     except S3Error as e:
         print(f"❌ Error setting policy: {e}")
 
-    # Upload Files
+    # Upload Scans
     print(f"📂 Scanning {SOURCE_DIR}...")
     files = list(SOURCE_DIR.glob("**/*"))
     files = [f for f in files if f.is_file()]
-    print(f"Found {len(files)} files to sync.")
+    
+    # Also add the default gill images from parent dir
+    root_images = list(SOURCE_DIR.parent.glob("gill*.png"))
+    print(f"Found {len(files)} scans and {len(root_images)} default images.")
+    
+    files.extend(root_images)
 
     for i, file_path in enumerate(files):
         # Rel path in bucket
-        object_name = file_path.name 
+        # If it's a scan (in SOURCE_DIR), keep relative structure
+        # If it's a default image (in SOURCE_DIR.parent), put at root of bucket
+        if SOURCE_DIR in file_path.parents:
+            object_name = file_path.relative_to(SOURCE_DIR).as_posix()
+        else:
+            object_name = file_path.name
         
         # Determine content type
         content_type, _ = mimetypes.guess_type(file_path)
