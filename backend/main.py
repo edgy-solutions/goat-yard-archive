@@ -80,7 +80,7 @@ class SearchResponse(BaseModel):
     evidence: List[EvidenceItem]
     verified: bool
 
-@app.post("/search", response_model=SearchResponse)
+@app.post("/api/search", response_model=SearchResponse)
 async def search(req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
