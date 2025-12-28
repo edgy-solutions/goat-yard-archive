@@ -14,6 +14,9 @@ RUN chmod +x /tmp/src/.s2i/bin/*
 RUN /usr/libexec/s2i/assemble
 
 # 3. Set Run Command
-# This will invoke our custom .s2i/bin/run script if present, or we can call it directly.
+# Copy our custom run script to the S2I bin directory to override default behavior
+COPY .s2i/bin/run /usr/libexec/s2i/run
+RUN chmod +x /usr/libexec/s2i/run
+
 USER 1001
 CMD /usr/libexec/s2i/run
