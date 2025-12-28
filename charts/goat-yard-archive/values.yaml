@@ -4,7 +4,9 @@ api:
   enabled: true
   replicaCount: 1
   image:
-    repository: gill-backend
+    # Update this to your GitHub repository path:
+    # ghcr.io/<USERNAME>/<REPO_NAME>/backend
+    repository: ghcr.io/cnogradi/goat-yard-archive/backend
     pullPolicy: Always
     tag: "latest"
   service:
@@ -26,7 +28,9 @@ ui:
   enabled: true
   replicaCount: 1
   image:
-    repository: gill-frontend
+    # Update this to your GitHub repository path:
+    # ghcr.io/<USERNAME>/<REPO_NAME>/frontend
+    repository: ghcr.io/cnogradi/goat-yard-archive/frontend
     pullPolicy: Always
     tag: "latest"
   service:
