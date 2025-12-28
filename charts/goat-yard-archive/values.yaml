@@ -1,5 +1,9 @@
 # Default values for goat-yard-archive.
 
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
 api:
   enabled: true
   replicaCount: 1
