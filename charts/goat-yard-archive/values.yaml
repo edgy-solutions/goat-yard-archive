@@ -71,15 +71,23 @@ ui:
     enabled: false # Disabled in favor of MinIO
     
 # MinIO Configuration (Bitnami Chart)
+# MinIO Configuration (Official Chart)
 minio:
   enabled: true
-  auth:
-    rootUser: "minio"
-    rootPassword: "minio123"
-  defaultBuckets: "scans"
+  rootUser: "minio"
+  rootPassword: "minio123"
+  buckets:
+     - name: scans
+       policy: public # Official chart text-based policy or just creates bucket? 
+       # Official chart 'buckets' config often creates buckets. 
+       # 'purge: false' to keep data?
+       # Let's keep it simple for now and rely on setup script if buckets key isn't standard in 5.x
   persistence:
     enabled: true
     size: 50Gi
   service:
     type: ClusterIP
     port: 9000
+    name: minio # FORCE service name to be 'minio' (or 'release-minio' depending on chart logic)
+  # Force name to be predictable
+  fullnameOverride: "gya-minio"
