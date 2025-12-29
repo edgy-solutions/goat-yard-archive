@@ -38,7 +38,7 @@ spec:
               value: {{ $val | quote }}
             {{- end }}
             - name: DATABASE_URL
-              value: "postgresql://{{ .Values.postgres.auth.user }}:{{ .Values.postgres.auth.password }}@{{ include "goat-yard-archive.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}"
+              value: "postgresql://{{ .Values.postgres.auth.user }}:{{ .Values.postgres.auth.password }}@{{ .Values.postgres.host | default (printf "%s-postgres" (include "goat-yard-archive.fullname" .)) }}:5432/{{ .Values.postgres.auth.database }}"
             - name: CLERK_ISSUER
               value: {{ .Values.api.auth.clerkIssuer | quote }}
             - name: CLERK_WEBHOOK_SECRET

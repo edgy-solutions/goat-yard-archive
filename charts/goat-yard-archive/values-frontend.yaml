@@ -43,6 +43,9 @@ api:
 
 postgres:
   enabled: false
+  # Since Postgres is in 'gya-backend' namespace:
+  # Host: <service-name>.<namespace>.svc.cluster.local
+  host: "gya-backend-postgres.gya-backend.svc.cluster.local"
 
 # MinIO Configuration (Official Chart)
 minio:
