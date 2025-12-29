@@ -841,9 +841,9 @@ if __name__ == "__main__":
                 args.recycle_entities,
                 Path(args.entity_cache_dir)
             )
-            print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
+            print(f"[OK] Test complete: {chunks} chunks ingested for {args.test_page}")
         else:
             base_data = Path(args.data_dir)
             qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
             chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume, args.recycle_entities, args.limit, args.entity_cache_dir)
-            print(f"✅ Batch complete: {chunks} chunks total")
+            print(f"[OK] Batch complete: {chunks} chunks total")
