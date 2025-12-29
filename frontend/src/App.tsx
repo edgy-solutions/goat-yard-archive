@@ -288,7 +288,10 @@ function App() {
                                     {activeEvidence.entities && activeEvidence.entities.length > 0 && (
                                         <div className="flex flex-wrap gap-2 mb-3 mt-2">
                                             {activeEvidence.entities.map((ent, idx) => {
-                                                const isMatch = lastSearchedQuery && ent.toLowerCase().includes(lastSearchedQuery.toLowerCase());
+                                                const q = lastSearchedQuery.toLowerCase();
+                                                const e = ent.toLowerCase();
+                                                // Highlight if query contains entity OR entity contains query
+                                                const isMatch = lastSearchedQuery && (e.includes(q) || q.includes(e));
                                                 return (
                                                     <span
                                                         key={idx}
