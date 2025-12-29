@@ -115,3 +115,13 @@ ingress:
   #  - secretName: chart-example-tls
   #    hosts:
   #      - chart-example.local
+
+# Cloudflare Tunnel
+cloudflared:
+  enabled: true
+  replicaCount: 2
+  token: "" # Override via command line
+  
+  # Apply DMZ Isolation
+  nodeSelector: *dmzNode
+  tolerations: *dmzTol

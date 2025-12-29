@@ -27,6 +27,19 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
+# Cloudflare Tunnel (Optional)
+cloudflared:
+  enabled: false
+  image:
+    repository: cloudflare/cloudflared
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  token: "" # Set via --set cloudflared.token=...
+  # Inherits global nodeSelector/tolerations if not set, or specific:
+  nodeSelector: {}
+  tolerations: []
+
 api:
   enabled: true
   replicaCount: 1
