@@ -53,6 +53,7 @@ api:
     clerkWebhookSecret: ""
 
 postgres:
+  enabled: true
   image:
     repository: postgres
     tag: "15-alpine"
