@@ -11,3 +11,4 @@ openai==2.14.0
 python-multipart==0.0.18
 tenacity==9.1.2
 protobuf<6.0.0
+slowapi==0.1.9

@@ -2,7 +2,7 @@
 import os
 import uvicorn
 import dspy
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
@@ -11,7 +11,15 @@ from typing import List, Optional, Any
 from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot
 
+# Rate Limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Gill Commentary API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
 
 # CORS (Allow Frontend)
@@ -81,7 +89,8 @@ class SearchResponse(BaseModel):
     verified: bool
 
 @app.post("/api/search", response_model=SearchResponse)
-async def search(req: SearchRequest):
+@limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"))
+async def search(request: Request, req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
