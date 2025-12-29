@@ -173,7 +173,8 @@ class GillSearchEngine:
                 response = self.chunks.query.fetch_objects(
                     filters=ref_filter,
                     limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"]
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
             else:
                  # Fallback if map fails (unlikely due to regex)
@@ -184,6 +185,7 @@ class GillSearchEngine:
                     filters=filters,
                     limit=limit,
                     return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
         else:
             # 3. Retrieval (Hybrid)
@@ -192,7 +194,8 @@ class GillSearchEngine:
                 query_properties=["content", "verse_ref"],
                 filters=filters,
                 limit=limit,
-                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"]
+                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
             )
         
         if ref_match and 'canonical_ref' in locals():
