@@ -1,3 +1,14 @@
+# 1. PHYSICAL Separation: Only run on nodes with this label
+nodeSelector: &dmzNode
+  network: dmz
+
+# 2. SECURITY Permission: Allow running on these locked-down nodes
+tolerations: &dmzTol
+- key: "network"
+  operator: "Equal"
+  value: "dmz"
+  effect: "NoSchedule"
+
 # Frontend Deployment Values
 nameOverride: "gya-frontend"
 fullnameOverride: "gya-frontend"
@@ -14,6 +25,9 @@ api:
   service:
     type: ClusterIP
     port: 8000
+  # Apply DMZ Isolation to MinIO
+  nodeSelector: *dmzNode
+  tolerations: *dmzTol
   env:
     # URL to Weaviate in the *backend* namespace
     # Format: http://<svc-name>.<namespace>.svc.cluster.local
@@ -37,12 +51,14 @@ minio:
   replicas: 1      # Force 1 replica
   rootUser: "minio"
   rootPassword: "minio123"
+  # Apply DMZ Isolation to MinIO
+  nodeSelector: *dmzNode
+  tolerations: *dmzTol
   buckets:
      - name: scans
        policy: public # Official chart text-based policy or just creates bucket? 
        # Official chart 'buckets' config often creates buckets. 
        # 'purge: false' to keep data?
-       # Let's keep it simple for now and rely on setup script if buckets key isn't standard in 5.x
   persistence:
     enabled: true
     size: 50Gi
@@ -67,6 +83,12 @@ ui:
     port: 3000
   auth:
     clerkPublishableKey: ""
+  
+  # 1. PHYSICAL Separation: Only run on nodes with this label
+  nodeSelector: *dmzNode
+  
+  # 2. SECURITY Permission: Allow running on these locked-down nodes
+  tolerations: *dmzTol
 
 ingress:
   enabled: false

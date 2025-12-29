@@ -77,6 +77,8 @@ ui:
   service:
     type: ClusterIP
     port: 3000
+  nodeSelector: {}
+  tolerations: []
   auth:
     clerkPublishableKey: ""
     

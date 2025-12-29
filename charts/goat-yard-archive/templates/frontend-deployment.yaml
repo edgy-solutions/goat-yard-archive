@@ -55,3 +55,11 @@ spec:
             path: {{ .Values.ui.persistence.hostPath }}
             type: Directory
         {{- end }}
+      {{- with .Values.ui.nodeSelector | default .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ui.tolerations | default .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
