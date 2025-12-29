@@ -285,18 +285,69 @@ class GillIngestionEngine:
             logging.warning(f"Error searching for entity: {e}")
         
         try:
-            uuid = self.entities.data.insert({
-                "name": name,
-                "category": category,
-                "normalized_name": normalized_name
-            })
+            # Explicitly cast to string to avoid serialization issues
+            safe_name = str(name)
+            safe_category = str(category)
+            safe_norm = str(normalized_name) if normalized_name else None
             
-            uuid_str = str(uuid)
+            # Deterministic UUID
+            import weaviate.util
+            entity_uuid = weaviate.util.generate_uuid5({"name": safe_name, "category": safe_category})
+
+            self.entities.data.insert(
+                properties={
+                    "name": safe_name,
+                    "category": safe_category,
+                    "normalized_name": safe_norm
+                },
+                uuid=entity_uuid
+            )
+            
+            uuid_str = str(entity_uuid)
             self.entity_cache[cache_key] = uuid_str
+            logging.info(f"✨ Created Entity: {safe_name} ({safe_category}) -> {uuid_str}")
             return uuid_str
         except Exception as e:
             logging.error(f"Error creating entity {name}: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return None
+
+    
+    class EntityStub:
+        def __init__(self, name, category, normalized_name=None):
+            self.name = name
+            self.category = category
+            self.normalized_name = normalized_name
+
+    def load_entities_from_cache(self, cache_file: Path) -> List[Any]:
+        """Load entities from local JSON cache file."""
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return [self.EntityStub(**item) for item in data]
+        except Exception as e:
+            logging.warning(f"Error loading entity cache {cache_file}: {e}")
+            return []
+
+    def save_entities_to_cache(self, entities: List[Any], cache_file: Path):
+        """Save extracted entities to local JSON cache file."""
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            data = [
+                {
+                    "name": e.name, 
+                    "category": e.category, 
+                    "normalized_name": e.normalized_name
+                } 
+                for e in entities
+            ]
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            logging.info(f"💾 Saved {len(data)} entities to cache: {cache_file.name}")
+        except Exception as e:
+            logging.error(f"Error saving entity cache {cache_file}: {e}")
+
     
     def extract_entities(self, commentary_text: str) -> List[Any]:
         """Use BAML to extract entities from commentary text."""
@@ -314,12 +365,29 @@ class GillIngestionEngine:
                 return json.load(f)
         return []
 
-    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path, volume_override: int = None, recycle_entities: bool = False) -> int:
+    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path, volume_override: int = None, recycle_entities: bool = False, entity_cache_dir: Optional[Path] = None) -> int:
         """Process a single page and ingest into Weaviate."""
         logging.info(f"Processing {page_name}...")
         
+        # Setup Cache Path
+        cache_file = None
+        if entity_cache_dir:
+            cache_file = entity_cache_dir / f"{page_name}_entities.json"
+        
         volume, page_num = self.parse_page_info(page_name, volume_override)
         
+        # Load Entity Cache for this Page
+        page_entity_cache = {}
+        cache_dirty = False
+        
+        if cache_file and cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    page_entity_cache = json.load(f)
+                logging.info(f"Loaded entity cache for {page_name}")
+            except Exception as e:
+                logging.warning(f"Failed to load cache {cache_file}: {e}")
+
         verse_entity_map = {}
         if recycle_entities:
              logging.info("♻️ Recycling Entities: Fetching existing links...")
@@ -495,16 +563,43 @@ class GillIngestionEngine:
             
             # Extract Entities
             entity_uuids = []
+            
             if recycle_entities and verse_ref in verse_entity_map:
                 entity_uuids = verse_entity_map[verse_ref]
-                # If map has them, great. If we want hybrid (recycle + new), 
-                # we'd need to extract too. But "recycle" implies skipping LLM.
             else:
-                entities = self.extract_entities(commentary_text)
-                for entity in entities:
-                    uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name)
-                    if uuid:
-                        entity_uuids.append(uuid)
+                # Check Cache
+                if verse_ref in page_entity_cache:
+                    logging.info(f"🟢 Cache HIT for {verse_ref}")
+                    raw_ents = page_entity_cache[verse_ref]
+                    for ent_dict in raw_ents:
+                        uuid = self.get_or_create_entity(
+                            ent_dict.get("name"), 
+                            ent_dict.get("category"), 
+                            ent_dict.get("normalized_name")
+                        )
+                        if uuid:
+                            entity_uuids.append(uuid)
+                else:
+                    logging.info(f"⚪ Cache MISS for {verse_ref}")
+                    # LLM Extraction
+                    extracted_entities = self.extract_entities(commentary_text)
+                    
+                    # Store in Cache
+                    serialized_ents = []
+                    for entity in extracted_entities:
+                        # Process and store
+                        uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name)
+                        if uuid:
+                            entity_uuids.append(uuid)
+                        
+                        serialized_ents.append({
+                            "name": entity.name, 
+                            "category": entity.category, 
+                            "normalized_name": entity.normalized_name
+                        })
+                    
+                    page_entity_cache[verse_ref] = serialized_ents
+                    cache_dirty = True
             
             # Ingest
             try:
@@ -529,13 +624,25 @@ class GillIngestionEngine:
             except Exception as e:
                 logging.error(f"Error ingesting {verse_ref}: {e}")
         
+        if cache_dirty and cache_file:
+             try:
+                 with open(cache_file, 'w', encoding='utf-8') as f:
+                     json.dump(page_entity_cache, f, indent=2)
+                 logging.info(f"💾 Saved entity cache for {page_name}")
+             except Exception as e:
+                 logging.error(f"Failed to save cache {cache_file}: {e}")
+
         return chunks_ingested
     
-    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking", page_filter: str = None, volume_override: int = None, recycle_entities: bool = False, limit: int = None):
+    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking", page_filter: str = None, volume_override: int = None, recycle_entities: bool = False, limit: int = None, entity_cache_dir: str = "outputs/entities"):
         """Process all pages, optionally filtering by page name."""
         data_path = Path(data_dir)
         alignment_path = Path(alignment_dir)
         qwen_path = data_path / qwen_subdir
+        cache_path = Path(entity_cache_dir)
+        
+        if not cache_path.exists():
+            cache_path.mkdir(parents=True, exist_ok=True)
         
         alignment_files = list(alignment_path.glob("*_alignment.json"))
         
@@ -558,7 +665,7 @@ class GillIngestionEngine:
         for align_file in alignment_files:
             page_name = align_file.name.replace("_alignment.json", "")
             try:
-                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path, volume_override, recycle_entities)
+                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path, volume_override, recycle_entities, cache_path)
                 total_chunks += chunks
                 processed_pages += 1
                 if processed_pages % 10 == 0:
@@ -710,6 +817,7 @@ if __name__ == "__main__":
     parser.add_argument("--volume", type=int, help="Override volume number")
     parser.add_argument("--recycle-entities", action="store_true", help="Reuse existing entities from DB (skips LLM)")
     parser.add_argument("--limit", type=int, help="Limit number of pages to process (for testing)")
+    parser.add_argument("--entity-cache-dir", default="outputs/entities", help="Directory to cache entity extraction results")
     
     args = parser.parse_args()
     
@@ -729,11 +837,13 @@ if __name__ == "__main__":
                 Path(args.alignment_dir),
                 qwen_dir,
                 args.volume,
-                args.recycle_entities
+                args.volume,
+                args.recycle_entities,
+                Path(args.entity_cache_dir)
             )
             print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
         else:
             base_data = Path(args.data_dir)
             qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
-            chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume, args.recycle_entities, args.limit)
+            chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume, args.recycle_entities, args.limit, args.entity_cache_dir)
             print(f"✅ Batch complete: {chunks} chunks total")

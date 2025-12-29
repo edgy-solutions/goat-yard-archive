@@ -40,6 +40,9 @@ function App() {
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
 
+    // Track the query that ACTUALLY produced the results, for highlighting
+    const [lastSearchedQuery, setLastSearchedQuery] = useState("");
+
     // Default Image Rotation
     const [defaultImage] = useState(() => {
         const images = ['/scans/gill1.png', '/scans/gill2.png', '/scans/gill3.png'];
@@ -54,7 +57,9 @@ function App() {
         setLoading(true);
         setError(null);
         setResponse(null);
+        setResponse(null);
         setActiveEvidence(null);
+        setLastSearchedQuery(query);
 
         try {
             const res = await fetch('/api/search', {
@@ -276,11 +281,22 @@ function App() {
                                     {/* Entity Tags */}
                                     {activeEvidence.entities && activeEvidence.entities.length > 0 && (
                                         <div className="flex flex-wrap gap-2 mb-3 mt-2">
-                                            {activeEvidence.entities.map((ent, idx) => (
-                                                <span key={idx} className="bg-[#EFEBE9] text-[#4E342E] text-xs px-2 py-1 rounded font-semibold border border-[#D7CCC8] shadow-sm">
-                                                    {ent}
-                                                </span>
-                                            ))}
+                                            {activeEvidence.entities.map((ent, idx) => {
+                                                const isMatch = lastSearchedQuery && ent.toLowerCase().includes(lastSearchedQuery.toLowerCase());
+                                                return (
+                                                    <span
+                                                        key={idx}
+                                                        className={`text-xs px-2 py-1 rounded font-semibold border shadow-sm transition-all duration-300
+                                                            ${isMatch
+                                                                ? 'bg-amber-300 text-amber-900 border-amber-400 ring-2 ring-amber-500/50 scale-105'
+                                                                : 'bg-[#EFEBE9] text-[#4E342E] border-[#D7CCC8]'
+                                                            }
+                                                        `}
+                                                    >
+                                                        {ent}
+                                                    </span>
+                                                );
+                                            })}
                                         </div>
                                     )}
 
