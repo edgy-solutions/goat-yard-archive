@@ -78,8 +78,26 @@ function App() {
             });
 
             if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`Server Error: ${res.status} ${errText}`);
+                // Try to parse JSON error first (especially for 429)
+                let errorMsg = `Server Error: ${res.status}`;
+                try {
+                    const errorJson = await res.json();
+                    if (errorJson.detail) {
+                        errorMsg = errorJson.detail;
+                    }
+                } catch (e) {
+                    // Fallback to text if not JSON
+                    const errText = await res.text();
+                    if (errText) errorMsg += ` ${errText}`;
+                }
+
+                // Throw with specific flag if 429
+                if (res.status === 429) {
+                    const err = new Error(errorMsg);
+                    (err as any).isRateLimit = true;
+                    throw err;
+                }
+                throw new Error(errorMsg);
             }
 
             const data = await res.json();
@@ -88,9 +106,18 @@ function App() {
                 setActiveEvidence(data.evidence[0]);
             }
         } catch (err) {
-            console.error("Search failed, falling back to mock:", err);
-            setError(err instanceof Error ? err.message : "Unknown error");
-            // MOCK FALLBACK for demo/testing
+            console.error("Search failed:", err);
+            const message = err instanceof Error ? err.message : "Unknown error";
+            setError(message);
+
+            // Skip mock fallback for Rate Limits
+            if ((err as any).isRateLimit) {
+                setLoading(false);
+                return;
+            }
+
+            console.log("Falling back to mock data...");
+            // MOCK FALLBACK for other errors
             setTimeout(() => {
                 const mockEv: EvidenceItem = {
                     chunk_id: "mock1",
@@ -197,8 +224,14 @@ function App() {
                     {/* Error Banner */}
                     {error && (
                         <div className="bg-red-50 border-l-4 border-red-800 text-red-900 p-4 rounded shadow-sm text-sm">
-                            <strong>Connection Error:</strong> {error}
-                            <div className="text-xs mt-1 text-red-700">Using mock data for demonstration.</div>
+                            {(error.includes("My dear friend") || error.includes("Scriptures"))
+                                ? <span className="italic font-serif text-amber-900">{error}</span>
+                                : <><strong>Connection Error:</strong> {error}</>
+                            }
+                            {/* Only show mock warning if NOT a rate limit error (based on content) */}
+                            {!error.includes("My dear friend") && (
+                                <div className="text-xs mt-1 text-red-700">Using mock data for demonstration.</div>
+                            )}
                         </div>
                     )}
 
