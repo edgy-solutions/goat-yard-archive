@@ -27,14 +27,36 @@ def auth_limit_key(request: Request):
         return f"user:{request.state.user_id}"
     return None
 
+# Proxy-Aware IP Resolution
+def get_real_remote_address(request: Request) -> str:
+    """
+    Resolves the real client IP, prioritizing headers set by proxies
+    (Cloudflare, Ingress, etc.).
+    """
+    # 1. Cloudflare
+    if "cf-connecting-ip" in request.headers:
+        return request.headers["cf-connecting-ip"]
+    
+    # 2. X-Forwarded-For (Standard)
+    # The first IP in the list is the original client
+    if "x-forwarded-for" in request.headers:
+        return request.headers["x-forwarded-for"].split(",")[0].strip()
+        
+    # 3. X-Real-IP
+    if "x-real-ip" in request.headers:
+        return request.headers["x-real-ip"]
+        
+    # 4. Fallback to direct connection
+    return get_remote_address(request) or "127.0.0.1"
+
 def anon_limit_key(request: Request):
     """Returns IP if anonymous, else None (skips limit)"""
     if hasattr(request.state, "user_id") and request.state.user_id:
         return None
-    return get_remote_address(request)
+    return get_real_remote_address(request)
 
-# Default global limiter key (not really used if we override everything, but safe fallback)
-limiter = Limiter(key_func=get_remote_address)
+# Use the proxy-aware function for the global limiter
+limiter = Limiter(key_func=get_real_remote_address)
 # Custom Rate Limit Handler (Dr. Gill's Tone)
 async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(
