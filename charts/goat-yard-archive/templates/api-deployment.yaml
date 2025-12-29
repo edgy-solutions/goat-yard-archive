@@ -36,6 +36,12 @@ spec:
             - name: {{ $key }}
               value: {{ $val | quote }}
             {{- end }}
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.auth.user }}:{{ .Values.postgres.auth.password }}@{{ include "goat-yard-archive.fullname" . }}-postgres:5432/{{ .Values.postgres.auth.database }}"
+            - name: CLERK_ISSUER
+              value: {{ .Values.api.auth.clerkIssuer | quote }}
+            - name: CLERK_WEBHOOK_SECRET
+              value: {{ .Values.api.auth.clerkWebhookSecret | quote }}
           resources:
             requests:
               cpu: 100m

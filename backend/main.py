@@ -10,16 +10,61 @@ from typing import List, Optional, Any
 # Import our modules
 from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot
+from .database import init_db
+from .webhooks import router as webhook_router
+from .auth import get_optional_user_id, security
 
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+# Rate Limit Keys
+def auth_limit_key(request: Request):
+    """Returns user ID if authenticated, else None (skips limit)"""
+    if hasattr(request.state, "user_id") and request.state.user_id:
+        return f"user:{request.state.user_id}"
+    return None
+
+def anon_limit_key(request: Request):
+    """Returns IP if anonymous, else None (skips limit)"""
+    if hasattr(request.state, "user_id") and request.state.user_id:
+        return None
+    return get_remote_address(request)
+
+# Default global limiter key (not really used if we override everything, but safe fallback)
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Gill Commentary API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.include_router(webhook_router)
+
+# Auth Middleware
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # Attempt to extract User ID from header (Basic parse, full verify in Auth module if desired)
+    # Ideally reuse auth logic. Here we do a quick check or full check?
+    # Used for Rate Limiting.
+    auth_header = request.headers.get("Authorization")
+    request.state.user_id = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        # We need to verify logic. Since middleware fails hard if we import heavy logic,
+        # we can try to use a utility.
+        # Importing logic from auth.py
+        from .auth import PyJWKClient, jwt, CLERK_ISSUER
+        if CLERK_ISSUER:
+            try:
+                # Optimized: In prod, cache JWKs. PyJWKClient does caching.
+                jwks_client = PyJWKClient(f"{CLERK_ISSUER}/.well-known/jwks.json")
+                signing_key = jwks_client.get_signing_key_from_jwt(token)
+                data = jwt.decode(token, signing_key.key, algorithms=["RS256"], issuer=CLERK_ISSUER, options={"verify_aud": False})
+                request.state.user_id = data.get("sub")
+            except:
+                pass 
+    
+    response = await call_next(request)
+    return response
 print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
 
 # CORS (Allow Frontend)
@@ -42,10 +87,11 @@ def startup():
     
     # 1. Search Engine
     try:
+        init_db()
         search_engine = GillSearchEngine()
         print("Search Engine initialized.")
     except Exception as e:
-        print(f"Failed to init Search Engine: {e}")
+        print(f"Failed to init Search Engine/DB: {e}")
 
     # 2. DSPy Bot
     try:
@@ -89,7 +135,8 @@ class SearchResponse(BaseModel):
     verified: bool
 
 @app.post("/api/search", response_model=SearchResponse)
-@limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"))
+@limiter.limit("100/day", key_func=auth_limit_key)
+@limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
 async def search(request: Request, req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")

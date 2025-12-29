@@ -1,0 +1,15 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ include "goat-yard-archive.fullname" . }}-postgres-pvc
+  labels:
+    app.kubernetes.io/name: {{ include "goat-yard-archive.name" . }}-postgres
+    helm.sh/chart: {{ include "goat-yard-archive.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

@@ -3,6 +3,8 @@ import { useState } from 'react';
 import ScanGallery from './components/ScanGallery';
 import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
+import Header from './components/Header';
+import { useAuth } from '@clerk/clerk-react';
 
 // Types (should actully be in types.ts but putting here for single-file portability if needed)
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -39,6 +41,7 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
+    const { getToken } = useAuth();
 
     // Track the query that ACTUALLY produced the results, for highlighting
     const [lastSearchedQuery, setLastSearchedQuery] = useState("");
@@ -62,9 +65,15 @@ function App() {
         setLastSearchedQuery(query);
 
         try {
+            const token = await getToken();
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
             const res = await fetch('/api/search', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ query }),
             });
 
@@ -180,10 +189,7 @@ function App() {
             <div className="w-1/2 flex flex-col border-r border-[#8D6E63] shadow-2xl z-10">
 
                 {/* Header */}
-                <div className="p-4 border-b border-[#5D4037] bg-wood text-gold shadow-md">
-                    <h1 className="text-2xl font-bold tracking-wide">Dr. Voluminous</h1>
-                    <p className="text-xs text-amber-200/80 italic">Grounded Theological AI</p>
-                </div>
+                <Header />
 
                 {/* Main Content Area */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#FDFBF7]">
