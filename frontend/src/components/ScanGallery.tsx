@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 
 // Use local interface or import from shared types
@@ -17,11 +16,17 @@ interface ScanGalleryProps {
     defaultImage?: string; // Fallback if no pages
 }
 
-const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: number } | null; shouldFocus?: boolean }> = ({ page, originalDims, shouldFocus }) => {
+const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: number } | null; shouldFocus?: boolean; onLoaded?: () => void }> = ({ page, originalDims, shouldFocus, onLoaded }) => {
     const imgRef = useRef<HTMLImageElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const scrollAnchorRef = useRef<HTMLDivElement>(null);
     const [loaded, setLoaded] = useState(false);
+
+    // Trigger onLoaded when image loads
+    const handleLoad = () => {
+        setLoaded(true);
+        if (onLoaded) onLoaded();
+    };
 
     // Draw Highlight & Handle Focus
     useEffect(() => {
@@ -65,20 +70,7 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
             ctx.strokeRect(x, y, w, h);
         });
 
-        // Auto-Scroll if this is the target page
-        if (shouldFocus && page.boxes.length > 0 && scrollAnchorRef.current) {
-            const firstBox = page.boxes[0];
-            const y = firstBox.y * scaleY;
-            const h = firstBox.h * scaleY;
-
-            // Position anchor at center of box
-            scrollAnchorRef.current.style.top = `${y + h / 2}px`;
-
-            // Scroll after short delay to allow layout
-            setTimeout(() => {
-                scrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
-        }
+        // Auto-scroll handled by parent now (Global Centering)
 
     }, [page, originalDims, loaded, shouldFocus]);
 
@@ -97,7 +89,7 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
                 src={page.url}
                 alt={`Page ${page.page}`}
                 className="w-full h-auto block rounded-sm bg-white"
-                onLoad={() => setLoaded(true)}
+                onLoad={handleLoad}
             />
             <canvas
                 ref={canvasRef}
@@ -109,9 +101,79 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
 
 const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultImage }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const [imagesLoaded, setImagesLoaded] = useState<Record<number, boolean>>({});
 
-    // Find index of first page with boxes for focus
-    const targetPageIndex = pages.findIndex(p => p.boxes.length > 0);
+    // Track image loading state to trigger scroll calculation only when ready
+    const handleImageLoad = (pageNum: number) => {
+        setImagesLoaded(prev => ({ ...prev, [pageNum]: true }));
+    };
+
+    // Auto-scroll logic: Global Centering
+    useEffect(() => {
+        // Wait for all relevant images to load? Or just the ones with highlights?
+        // Let's assume we need layout to be stable.
+        const pagesWithHighlights = pages.filter(p => p.boxes.length > 0);
+        if (pagesWithHighlights.length === 0) return;
+
+        // Check if relevant pages are loaded
+        const allRelevantLoaded = pagesWithHighlights.every(p => imagesLoaded[p.page]);
+        if (!allRelevantLoaded) return;
+
+        // Delay slightly for layout paint
+        const timeout = setTimeout(() => {
+            if (!containerRef.current) return;
+
+            // 1. Calculate Global Bounds
+            let globalMinY = Infinity;
+            let globalMaxY = -Infinity;
+            let validMeasurements = false;
+
+            pagesWithHighlights.forEach(p => {
+                const element = document.getElementById(`gallery-page-${p.page}`);
+                if (!element) return;
+
+                // Get the image element inside to calculate scale
+                const img = element.querySelector('img');
+                if (!img) return;
+
+                const pageTop = element.offsetTop;
+                const sourceH = (originalDims ? originalDims.h : 3800); // fallback
+                const scaleY = img.clientHeight / sourceH;
+
+                p.boxes.forEach(box => {
+                    const boxTop = pageTop + (box.y * scaleY);
+                    const boxBottom = pageTop + ((box.y + box.h) * scaleY);
+
+                    if (boxTop < globalMinY) globalMinY = boxTop;
+                    if (boxBottom > globalMaxY) globalMaxY = boxBottom;
+                    validMeasurements = true;
+                });
+            });
+
+            if (!validMeasurements) return;
+
+            // 2. Determine Scroll Target
+            const contentHeight = globalMaxY - globalMinY;
+            const viewportHeight = containerRef.current.clientHeight;
+            const contentCenter = globalMinY + (contentHeight / 2);
+
+            let targetScroll = 0;
+
+            if (contentHeight > (viewportHeight * 0.9)) {
+                // If content is taller than viewport (or close to it), align top
+                // Add a little padding (e.g. 20px)
+                targetScroll = Math.max(0, globalMinY - 20);
+            } else {
+                // Center the content block in the viewport
+                targetScroll = Math.max(0, contentCenter - (viewportHeight / 2));
+            }
+
+            containerRef.current.scrollTo({ top: targetScroll, behavior: 'smooth' });
+
+        }, 100);
+
+        return () => clearTimeout(timeout);
+    }, [pages, imagesLoaded, originalDims]);
 
     if (pages.length === 0 && defaultImage) {
         return (
@@ -124,13 +186,14 @@ const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultI
     return (
         <div className="relative w-full h-full overflow-y-auto bg-[#2D1B18] p-2" ref={containerRef}>
             <div className="w-full mx-auto space-y-4">
-                {pages.map((page, index) => (
-                    <div id={`gallery-page-${page.page}`} key={page.page} className="flex justify-center">
+                {pages.map((page) => (
+                    <div id={`gallery-page-${page.page}`} key={page.page} className="flex justify-center relative">
                         <div className="max-w-full">
                             <ScanPage
                                 page={page}
                                 originalDims={originalDims}
-                                shouldFocus={index === targetPageIndex}
+                                shouldFocus={false} // Managed by global scroll now
+                                onLoaded={() => handleImageLoad(page.page)}
                             />
                         </div>
                     </div>
