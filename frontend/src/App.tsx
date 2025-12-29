@@ -1,10 +1,18 @@
 
 import { useState } from 'react';
-import ScanViewer from './components/ScanViewer';
+import ScanGallery from './components/ScanGallery';
 import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
 
 // Types (should actully be in types.ts but putting here for single-file portability if needed)
+interface Rect { x: number; y: number; w: number; h: number; }
+
+interface ScanPageHighlight {
+    vol: number;
+    page: number;
+    boxes: Rect[];
+}
+
 interface EvidenceItem {
     chunk_id: string;
     content: string;
@@ -12,7 +20,8 @@ interface EvidenceItem {
     citation: string;
     vol: number;
     page: number;
-    scan: { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; h: number }[] | null;
+    // scan can be legacy Rect[] or new ScanPageHighlight[]
+    scan: Rect[] | ScanPageHighlight[] | null;
     score: number;
     footnotes?: string[];
     entities?: string[];
@@ -75,7 +84,7 @@ function App() {
                     citation: "[Vol 1, p. 287]",
                     vol: 1,
                     page: 287,
-                    scan: MOCK_CITATION.scan_json || { x: 0, y: 0, w: 0, h: 0 },
+                    scan: MOCK_CITATION.scan_json as any || [],
                     score: 1.0,
                     footnotes: ["Mock footnote 1"],
                     entities: ["Mock Entity"]
@@ -94,12 +103,52 @@ function App() {
         }
     };
 
-    // Helper to get Image URL (Placeholder logic)
-    // We now have images in /public/scans/vol{vol}_page{page}_image1.png
-    // This handles multi-volume support (e.g. Genesis=vol1, Matthew=vol7)
-    const getImageUrl = (ev: EvidenceItem | null) => {
-        if (!ev) return "";
-        return `/scans/vol${ev.vol}_page${ev.page}_image1.png`;
+    // Prepare Pages for Gallery (Prev + Highlighted + Next)
+    const getGalleryPages = (ev: EvidenceItem | null) => {
+        if (!ev) return [];
+
+        let pages: { vol: number; page: number; url: string; boxes: Rect[] }[] = [];
+        let minPage = ev.page;
+        let maxPage = ev.page;
+        let vol = ev.vol;
+        let highlights: ScanPageHighlight[] = [];
+
+        // Normalize Scan Data
+        if (ev.scan) {
+            if (Array.isArray(ev.scan) && ev.scan.length > 0 && 'page' in ev.scan[0]) {
+                // New Format
+                highlights = ev.scan as ScanPageHighlight[];
+            } else if (Array.isArray(ev.scan)) {
+                // Old Format (Rect[]) - assume current page
+                highlights = [{ vol: ev.vol, page: ev.page, boxes: ev.scan as Rect[] }];
+            } else {
+                // Single Object Rect
+                highlights = [{ vol: ev.vol, page: ev.page, boxes: [ev.scan as Rect] }];
+            }
+        }
+
+        if (highlights.length > 0) {
+            minPage = Math.min(...highlights.map(h => h.page));
+            maxPage = Math.max(...highlights.map(h => h.page));
+            vol = highlights[0].vol; // Assume single volume for now
+        }
+
+        // Add Context Pages (One before, One after)
+        const startPage = Math.max(1, minPage - 1);
+        const endPage = maxPage + 1; // Limit logic?
+
+        for (let p = startPage; p <= endPage; p++) {
+            // Find boxes for this page
+            const h = highlights.find(x => x.page === p && x.vol === vol);
+            pages.push({
+                vol: vol,
+                page: p,
+                url: `/scans/vol${vol}_page${p}_image1.png`,
+                boxes: h ? h.boxes : []
+            });
+        }
+
+        return pages;
     };
 
     // We need Original Dims for the scan. 
@@ -285,9 +334,9 @@ function App() {
             <div className="w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner flex items-center justify-center p-8">
                 {/* Background pattern or texture could go here */}
                 <div className="w-full h-full relative shadow-2xl rounded overflow-hidden border border-[#5D4037]">
-                    <ScanViewer
-                        imageUrl={getImageUrl(activeEvidence) || defaultImage}
-                        highlightBox={activeEvidence?.scan || null}
+                    <ScanGallery
+                        pages={getGalleryPages(activeEvidence)}
+                        defaultImage={defaultImage}
                         originalDims={getOriginalDims(activeEvidence)}
                     />
 

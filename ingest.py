@@ -314,13 +314,34 @@ class GillIngestionEngine:
                 return json.load(f)
         return []
 
-    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path, volume_override: int = None) -> int:
+    def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path, volume_override: int = None, recycle_entities: bool = False) -> int:
         """Process a single page and ingest into Weaviate."""
         logging.info(f"Processing {page_name}...")
         
         volume, page_num = self.parse_page_info(page_name, volume_override)
         
-        # Delete existing chunks for this page to prevent duplicates
+        verse_entity_map = {}
+        if recycle_entities:
+             logging.info("♻️ Recycling Entities: Fetching existing links...")
+             try:
+                existing = self.chunks.query.fetch_objects(
+                    filters=(wvc.query.Filter.by_property("page_number").equal(page_num) & 
+                            wvc.query.Filter.by_property("volume").equal(volume)),
+                    limit=1000, # Max per page
+                    return_properties=["verse_ref"],
+                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
+                )
+                for obj in existing.objects:
+                    ref = obj.properties.get("verse_ref")
+                    if obj.references.get("mentions_entity"):
+                         # Just need UUIDs
+                         uuids = [str(o.uuid) for o in obj.references["mentions_entity"].objects]
+                         verse_entity_map[ref] = uuids
+                logging.info(f"♻️ Found existing entities for {len(verse_entity_map)} verses.")
+             except Exception as e:
+                 logging.warning(f"Failed to fetch existing entities: {e}")
+
+        # Delete existing chunks
         try:
              self.chunks.data.delete_many(
                 where=wvc.query.Filter.by_property("page_number").equal(page_num) & 
@@ -328,7 +349,7 @@ class GillIngestionEngine:
             )
              logging.info(f"Deleted existing chunks for Vol {volume} Page {page_num}")
         except Exception as e:
-            logging.warning(f"Failed to delete existing chunks: {e}")
+             logging.warning(f"Failed to delete existing chunks: {e}")
         
         # Load metadata
         metadata_path = data_dir / f"{page_name}_metadata.json"
@@ -388,17 +409,61 @@ class GillIngestionEngine:
             if not all([verse_ref, start_phrase]):
                 continue
                 
-            # Determine Stop Phrase (Start of next verse)
+            # Determine Stop Phrase & Check Next Page for Spanning Boxes
             stop_phrase = None
+            next_page_boxes = None
+            
             if i + 1 < len(alignments):
                 stop_phrase = alignments[i+1].get("start_phrase")
             elif next_alignments:
-                # If last verse on page, check next page for the *next distinct* verse
-                # (Skip verses that are just the current verse continuing)
+                # Check next page for continuation of THIS verse
                 for next_align in next_alignments:
-                    if next_align.get("verse_ref") != verse_ref:
+                    if next_align.get("verse_ref") == verse_ref:
+                         # Found continuation!
+                         nb = next_align.get("boxes") or next_align.get("highlight_box")
+                         if nb:
+                             if isinstance(nb, list) and len(nb) > 0 and isinstance(nb[0], list):
+                                  # Already list of lists?
+                                  next_page_boxes = nb
+                             elif isinstance(nb, dict):
+                                  next_page_boxes = [nb]
+                             elif isinstance(nb, list):
+                                  next_page_boxes = nb
+                    
+                    if next_align.get("verse_ref") != verse_ref and not stop_phrase:
+                        # This is the start of the Next verse, so our stop phrase is its start
                         stop_phrase = next_align.get("start_phrase")
-                        break
+                        # Don't break immediately if we are looking for continuation, 
+                        # but typically continuation comes before next verse.
+                        
+            # Construct Composite Scan Data
+            # Format: [ { "vol": 1, "page": 100, "boxes": [...] }, ... ]
+            
+            final_scan_data = []
+            
+            # Current Page
+            if scan_data:
+                 # Normalize scan_data to list of boxes
+                 current_boxes_norm = scan_data if isinstance(scan_data, list) else [scan_data]
+                 final_scan_data.append({
+                     "vol": volume,
+                     "page": page_num,
+                     "boxes": current_boxes_norm
+                 })
+            
+            # Next Page (if spanning)
+            if next_page_boxes:
+                 file_volume, _ = self.parse_page_info(page_name) # Ensure consistent volume
+                 final_scan_data.append({
+                     "vol": file_volume,
+                     "page": page_num + 1,
+                     "boxes": next_page_boxes
+                 })
+                 logging.info(f"Merged spanning boxes for {verse_ref} (Page {page_num} -> {page_num+1})")
+
+            # Update scan_data variable for insertion
+            # If we have structured data, use it. If effectively empty, None.
+            scan_data_to_store = final_scan_data if final_scan_data else None
             
             # Slice Text
             commentary_text = self.slice_verse_text(full_context_text, start_phrase, stop_phrase, end_fallback)
@@ -429,12 +494,17 @@ class GillIngestionEngine:
             original_snippet = hebrew_data.get(verse_num, "") or greek_data.get(verse_num, "")
             
             # Extract Entities
-            entities = self.extract_entities(commentary_text)
             entity_uuids = []
-            for entity in entities:
-                uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name)
-                if uuid:
-                    entity_uuids.append(uuid)
+            if recycle_entities and verse_ref in verse_entity_map:
+                entity_uuids = verse_entity_map[verse_ref]
+                # If map has them, great. If we want hybrid (recycle + new), 
+                # we'd need to extract too. But "recycle" implies skipping LLM.
+            else:
+                entities = self.extract_entities(commentary_text)
+                for entity in entities:
+                    uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name)
+                    if uuid:
+                        entity_uuids.append(uuid)
             
             # Ingest
             try:
@@ -446,7 +516,7 @@ class GillIngestionEngine:
                     "volume": volume,
                     "page_number": page_num,
                     "original_text_snippet": original_snippet,
-                    "scan_json": json.dumps(scan_data) if scan_data else None,
+                    "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
                     "sentence_data": sentence_data,
                     "footnotes": footnotes
                 }, references={
@@ -461,18 +531,26 @@ class GillIngestionEngine:
         
         return chunks_ingested
     
-    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking", page_filter: str = None, volume_override: int = None):
+    def run_batch(self, data_dir: str, alignment_dir: str, qwen_subdir: str = "qwen_qwen3-vl-235b-a22b-thinking", page_filter: str = None, volume_override: int = None, recycle_entities: bool = False, limit: int = None):
         """Process all pages, optionally filtering by page name."""
         data_path = Path(data_dir)
         alignment_path = Path(alignment_dir)
         qwen_path = data_path / qwen_subdir
         
         alignment_files = list(alignment_path.glob("*_alignment.json"))
+        
+        # Sort files to ensure deterministic order for "first N" testing
+        alignment_files.sort(key=lambda x: str(x.name))
+        
         if page_filter:
             alignment_files = [f for f in alignment_files if f.name.replace("_alignment.json", "") == page_filter]
             logging.info(f"Filtered to {len(alignment_files)} files matching {page_filter}")
         else:
             logging.info(f"Found {len(alignment_files)} alignment files")
+
+        if limit:
+            logging.info(f"Limiting to first {limit} pages.")
+            alignment_files = alignment_files[:limit]
         
         total_chunks = 0
         processed_pages = 0
@@ -480,7 +558,7 @@ class GillIngestionEngine:
         for align_file in alignment_files:
             page_name = align_file.name.replace("_alignment.json", "")
             try:
-                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path, volume_override)
+                chunks = self.process_page(page_name, data_path, alignment_path, qwen_path, volume_override, recycle_entities)
                 total_chunks += chunks
                 processed_pages += 1
                 if processed_pages % 10 == 0:
@@ -630,6 +708,8 @@ if __name__ == "__main__":
     parser.add_argument("--test-page", help="Process only a specific page")
     parser.add_argument("--visualize", action="store_true", help="Generate PDF graph of current data")
     parser.add_argument("--volume", type=int, help="Override volume number")
+    parser.add_argument("--recycle-entities", action="store_true", help="Reuse existing entities from DB (skips LLM)")
+    parser.add_argument("--limit", type=int, help="Limit number of pages to process (for testing)")
     
     args = parser.parse_args()
     
@@ -648,11 +728,12 @@ if __name__ == "__main__":
                 base_data,
                 Path(args.alignment_dir),
                 qwen_dir,
-                args.volume
+                args.volume,
+                args.recycle_entities
             )
             print(f"✅ Test complete: {chunks} chunks ingested for {args.test_page}")
         else:
             base_data = Path(args.data_dir)
             qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
-            chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume)
+            chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume, args.recycle_entities, args.limit)
             print(f"✅ Batch complete: {chunks} chunks total")

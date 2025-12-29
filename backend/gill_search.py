@@ -70,31 +70,37 @@ class GillSearchEngine:
     def extract_potential_entities(self, query: str) -> List[str]:
         """
         Identify potential entities in the query.
-        For now, we look for Capitalized Words and verify if they exist in DB.
+        Look for words that match entities in the DB, handling case sensitivity.
         """
-        # Simple regex for Capitalized phrases (e.g. "John Gill", "Socinus", "God")
-        # Ignoring common stop words if necessary, but Weaviate handles that generally.
-        caps = re.findall(r'\b[A-Z][a-z]+\b', query)
+        # Capture all word sequences (potential names)
+        # We'll split by spaces and check grams or just individual keys.
+        # Simplest approach: Check title-cased words from query.
+        
+        words = re.findall(r'\b[a-z]+\b', query, re.IGNORECASE)
         verified_entities = []
         
-        for cap in caps:
-            # Skip very short words (stopword risk)
-            if len(cap) < 3:
-                continue
-                
-            # Check existence in Weaviate (exact match for speed)
-            # This is the "Lightweight" check
-            try:
-                response = self.entities.query.fetch_objects(
-                    filters=wvc.query.Filter.by_property("name").equal(cap),
-                    limit=1
-                )
-                if response.objects:
-                    verified_entities.append(cap)
-            except Exception as e:
-                # If query fails (e.g. stopword error), just ignore
-                print(f"Warning: Entity check failed for '{cap}': {e}")
-                
+        for w in words:
+            if len(w) < 3: continue
+            
+            # Check original and title-cased (e.g. "abraham" -> "Abraham")
+            candidates = set([w, w.capitalize(), w.lower()])
+            
+            for cand in candidates:
+                try:
+                    # We accept partial match or exact match? Exact is safer for "Name" lookup.
+                    # Using LIKE or EQUAL
+                    response = self.entities.query.fetch_objects(
+                        filters=wvc.query.Filter.by_property("name").equal(cand),
+                        limit=1
+                    )
+                    if response.objects:
+                        # Found one! Use the stored name (correct casing)
+                        stored_name = response.objects[0].properties.get("name")
+                        if stored_name and stored_name not in verified_entities:
+                            verified_entities.append(stored_name)
+                except Exception as e:
+                    pass
+        
         return verified_entities
 
     def search_gill(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:

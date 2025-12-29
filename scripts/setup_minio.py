@@ -30,7 +30,7 @@ def set_public_policy(client, bucket_name):
     client.set_bucket_policy(bucket_name, json.dumps(policy))
     print(f"✅ Public Read policy set for {bucket_name}")
 
-def main():
+def main(filter_str=None):
     # Initialize Client
     client = Minio(
         MINIO_ENDPOINT,
@@ -63,9 +63,14 @@ def main():
     
     # Also add the default gill images from parent dir
     root_images = list(SOURCE_DIR.parent.glob("gill*.png"))
-    print(f"Found {len(files)} scans and {len(root_images)} default images.")
-    
     files.extend(root_images)
+    
+    # Apply Filter
+    if filter_str:
+        print(f"🔍 Filtering for files containing: '{filter_str}'")
+        files = [f for f in files if filter_str in str(f)]
+
+    print(f"Found {len(files)} files to sync.")
 
     for i, file_path in enumerate(files):
         # Rel path in bucket
@@ -94,4 +99,9 @@ def main():
     print("✅ Sync Complete!")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Sync images to MinIO")
+    parser.add_argument("--filter", help="Partial filename match to filter uploads (e.g. 'page280')")
+    args = parser.parse_args()
+    
+    main(filter_str=args.filter)
