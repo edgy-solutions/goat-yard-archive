@@ -3,6 +3,7 @@ import os
 import uvicorn
 import dspy
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
@@ -34,9 +35,22 @@ def anon_limit_key(request: Request):
 
 # Default global limiter key (not really used if we override everything, but safe fallback)
 limiter = Limiter(key_func=get_remote_address)
+# Custom Rate Limit Handler (Dr. Gill's Tone)
+async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": (
+                "My dear friend, it appears you have exhausted your daily allowance of ten inquiries per day. "
+                "To continue our study of the Scriptures together, I pray you would join our number by signing in, "
+                "that we may search the deep things of God without constraint."
+            )
+        }
+    )
+
 app = FastAPI(title="Gill Commentary API")
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
 app.include_router(webhook_router)
 
 # Auth Middleware
