@@ -76,6 +76,8 @@ ui:
   service:
     type: ClusterIP
     port: 3000
+  auth:
+    clerkPublishableKey: ""
     
   # Persistence for Scanned Images
   # Mounts a local volume (HostPath) or PVC to /opt/app-root/src/dist/scans

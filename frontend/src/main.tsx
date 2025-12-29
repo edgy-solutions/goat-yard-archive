@@ -6,8 +6,8 @@ import './index.css'
 
 import { ClerkProvider } from '@clerk/clerk-react'
 
-// Import publishable key
-const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
+// Import publishable key (Runtime first, then Build-time)
+const PUBLISHABLE_KEY = window.__RUNTIME_CONFIG__?.VITE_CLERK_PUBLISHABLE_KEY || import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
 if (!PUBLISHABLE_KEY) {
     console.warn("Missing Publishable Key")

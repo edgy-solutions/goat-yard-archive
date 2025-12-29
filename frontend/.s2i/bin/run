@@ -3,6 +3,18 @@ set -e
 
 # S2I Run Script for React Frontend
 
+# 1. Runtime Config Injection
+# We inject environment variables into the static HTML so the browser can see them.
+if [ -n "$VITE_CLERK_PUBLISHABLE_KEY" ]; then
+    echo "---> Injecting Runtime Config..."
+    # Create the config JSON
+    CONFIG_JSON="window.__RUNTIME_CONFIG__ = { \"VITE_CLERK_PUBLISHABLE_KEY\": \"$VITE_CLERK_PUBLISHABLE_KEY\" };"
+    
+    # Replace the placeholder in index.html (safely using a temp file)
+    # Note: We target dist/index.html because that is what 'serve' uses.
+    sed "s|<script id=\"runtime-config\"></script>|<script>$CONFIG_JSON</script>|g" dist/index.html > dist/index.html.tmp && mv dist/index.html.tmp dist/index.html
+fi
+
 echo "---> Starting Frontend Server..."
 # Using 'serve' (installed in assemble)
 # -s: Single-Page Application (rewrites 404 to index.html)

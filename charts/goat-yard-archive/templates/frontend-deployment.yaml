@@ -31,9 +31,10 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
-          # Frontend env vars (Vite) are usually built-time, but 'serve' implies static content.
-          # If we need runtime config, we'd need a config map injection or init script.
-          # For now, simplistic.
+          # Frontend Runtime Config
+          env:
+            - name: VITE_CLERK_PUBLISHABLE_KEY
+              value: {{ .Values.ui.auth.clerkPublishableKey | quote }}
           resources:
             requests:
               cpu: 100m
