@@ -1,3 +1,4 @@
+{{- if .Values.api.enabled -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,3 +50,4 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+{{- end }}
