@@ -59,8 +59,7 @@ function App() {
         if (!query) return;
         setLoading(true);
         setError(null);
-        setResponse(null);
-        setResponse(null);
+        setResponse(null); // Clear previous
         setActiveEvidence(null);
         setShowMobileGallery(false);
         setLastSearchedQuery(query);
@@ -71,6 +70,14 @@ function App() {
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
             }
+
+            // Initial Optimistic Response
+            setResponse({
+                answer: "",
+                citations: [],
+                evidence: [],
+                verified: true
+            });
 
             const res = await fetch('/api/search', {
                 method: 'POST',
@@ -87,12 +94,10 @@ function App() {
                         errorMsg = errorJson.detail;
                     }
                 } catch (e) {
-                    // Fallback to text if not JSON
                     const errText = await res.text();
                     if (errText) errorMsg += ` ${errText}`;
                 }
 
-                // Throw with specific flag if 429
                 if (res.status === 429) {
                     const err = new Error(errorMsg);
                     (err as any).isRateLimit = true;
@@ -101,45 +106,108 @@ function App() {
                 throw new Error(errorMsg);
             }
 
-            const data = await res.json();
-            setResponse(data);
-            if (data.evidence && data.evidence.length > 0) {
-                setActiveEvidence(data.evidence[0]);
+            // Stream Reader
+            const reader = res.body?.getReader();
+            const decoder = new TextDecoder();
+
+            if (!reader) throw new Error("No response body");
+
+            let buffer = "";
+            let currentAnswer = "";
+            let evidenceLoaded = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunkText = decoder.decode(value, { stream: true });
+                buffer += chunkText;
+
+                // Split by newline (NDJSON)
+                const lines = buffer.split("\n");
+
+                // Keep the last partial line in buffer
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const evt = JSON.parse(line);
+
+                        // Handle Events
+                        if (evt.type === "evidence") {
+                            setResponse(prev => {
+                                if (!prev) return prev;
+                                return { ...prev, evidence: evt.data };
+                            });
+                            // Auto-select first evidence if not already selected
+                            if (evt.data.length > 0 && !evidenceLoaded) {
+                                setActiveEvidence(evt.data[0]);
+                                evidenceLoaded = true;
+                            }
+                        } else if (evt.type === "chunk") {
+                            currentAnswer += evt.text;
+                            setResponse(prev => {
+                                if (!prev) return prev;
+                                return { ...prev, answer: currentAnswer };
+                            });
+                        } else if (evt.type === "result") {
+                            setResponse(prev => {
+                                if (!prev) return prev;
+                                return {
+                                    ...prev,
+                                    verified: evt.verified,
+                                    citations: evt.citations
+                                };
+                            });
+                        }
+                    } catch (e) {
+                        console.warn("Failed to parse JSON chunk", line);
+                    }
+                }
             }
-        } catch (err) {
+
+        } catch (err: any) {
             console.error("Search failed:", err);
             const message = err instanceof Error ? err.message : "Unknown error";
             setError(message);
 
-            // Skip mock fallback for Rate Limits
+            // Clear partial response if it failed totally (optional, but cleaner)
+            if (!response?.answer) {
+                setResponse(null);
+            }
+
             if ((err as any).isRateLimit) {
                 setLoading(false);
                 return;
             }
 
-            console.log("Falling back to mock data...");
-            // MOCK FALLBACK for other errors
-            setTimeout(() => {
-                const mockEv: EvidenceItem = {
-                    chunk_id: "mock1",
-                    content: MOCK_CITATION.text || "Mock content not found",
-                    citation: "[Vol 1, p. 287]",
-                    vol: 1,
-                    page: 287,
-                    scan: MOCK_CITATION.scan_json as any || [],
-                    score: 1.0,
-                    footnotes: ["Mock footnote 1"],
-                    entities: ["Mock Entity"]
-                };
+            // MOCK FALLBACK (Only implies if backend totally failed connection)
+            // If we got *some* stream, we don't fallback.
+            if (err.message.includes("fetch") || err.message.includes("Network")) {
+                console.log("Falling back to mock data...");
+                setTimeout(() => {
+                    const mockEv: EvidenceItem = {
+                        chunk_id: "mock1",
+                        content: MOCK_CITATION.text || "Mock content not found",
+                        citation: "[Vol 1, p. 287]",
+                        vol: 1,
+                        page: 287,
+                        scan: MOCK_CITATION.scan_json as any || [],
+                        score: 1.0,
+                        footnotes: ["Mock footnote 1"],
+                        entities: ["Mock Entity"]
+                    };
 
-                setResponse({
-                    answer: "Backend unavailable. (Mock Answer) Gill discusses this in his Exposition of the Old and New Testaments...",
-                    citations: ["[Vol 1, p. 123]"],
-                    evidence: [mockEv],
-                    verified: false
-                });
-                setActiveEvidence(mockEv);
-            }, 500);
+                    setResponse({
+                        answer: "Backend unavailable. (Mock Answer) Gill discusses this in his Exposition of the Old and New Testaments...",
+                        citations: ["[Vol 1, p. 123]"],
+                        evidence: [mockEv],
+                        verified: false
+                    });
+                    setActiveEvidence(mockEv);
+                }, 500);
+            }
         } finally {
             setLoading(false);
         }

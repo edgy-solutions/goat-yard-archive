@@ -2,8 +2,12 @@
 import os
 import uvicorn
 import dspy
+import json
+import litellm
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
@@ -181,77 +185,118 @@ class SearchResponse(BaseModel):
     evidence: List[EvidenceItem]
     verified: bool
 
-@app.post("/api/search", response_model=SearchResponse)
+@app.post("/api/search")
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
 async def search(request: Request, req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
-    # 1. Retrieve Evidence
-    raw_results = search_engine.search_gill(req.query, limit=5)
-    
-    if not raw_results:
-        return SearchResponse(
-            answer="No relevant commentary found.",
-            citations=[],
-            evidence=[],
-            verified=True
-        )
-
-    # 2. Generate Answer (if Bot available)
-    answer = "LLM Generation disabled (No Key)."
-    citations = []
-    verified = False
-    
-    if bot:
-        try:
-            # Select LM based on auth status
-            # Use lm_auth if user is signed in, otherwise lm_anon
-            target_lm = lm_auth if (hasattr(request.state, "user_id") and request.state.user_id) else lm_anon
-            
-            # Use specific LM context for this request
-            with dspy.context(lm=target_lm):
-                # Forward pass
-                pred = bot(question=req.query, context_chunks=raw_results)
-                answer = pred.answer
-                citations = pred.citations
+    async def event_generator():
+        # 1. Retrieve Evidence
+        raw_results = search_engine.search_gill(req.query, limit=5)
+        
+        # Format and Send Evidence Immediately
+        evidence_list = []
+        context_str = ""
+        valid_citations = set()
+        
+        if raw_results:
+            for r in raw_results:
+                ev_item = EvidenceItem(
+                    chunk_id=r["chunk_id"],
+                    content=r["content"],
+                    verse_ref=r.get("verse_ref"),
+                    citation=r.get("citation", "Unknown"),
+                    vol=r.get("vol", 1),
+                    page=r.get("page", 0),
+                    scan=r.get("scan_json"), # Can be list or highlight object
+                    footnotes=r.get("footnotes", []),
+                    entities=r.get("entities", []),
+                    score=r["score"]
+                )
+                evidence_list.append(ev_item)
                 
-            verified = True
-                 
-        except Exception as e:
-            if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
-                  answer = f"Generated answer could not be verified against sources.\nError: {e}"
-                  verified = False
-            else:
-                  answer = f"Error generating answer: {e}"
-                  verified = False
-    
-    # Format Evidence
-    evidence_list = []
-    for r in raw_results:
-        evidence_list.append(EvidenceItem(
-            chunk_id=r["chunk_id"],
-            content=r["content"],
-            verse_ref=r.get("verse_ref"),
-            citation=r["citation"],
-            vol=int(r["vol"]) if r["vol"] else 0,
-            page=int(r["page"]) if r["page"] else 0,
-            scan=r["scan"],
-            footnotes=r.get("footnotes", []),
-            entities=r.get("entities", []),
-            score=r["score"]
-        ))
+                # Build Context for LLM
+                citation_tag = r.get("citation", "Unknown")
+                valid_citations.add(citation_tag)
+                verse_ref_str = r.get("verse_ref", "")
+                text = r.get("content", "")
+                context_str += f"Source {citation_tag} ({verse_ref_str}): {text}\n\n"
+        
+        # Yield Evidence Block
+        # We use json.dumps with 'default' to handle Pydantic models if needed, but evidence_list is list of models
+        # iterating models manually is safer or use model_dump
+        ev_dicts = [e.model_dump() for e in evidence_list]
+        yield json.dumps({"type": "evidence", "data": ev_dicts}) + "\n"
+        
+        if not raw_results:
+            yield json.dumps({"type": "chunk", "text": "No relevant commentary found."}) + "\n"
+            yield json.dumps({"type": "result", "verified": True, "citations": []}) + "\n"
+            return
 
-    if evidence_list:
-        print(f"DEBUG: First Evidence Item Entities: {evidence_list[0].entities}")
+        # 2. Generate Answer (Streaming)
+        answer_accum = ""
+        
+        if bot:
+            try:
+                # Select LM
+                target_lm = lm_auth if (hasattr(request.state, "user_id") and request.state.user_id) else lm_anon
+                
+                # Manually Construct Prompt to mimic the Signature
+                system_prompt = (
+                    "You are an intimate 18th-century contemporary of Dr. John Gill. "
+                    "Answer questions by summarizing what \"The Expositor\" or \"Dr. Gill\" teaches in the provided context. "
+                    "Speak in a learned, reverent, and slightly archaic 18th-century academic tone, always referring to him in the third person. "
+                    "Do not append a list of citations or bibliography at the end of your response. "
+                    "Base your answer ONLY on the provided context."
+                )
+                
+                full_prompt = f"{system_prompt}\n\nContext:\n{context_str}\n\nQuestion: {req.query}\n\nAnswer:"
+                
+                # Stream Generation
+                # Bypass DSPy stream wrapper issue by calling litellm directly
+                # Resolve Key
+                api_key = os.getenv("OPENROUTER_API_KEY")
+                if target_lm == lm_anon:
+                    api_key = os.getenv("OPENROUTER_API_KEY_ANON") or api_key
+                
+                response = litellm.completion(
+                    model=target_lm.model,
+                    messages=[{"role": "user", "content": full_prompt}],
+                    api_key=api_key,
+                    base_url="https://openrouter.ai/api/v1",
+                    stream=True
+                )
+                
+                for chunk in response:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield json.dumps({"type": "chunk", "text": content}) + "\n"
+                        answer_accum += content
+                        
+                # 3. Verification
+                citations_found = []
+                verified = True
+                
+                import re
+                citations_found = re.findall(r"\[Vol \d+, p\. \d+\]", answer_accum)
+                
+                for cit in citations_found:
+                    if cit not in valid_citations:
+                        verified = False
+                        yield json.dumps({"type": "chunk", "text": f"\n\n[Warning: Citation {cit} not found in source text]"}) + "\n"
+                
+                yield json.dumps({"type": "result", "verified": verified, "citations": citations_found}) + "\n"
+                
+            except Exception as e:
+                yield json.dumps({"type": "chunk", "text": f"\nError generating answer: {e}"}) + "\n"
+                yield json.dumps({"type": "result", "verified": False, "citations": []}) + "\n"
+        else:
+             yield json.dumps({"type": "chunk", "text": "LLM Generation disabled (No Key)."}) + "\n"
+             yield json.dumps({"type": "result", "verified": False, "citations": []}) + "\n"
 
-    return SearchResponse(
-        answer=answer,
-        citations=citations,
-        evidence=evidence_list,
-        verified=verified
-    )
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
