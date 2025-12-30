@@ -216,6 +216,40 @@ async def search(request: Request, req: SearchRequest):
                 pred = bot(question=req.query, context_chunks=raw_results)
                 answer = pred.answer
                 citations = pred.citations
+
+                # --- DEBUG LOGGING ---
+                # Print the actual specific prompts/responses to console for user visibility
+                if hasattr(target_lm, "history") and target_lm.history:
+                    last_run = target_lm.history[-1]
+                    print("\n" + "="*50)
+                    print(" [DSPy INTERACTION LOG] ")
+                    print("="*50)
+                    
+                    # Prompt / Messages
+                    print("\n--- PROMPT / MESSAGES ---")
+                    if "messages" in last_run:
+                        for m in last_run["messages"]:
+                            role = m.get("role", "unknown").upper()
+                            content = m.get("content", "")
+                            # Print full content for verification
+                            print(f"[{role}]: {content}")
+                    else:
+                         print(last_run.get("prompt", "No prompt found"))
+
+                    # Response
+                    print("\n--- RESPONSE ---")
+                    # Try to parse response content safely
+                    try:
+                        resp_obj = last_run.get("response")
+                        if hasattr(resp_obj, "choices"):
+                             print(resp_obj.choices[0].message.content)
+                        else:
+                             print(resp_obj)
+                    except:
+                        print("Could not parse response object")
+                    
+                    print("="*50 + "\n")
+                # ---------------------
                 
             verified = True
                  
@@ -252,6 +286,14 @@ async def search(request: Request, req: SearchRequest):
         evidence=evidence_list,
         verified=verified
     )
+
+@app.get("/api/books")
+async def get_books():
+    """Return list of available books in the index."""
+    if not search_engine:
+        # Fallback if engine down
+        return {"books": ["Genesis", "Matthew"]}
+    return {"books": search_engine.get_available_books()}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

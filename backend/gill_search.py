@@ -260,6 +260,25 @@ class GillSearchEngine:
             
         return results
 
+    def get_available_books(self) -> List[str]:
+        """Fetch distinct books from the database."""
+        try:
+            # Aggregate distinct 'book' values
+            # Using Weaviate v4 syntax
+            response = self.chunks.aggregate.over_all(group_by="book")
+            books = []
+            if response.groups:
+                for grp in response.groups:
+                    val = grp.grouped_by.value
+                    if val:
+                        books.append(val.title()) # normalize case
+            
+            return sorted(list(set(books)))
+        except Exception as e:
+            print(f"Error fetching books: {e}")
+            # Fallback if aggregation fails or not supported on this version yet
+            return ["Genesis", "Matthew"]
+
 if __name__ == "__main__":
     # Test
     from dotenv import load_dotenv

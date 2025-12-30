@@ -1,10 +1,12 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ScanGallery from './components/ScanGallery';
 import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
 import { useAuth } from '@clerk/clerk-react';
+import About from './pages/About';
+import Contact from './pages/Contact';
+import Footer from './components/Footer';
 
 // Types (should actully be in types.ts but putting here for single-file portability if needed)
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -213,13 +215,43 @@ function App() {
     // Mobile State
     const [showMobileGallery, setShowMobileGallery] = useState(false);
 
+    // Navigation State
+    const [view, setView] = useState<'chat' | 'about' | 'contact'>('chat');
+
+    // Dynamic Book Availability
+    const [availableBooks, setAvailableBooks] = useState<string[]>([]);
+
+    // Fetch books on mount
+    useEffect(() => {
+        fetch('/api/books')
+            .then(res => res.json())
+            .then(data => setAvailableBooks(data.books))
+            .catch(err => console.error("Failed to fetch books:", err));
+    }, []);
+
     const handleCitationClick = (evidence: EvidenceItem) => {
         setActiveEvidence(evidence);
         setShowMobileGallery(true);
     };
 
+    // Close overlays
+    const closeOverlay = () => setView('chat');
+
     return (
-        <div className="flex h-[100dvh] overflow-hidden font-serif bg-parchment text-amber-950">
+        <div className="flex h-[100dvh] overflow-hidden font-serif bg-parchment text-amber-950 relative">
+
+            {/* Modal Backdrop & Container */}
+            {(view === 'about' || view === 'contact') && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    {/* Centered Modal Card */}
+                    <div className="w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-lg shadow-2xl border border-[#8D6E63] bg-[#FDFBF7] animate-in zoom-in-95 duration-200 flex flex-col">
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            {view === 'about' && <About onClose={closeOverlay} />}
+                            {view === 'contact' && <Contact onClose={closeOverlay} />}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Left Pane: Chat & Context */}
             {/* Mobile: Hidden if Gallery is Open. Desktop: Always 1/2 width */}
@@ -228,10 +260,13 @@ function App() {
             `}>
 
                 {/* Header */}
-                <Header />
+                <Header
+                    onOpenAbout={() => setView('about')}
+                    onOpenContact={() => setView('contact')}
+                />
 
                 {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 flex flex-col">
 
                     {/* Error Banner */}
                     {error && (
@@ -386,6 +421,9 @@ function App() {
                             )}
                         </div>
                     )}
+
+                    {/* Spacer removed, Footer moved to right pane */}
+
                 </div>
 
                 {/* Input Area */}
@@ -406,12 +444,28 @@ function App() {
                             Search
                         </button>
                     </div>
+
+                    {/* Available Books - Dynamic Pill */}
+                    {availableBooks.length > 0 && (
+                        <div className="mt-2 flex items-center space-x-2 text-xs text-[#5D4037]/80">
+                            <span className="font-bold uppercase tracking-wider text-[#3E2723] opacity-70">Library Contains:</span>
+                            <div className="flex flex-wrap gap-1">
+                                {availableBooks.map(book => (
+                                    <span key={book} className="bg-[#FFFDF5] px-2 py-0.5 rounded text-[#5D4037] border border-[#D7CCC8] shadow-sm">
+                                        {book}
+                                    </span>
+                                ))}
+                                <span className="italic opacity-60 ml-1 flex items-center text-[10px]">+ more D.V. soon</span>
+                            </div>
+                        </div>
+                    )}
+
                 </div>
             </div>
 
             {/* Right Pane: Scan Verification */}
             {/* Mobile: Full Width if Gallery Open, else Hidden. Desktop: Always 1/2 Width */}
-            <div className={`w-full md:w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner items-center justify-center p-8
+            <div className={`w-full md:w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner p-4 flex flex-col items-center justify-between
                 ${showMobileGallery ? 'flex fixed inset-0 z-50 md:static md:flex' : 'hidden md:flex'}
             `}>
 
@@ -424,7 +478,7 @@ function App() {
                 </button>
 
                 {/* Background pattern or texture could go here */}
-                <div className="w-full h-full relative shadow-2xl rounded overflow-hidden border border-[#5D4037]">
+                <div className="w-full flex-1 relative shadow-2xl rounded overflow-hidden border border-[#5D4037] min-h-0 mb-4">
                     <ScanGallery
                         pages={getGalleryPages(activeEvidence)}
                         defaultImage={defaultImage}
@@ -435,6 +489,10 @@ function App() {
                     <div className="absolute top-4 left-4 bg-[#2D1B18]/90 text-gold px-4 py-2 rounded-sm text-sm pointer-events-none shadow-lg border border-[#5D4037] font-serif z-10">
                         {activeEvidence ? `Vol ${activeEvidence.vol}, Page ${activeEvidence.page}` : "Library Archive"}
                     </div>
+                </div>
+
+                <div className="w-full rounded overflow-hidden shadow-lg border border-[#5D4037]">
+                    <Footer />
                 </div>
             </div>
 
