@@ -115,11 +115,13 @@ app.add_middleware(
 # Initialize Engine & Bot
 search_engine = None
 bot = None
+lm_auth = None
+lm_anon = None
 
 @app.on_event("startup")
 def startup():
     print("--- STARTUP EVENT FIRED ---")
-    global search_engine, bot
+    global search_engine, bot, lm_auth, lm_anon
     
     # 1. Search Engine
     try:
@@ -129,17 +131,26 @@ def startup():
     except Exception as e:
         print(f"Failed to init Search Engine/DB: {e}")
 
-    # 2. DSPy Bot
+    # 2. DSPy Bot (Dual Key Logic)
     try:
-        key = os.getenv("OPENROUTER_API_KEY")
-        if key:
-            # Using a capable model for reasoning
-            lm = dspy.LM("openrouter/deepseek/deepseek-chat", api_key=key, api_base="https://openrouter.ai/api/v1")
-            dspy.configure(lm=lm)
+        key_main = os.getenv("OPENROUTER_API_KEY")
+        key_anon = os.getenv("OPENROUTER_API_KEY_ANON") or key_main # Fallback to main if no anon key
+
+        if key_main:
+            # Initialize Auth LM
+            lm_auth = dspy.LM("openrouter/deepseek/deepseek-chat", api_key=key_main, api_base="https://openrouter.ai/api/v1")
+            
+            # Initialize Anon LM (might be same key)
+            lm_anon = dspy.LM("openrouter/deepseek/deepseek-chat", api_key=key_anon, api_base="https://openrouter.ai/api/v1")
+            
+            # Default helper configuration (just for consistency, context managers override this)
+            dspy.configure(lm=lm_anon) 
+            
             bot = GroundedGillBot()
-            print("DSPy Bot initialized.")
+            print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon}")
         else:
             print("Warning: OPENROUTER_API_KEY not found. Bot disabled.")
+            
     except Exception as e:
         print(f"Failed to init Bot: {e}")
 
@@ -195,12 +206,17 @@ async def search(request: Request, req: SearchRequest):
     
     if bot:
         try:
-            # Forward pass
-            # Forward pass
-            # FORCE DEBUG CHECK
-            pred = bot(question=req.query, context_chunks=raw_results)
-            answer = pred.answer
-            citations = pred.citations
+            # Select LM based on auth status
+            # Use lm_auth if user is signed in, otherwise lm_anon
+            target_lm = lm_auth if (hasattr(request.state, "user_id") and request.state.user_id) else lm_anon
+            
+            # Use specific LM context for this request
+            with dspy.context(lm=target_lm):
+                # Forward pass
+                pred = bot(question=req.query, context_chunks=raw_results)
+                answer = pred.answer
+                citations = pred.citations
+                
             verified = True
                  
         except Exception as e:
