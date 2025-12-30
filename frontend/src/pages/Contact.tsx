@@ -48,7 +48,7 @@ const Contact: React.FC<PageProps> = ({ onClose }) => {
                         <ul className="list-none pl-0">
                             <li className="mb-2">
                                 <strong>Church Website: </strong>
-                                <a href="https://rogersvillebaptistchurch.org/" target="_blank" rel="noopener noreferrer" className="text-amber-800 hover:text-amber-600 hover:underline">rogersvillebaptistchurch.org</a>
+                                <a href="https://www.rogersvillebaptistchurch.org/" target="_blank" rel="noopener noreferrer" className="text-amber-800 hover:text-amber-600 hover:underline">rogersvillebaptistchurch.org</a>
                             </li>
                         </ul>
                     </section>
