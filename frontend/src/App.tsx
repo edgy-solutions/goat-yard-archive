@@ -62,6 +62,7 @@ function App() {
         setResponse(null);
         setResponse(null);
         setActiveEvidence(null);
+        setShowMobileGallery(false);
         setLastSearchedQuery(query);
 
         try {
@@ -209,17 +210,28 @@ function App() {
         return { w: 3360, h: 5400 };
     };
 
+    // Mobile State
+    const [showMobileGallery, setShowMobileGallery] = useState(false);
+
+    const handleCitationClick = (evidence: EvidenceItem) => {
+        setActiveEvidence(evidence);
+        setShowMobileGallery(true);
+    };
+
     return (
         <div className="flex h-screen overflow-hidden font-serif bg-parchment text-amber-950">
 
             {/* Left Pane: Chat & Context */}
-            <div className="w-1/2 flex flex-col border-r border-[#8D6E63] shadow-2xl z-10">
+            {/* Mobile: Hidden if Gallery is Open. Desktop: Always 1/2 width */}
+            <div className={`w-full md:w-1/2 flex flex-col border-r border-[#8D6E63] shadow-2xl z-10 bg-[#FDFBF7]
+                ${showMobileGallery ? 'hidden md:flex' : 'flex'}
+            `}>
 
                 {/* Header */}
                 <Header />
 
                 {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#FDFBF7]">
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
 
                     {/* Error Banner */}
                     {error && (
@@ -274,7 +286,7 @@ function App() {
                                                             return (
                                                                 <button
                                                                     key={partIdx}
-                                                                    onClick={() => setActiveEvidence(match)}
+                                                                    onClick={() => handleCitationClick(match)}
                                                                     className="text-amber-700 font-bold hover:underline cursor-pointer bg-amber-50 px-1 rounded mx-0.5 border border-amber-200 text-xs align-middle"
                                                                     title="View Source"
                                                                 >
@@ -297,7 +309,7 @@ function App() {
                                 {response.evidence.map((ev, idx) => (
                                     <button
                                         key={idx}
-                                        onClick={() => setActiveEvidence(ev)}
+                                        onClick={() => handleCitationClick(ev)}
                                         className={`px-3 py-1 rounded text-sm transition-all duration-200 font-serif border
                                             ${activeEvidence?.chunk_id === ev.chunk_id
                                                 ? 'bg-[#5D4037] text-amber-50 border-[#3E2723] shadow-md'
@@ -313,9 +325,18 @@ function App() {
                             {/* Active Context Snippet */}
                             {activeEvidence && (
                                 <div className="mt-6 border-t border-[#D7CCC8] pt-4">
-                                    <h3 className="text-sm font-bold uppercase text-[#5D4037] mb-2 tracking-widest border-b border-[#D7CCC8] pb-1 inline-block">
-                                        Evidence Source: {activeEvidence.verse_ref || "Unknown Verse"}
-                                    </h3>
+                                    <div className="flex justify-between items-center mb-2 border-b border-[#D7CCC8] pb-1">
+                                        <h3 className="text-sm font-bold uppercase text-[#5D4037] tracking-widest">
+                                            Evidence Source: {activeEvidence.verse_ref || "Unknown Verse"}
+                                        </h3>
+                                        {/* Mobile: View Scan Button */}
+                                        <button
+                                            onClick={() => setShowMobileGallery(true)}
+                                            className="md:hidden text-xs bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded shadow-sm"
+                                        >
+                                            View Scan »
+                                        </button>
+                                    </div>
 
                                     {/* Entity Tags */}
                                     {activeEvidence.entities && activeEvidence.entities.length > 0 && (
@@ -389,7 +410,19 @@ function App() {
             </div>
 
             {/* Right Pane: Scan Verification */}
-            <div className="w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner flex items-center justify-center p-8">
+            {/* Mobile: Full Width if Gallery Open, else Hidden. Desktop: Always 1/2 Width */}
+            <div className={`w-full md:w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner items-center justify-center p-8
+                ${showMobileGallery ? 'flex fixed inset-0 z-50 md:static md:flex' : 'hidden md:flex'}
+            `}>
+
+                {/* Mobile Back Button */}
+                <button
+                    onClick={() => setShowMobileGallery(false)}
+                    className="md:hidden absolute top-4 right-4 z-[60] bg-[#EFEBE9] text-[#3E2723] px-3 py-2 rounded shadow-lg border border-[#8D6E63] font-bold flex items-center gap-2"
+                >
+                    ✕ Back to Chat
+                </button>
+
                 {/* Background pattern or texture could go here */}
                 <div className="w-full h-full relative shadow-2xl rounded overflow-hidden border border-[#5D4037]">
                     <ScanGallery
@@ -399,7 +432,7 @@ function App() {
                     />
 
                     {/* Verification Overlay Label */}
-                    <div className="absolute top-4 left-4 bg-[#2D1B18]/90 text-gold px-4 py-2 rounded-sm text-sm pointer-events-none shadow-lg border border-[#5D4037] font-serif">
+                    <div className="absolute top-4 left-4 bg-[#2D1B18]/90 text-gold px-4 py-2 rounded-sm text-sm pointer-events-none shadow-lg border border-[#5D4037] font-serif z-10">
                         {activeEvidence ? `Vol ${activeEvidence.vol}, Page ${activeEvidence.page}` : "Library Archive"}
                     </div>
                 </div>
