@@ -8,7 +8,7 @@ const Footer = () => {
                 {/* Left Side: Copyright */}
                 <div className="mt-4 md:mt-0 md:order-1">
                     <p className="text-center text-xs text-[#8D6E63] italic">
-                        &copy; {new Date().getFullYear()} Dr. Voluminous (Pre-Alpha v0.1). Soli Deo Gloria.
+                        &copy; {new Date().getFullYear()} Dr. Voluminous (Pre-Alpha v0.1). To the praise of His free grace.
                     </p>
                 </div>
 
