@@ -36,6 +36,12 @@ spec:
           env:
             - name: VITE_CLERK_PUBLISHABLE_KEY
               value: {{ .Values.ui.auth.clerkPublishableKey | quote }}
+            {{- if .Values.ui.env }}
+            {{- range $key, $value := .Values.ui.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
           resources:
             requests:
               cpu: 100m
