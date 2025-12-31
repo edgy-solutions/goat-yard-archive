@@ -70,9 +70,6 @@ const Privacy: React.FC<PrivacyProps> = ({ onClose, onOpenContact }) => {
                                     <li>Generate the answers you requested.</li>
                                     <li>Debug errors (e.g., if the AI hallucinates a citation, we need to see the query to fix it).</li>
                                     <li>Improve the accuracy of the theological engine.</li>
-                                    <li>Generate the answers you requested.</li>
-                                    <li>Debug errors (e.g., if the AI hallucinates a citation, we need to see the query to fix it).</li>
-                                    <li>Improve the accuracy of the theological engine.</li>
                                 </ul>
                             </li>
                         </ul>
