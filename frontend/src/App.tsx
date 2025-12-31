@@ -3,7 +3,8 @@ import ScanGallery from './components/ScanGallery';
 import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
-import { useAuth } from '@clerk/clerk-react';
+import { useAuth, useUser } from '@clerk/clerk-react';
+import { usePostHog } from 'posthog-js/react';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Footer from './components/Footer';
@@ -44,6 +45,21 @@ function App() {
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
     const { getToken } = useAuth();
+    const { user, isSignedIn } = useUser();
+    const posthog = usePostHog();
+
+    // Link Clerk to PostHog
+    useEffect(() => {
+        if (isSignedIn && user) {
+            posthog.identify(user.id, {
+                email: user.primaryEmailAddress?.emailAddress,
+                name: user.fullName,
+                role: user.publicMetadata?.role
+            });
+        } else if (!isSignedIn) {
+            posthog.reset();
+        }
+    }, [isSignedIn, user, posthog]);
 
     // Track the query that ACTUALLY produced the results, for highlighting
     const [lastSearchedQuery, setLastSearchedQuery] = useState("");
@@ -66,6 +82,12 @@ function App() {
         setActiveEvidence(null);
         setShowMobileGallery(false);
         setLastSearchedQuery(query);
+
+        // Track Search Event
+        posthog.capture('search_performed', {
+            query_length: query.length,
+            is_paid_user: false // TODO: Check actual status if available
+        });
 
         try {
             const token = await getToken();
