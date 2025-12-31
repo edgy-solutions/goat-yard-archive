@@ -2,6 +2,11 @@
 import os
 import uvicorn
 import dspy
+import litellm
+import json
+import warnings
+from langfuse import observe, Langfuse
+# from langfuse.decorators import langfuse_context (Not found in installed version)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +24,9 @@ from .auth import get_optional_user_id, security
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+# Filter Pydantic Warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 # Rate Limit Keys
 def auth_limit_key(request: Request):
@@ -79,15 +87,10 @@ app.include_router(webhook_router)
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # Attempt to extract User ID from header (Basic parse, full verify in Auth module if desired)
-    # Ideally reuse auth logic. Here we do a quick check or full check?
-    # Used for Rate Limiting.
     auth_header = request.headers.get("Authorization")
     request.state.user_id = None
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
-        # We need to verify logic. Since middleware fails hard if we import heavy logic,
-        # we can try to use a utility.
-        # Importing logic from auth.py
         from .auth import PyJWKClient, jwt, CLERK_ISSUER
         if CLERK_ISSUER:
             try:
@@ -101,6 +104,7 @@ async def auth_middleware(request: Request, call_next):
     
     response = await call_next(request)
     return response
+
 print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
 
 # CORS (Allow Frontend)
@@ -123,6 +127,19 @@ def startup():
     print("--- STARTUP EVENT FIRED ---")
     global search_engine, bot, lm_auth, lm_anon
     
+    # 0. Langfuse / Litellm Setup
+    try:
+        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+            print("Initializing Langfuse integration for TitleLLM/DSPy...")
+            print("Initializing Langfuse integration for TitleLLM/DSPy...")
+            # Disable auto-callbacks as they cause AttributeError with current versions
+            litellm.success_callback = [] 
+            litellm.failure_callback = []
+        else:
+            print("Langfuse keys not found. Tracing disabled.")
+    except Exception as e:
+        print(f"Failed to init Langfuse: {e}")
+
     # 1. Search Engine
     try:
         init_db()
@@ -134,20 +151,33 @@ def startup():
     # 2. DSPy Bot (Dual Key Logic)
     try:
         key_main = os.getenv("OPENROUTER_API_KEY")
-        key_anon = os.getenv("OPENROUTER_API_KEY_ANON") or key_main # Fallback to main if no anon key
+        key_anon_check = os.getenv("OPENROUTER_API_KEY_ANON") or key_main # Fallback to main if no anon key
 
         if key_main:
-            # Initialize Auth LM
-            lm_auth = dspy.LM("openrouter/deepseek/deepseek-chat", api_key=key_main, api_base="https://openrouter.ai/api/v1")
+            # Initialize Auth LM with usage flag
+            lm_auth = dspy.LM(
+                model="openai/deepseek/deepseek-chat",
+                api_key=key_main,
+                api_base="https://openrouter.ai/api/v1",
+                extra_body={"usage": {"include": True}}
+            )
             
             # Initialize Anon LM (might be same key)
-            lm_anon = dspy.LM("openrouter/deepseek/deepseek-chat", api_key=key_anon, api_base="https://openrouter.ai/api/v1")
+            lm_anon = dspy.LM(
+                model="openai/deepseek/deepseek-chat",
+                api_key=key_anon_check,
+                api_base="https://openrouter.ai/api/v1",
+                extra_body={"usage": {"include": True}}
+            )
             
             # Default helper configuration (just for consistency, context managers override this)
-            dspy.configure(lm=lm_anon) 
+            dspy.settings.configure(lm=lm_anon) 
+            
+            # Note: We disabled litellm.success_callback = ["langfuse"] because it clashes with 
+            # the installed Langfuse/LiteLLM versions. We use manual tracing in the search endpoint instead.
             
             bot = GroundedGillBot()
-            print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon}")
+            print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon_check}")
         else:
             print("Warning: OPENROUTER_API_KEY not found. Bot disabled.")
             
@@ -184,12 +214,24 @@ class SearchResponse(BaseModel):
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
+@observe(name="search_endpoint")
 async def search(request: Request, req: SearchRequest):
+    # Set User ID in Langfuse Trace
+    # if hasattr(request.state, "user_id") and request.state.user_id:
+    #     langfuse_context.update_current_trace(user_id=request.state.user_id)
+    # else:
+    #     # Try finding anon IP
+    #     ip = get_real_remote_address(request)
+    #     langfuse_context.update_current_trace(user_id=f"anon-{ip}")
+
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
     # 1. Retrieve Evidence
+    # (Optional: wrap this in a span)
+    # with langfuse_context.observe(name="retrieve_evidence") as span:
     raw_results = search_engine.search_gill(req.query, limit=5)
+    # span.update(metadata={"hit_count": len(raw_results)})
     
     if not raw_results:
         return SearchResponse(
@@ -212,43 +254,118 @@ async def search(request: Request, req: SearchRequest):
             
             # Use specific LM context for this request
             with dspy.context(lm=target_lm):
-                # Forward pass
-                pred = bot(question=req.query, context_chunks=raw_results)
-                answer = pred.answer
-                citations = pred.citations
+                trace_name = "dspy_generation"
+                user_id = request.state.user_id if request.state.user_id else f"anon-{get_real_remote_address(request)}"
+                
+                # Manual trace management for better control
+                # We use the raw client instance `lf` created safely above inside `search` (Wait, I need to instantiate it here or outside)
+                # Actually, best practice is to instantiate a fresh client per request if relying on env vars, to pick up latest config or context?
+                # But typically `Langfuse()` is lightweight.
+                
+                lf_client = None
+                try:
+                    lf_client = Langfuse()
+                except:
+                    lf_client = None
 
-                # --- DEBUG LOGGING ---
-                # Print the actual specific prompts/responses to console for user visibility
-                if hasattr(target_lm, "history") and target_lm.history:
-                    last_run = target_lm.history[-1]
-                    print("\n" + "="*50)
-                    print(" [DSPy INTERACTION LOG] ")
-                    print("="*50)
+                generation = None
+                
+                # Context managed generation
+                # We check if client is available. If so, we use it.
+                # If not, we just run the bot.
+                
+                if lf_client:
+                    # Create context manager for generation
+                    gen_ctx = lf_client.start_as_current_observation(
+                        name="bot_forward",
+                        as_type="generation"
+                    )
+                    # We manually enter the context
+                    generation = gen_ctx.__enter__()
+                    # Update generation with input/metadata immediately
+                    if generation:
+                        generation.update(input=req.query)
+                        # We cannot set user_id on a generation typically, it belongs to the trace.
+                        # But we can try setting it on the context via `lf_client.update_current_trace(user_id=...)`
+                        # However, for now let's skip setting user_id on generation explicitly as it inherits from trace.
+                        lf_client.update_current_trace(user_id=user_id)
+                else:
+                    gen_ctx = None
+                    generation = None
+
+                try:
+                    pred = bot(question=req.query, context_chunks=raw_results)
+                    answer = pred.answer
+                    citations = pred.citations
                     
-                    # Prompt / Messages
-                    print("\n--- PROMPT / MESSAGES ---")
-                    if "messages" in last_run:
-                        for m in last_run["messages"]:
-                            role = m.get("role", "unknown").upper()
-                            content = m.get("content", "")
-                            # Print full content for verification
-                            print(f"[{role}]: {content}")
-                    else:
-                         print(last_run.get("prompt", "No prompt found"))
-
-                    # Response
-                    print("\n--- RESPONSE ---")
-                    # Try to parse response content safely
-                    try:
-                        resp_obj = last_run.get("response")
-                        if hasattr(resp_obj, "choices"):
-                             print(resp_obj.choices[0].message.content)
+                    if generation:
+                        generation.update(output=answer)
+                        
+                except Exception as e:
+                    if generation:
+                         generation.update(level="ERROR", status_message=str(e))
+                    raise e
+                    
+                finally:
+                    # --- DEBUG LOGGING & USAGE TRACKING ---
+                    if hasattr(target_lm, "history") and target_lm.history:
+                        last_run = target_lm.history[-1]
+                        
+                        # Console Debug First
+                        print("\n" + "="*50)
+                        print(" [DSPy INTERACTION LOG] ")
+                        print("="*50)
+                        
+                        # ... Log Prompt ...
+                        if "messages" in last_run:
+                            print("\n--- PROMPT / MESSAGES ---")
+                            for m in last_run["messages"]:
+                                print(f"[{m.get('role','').upper()}]: {m.get('content','')}")
                         else:
-                             print(resp_obj)
-                    except:
-                        print("Could not parse response object")
+                            print(last_run.get("prompt", "No prompt"))
+                        
+                        # ... Log Response ...
+                        print("\n--- RESPONSE ---")
+                        try:
+                            resp_obj = last_run.get("response")
+                            if hasattr(resp_obj, "choices"):
+                                    print(resp_obj.choices[0].message.content)
+                            else:
+                                    print(resp_obj)
+                        except:
+                            print("Could not parse response object")
+                        
+                        # Usage
+                        usage = last_run.get("usage")
+                        print("\n--- USAGE ---")
+                        print(f"Usage: {usage}")
+                        print("="*50 + "\n")
+
+                        # Update Langfuse Generation Usage
+                        if generation and usage:
+                            cost_details = last_run.get("cost_details", {})
+                            lf_usage = {
+                                "input": usage.get("prompt_tokens"),
+                                "output": usage.get("completion_tokens"),
+                                "total": usage.get("total_tokens"),
+                                "unit": "TOKENS", 
+                            }
+                            lf_cost = {
+                                "total": usage.get("cost"),
+                                "input": cost_details.get("upstream_inference_prompt_cost"),
+                                "output": cost_details.get("upstream_inference_completions_cost")
+                            }
+                            
+                            model_name = last_run.get("model") or "deepseek-chat"
+                        generation.update(usage_details=lf_usage, cost_details=lf_cost, model=model_name)
                     
-                    print("="*50 + "\n")
+                    if gen_ctx:
+                        gen_ctx.__exit__(None, None, None)
+                    
+                    if lf_client:
+                        import asyncio
+                        await asyncio.sleep(0.5) 
+                        lf_client.flush()
                 # ---------------------
                 
             verified = True
@@ -257,6 +374,8 @@ async def search(request: Request, req: SearchRequest):
             if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
                   answer = f"Generated answer could not be verified against sources.\nError: {e}"
                   verified = False
+                  # Log exception to trace
+                  # langfuse_context.get_current_trace().score(name="verification", value=0, comment=str(e))
             else:
                   answer = f"Error generating answer: {e}"
                   verified = False
