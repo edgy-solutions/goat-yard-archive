@@ -5,6 +5,9 @@ import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
 import { useAuth, useUser } from '@clerk/clerk-react';
 import { usePostHog } from 'posthog-js/react';
+import { Toaster, toast } from 'sonner';
+import ReportModal from './components/ReportModal';
+import ResponseActions from './components/ResponseActions';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Footer from './components/Footer';
@@ -60,6 +63,29 @@ function App() {
             posthog.reset();
         }
     }, [isSignedIn, user, posthog]);
+
+    // User Feedback State
+    const [reportModalOpen, setReportModalOpen] = useState(false);
+    const [reportContext, setReportContext] = useState<{ query: string, evidenceIds: string[] } | null>(null);
+
+    const handleReportOpen = () => {
+        setReportContext({
+            query: lastSearchedQuery,
+            evidenceIds: response?.evidence.map(e => e.chunk_id) || []
+        });
+        setReportModalOpen(true);
+    };
+
+    const handleReportSubmit = (issueType: string, description: string) => {
+        posthog.capture('user_feedback_submitted', {
+            issue_type: issueType,
+            description: description,
+            user_query: reportContext?.query,
+            retrieved_chunk_ids: reportContext?.evidenceIds,
+            $set: { has_reported_issue: true }
+        });
+        toast.success("Report submitted. Thank you for helping improve the library.");
+    };
 
     // Track the query that ACTUALLY produced the results, for highlighting
     const [lastSearchedQuery, setLastSearchedQuery] = useState("");
@@ -261,6 +287,13 @@ function App() {
 
     return (
         <div className="flex h-[100dvh] overflow-hidden font-serif bg-parchment text-amber-950 relative">
+            <Toaster position="top-center" richColors />
+
+            <ReportModal
+                isOpen={reportModalOpen}
+                onClose={() => setReportModalOpen(false)}
+                onSubmit={handleReportSubmit}
+            />
 
             {/* Modal Backdrop & Container */}
             {(view === 'about' || view === 'contact') && (
@@ -359,6 +392,11 @@ function App() {
                                         );
                                     })}
                                 </div>
+
+                                <ResponseActions
+                                    responseId={lastSearchedQuery} // Using query as ID for now since we lack UUID
+                                    onReport={handleReportOpen}
+                                />
                             </div>
 
                             {/* Citations / Sources */}
@@ -518,7 +556,7 @@ function App() {
                 </div>
             </div>
 
-        </div>
+        </div >
     );
 }
 
