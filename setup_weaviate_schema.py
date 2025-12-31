@@ -10,7 +10,7 @@ This script initializes the Weaviate collections for:
 import os
 import weaviate
 import weaviate.classes as wvc
-from weaviate.classes.config import Configure, Property, DataType, ReferenceProperty
+from weaviate.classes.config import Configure, Property, DataType, ReferenceProperty, Tokenization
 
 def setup_weaviate_schema():
     """Initialize Weaviate collections."""
@@ -95,6 +95,7 @@ def setup_weaviate_schema():
                         name="verse_ref", 
                         data_type=DataType.TEXT,
                         description="Verse reference (e.g., 'GEN 46:06')",
+                        tokenization=Tokenization.FIELD,
                         skip_vectorization=True
                     ),
                     Property(
@@ -129,12 +130,16 @@ def setup_weaviate_schema():
                         name="scan_json", 
                         data_type=DataType.TEXT,
                         description="Serialized highlight box JSON",
-                        skip_vectorization=True
+                        skip_vectorization=True,
+                        index_filterable=False,
+                        index_searchable=False
                     ),
                     Property(
                         name="sentence_data",
                         data_type=DataType.OBJECT_ARRAY,
                         description="Sentence-level segmentation",
+                        index_filterable=False,
+                        index_searchable=False,
                         nested_properties=[
                             Property(name="sentence_id", data_type=DataType.TEXT),
                             Property(name="text", data_type=DataType.TEXT),
