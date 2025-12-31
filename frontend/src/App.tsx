@@ -10,6 +10,8 @@ import ReportModal from './components/ReportModal';
 import ResponseActions from './components/ResponseActions';
 import About from './pages/About';
 import Contact from './pages/Contact';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
 import Footer from './components/Footer';
 
 // Types (should actully be in types.ts but putting here for single-file portability if needed)
@@ -63,6 +65,15 @@ function App() {
             posthog.reset();
         }
     }, [isSignedIn, user, posthog]);
+
+    // Handle Deep Linking (e.g. ?view=privacy)
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const viewParam = params.get('view');
+        if (viewParam === 'privacy') setView('privacy');
+        if (viewParam === 'terms') setView('terms');
+        if (viewParam === 'contact') setView('contact');
+    }, []);
 
     // User Feedback State
     const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -264,7 +275,7 @@ function App() {
     const [showMobileGallery, setShowMobileGallery] = useState(false);
 
     // Navigation State
-    const [view, setView] = useState<'chat' | 'about' | 'contact'>('chat');
+    const [view, setView] = useState<'chat' | 'about' | 'contact' | 'privacy' | 'terms'>('chat');
 
     // Dynamic Book Availability
     const [availableBooks, setAvailableBooks] = useState<string[]>([]);
@@ -296,13 +307,15 @@ function App() {
             />
 
             {/* Modal Backdrop & Container */}
-            {(view === 'about' || view === 'contact') && (
+            {(view === 'about' || view === 'contact' || view === 'privacy' || view === 'terms') && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     {/* Centered Modal Card */}
-                    <div className="w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-lg shadow-2xl border border-[#8D6E63] bg-[#FDFBF7] animate-in zoom-in-95 duration-200 flex flex-col">
+                    <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-lg shadow-2xl border border-[#8D6E63] bg-[#FDFBF7] animate-in zoom-in-95 duration-200 flex flex-col">
                         <div className="flex-1 overflow-y-auto custom-scrollbar">
                             {view === 'about' && <About onClose={closeOverlay} />}
                             {view === 'contact' && <Contact onClose={closeOverlay} />}
+                            {view === 'privacy' && <Privacy onClose={closeOverlay} onOpenContact={() => setView('contact')} />}
+                            {view === 'terms' && <Terms onClose={closeOverlay} />}
                         </div>
                     </div>
                 </div>
@@ -552,7 +565,7 @@ function App() {
                 </div>
 
                 <div className="w-full rounded overflow-hidden shadow-lg border border-[#5D4037]">
-                    <Footer />
+                    <Footer onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
                 </div>
             </div>
 
