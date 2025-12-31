@@ -21,6 +21,7 @@ const POSTHOG_HOST = window.__RUNTIME_CONFIG__?.VITE_POSTHOG_HOST || import.meta
 if (POSTHOG_KEY) {
     posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST,
+        opt_out_capturing_by_default: true, // Strict Privacy: Defauts to OFF
         person_profiles: 'identified_only',
         session_recording: {
             maskAllInputs: false,

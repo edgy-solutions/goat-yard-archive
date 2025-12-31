@@ -3,7 +3,7 @@ import ScanGallery from './components/ScanGallery';
 import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
-import { useAuth, useUser } from '@clerk/clerk-react';
+import { useAuth } from '@clerk/clerk-react';
 import { usePostHog } from 'posthog-js/react';
 import { Toaster, toast } from 'sonner';
 import ReportModal from './components/ReportModal';
@@ -13,6 +13,7 @@ import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Footer from './components/Footer';
+import AnalyticsManager from './components/AnalyticsManager';
 
 // Types (should actully be in types.ts but putting here for single-file portability if needed)
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -50,21 +51,8 @@ function App() {
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
     const { getToken } = useAuth();
-    const { user, isSignedIn } = useUser();
+    // User hook removed as logic moved to AnalyticsManager
     const posthog = usePostHog();
-
-    // Link Clerk to PostHog
-    useEffect(() => {
-        if (isSignedIn && user) {
-            posthog.identify(user.id, {
-                email: user.primaryEmailAddress?.emailAddress,
-                name: user.fullName,
-                role: user.publicMetadata?.role
-            });
-        } else if (!isSignedIn) {
-            posthog.reset();
-        }
-    }, [isSignedIn, user, posthog]);
 
     // Handle Deep Linking (e.g. ?view=privacy)
     useEffect(() => {
@@ -299,6 +287,7 @@ function App() {
     return (
         <div className="flex h-[100dvh] overflow-hidden font-serif bg-parchment text-amber-950 relative">
             <Toaster position="top-center" richColors />
+            <AnalyticsManager />
 
             <ReportModal
                 isOpen={reportModalOpen}
