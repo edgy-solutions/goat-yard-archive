@@ -109,34 +109,66 @@ const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultI
         setImagesLoaded(prev => ({ ...prev, [pageNum]: true }));
     };
 
-    // Track Visible Page on Scroll
+    // Track current visible page to prevent flip-flopping
+    const currentVisiblePageRef = useRef<number | null>(null);
+    // Track visibility ratios of all pages (persists across callbacks)
+    const visibilityMapRef = useRef<Map<number, number>>(new Map());
+
+    // Track Visible Page on Scroll with hysteresis to prevent flip-flop
     useEffect(() => {
         if (!onVisiblePageChange || pages.length === 0) return;
 
+        // Reset visibility tracking when pages change
+        visibilityMapRef.current.clear();
+        currentVisiblePageRef.current = null;
+
         const observer = new IntersectionObserver(
             (entries) => {
-                // Find visible page(s)
-                const visibleEntries = entries.filter(entry => entry.isIntersecting);
-
-                if (visibleEntries.length > 0) {
-                    // Sort by visibility ratio if needed, or just take the first one
-                    // Taking the one with the largest intersection ratio usually "feels" right
-                    const mostVisible = visibleEntries.reduce((prev, current) =>
-                        (prev.intersectionRatio > current.intersectionRatio) ? prev : current
-                    );
-
-                    // Extract page number from ID
-                    const pageId = mostVisible.target.id;
+                // Update the persistent visibility map with changed entries
+                entries.forEach(entry => {
+                    const pageId = entry.target.id;
                     const pageNum = parseInt(pageId.replace('gallery-page-', ''), 10);
-
                     if (!isNaN(pageNum)) {
-                        onVisiblePageChange(pageNum);
+                        if (entry.isIntersecting) {
+                            visibilityMapRef.current.set(pageNum, entry.intersectionRatio);
+                        } else {
+                            visibilityMapRef.current.delete(pageNum);
+                        }
+                    }
+                });
+
+                // Find the page with the highest visibility from ALL visible pages
+                let maxRatio = 0;
+                let bestPage: number | null = null;
+
+                visibilityMapRef.current.forEach((ratio, pageNum) => {
+                    if (ratio > maxRatio) {
+                        maxRatio = ratio;
+                        bestPage = pageNum;
+                    }
+                });
+
+                if (bestPage !== null) {
+                    const currentPage = currentVisiblePageRef.current;
+
+                    // Hysteresis: Only change page if:
+                    // 1. There's no current page, or
+                    // 2. The current page is no longer visible at all, or
+                    // 3. The new page has at least 25% more visibility than current
+                    const currentRatio = currentPage !== null ? (visibilityMapRef.current.get(currentPage) || 0) : 0;
+                    const shouldSwitch = currentPage === null ||
+                        currentRatio === 0 ||
+                        (maxRatio - currentRatio > 0.25);
+
+                    if (shouldSwitch && bestPage !== currentPage) {
+                        currentVisiblePageRef.current = bestPage;
+                        onVisiblePageChange(bestPage);
                     }
                 }
             },
             {
                 root: containerRef.current,
-                threshold: [0.1, 0.5, 0.9] // Multiple thresholds for smoother detection
+                threshold: [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]
             }
         );
 

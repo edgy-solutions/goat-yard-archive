@@ -3,11 +3,16 @@ import ReactMarkdown from 'react-markdown';
 import { useQuery } from '@tanstack/react-query';
 
 // 1. The Regex for Gill's Style
-// Matches: "Rom. i. 4", "Matt. 3:16", "Genesis 1"
-// Logic: (Optional Num) + (Book Prefix from Whitelist) + (Optional Dot/Suffix) + (Chapter) + (Optional Verse)
+// Matches: "Rom. i. 4", "Matt. 3:16", "Genesis 1:1"
+// REQUIRES: Book + Chapter + Verse (complete reference only)
 // Fix: Replaced generic `[A-Z][a-z]+` with specific book list to avoid matching "Persic v", "God i"
-const BOOKS = "Gen|Exod|Lev|Num|Deut|Josh|Judg|Ruth|Sam|Kgs|Chr|Ezra|Neh|Est|Job|Ps|Prov|Eccl|Cant|Isa|Jer|Lam|Ezek|Dan|Hos|Joel|Amos|Obad|Jon|Mic|Nah|Hab|Zeph|Hag|Zech|Mal|Matt|Mark|Luke|John|Acts|Rom|Cor|Gal|Eph|Phil|Col|Thess|Tim|Tit|Phm|Heb|Jas|Pet|Jude|Rev";
-const GILL_REF_REGEX = new RegExp(`[1-3]?\\s?(?:${BOOKS})[a-z]*\\.?[\\s\\xa0]+[xviXVI0-9]+\\.?(?:[:.]?[\\s\\xa0]*[0-9]+)?`, 'g');
+// Fix2: Made verse number REQUIRED to avoid matching incomplete refs like "Gen. x"
+const BOOKS = "Gen|Exod|Lev|Num|Numb|Deut|Josh|Judg|Ruth|Sam|Kgs|Chr|Ezra|Neh|Est|Job|Ps|Psal|Prov|Eccl|Cant|Isa|Jer|Lam|Ezek|Dan|Hos|Joel|Amos|Obad|Jon|Mic|Nah|Hab|Zeph|Hag|Zech|Mal|Matt|Mark|Luke|John|Acts|Rom|Cor|Gal|Eph|Phil|Col|Thess|Tim|Tit|Phm|Heb|Jas|Pet|Jude|Rev";
+// Pattern: [optional 1-3] Book[suffix][. or ,] chapter. verse[,verse,verse...] (verse is REQUIRED)
+// Include all Roman numeral letters: i, v, x, l, c, d, m
+// Support verse lists like "14,15" or "14, 15"
+// Support comma after book: "1 John, iii. 8"
+const GILL_REF_REGEX = new RegExp(`[1-3]?\\s?(?:${BOOKS})[a-z]*[.,]?[\\s\\xa0]+[ivxlcdmIVXLCDM0-9]+[.:]\\s*[0-9]+(?:[,\\s]*[0-9]+)*\\.?`, 'g');
 
 interface VerseHoverProps {
     reference: string;

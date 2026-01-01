@@ -59,7 +59,7 @@ BOOK_MAP = {
     "gen": "GEN", "genesis": "GEN",
     "exod": "EXO", "exodus": "EXO", "ex": "EXO",
     "lev": "LEV", "leviticus": "LEV",
-    "num": "NUM", "numbers": "NUM",
+    "num": "NUM", "numbers": "NUM", "numb": "NUM",
     "deut": "DEU", "deuteronomy": "DEU",
     "josh": "JOS", "joshua": "JOS",
     "judg": "JDG", "judges": "JDG",
@@ -120,27 +120,39 @@ BOOK_MAP = {
 def normalize_reference(ref: str) -> str:
     """
     Smart fuzzy parsing of references like:
-    "Psal. xxxiii. 6" -> "PSALMS 33:6"
-    "2 Cor. iv. 6" -> "2 CORINTHIANS 4:6"
+    "Psal. xxxiii. 6" -> "PSA 33:6"
+    "2 Cor. iv. 6" -> "2CO 4:6"
+    "Heb. ii. 14,15." -> "HEB 2:14" (takes first verse in list)
+    "1 John, iii. 8." -> "1JN 3:8"
     """
-    # 1. Clean up chars
-    # Replace periods with spaces, remove excess usage
-    clean = ref.replace('.', ' ').replace(':', ' ').strip()
+    # 1. Pre-clean: strip trailing periods and handle verse lists
+    ref = ref.strip().rstrip('.')
+    
+    # Handle verse lists like "14,15" - just take the first verse
+    # We'll extract verse candidates at the end
+    
+    # 2. Replace periods and colons with spaces, also commas after book
+    # But preserve commas in verse lists for now
+    clean = ref.replace('.', ' ').replace(':', ' ')
+    # Replace comma followed by space (book separator) with space
+    clean = re.sub(r',\s+', ' ', clean)
     # Normalize whitespace
-    clean = re.sub(r'\s+', ' ', clean)
+    clean = re.sub(r'\s+', ' ', clean).strip()
     
     parts = clean.split()
     if len(parts) < 2: return ref
     
     # Parse parts from right to left: [Verse] [Chapter] [Book...]
     # Case: "2 Cor 4 6" -> Verse=6, Chap=4, Book="2 Cor"
-    # Case: "John 3 16" -> Verse=16, Chap=3, Book="John"
-    # Case: "Judges 4" -> Verse?, Chap=4? No, assume Ref is always Chap:Verse. 
-    # If standard Gill ref, it is always Book Chap Verse.
+    # Case: "Heb ii 14,15" -> Verse=14,15, Chap=ii, Book="Heb"
     
     verse_part = parts[-1]
     chapter_part = parts[-2]
     book_parts = parts[:-2]
+    
+    # Handle verse lists: take only the first verse
+    if ',' in verse_part:
+        verse_part = verse_part.split(',')[0]
     
     # Reassemble book key
     book_key = " ".join(book_parts).lower()

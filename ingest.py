@@ -749,9 +749,10 @@ class GillIngestionEngine:
             
             # Next Page (if spanning)
             if next_page_boxes:
-                 file_volume, _ = self.parse_page_info(page_name) # Ensure consistent volume
+                 # CRITICAL FIX: Use the 'volume' variable which respects the override!
+                 # Do NOT re-parse from filename as it might default to Vol 1 (legacy heuristic).
                  final_scan_data.append({
-                     "vol": file_volume,
+                     "vol": volume,
                      "page": page_num + 1,
                      "boxes": next_page_boxes
                  })

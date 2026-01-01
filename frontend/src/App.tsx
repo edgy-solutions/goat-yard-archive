@@ -369,9 +369,9 @@ function App() {
 
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-4xl px-4">
                                 {[
-                                    { q: "What does Gill say about the Serpent in the Garden?", label: "Genesis" },
-                                    { q: "What is the meaning of the Sermon on the Mount?", label: "Matthew" },
-                                    { q: "Explain Noah's Ark and the Flood.", label: "Genesis" }
+                                    { q: "What does Gill say about the Word of God?", label: "Theology" },
+                                    { q: "What does Gill say about baptism?", label: "Ecclesiology" },
+                                    { q: "What does Gill say about the Garden?", label: "Genesis" }
                                 ].map((item) => (
                                     <button
                                         key={item.q}
@@ -531,8 +531,8 @@ function App() {
                                             View Original Scan →
                                         </button>
                                     </div>
-                                    {/* Evidence content with independent scroll - pb-40 provides scroll room past search bar */}
-                                    <div id="evidence-scroll-container" className="p-6 pb-40 bg-white rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-[#E5E0D8] text-sm text-[#3E2723] font-serif leading-relaxed relative overflow-y-auto max-h-[50vh] custom-scrollbar group">
+                                    {/* Evidence content with independent scroll - pb-52 provides extra scroll room above search bar */}
+                                    <div id="evidence-scroll-container" className="p-6 pb-52 bg-white rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-[#E5E0D8] text-sm text-[#3E2723] font-serif leading-relaxed relative overflow-y-auto max-h-[50vh] custom-scrollbar group">
                                         {/* Paper texture overlay hint */}
                                         <div className="absolute inset-0 bg-[#FDFBF7] opacity-50 pointer-events-none mix-blend-multiply"></div>
 
@@ -681,7 +681,7 @@ function App() {
                     )}
                 </div>
 
-                <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-[#15100D] via-[#15100D]/90 to-transparent pt-12 pb-2">
+                <div className="absolute bottom-0 inset-x-0 z-50 bg-gradient-to-t from-[#15100D] via-[#15100D]/90 to-transparent pt-4 pb-3">
                     <Footer onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
                 </div>
             </div>
