@@ -18,6 +18,7 @@ from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot
 from .database import init_db
 from .webhooks import router as webhook_router
+from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 
 # Rate Limiting
@@ -82,6 +83,7 @@ app = FastAPI(title="Gill Commentary API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
 app.include_router(webhook_router)
+app.include_router(bible_router)
 
 # Auth Middleware
 @app.middleware("http")

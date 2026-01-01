@@ -1,9 +1,11 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import { TextWithVerses } from './TextWithVerses';
 
 interface HighlightedContentProps {
     content: string;
     sentenceData?: { sentence_id: string; text: string }[];
+    lemma?: string; // New Lemma field
     citations?: string[]; // List of citations [ID_Sxx] from the answer
     activeIds?: string[]; // IDs to explicitly highlight (if empty, highlight nothing specific)
 }
@@ -11,15 +13,29 @@ interface HighlightedContentProps {
 const HighlightedContent: React.FC<HighlightedContentProps> = ({
     content,
     sentenceData,
+    lemma,
     activeIds = []
 }) => {
-    // If no sentence data, just return content as is
+    // Render Lemma (if active)
+    const lemmaNode = lemma ? (
+        <span className="font-bold text-[#5D4037] mr-2 block mb-1">
+            <TextWithVerses text={lemma} />
+        </span>
+    ) : null;
+
+    // If no sentence data, just return content as is (with lemma prefixed)
     if (!sentenceData || sentenceData.length === 0) {
-        return <div className="leading-relaxed text-[#3E2723]"><ReactMarkdown>{content}</ReactMarkdown></div>;
+        return (
+            <div className="leading-relaxed text-[#3E2723]">
+                {lemmaNode}
+                <ReactMarkdown>{content}</ReactMarkdown>
+            </div>
+        );
     }
 
     return (
         <div className="leading-relaxed text-[#3E2723]">
+            {lemmaNode}
             {sentenceData.map((sent) => {
                 const id = sent.sentence_id;
                 // Highlight IF it is in the activeIds list.
@@ -35,9 +51,8 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
                         `}
                         title={id}
                     >
-                        <ReactMarkdown components={{ p: 'span' }}>
-                            {sent.text}
-                        </ReactMarkdown>{' '}
+                        {/* We use TextWithVerses to parse and add tooltips to Bible refs */}
+                        <TextWithVerses text={sent.text} />
                     </span>
                 );
             })}

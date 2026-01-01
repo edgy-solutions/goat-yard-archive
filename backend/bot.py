@@ -4,6 +4,17 @@ import re
 from typing import List
 
 # Define Signature
+# Load KJV Data (Global Cache)
+import json
+import os
+# Import shared KJV Index from bible_api (which handles MinIO fallback)
+try:
+    from .bible_api import BIBLE_MAP as KJV_DATA
+except ImportError:
+    # Fallback/Safeguard during testing or if circle import issues
+    KJV_DATA = {}
+    print("Warning: Could not import BIBLE_MAP from bible_api")
+
 class GillSignature(dspy.Signature):
     """You are an intimate 18th-century contemporary of Dr. John Gill.
     Answer questions by summarizing what "The Expositor" or "Dr. Gill" teaches in the provided context.
@@ -38,23 +49,22 @@ class GroundedGillBot(dspy.Module):
             citation_tag = chunk.get("citation", "Unknown") # e.g. [Vol 1, p. 287]
             verse_ref = chunk.get("verse_ref", "")
             
+            # Inject Scripture if available
+            scripture_text = KJV_DATA.get(verse_ref)
+            if scripture_text:
+                formatted_context += f"SOURCE: {verse_ref}\n"
+                formatted_context += f"[SCRIPTURE (KJV)]: \"{scripture_text}\"\n\n"
+                formatted_context += f"[GILL'S COMMENTARY ({citation_tag})]:\n"
+            else:
+                formatted_context += f"SOURCE: {verse_ref} ({citation_tag})\n"
+            
             # Sentence Granularity
             sentence_data = chunk.get("sentence_data", [])
-            
-            formatted_context += f"SOURCE: {verse_ref} ({citation_tag})\n"
             
             if sentence_data and isinstance(sentence_data, list):
                 # Format: [S01] Text...
                 for sent in sentence_data:
                     # Parse sentence ID to get suffix (e.g. GEN_46_06_S01 -> [S01])
-                    # Or just use the full ID? The user prompt implies short tags [S01] per chunk.
-                    # But if we have multiple chunks, [S01] is ambiguous.
-                    # Strategy: Use local index for readability, but LLM might get confused across chunks.
-                    # Better: Use the S-suffix if unique in this context block?
-                    # User example: "[S03] Gill notes..."
-                    # Let's use the local index format provided in ingestion "S01", "S02".
-                    # We will trust the LLM to contextually map it or we can prefix unique ID.
-                    
                     s_id = sent.get("sentence_id", "")
                     # Use FULL ID to ensure global uniqueness across multiple verses
                     text = sent.get("text", "")

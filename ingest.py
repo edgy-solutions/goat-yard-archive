@@ -241,10 +241,52 @@ class GillIngestionEngine:
         
         return footnotes
 
-    def process_sentences(self, verse_ref: str, full_text: str) -> List[Dict[str, Any]]:
-        """Segment text into sentences and generate structured sentence data."""
+    def process_sentences(self, verse_ref: str, full_text: str) -> Tuple[List[Dict[str, Any]], str]:
+        """Segment text into sentences better handling abbreviations. Returns (sentences, lemma_text)."""
         safe_ref = verse_ref.replace(" ", "_").replace(":", "_")
-        sentences = nltk.sent_tokenize(full_text)
+        lemma_text = ""
+        
+        # 1. Detect and Strip Lemma (Header Phrase ending in ']')
+        # Regex: Start of string, non-greedy match until first ']', followed by optional whitespace
+        # Example: "[Mat 5:1] And he said... ] Then he..." -> Lemma: "And he said... ]", Text: "Then he..."
+        match = re.match(r'^(.*?\])\s*', full_text)
+        if "]" in full_text and match:
+             lemma_text = match.group(1) # Capture the lemma
+             full_text = full_text[match.end():] # Slice after the match
+        
+        # Configure Tokenizer with Custom Abbreviations
+        # We load the default English tokenizer
+        try:
+            tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
+            # Add common biblical & theological abbreviations
+            abbrevs = {
+                'gen', 'exod', 'lev', 'num', 'deut', 'josh', 'judg', 'ruth', 'sam', 'kgs', 'chron', 'ezra', 'neh', 'esth', 'job', 'ps', 'prov', 'eccl', 'cant', 'isa', 'jer', 'lam', 'ezek', 'dan', 'hos', 'joel', 'amos', 'obad', 'jon', 'mic', 'nah', 'hab', 'zeph', 'hag', 'zech', 'mal',
+                'matt', 'rom', 'cor', 'gal', 'eph', 'phil', 'col', 'thess', 'tim', 'titus', 'phlm', 'heb', 'jas', 'pet', 'john', 'jude', 'rev',
+                'ver', 'vol', 'chap', 'sect', 'bk', 'lib', 'cap', 'ibid', 'id', 'vid', 'viz', 'sc', 'eq', 'cf', 'vs', 'mss', 'obj'
+            }
+            tokenizer._params.abbrev_types.update(abbrevs)
+            raw_sentences = tokenizer.tokenize(full_text)
+        except Exception as e:
+            logging.warning(f"Failed to configure custom tokenizer: {e}. Falling back to default.")
+            raw_sentences = nltk.sent_tokenize(full_text)
+
+        # Heuristic Post-Processing: Merge sentences starting with lowercase
+        merged_sentences = []
+        if raw_sentences:
+            merged_sentences.append(raw_sentences[0])
+            
+            for i in range(1, len(raw_sentences)):
+                curr = raw_sentences[i]
+                prev = merged_sentences[-1]
+                
+                # Check 1: Starts with lowercase (continuations)
+                # Check 2: Previous ended with common abbrv
+                if curr[0].islower() or (prev.strip().endswith('.') and len(prev.split()[-1]) <= 3 and prev.split()[-1].lower().replace('.','') in abbrevs):
+                     merged_sentences[-1] = f"{prev} {curr}"
+                else:
+                     merged_sentences.append(curr)
+        
+        sentences = merged_sentences
         
         structured_data = []
         for i, txt in enumerate(sentences):
@@ -254,7 +296,7 @@ class GillIngestionEngine:
                 "index": i
             })
         
-        return structured_data
+        return structured_data, lemma_text
     
     def extract_verse_number(self, verse_ref: str) -> str:
         """Extract verse number from reference."""
@@ -466,12 +508,12 @@ class GillIngestionEngine:
         """Process a single page and ingest into Weaviate."""
         logging.info(f"Processing {page_name}...")
         
+        volume, page_num = self.parse_page_info(page_name, volume_override)
+        
         # Setup Cache Path
         if entity_cache_dir:
             # Namespace cache by Volume to avoid collisions
             cache_file = entity_cache_dir / f"vol{volume}_{page_name}_entities.json"
-        
-        volume, page_num = self.parse_page_info(page_name, volume_override)
         
         # Load Entity Cache for this Page
         page_entity_cache = {}
@@ -594,6 +636,12 @@ class GillIngestionEngine:
                                   next_page_boxes = [nb]
                              elif isinstance(nb, list):
                                   next_page_boxes = nb
+                         
+                         # CRITICAL FIX: Update end_fallback to the end of the NEXT page's chunk
+                         # This allows the slicer to capture the full text if "stop_phrase" (next verse) isn't found
+                         if next_align.get("end_phrase"):
+                             end_fallback = next_align.get("end_phrase")
+                             logging.info(f"  extended end_fallback for {verse_ref} to next page")
                     
                     if next_align.get("verse_ref") != verse_ref and not stop_phrase:
                         # This is the start of the Next verse, so our stop phrase is its start
@@ -651,7 +699,7 @@ class GillIngestionEngine:
                 vector_content += "\n\nFootnotes:\n" + "\n".join(footnotes)
             
             # Process sentences
-            sentence_data = self.process_sentences(verse_ref, commentary_text)
+            sentence_data, lemma = self.process_sentences(verse_ref, commentary_text)
             
             # Meta extraction
             parts = verse_ref.split()
@@ -733,6 +781,7 @@ class GillIngestionEngine:
                     "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if verse_ref and ':' in verse_ref else 0,
                     "volume": volume,
                     "page_number": page_num,
+                    "lemma": lemma, # Store the extracted lemma for UI display
                     "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
                     "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
                     "footnotes": footnotes,
@@ -959,7 +1008,6 @@ if __name__ == "__main__":
                 base_data,
                 Path(args.alignment_dir),
                 qwen_dir,
-                args.volume,
                 args.volume,
                 args.recycle_entities,
                 Path(args.entity_cache_dir)

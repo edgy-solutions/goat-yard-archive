@@ -19,3 +19,6 @@ openai==2.14.0
 # Text Processing & NLP
 nltk
 rapidfuzz
+
+# minio setup
+minio

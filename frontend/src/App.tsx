@@ -163,8 +163,13 @@ function App() {
 
             const data = await res.json();
             setResponse(data);
-            if (data.evidence && data.evidence.length > 0) {
+
+            // Only show evidence if there are actual citations or if the answer DOESN'T indicate failure
+            // If citations are empty, it usually means "I regret..." or "No info found"
+            if (data.evidence && data.evidence.length > 0 && data.citations && data.citations.length > 0) {
                 setActiveEvidence(data.evidence[0]);
+            } else {
+                setActiveEvidence(null);
             }
         } catch (err) {
             console.error("Search failed:", err);
@@ -380,36 +385,55 @@ function App() {
                                 </div>
                                 <div className="prose prose-sm max-w-none text-[#3E2723] leading-relaxed">
                                     {response.answer.split('\n').map((line, i) => {
-                                        // Regex to match [ID_PATTERN] e.g. [GENESIS_29_34_S00]
-                                        const parts = line.split(/(\[[A-Z0-9_]+\])/g);
+                                        // Regex to match [ID_PATTERN] including lists: [GENESIS_29_34_S00, MATTHEW_1_1_S01]
+                                        // Allow comma and space in the capture group
+                                        const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
                                         return (
                                             <p key={i} className="mb-2">
                                                 {parts.map((part, partIdx) => {
-                                                    if (part.match(/^\[[A-Z0-9_]+\]$/)) {
-                                                        // Find matching evidence by checking if this ID exists in any evidence's sentence_data
-                                                        const match = response.evidence.find(ev =>
-                                                            ev.sentence_data?.some(s => `[${s.sentence_id}]` === part)
-                                                        );
+                                                    if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
+                                                        // Strip brackets
+                                                        const rawContent = part.replace(/^\[+|\]+$/g, '');
+                                                        // Split by comma to handle lists
+                                                        const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
 
-                                                        if (match) {
-                                                            const id = part.replace(/^\[+|\]+$/g, '');
-                                                            // Check if this specific ID is the currently focused one
-                                                            const isFocused = focusedSentenceId === id;
+                                                        // If we found valid IDs, map them. If none match evidence, just render text.
+                                                        // We check if AT LEAST ONE id matches evidence to treat this block as citations.
+                                                        const hasMatch = ids.some(id => response.evidence.find(ev =>
+                                                            ev.sentence_data?.some(s => s.sentence_id === id) // Check raw ID match (no brackets)
+                                                        ));
 
+                                                        if (hasMatch) {
                                                             return (
-                                                                <button
-                                                                    key={partIdx}
-                                                                    onClick={() => handleCitationClick(match, id)}
-                                                                    className={`font-bold hover:underline cursor-pointer px-1.5 rounded mx-0.5 text-xs align-middle shadow-sm transition-transform hover:scale-105
-                                                                        ${isFocused
-                                                                            ? 'bg-yellow-200 text-amber-950 border border-yellow-400'
-                                                                            : 'bg-amber-50 text-amber-900 border border-amber-200'
+                                                                <span key={partIdx}>
+                                                                    {ids.map((id, idIdx) => {
+                                                                        const match = response.evidence.find(ev =>
+                                                                            ev.sentence_data?.some(s => s.sentence_id === id)
+                                                                        );
+
+                                                                        if (match) {
+                                                                            const isFocused = focusedSentenceId === id;
+                                                                            return (
+                                                                                <button
+                                                                                    key={`${partIdx}-${idIdx}`}
+                                                                                    onClick={() => handleCitationClick(match, id)}
+                                                                                    className={`font-bold hover:underline cursor-pointer px-1.5 rounded mx-0.5 text-xs align-middle shadow-sm transition-transform hover:scale-105
+                                                                                        ${isFocused
+                                                                                            ? 'bg-yellow-200 text-amber-950 border border-yellow-400'
+                                                                                            : 'bg-amber-50 text-amber-900 border border-amber-200'
+                                                                                        }
+                                                                                    `}
+                                                                                    title={`View Source: ${match.verse_ref || match.citation}`}
+                                                                                >
+                                                                                    {match.verse_ref ? `[${match.verse_ref}]` : `[${id}]`}
+                                                                                </button>
+                                                                            );
                                                                         }
-                                                                    `}
-                                                                    title={`View Source: ${match.verse_ref || match.citation}`}
-                                                                >
-                                                                    {match.verse_ref ? `[${match.verse_ref}]` : part}
-                                                                </button>
+                                                                        // ID in list but not found in evidence? Render as text or ignore?
+                                                                        // Render as text to be safe
+                                                                        return <span key={`${partIdx}-${idIdx}`} className="text-gray-400 text-xs">[{id}]</span>;
+                                                                    })}
+                                                                </span>
                                                             );
                                                         }
                                                         return <span key={partIdx}>{part}</span>;
@@ -432,7 +456,7 @@ function App() {
                                 {response.evidence
                                     // Filter to only show evidence that is actually CITED in the answer
                                     .filter(ev => {
-                                        // If no citations in answer, show nothing (or maybe show all info if debugging? No, stricter is better)
+                                        // If no citations in answer, show nothing
                                         if (!response.citations || response.citations.length === 0) return false;
                                         if (!ev.sentence_data) return false;
 
@@ -440,6 +464,15 @@ function App() {
                                             response.citations.includes(`[${s.sentence_id}]`)
                                         );
                                     })
+                                    // De-duplicate evidence buttons based on the DISPLAY LABEL
+                                    // If two buttons would show "MATTHEW 7:6", we only want one.
+                                    .filter((ev, index, self) =>
+                                        index === self.findIndex((t) => {
+                                            const tLabel = t.verse_ref || t.citation;
+                                            const evLabel = ev.verse_ref || ev.citation;
+                                            return tLabel === evLabel && t.page === ev.page;
+                                        })
+                                    )
                                     .map((ev, idx) => (
                                         <button
                                             key={idx}

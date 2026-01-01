@@ -65,6 +65,13 @@ def main(filter_str=None):
     root_images = list(SOURCE_DIR.parent.glob("gill*.png"))
     files.extend(root_images)
     
+    # [NEW] Add KJV Index
+    kjv_index = Path("kjv_fast_lookup.json")
+    if kjv_index.exists():
+        files.append(kjv_index)
+    else:
+        print("⚠️ Warning: kjv_fast_lookup.json not found in root. Skipping upload.")
+    
     # Apply Filter
     if filter_str:
         print(f"🔍 Filtering for files containing: '{filter_str}'")

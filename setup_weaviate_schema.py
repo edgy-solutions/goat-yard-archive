@@ -116,6 +116,12 @@ def setup_weaviate_schema():
                         description="Full commentary text for this verse"
                     ),
                     Property(
+                        name="lemma",
+                        data_type=DataType.TEXT,
+                        description="The lemma phrases (e.g., 'And he said... ]') extracted from the start of the commentary.",
+                        skip_vectorization=True
+                    ),
+                    Property(
                         name="verse_ref", 
                         data_type=DataType.TEXT,
                         description="Verse reference (e.g., 'GEN 46:06')",

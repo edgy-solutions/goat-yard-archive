@@ -8,6 +8,9 @@ import { ClerkProvider } from '@clerk/clerk-react'
 
 import posthog from 'posthog-js'
 import { PostHogProvider } from 'posthog-js/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+const queryClient = new QueryClient()
 
 // Import publishable key (Runtime first, then Build-time)
 const PUBLISHABLE_KEY = window.__RUNTIME_CONFIG__?.VITE_CLERK_PUBLISHABLE_KEY || import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -40,7 +43,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
         <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
             <PostHogProvider client={posthog}>
-                <App />
+                <QueryClientProvider client={queryClient}>
+                    <App />
+                </QueryClientProvider>
             </PostHogProvider>
         </ClerkProvider>
     </React.StrictMode>,
