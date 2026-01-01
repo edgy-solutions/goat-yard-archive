@@ -167,7 +167,7 @@ class GillSearchEngine:
                 response = self.chunks.query.fetch_objects(
                     filters=ref_filter,
                     limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data"],
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
                     return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
             else:
@@ -178,7 +178,7 @@ class GillSearchEngine:
                     query_properties=["content", "verse_ref"],
                     filters=filters,
                     limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data"],
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
                     return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
         else:
@@ -188,7 +188,7 @@ class GillSearchEngine:
                 query_properties=["content", "verse_ref"],
                 filters=filters,
                 limit=limit,
-                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data"],
+                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
                 return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
             )
         
@@ -266,6 +266,7 @@ class GillSearchEngine:
                 "scan": scan_box,
                 "footnotes": obj.properties.get("footnotes", []),
                 "entities": entity_names,
+                "lemma": obj.properties.get("lemma"),
                 "score": obj.metadata.score if (obj.metadata and obj.metadata.score is not None) else 1.0 # Boost score for lookup
             })
             

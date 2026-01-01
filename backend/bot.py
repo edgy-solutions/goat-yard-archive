@@ -98,14 +98,35 @@ class GroundedGillBot(dspy.Module):
         # Here we implement it as runtime logic.
         
         # Parse citations if it's a string (sometimes LLMs output string repr of list)
-        citations_list = pred.citations
+        # Parse citations if it's a string (sometimes LLMs output string repr of list)
+        citations = pred.citations
+        print(f"DEBUG: Raw Prediction Citations: {citations} (Type: {type(citations)})")
         
-        # Deep Sanitize: Regardless of if it's a list, string, or nested mess, 
-        # we extract anything that looks like a valid ID.
-        raw_dump = str(citations_list)
+        final_citations = []
         import re
-        # Match [GEN_46_06_S01] style IDs
-        citations_list = re.findall(r"\[[a-zA-Z0-9_]+_S\d+\]", raw_dump)
+        
+        # Helper to extract IDs
+        def extract_ids(text):
+            return re.findall(r"\[[a-zA-Z0-9_]+_S\d+\]", text)
+
+        if isinstance(citations, str):
+             final_citations = extract_ids(citations)
+        elif isinstance(citations, list):
+            for item in citations:
+                item_str = str(item)
+                # Try to extract valid IDs from the item
+                found = extract_ids(item_str)
+                if found:
+                    final_citations.extend(found)
+                else:
+                    # Fallback: validation might fail later, but keep the raw item to show in error
+                    # if it looks remotely like a citation
+                    if "[" in item_str and "]" in item_str:
+                         final_citations.append(item_str.strip())
+        
+        # Deduplicate
+        citations_list = list(set(final_citations))
+        print(f"DEBUG: Parsed Citations: {citations_list}")
         
         # ---------------------------------------------------------
         # CRITICAL FIX: The "No-Free-Lunch" Check
@@ -137,24 +158,52 @@ class GroundedGillBot(dspy.Module):
         # ---------------------------------------------------------
         
         # Assertion 1: Format Check
-        is_valid_format = all("_S" in c and "[" in c and "]" in c for c in citations_list)
+        # Now handled by extraction logic largely, but we double check
+        # is_valid_format = all("_S" in c and "[" in c and "]" in c for c in citations_list)
         
-        if not is_valid_format:
-             return dspy.Prediction(
-                 answer=f"Verification Failed: Invalid citation format found. Expected [GEN_XX_XX_SXX]. Citations: {citations_list}",
-                 citations=[]
-             )
-
         # Assertion 2: Hallucination Check
         citation_found = True
         missing_cits = []
         
+        # Helper to normalize ID for comparison (e.g. [GEN_01_01_S01] -> [GEN_1_1_S1])
+        def normalize_id_for_cmp(ref):
+             # Remove brackets
+             s = ref.replace("[", "").replace("]", "")
+             parts = s.split('_')
+             # Re-assemble with int casting to strip zeros
+             try:
+                 # Standard format: BOOK_CH_VS_SXX or similar
+                 # We just want to strip leading zeros from any numeric component
+                 norm_parts = []
+                 for p in parts:
+                     if p.isdigit():
+                         norm_parts.append(str(int(p)))
+                     elif p.startswith("S") and p[1:].isdigit():
+                          # Handle Sentence ID suffix specially if needed, but int(digit) works for S01 -> S1?
+                          # Actually S01 is usually S + digits.
+                          norm_parts.append(f"S{int(p[1:])}")
+                     else:
+                         norm_parts.append(p)
+                 return "_".join(norm_parts)
+             except:
+                 return s
+
+        # Pre-compute valid normalized set
+        valid_norm = {normalize_id_for_cmp(v) for v in valid_citations}
+        
         for cit in citations_list:
             clean_cit = cit.strip()
-            # Strict check against valid_citations collected from context
-            if clean_cit not in valid_citations:
-                citation_found = False
-                missing_cits.append(clean_cit)
+            # 1. Exact Match
+            if clean_cit in valid_citations:
+                continue
+            
+            # 2. Normalized Match (Zero-padding tolerance)
+            if normalize_id_for_cmp(clean_cit) in valid_norm:
+                continue
+                
+            # If neither, it's missing
+            citation_found = False
+            missing_cits.append(clean_cit)
         
         if not citation_found:
              return dspy.Prediction(

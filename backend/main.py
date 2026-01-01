@@ -206,6 +206,7 @@ class EvidenceItem(BaseModel):
     footnotes: Optional[List[str]] = []
     entities: Optional[List[str]] = []
     sentence_data: Optional[List[Any]] = [] # New field for highlighting
+    lemma: Optional[str] = None # New Lemma field
     score: float
 
 class SearchResponse(BaseModel):
@@ -234,6 +235,10 @@ async def search(request: Request, req: SearchRequest):
     # (Optional: wrap this in a span)
     # with langfuse_context.observe(name="retrieve_evidence") as span:
     raw_results = search_engine.search_gill(req.query, limit=5)
+    if raw_results:
+        import logging
+        logging.error(f"DEBUG MAIN: First result lemma: '{raw_results[0].get('lemma')}'")
+        logging.error(f"DEBUG MAIN: First result keys: {raw_results[0].keys()}")
     # span.update(metadata={"hit_count": len(raw_results)})
     
     if not raw_results:
@@ -249,6 +254,25 @@ async def search(request: Request, req: SearchRequest):
     citations = []
     verified = False
     
+    # MANUAL MAPPING TO ENSURE LEMMA IS NOT LOST
+    evidence_objects = []
+    for r in raw_results:
+        ev = EvidenceItem(
+            chunk_id=r["chunk_id"],
+            content=r["content"],
+            verse_ref=r.get("verse_ref"),
+            citation=r["citation"],
+            vol=r["vol"],
+            page=r["page"],
+            scan=r.get("scan"),
+            footnotes=r.get("footnotes", []),
+            entities=r.get("entities", []),
+            sentence_data=r.get("sentence_data", []),
+            lemma=r.get("lemma"), # EXPLICIT
+            score=r["score"]
+        )
+        evidence_objects.append(ev)
+
     if bot:
         try:
             # Select LM based on auth status
@@ -409,7 +433,7 @@ async def search(request: Request, req: SearchRequest):
     return SearchResponse(
         answer=answer,
         citations=citations,
-        evidence=evidence_list,
+        evidence=evidence_objects,
         verified=verified
     )
 
