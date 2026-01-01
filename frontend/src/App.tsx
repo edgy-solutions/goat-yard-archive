@@ -369,9 +369,9 @@ function App() {
 
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-4xl px-4">
                                 {[
-                                    { q: "Who is the Angel of the Lord?", label: "Theology" },
-                                    { q: "Explain the Covenant of Grace.", label: "Covenant" },
-                                    { q: "What is Justification?", label: "Doctrine" }
+                                    { q: "What does Gill say about the Serpent in the Garden?", label: "Genesis" },
+                                    { q: "What is the meaning of the Sermon on the Mount?", label: "Matthew" },
+                                    { q: "Explain Noah's Ark and the Flood.", label: "Genesis" }
                                 ].map((item) => (
                                     <button
                                         key={item.q}

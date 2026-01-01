@@ -23,7 +23,7 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to highlighted sentence when activeIds changes
-    // Scrolls only within the evidence container, not the whole page
+    // Scrolls only within the evidence container, positions near TOP
     useEffect(() => {
         if (activeIds.length > 0) {
             const targetId = activeIds[0].replace(/[\[\]]/g, ''); // Remove brackets if present
@@ -31,13 +31,18 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
             const container = document.getElementById('evidence-scroll-container');
 
             if (element && container) {
-                // Calculate scroll position to center element in container
+                // Use getBoundingClientRect for accurate relative positioning
                 const elementRect = element.getBoundingClientRect();
                 const containerRect = container.getBoundingClientRect();
-                const scrollTop = element.offsetTop - container.offsetTop - (containerRect.height / 2) + (elementRect.height / 2);
+
+                // Calculate relative position of element within container
+                const relativeTop = elementRect.top - containerRect.top + container.scrollTop;
+
+                // Scroll to position element near TOP of container (with 20px offset for breathing room)
+                const targetScroll = relativeTop - 20;
 
                 container.scrollTo({
-                    top: Math.max(0, scrollTop),
+                    top: Math.max(0, targetScroll),
                     behavior: 'smooth'
                 });
             }
