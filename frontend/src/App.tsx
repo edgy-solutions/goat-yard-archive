@@ -356,7 +356,7 @@ function App() {
                 />
 
                 {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 flex flex-col custom-scrollbar pb-32">
+                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 flex flex-col custom-scrollbar">
 
                     {/* Empty State */}
                     {!response && !loading && !error && (
@@ -510,9 +510,9 @@ function App() {
                                 </div>
                             </div>
 
-                            {/* Active Context Snippet */}
+                            {/* Active Context Snippet - pb-44 ensures text can scroll above floating search bar */}
                             {activeEvidence && (
-                                <div className="mt-8 pt-6 border-t border-[#E5E0D8]">
+                                <div className="mt-8 pt-6 pb-44 border-t border-[#E5E0D8]">
                                     <div className="flex justify-between items-center mb-4">
                                         <h3 className="text-xs font-bold uppercase text-[#8D6E63] tracking-widest font-ui flex items-center gap-2">
                                             <span className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full"></span>

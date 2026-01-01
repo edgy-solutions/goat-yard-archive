@@ -50,42 +50,71 @@ def roman_to_int(s):
             
     return int_val
 
-# Comprehensive Mapping from Abbr -> Full Name (Key in JSON)
-# IMPORTANT: Keys in kjv_fast_lookup.json are predominantly standard USFM (e.g., "PSA", "ISA", "1SA")
-# unless build_bible_index.py successfully mapped them.
-# The USFM_TO_FULL map in build script was incomplete (missing OT), so most OT books are stored as "ISA", "PSA", etc.
-# NT books like MATTHEW are likely full names if they were in the map.
+# Comprehensive mapping: Common abbreviations -> USFM codes
+# USFM codes are the primary keys in kjv_fast_lookup.json (e.g., "JDG 11:4")
+# Source: get_md.py usfm_to_book_name
 
 BOOK_MAP = {
-    # OLD TESTAMENT (Mostly USFM codes because build script map was partial)
-    "gen": "GENESIS", "exod": "EXODUS", "lev": "LEVITICUS", "num": "NUMBERS", "deut": "DEUTERONOMY",
-    "josh": "JOSH", "judg": "JUDG", "ruth": "RUTH",
-    "1 sam": "1SA", "2 sam": "2SA", "sam": "1SA", 
-    "1 kgs": "1KI", "2 kgs": "2KI", "kgs": "1KI",
-    "1 chr": "1CH", "2 chr": "2CH", "chr": "1CH",
-    "ezra": "EZR", "neh": "NEH", "est": "EST",
-    "job": "JOB", "ps": "PSA", "psal": "PSA", "psa": "PSA", "psalm": "PSA", "psalms": "PSA",
-    "prov": "PRO", "eccl": "ECC", "cant": "SNG", # USFM for Song of Sol is SNG
-    "isa": "ISA", "jer": "JER", "lam": "LAM", "ezek": "EZK", "dan": "DAN",
-    "hos": "HOS", "joel": "JOL", "amos": "AMO", "obad": "OBA", "jon": "JON", "mic": "MIC",
-    "nah": "NAM", "hab": "HAB", "zeph": "ZEP", "hag": "HAG", "zech": "ZEC", "mal": "MAL",
+    # OLD TESTAMENT
+    "gen": "GEN", "genesis": "GEN",
+    "exod": "EXO", "exodus": "EXO", "ex": "EXO",
+    "lev": "LEV", "leviticus": "LEV",
+    "num": "NUM", "numbers": "NUM",
+    "deut": "DEU", "deuteronomy": "DEU",
+    "josh": "JOS", "joshua": "JOS",
+    "judg": "JDG", "judges": "JDG",
+    "ruth": "RUT",
+    "1 sam": "1SA", "2 sam": "2SA", "sam": "1SA", "1 samuel": "1SA", "2 samuel": "2SA",
+    "1 kgs": "1KI", "2 kgs": "2KI", "kgs": "1KI", "1 kings": "1KI", "2 kings": "2KI",
+    "1 chr": "1CH", "2 chr": "2CH", "chr": "1CH", "1 chronicles": "1CH", "2 chronicles": "2CH",
+    "ezra": "EZR", "ezr": "EZR",
+    "neh": "NEH", "nehemiah": "NEH",
+    "est": "EST", "esther": "EST",
+    "job": "JOB",
+    "ps": "PSA", "psal": "PSA", "psa": "PSA", "psalm": "PSA", "psalms": "PSA",
+    "prov": "PRO", "proverbs": "PRO",
+    "eccl": "ECC", "ecclesiastes": "ECC",
+    "cant": "SNG", "song": "SNG", "song of solomon": "SNG",
+    "isa": "ISA", "isaiah": "ISA",
+    "jer": "JER", "jeremiah": "JER",
+    "lam": "LAM", "lamentations": "LAM",
+    "ezek": "EZK", "ezekiel": "EZK",
+    "dan": "DAN", "daniel": "DAN",
+    "hos": "HOS", "hosea": "HOS",
+    "joel": "JOL",
+    "amos": "AMO",
+    "obad": "OBA", "obadiah": "OBA",
+    "jon": "JON", "jonah": "JON",
+    "mic": "MIC", "micah": "MIC",
+    "nah": "NAM", "nahum": "NAM",
+    "hab": "HAB", "habakkuk": "HAB",
+    "zeph": "ZEP", "zephaniah": "ZEP",
+    "hag": "HAG", "haggai": "HAG",
+    "zech": "ZEC", "zechariah": "ZEC",
+    "mal": "MAL", "malachi": "MAL",
     
-    # NEW TESTAMENT (Mapped to Full Names in build script)
-    "matt": "MATTHEW", "mat": "MATTHEW", "mt": "MATTHEW", 
-    "mark": "MARK", "mrk": "MARK", "mk": "MARK",
-    "luke": "LUKE", "luk": "LUKE", "lk": "LUKE",
-    "john": "JOHN", "jhn": "JOHN", "jn": "JOHN",
-    "acts": "ACTS", "act": "ACTS",
-    "rom": "ROMANS", "rom": "ROMANS",
-    "1 cor": "1 CORINTHIANS", "2 cor": "2 CORINTHIANS", "cor": "1 CORINTHIANS",
-    "gal": "GALATIANS", "eph": "EPHESIANS", "phil": "PHILIPPIANS", "col": "COLOSSIANS",
-    "1 thess": "1 THESSALONIANS", "2 thess": "2 THESSALONIANS", "thess": "1 THESSALONIANS",
-    "1 tim": "1 TIMOTHY", "2 tim": "2 TIMOTHY", "tim": "1 TIMOTHY",
-    "tit": "TITUS", "phm": "PHILEMON",
-    "heb": "HEBREWS", "jas": "JAMES", 
-    "1 pet": "1 PETER", "2 pet": "2 PETER", "pet": "1 PETER",
-    "1 john": "1 JOHN", "2 john": "2 JOHN", "3 john": "3 JOHN",
-    "jude": "JUDE", "rev": "REVELATION"
+    # NEW TESTAMENT
+    "matt": "MAT", "mat": "MAT", "mt": "MAT", "matthew": "MAT",
+    "mark": "MRK", "mrk": "MRK", "mk": "MRK",
+    "luke": "LUK", "luk": "LUK", "lk": "LUK",
+    "john": "JHN", "jhn": "JHN", "jn": "JHN",
+    "acts": "ACT", "act": "ACT",
+    "rom": "ROM", "romans": "ROM",
+    "1 cor": "1CO", "2 cor": "2CO", "cor": "1CO", "1 corinthians": "1CO", "2 corinthians": "2CO",
+    "gal": "GAL", "galatians": "GAL",
+    "eph": "EPH", "ephesians": "EPH",
+    "phil": "PHP", "philippians": "PHP",
+    "col": "COL", "colossians": "COL",
+    "1 thess": "1TH", "2 thess": "2TH", "thess": "1TH", "1 thessalonians": "1TH", "2 thessalonians": "2TH",
+    "1 tim": "1TI", "2 tim": "2TI", "tim": "1TI", "1 timothy": "1TI", "2 timothy": "2TI",
+    "tit": "TIT", "titus": "TIT",
+    "phm": "PHM", "philemon": "PHM",
+    "heb": "HEB", "hebrews": "HEB",
+    "jas": "JAS", "james": "JAS",
+    "1 pet": "1PE", "2 pet": "2PE", "pet": "1PE", "1 peter": "1PE", "2 peter": "2PE",
+    "1 john": "1JN", "2 john": "2JN", "3 john": "3JN",
+    "jude": "JUD",
+    "rev": "REV", "revelation": "REV"
 }
 
 def normalize_reference(ref: str) -> str:

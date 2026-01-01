@@ -253,20 +253,70 @@ class GillIngestionEngine:
             
         return None
 
-    def extract_footnotes(self, text: str, context_text: str) -> List[str]:
-        """Extract footnote definitions for references found in the text."""
+    def extract_footnotes(self, text: str, current_md: str, next_md: str = "") -> List[str]:
+        """
+        Extract footnote definitions for references found in the text.
+        
+        For spanning verses, we need to determine which PAGE each reference is on,
+        since footnote IDs reset per-page in the original work.
+        
+        Strategy:
+        1. Find where current_md ends in the merged context
+        2. For each ref in `text`, find its position
+        3. If ref appears in portion from current_md -> search current_md for definition
+        4. If ref appears in portion from next_md -> search next_md for definition
+        """
         # Find refs like [^1], [^12] but NOT followed by a colon (which would indicate a definition)
         refs = re.findall(r'\[\^(\d+)\](?!:)', text)
         footnotes = []
         unique_refs = sorted(list(set(refs)), key=lambda x: int(x))
         
+        # Determine page boundary in the merged text
+        # We search `text` against both pages to determine affinity
+        current_boundary = len(current_md)
+        merged_context = current_md + "\n" + next_md
+        
         for ref in unique_refs:
+            ref_pattern = re.compile(rf'\[\^{ref}\](?!:)')
+            
+            # Find where this ref appears in the sliced text
+            # Then map that to the merged context to determine page affinity
+            ref_match_in_text = ref_pattern.search(text)
+            if not ref_match_in_text:
+                continue
+                
+            # Find this reference's position in the merged context
+            # Use fuzzy matching since text was sliced from merged context
+            ref_pos_in_merged = merged_context.find(text[:50])  # Use start of text as anchor
+            if ref_pos_in_merged == -1:
+                ref_pos_in_merged = 0
+            
+            actual_ref_pos = ref_pos_in_merged + ref_match_in_text.start()
+            
+            # Determine which page to search for definition
+            if actual_ref_pos < current_boundary:
+                # Reference is on current page, search current_md for definition
+                search_context = current_md
+                logging.debug(f"Footnote [{ref}] on current page")
+            else:
+                # Reference is on next page, search next_md for definition
+                search_context = next_md if next_md else current_md
+                logging.debug(f"Footnote [{ref}] on next page")
+            
             # Search for definition [^ref]: ... at start of line
-            pattern = re.compile(rf"^\[\^{ref}\]:\s*(.*)", re.MULTILINE)
-            match = pattern.search(context_text)
+            def_pattern = re.compile(rf"^\[\^{ref}\]:\s*(.*)", re.MULTILINE)
+            match = def_pattern.search(search_context)
             if match:
                 defn = match.group(1).strip()
                 footnotes.append(f"[{ref}] {defn}")
+            else:
+                # Fallback: try the other page if not found
+                fallback_context = next_md if search_context == current_md else current_md
+                match = def_pattern.search(fallback_context)
+                if match:
+                    defn = match.group(1).strip()
+                    footnotes.append(f"[{ref}] {defn}")
+                    logging.debug(f"Footnote [{ref}] found in fallback context")
         
         return footnotes
 
@@ -719,8 +769,8 @@ class GillIngestionEngine:
                 continue
             
             # Extract Footnotes
-            # We look for definitions in both current and next page (as the ref could be anywhere)
-            footnotes = self.extract_footnotes(commentary_text, full_context_text)
+            # Pass current_md and next_md separately so we can match refs to correct page definitions
+            footnotes = self.extract_footnotes(commentary_text, current_md, next_md)
             
             # Clean text (remove footnotes and next-verse headers)
             commentary_text = self.clean_text(commentary_text)

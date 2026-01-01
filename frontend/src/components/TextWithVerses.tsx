@@ -69,14 +69,14 @@ const SimpleTooltip: React.FC<{ content: string; children: React.ReactNode }> = 
 
     return (
         <>
-            <div
+            <span
                 ref={triggerRef}
-                className="inline-block cursor-help border-b border-dotted border-gray-400"
+                className="inline cursor-help border-b border-dotted border-gray-400"
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={() => setIsVisible(false)}
             >
                 {children}
-            </div>
+            </span>
             {isVisible && createPortal(
                 <div
                     className="fixed z-[99999] px-3 py-2 bg-gray-900 text-white text-xs rounded shadow-2xl min-w-[200px] max-w-[320px] pointer-events-none transition-opacity duration-200"
@@ -158,10 +158,7 @@ export const TextWithVerses: React.FC<TextWithVersesProps> = ({ text, renderMark
                 // 1. Is it a Verse Ref?
                 if (part.match(new RegExp(`^${GILL_REF_REGEX.source}$`))) {
                     return (
-                        <span key={index} className="group/verse relative inline-block cursor-help font-medium decoration-dotted underline decoration-[#D7CCC8]">
-                            {/* The VerseHover component handles the tooltip and styling for the text itself */}
-                            <VerseHover reference={part}>{part}</VerseHover>
-                        </span>
+                        <VerseHover key={index} reference={part}>{part}</VerseHover>
                     );
                 }
 
@@ -184,7 +181,7 @@ export const TextWithVerses: React.FC<TextWithVersesProps> = ({ text, renderMark
                     };
 
                     return (
-                        <span key={index} className="group/verse relative inline-block cursor-pointer align-super text-[10px] text-[#8D6E63] font-bold hover:text-[#5D4037] ml-0.5" onClick={scrollToFootnote}>
+                        <span key={index} className="cursor-pointer align-super text-[10px] text-[#8D6E63] font-bold hover:text-[#5D4037]" onClick={scrollToFootnote}>
                             <SimpleTooltip content={fnContent}>
                                 <span className="underline decoration-dotted decoration-[#D7CCC8]">[{fnIndex}]</span>
                             </SimpleTooltip>
@@ -194,15 +191,27 @@ export const TextWithVerses: React.FC<TextWithVersesProps> = ({ text, renderMark
 
                 // 3. Plain Text
                 if (renderMarkdown) {
+                    // Preserve leading/trailing whitespace that ReactMarkdown might strip
+                    const leadingSpace = part.match(/^(\s+)/)?.[1] || '';
+                    const trailingSpace = part.match(/(\s+)$/)?.[1] || '';
+                    const trimmedPart = part.trim();
+
+                    if (!trimmedPart) {
+                        // Part is only whitespace, render it directly
+                        return <span key={index}>{part}</span>;
+                    }
+
                     return (
-                        <span key={index} className="inline">
+                        <span key={index}>
+                            {leadingSpace}
                             <ReactMarkdown
                                 components={{
-                                    p: ({ node, ...props }) => <span {...props} /> // Render spans effectively to keep inline
+                                    p: ({ node, ...props }) => <span {...props} />
                                 }}
                             >
-                                {part}
+                                {trimmedPart}
                             </ReactMarkdown>
+                            {trailingSpace}
                         </span>
                     );
                 }

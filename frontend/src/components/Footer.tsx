@@ -35,9 +35,9 @@ const Footer: React.FC<FooterProps> = ({ onOpenPrivacy, onOpenTerms }) => {
 
                 {/* Right Side: Links */}
                 <div className="flex-1 min-w-[200px] flex justify-center md:justify-end items-center space-x-4 md:space-x-6 flex-wrap">
-                    <span className="text-[#D7CCC8] text-xs whitespace-nowrap">Powered by <a href="https://www.edgy-solutions.com" className="hover:text-amber-400 text-amber-200/80 transition-colors underline decoration-amber-800/50">Edgy Solutions</a></span>
+                    <span className="text-[#D7CCC8] text-xs whitespace-nowrap">Powered by <a href="https://www.edgy-solutions.com" className="text-[#E6D5AC] hover:text-white transition-colors underline decoration-[#B45309]/50 hover:decoration-[#B45309]">Edgy Solutions</a></span>
                     <span className="text-[#5D4037] text-xs hidden md:inline">|</span>
-                    <span className="text-[#D7CCC8] text-xs whitespace-nowrap">Text via <a href="https://standardbearer.org/" className="hover:text-amber-400 text-amber-200/80 transition-colors underline decoration-amber-800/50">Baptist Standard Bearer</a></span>
+                    <span className="text-[#D7CCC8] text-xs whitespace-nowrap">Text via <a href="https://standardbearer.org/" className="text-[#E6D5AC] hover:text-white transition-colors underline decoration-[#B45309]/50 hover:decoration-[#B45309]">Baptist Standard Bearer</a></span>
                 </div>
 
             </div>
