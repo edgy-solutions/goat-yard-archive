@@ -70,7 +70,7 @@ const SimpleTooltip: React.FC<{ content: string; children: React.ReactNode }> = 
         }
     };
 
-    const gap_adjustment = (h: number) => 0; // Placeholder if needed
+    const gap_adjustment = (_h: number) => 0; // Placeholder if needed
 
     return (
         <>
