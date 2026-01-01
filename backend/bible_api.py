@@ -117,79 +117,100 @@ BOOK_MAP = {
     "rev": "REV", "revelation": "REV"
 }
 
-def normalize_reference(ref: str) -> str:
+def normalize_reference(ref: str) -> list[str]:
     """
     Smart fuzzy parsing of references like:
-    "Psal. xxxiii. 6" -> "PSA 33:6"
-    "2 Cor. iv. 6" -> "2CO 4:6"
-    "Heb. ii. 14,15." -> "HEB 2:14" (takes first verse in list)
-    "1 John, iii. 8." -> "1JN 3:8"
+    "Psal. xxxiii. 6" -> ["PSA 33:6"]
+    "2 Cor. iv. 6" -> ["2CO 4:6"]
+    "Heb. ii. 14,15." -> ["HEB 2:14", "HEB 2:15"]
+    "Joshua iii. 15, 16, 17" -> ["JOS 3:15", "JOS 3:16", "JOS 3:17"]
     """
-    # 1. Pre-clean: strip trailing periods and handle verse lists
+    # 1. Pre-clean: strip trailing periods
     ref = ref.strip().rstrip('.')
     
-    # Handle verse lists like "14,15" - just take the first verse
-    # We'll extract verse candidates at the end
+    # 2. Compress verse lists: "15, 16" -> "15,16" (remove space after comma if between digits)
+    # This prepares the verse part to be a single token for splitting
+    clean = re.sub(r'(?<=\d),\s+(?=\d)', ',', ref)
     
-    # 2. Replace periods and colons with spaces, also commas after book
-    # But preserve commas in verse lists for now
-    clean = ref.replace('.', ' ').replace(':', ' ')
-    # Replace comma followed by space (book separator) with space
+    # 3. Replace periods and colons with spaces
+    clean = clean.replace('.', ' ').replace(':', ' ')
+    
+    # 4. Replace remaining ", " with space (likely book separator like "Gen, 1")
     clean = re.sub(r',\s+', ' ', clean)
-    # Normalize whitespace
+    
+    # 5. Normalize whitespace
     clean = re.sub(r'\s+', ' ', clean).strip()
     
     parts = clean.split()
-    if len(parts) < 2: return ref
+    if len(parts) < 2: return [ref]
     
-    # Parse parts from right to left: [Verse] [Chapter] [Book...]
-    # Case: "2 Cor 4 6" -> Verse=6, Chap=4, Book="2 Cor"
-    # Case: "Heb ii 14,15" -> Verse=14,15, Chap=ii, Book="Heb"
+    # Parse parts from right to left: [VersePart] [Chapter] [Book...]
+    # VersePart might be "14,15" due to step 2
     
     verse_part = parts[-1]
     chapter_part = parts[-2]
     book_parts = parts[:-2]
     
-    # Handle verse lists: take only the first verse
-    if ',' in verse_part:
-        verse_part = verse_part.split(',')[0]
-    
     # Reassemble book key
     book_key = " ".join(book_parts).lower()
     
-    # 1. Normalize Book
+    # Normalize Book
     book_norm = BOOK_MAP.get(book_key, book_key.upper())
     
-    # 2. Normalize Chapter (Roman)
+    # Normalize Chapter (Roman)
     chapter_num = roman_to_int(chapter_part) if not chapter_part.isdigit() else int(chapter_part)
     
-    # 3. Normalize Verse
-    verse_num = int(verse_part) if verse_part.isdigit() else verse_part
+    # Normalize Verses (split by comma)
+    verse_nums = verse_part.split(',')
     
-    return f"{book_norm} {chapter_num}:{verse_num}"
+    results = []
+    for v_str in verse_nums:
+        if not v_str: continue
+        v_num = int(v_str) if v_str.isdigit() else v_str
+        results.append(f"{book_norm} {chapter_num}:{v_num}")
+        
+    return results
 
 @router.get("/api/verse/{ref}")
 def get_verse_text(ref: str):
     """
     Returns verse text.
     First tries strict lookup.
-    Then tries normalization.
+    Then tries normalization (handling ranges).
     """
     # 0. Raw Decode is handled by FastAPI
     ref = ref.strip()
     
-    # 1. Direct Lookup (e.g. if frontend sent "GENESIS 1:1")
+    # 1. Direct Lookup (e.g. if frontend sent "GENESIS 1:1" or a specific key)
     if ref in BIBLE_MAP:
         return {"ref": ref, "text": BIBLE_MAP[ref]}
         
-    # 2. Normalize
+    # 2. Normalize (returns list of keys)
     try:
-        norm_ref = normalize_reference(ref)
-        if norm_ref in BIBLE_MAP:
-            return {"ref": norm_ref, "text": BIBLE_MAP[norm_ref]}
+        norm_refs = normalize_reference(ref)
+        
+        texts = []
+        found_any = False
+        primary_ref = None
+        
+        for nr in norm_refs:
+            if nr in BIBLE_MAP:
+                if primary_ref is None: primary_ref = nr
+                texts.append(BIBLE_MAP[nr])
+                found_any = True
+            # We skip missing verses in the range gracefully
+            
+        if found_any:
+            # Construct a display ref from the first found
+            display_ref = primary_ref
+            if len(texts) > 1:
+                display_ref += "..." 
+            
+            return {"ref": display_ref, "text": " ".join(texts)}
+            
     except Exception as e:
         print(f"Verse Normalize Error for {ref}: {e}")
         pass
         
     # 3. Fail gracefully
-    raise HTTPException(status_code=404, detail=f"Verse not found: {ref} (Normalized: {norm_ref if 'norm_ref' in locals() else 'Failed'})")
+    raise HTTPException(status_code=404, detail=f"Verse not found: {ref}")
