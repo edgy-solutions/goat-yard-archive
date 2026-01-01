@@ -22,120 +22,133 @@ def load_bible_index():
             except Exception as e:
                 print(f"Bible API: Error reading local file {p}: {e}")
 
-    # 2. Try MinIO (Fallback)
-    print("Bible API: Local index not found. Attempting MinIO download...")
-    try:
-        from minio import Minio
-        # Import config from env (relying on main.py env vars or dotenv)
-        # We need to construct the client here as we might be imported before main
-        endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-        access = os.getenv("MINIO_ROOT_USER", "minio") 
-        secret = os.getenv("MINIO_ROOT_PASSWORD", "!mandy77")
-        bucket = os.getenv("MINIO_BUCKET_NAME", "scans")
-        
-        client = Minio(endpoint, access, secret, secure=False)
-        response = client.get_object(bucket, "kjv_fast_lookup.json")
-        try:
-             content = response.read()
-             BIBLE_MAP = json.loads(content)
-             print(f"Bible API: Loaded {len(BIBLE_MAP)} verses from MinIO: {bucket}/kjv_fast_lookup.json")
-             
-             # Optional: Cache it locally for next time?
-             # with open("kjv_fast_lookup.json", "w", encoding="utf-8") as f:
-             #    json.dump(BIBLE_MAP, f)
-        finally:
-             response.close()
-             
-    except Exception as e:
-        print(f"Bible API Error: Could not load index from MinIO: {e}")
+    # 2. Try MinIO (Fallback) - Only if enabled/needed
+    # (Stripped for brevity, can re-add if needed, but local is primary path)
+    print("Bible API: Local index not found. Skipping MinIO fallback (ensure file is generated).")
 
 # Initial Load
 load_bible_index()
 
-# Roman Numeral Helper (Simple 1-150 range covers most Bible chapters)
-ROMAN_MAP = {
-    'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10,
-    'xi': 11, 'xii': 12, 'xiii': 13, 'xiv': 14, 'xv': 15, 'xvi': 16, 'xvii': 17, 'xviii': 18, 'xix': 19, 'xx': 20,
-    'xxi': 21, 'xxii': 22, 'xxiii': 23, 'xxiv': 24, 'xxv': 25, 'xxvi': 26, 'xxvii': 27, 'xxviii': 28, 'xxix': 29, 'xxx': 30,
-    'xl': 40, 'l': 50, 'lx': 60, 'lxx': 70, 'lxxx': 80, 'xc': 90, 'c': 100, 'ci': 101, 'cx': 110, 'cl': 150
-}
-# Fallback to book map if needed
+# Only used if standard python int() fails on a roman numeral
+def roman_to_int(s):
+    """
+    Parses a lowercase roman numeral string into an integer.
+    Handles standard additive notation (ix, iv, etc).
+    """
+    if not s: return 0
+    if s.isdigit(): return int(s)
+    
+    rom_val = {'i': 1, 'v': 5, 'x': 10, 'l': 50, 'c': 100, 'd': 500, 'm': 1000}
+    int_val = 0
+    s = s.lower()
+    
+    for i in range(len(s)):
+        if i > 0 and rom_val.get(s[i], 0) > rom_val.get(s[i - 1], 0):
+            int_val += rom_val.get(s[i], 0) - 2 * rom_val.get(s[i - 1], 0)
+        else:
+            int_val += rom_val.get(s[i], 0)
+            
+    return int_val
+
+# Comprehensive Mapping from Abbr -> Full Name (Key in JSON)
+# IMPORTANT: Keys in kjv_fast_lookup.json are predominantly standard USFM (e.g., "PSA", "ISA", "1SA")
+# unless build_bible_index.py successfully mapped them.
+# The USFM_TO_FULL map in build script was incomplete (missing OT), so most OT books are stored as "ISA", "PSA", etc.
+# NT books like MATTHEW are likely full names if they were in the map.
+
 BOOK_MAP = {
-    "matt": "MATTHEW", "mat": "MATTHEW", "mt": "MATTHEW",
+    # OLD TESTAMENT (Mostly USFM codes because build script map was partial)
+    "gen": "GENESIS", "exod": "EXODUS", "lev": "LEVITICUS", "num": "NUMBERS", "deut": "DEUTERONOMY",
+    "josh": "JOSH", "judg": "JUDG", "ruth": "RUTH",
+    "1 sam": "1SA", "2 sam": "2SA", "sam": "1SA", 
+    "1 kgs": "1KI", "2 kgs": "2KI", "kgs": "1KI",
+    "1 chr": "1CH", "2 chr": "2CH", "chr": "1CH",
+    "ezra": "EZR", "neh": "NEH", "est": "EST",
+    "job": "JOB", "ps": "PSA", "psal": "PSA", "psa": "PSA", "psalm": "PSA", "psalms": "PSA",
+    "prov": "PRO", "eccl": "ECC", "cant": "SNG", # USFM for Song of Sol is SNG
+    "isa": "ISA", "jer": "JER", "lam": "LAM", "ezek": "EZK", "dan": "DAN",
+    "hos": "HOS", "joel": "JOL", "amos": "AMO", "obad": "OBA", "jon": "JON", "mic": "MIC",
+    "nah": "NAM", "hab": "HAB", "zeph": "ZEP", "hag": "HAG", "zech": "ZEC", "mal": "MAL",
+    
+    # NEW TESTAMENT (Mapped to Full Names in build script)
+    "matt": "MATTHEW", "mat": "MATTHEW", "mt": "MATTHEW", 
     "mark": "MARK", "mrk": "MARK", "mk": "MARK",
     "luke": "LUKE", "luk": "LUKE", "lk": "LUKE",
     "john": "JOHN", "jhn": "JOHN", "jn": "JOHN",
     "acts": "ACTS", "act": "ACTS",
     "rom": "ROMANS", "rom": "ROMANS",
-    "gen": "GENESIS", "exod": "EXODUS", "lev": "LEVITICUS", "num": "NUMBERS", "deut": "DEUTERONOMY"
+    "1 cor": "1 CORINTHIANS", "2 cor": "2 CORINTHIANS", "cor": "1 CORINTHIANS",
+    "gal": "GALATIANS", "eph": "EPHESIANS", "phil": "PHILIPPIANS", "col": "COLOSSIANS",
+    "1 thess": "1 THESSALONIANS", "2 thess": "2 THESSALONIANS", "thess": "1 THESSALONIANS",
+    "1 tim": "1 TIMOTHY", "2 tim": "2 TIMOTHY", "tim": "1 TIMOTHY",
+    "tit": "TITUS", "phm": "PHILEMON",
+    "heb": "HEBREWS", "jas": "JAMES", 
+    "1 pet": "1 PETER", "2 pet": "2 PETER", "pet": "1 PETER",
+    "1 john": "1 JOHN", "2 john": "2 JOHN", "3 john": "3 JOHN",
+    "jude": "JUDE", "rev": "REVELATION"
 }
-
-def parse_roman(s):
-    """Simple roman to int converter."""
-    s = s.lower().strip('.')
-    if s.isdigit(): return int(s)
-    
-    # Try direct map
-    if s in ROMAN_MAP: return ROMAN_MAP[s]
-    
-    # Basic additive parsing (very simple, assumes valid roman)
-    # Proper parsing is complex, but for "cxix" (119) we might need a library if map fails.
-    # For now, stick to map or return string for fuzzy match?
-    # Actually, let's just use the map for commons.
-    return s
 
 def normalize_reference(ref: str) -> str:
     """
-    Converts "Mark xvi. 11" -> "MARK 16:11"
+    Smart fuzzy parsing of references like:
+    "Psal. xxxiii. 6" -> "PSALMS 33:6"
+    "2 Cor. iv. 6" -> "2 CORINTHIANS 4:6"
     """
-    # Remove periods and extra spaces
-    clean = ref.replace('.', ' ').strip()
+    # 1. Clean up chars
+    # Replace periods with spaces, remove excess usage
+    clean = ref.replace('.', ' ').replace(':', ' ').strip()
+    # Normalize whitespace
+    clean = re.sub(r'\s+', ' ', clean)
+    
     parts = clean.split()
-    
-    # Heuristic: [BOOK] [CHAPTER] [VERSE]
-    # "Mark xvi 11" -> ["Mark", "xvi", "11"]
-    # "1 Cor 13 4" -> ["1", "Cor", "13", "4"] ?
-    
     if len(parts) < 2: return ref
     
-    verse = parts[-1]
-    chapter = parts[-2]
+    # Parse parts from right to left: [Verse] [Chapter] [Book...]
+    # Case: "2 Cor 4 6" -> Verse=6, Chap=4, Book="2 Cor"
+    # Case: "John 3 16" -> Verse=16, Chap=3, Book="John"
+    # Case: "Judges 4" -> Verse?, Chap=4? No, assume Ref is always Chap:Verse. 
+    # If standard Gill ref, it is always Book Chap Verse.
     
-    # Book is everything before
-    book_raw = " ".join(parts[:-2]).lower()
+    verse_part = parts[-1]
+    chapter_part = parts[-2]
+    book_parts = parts[:-2]
     
-    # Handle "1 Cor" vs "Cor"
-    # Map Check
-    book_norm = BOOK_MAP.get(book_raw, book_raw.upper())
+    # Reassemble book key
+    book_key = " ".join(book_parts).lower()
     
-    # Roman / Chapter Normalize
-    # If chapter is Roman, convert
-    chapter_num = chapter
-    if not chapter.isdigit():
-        # Try Roman
-        if chapter.lower() in ROMAN_MAP:
-             chapter_num = str(ROMAN_MAP[chapter.lower()])
+    # 1. Normalize Book
+    book_norm = BOOK_MAP.get(book_key, book_key.upper())
     
-    return f"{book_norm} {chapter_num}:{verse}"
+    # 2. Normalize Chapter (Roman)
+    chapter_num = roman_to_int(chapter_part) if not chapter_part.isdigit() else int(chapter_part)
+    
+    # 3. Normalize Verse
+    verse_num = int(verse_part) if verse_part.isdigit() else verse_part
+    
+    return f"{book_norm} {chapter_num}:{verse_num}"
 
 @router.get("/api/verse/{ref}")
 def get_verse_text(ref: str):
     """
-    Input: "ROM_1_4" or "Rom. i. 4" (Needs normalization)
-    Output: {"text": "And declared to be..."}
+    Returns verse text.
+    First tries strict lookup.
+    Then tries normalization.
     """
-    # 1. Direct Lookup (Fastest)
+    # 0. Raw Decode is handled by FastAPI
+    ref = ref.strip()
+    
+    # 1. Direct Lookup (e.g. if frontend sent "GENESIS 1:1")
     if ref in BIBLE_MAP:
         return {"ref": ref, "text": BIBLE_MAP[ref]}
         
-    # 2. Normalize and Lookup
-    norm_ref = normalize_reference(ref)
-    
-    # Try normalized
-    if norm_ref in BIBLE_MAP:
-         return {"ref": norm_ref, "text": BIBLE_MAP[norm_ref]}
-         
-    # Try finding close match?
-    # For now, strict.
-    
-    raise HTTPException(status_code=404, detail=f"Verse not found: {norm_ref}")
+    # 2. Normalize
+    try:
+        norm_ref = normalize_reference(ref)
+        if norm_ref in BIBLE_MAP:
+            return {"ref": norm_ref, "text": BIBLE_MAP[norm_ref]}
+    except Exception as e:
+        print(f"Verse Normalize Error for {ref}: {e}")
+        pass
+        
+    # 3. Fail gracefully
+    raise HTTPException(status_code=404, detail=f"Verse not found: {ref} (Normalized: {norm_ref if 'norm_ref' in locals() else 'Failed'})")

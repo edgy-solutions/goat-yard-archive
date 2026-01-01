@@ -53,8 +53,10 @@ def parse_usfm(directory):
                     # The pattern is |key="value" attached to words
                     clean_text = re.sub(r'\|strong="[^"]*"', '', verse_text)
                     
-                    # 2. Aggressive strip of remaining backslash commands (USFM tags)
-                    clean_text = re.sub(r'\\[a-z0-9]+\*?', '', clean_text).strip()
+                    # 2. Aggressive strip of remaining backslash commands (USFM tags) and KJV formatting
+                    clean_text = re.sub(r'\\[a-z0-9]+\*?', '', clean_text) # Standard USFM tags
+                    clean_text = re.sub(r'\\\+[a-z]+\*?', '', clean_text) # KJV add/trans tags like \+w \+w*
+                    clean_text = clean_text.strip()
                     
                     # 3. Collapse multiple spaces
                     clean_text = ' '.join(clean_text.split())

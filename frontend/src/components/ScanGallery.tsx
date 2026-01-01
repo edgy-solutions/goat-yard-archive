@@ -14,6 +14,7 @@ interface ScanGalleryProps {
     pages: GalleryPage[];
     originalDims: { w: number; h: number } | null;
     defaultImage?: string; // Fallback if no pages
+    onVisiblePageChange?: (page: number) => void;
 }
 
 const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: number } | null; shouldFocus?: boolean; onLoaded?: () => void }> = ({ page, originalDims, shouldFocus, onLoaded }) => {
@@ -99,7 +100,7 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
     );
 };
 
-const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultImage }) => {
+const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultImage, onVisiblePageChange }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [imagesLoaded, setImagesLoaded] = useState<Record<number, boolean>>({});
 
@@ -108,8 +109,59 @@ const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultI
         setImagesLoaded(prev => ({ ...prev, [pageNum]: true }));
     };
 
+    // Track Visible Page on Scroll
+    useEffect(() => {
+        if (!onVisiblePageChange || pages.length === 0) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                // Find visible page(s)
+                const visibleEntries = entries.filter(entry => entry.isIntersecting);
+
+                if (visibleEntries.length > 0) {
+                    // Sort by visibility ratio if needed, or just take the first one
+                    // Taking the one with the largest intersection ratio usually "feels" right
+                    const mostVisible = visibleEntries.reduce((prev, current) =>
+                        (prev.intersectionRatio > current.intersectionRatio) ? prev : current
+                    );
+
+                    // Extract page number from ID
+                    const pageId = mostVisible.target.id;
+                    const pageNum = parseInt(pageId.replace('gallery-page-', ''), 10);
+
+                    if (!isNaN(pageNum)) {
+                        onVisiblePageChange(pageNum);
+                    }
+                }
+            },
+            {
+                root: containerRef.current,
+                threshold: [0.1, 0.5, 0.9] // Multiple thresholds for smoother detection
+            }
+        );
+
+        pages.forEach(page => {
+            const el = document.getElementById(`gallery-page-${page.page}`);
+            if (el) observer.observe(el);
+        });
+
+        return () => observer.disconnect();
+    }, [pages, onVisiblePageChange]);
+
+    // Track if we have performed the initial auto-scroll for this set of pages
+    const hasScrolledRef = useRef(false);
+
+    // Reset scroll tracking when pages change
+    useEffect(() => {
+        hasScrolledRef.current = false;
+    }, [pages]);
+
     // Auto-scroll logic: Global Centering
     useEffect(() => {
+        // If we've already scrolled for this evidence set, don't do it again.
+        // This effectively stops the "fighting back" behavior on manual scroll.
+        if (hasScrolledRef.current) return;
+
         // Wait for all relevant images to load? Or just the ones with highlights?
         // Let's assume we need layout to be stable.
         const pagesWithHighlights = pages.filter(p => p.boxes.length > 0);
@@ -170,34 +222,46 @@ const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultI
 
             containerRef.current.scrollTo({ top: targetScroll, behavior: 'smooth' });
 
+            // Mark as done so we don't fight the user
+            hasScrolledRef.current = true;
+
         }, 100);
 
         return () => clearTimeout(timeout);
     }, [pages, imagesLoaded, originalDims]);
 
-    if (pages.length === 0 && defaultImage) {
-        return (
-            <div className="w-full h-full flex items-center justify-center p-8">
-                <img src={defaultImage} alt="Placeholder" className="max-w-full shadow-xl opacity-80" />
-            </div>
-        );
-    }
-
+    // Unified Render
     return (
-        <div className="relative w-full h-full overflow-y-auto bg-[#2D1B18] p-2" ref={containerRef}>
-            <div className="w-full mx-auto space-y-4">
-                {pages.map((page) => (
-                    <div id={`gallery-page-${page.page}`} key={page.page} className="flex justify-center relative">
-                        <div className="max-w-full">
-                            <ScanPage
-                                page={page}
-                                originalDims={originalDims}
-                                shouldFocus={false} // Managed by global scroll now
-                                onLoaded={() => handleImageLoad(page.page)}
-                            />
+        <div className="relative w-full h-full bg-[#1A1410] overflow-hidden">
+            {/* 1. Persistent Background Layer */}
+            {defaultImage && (
+                <div className="absolute inset-0 z-0">
+                    <img
+                        src={defaultImage}
+                        alt="Background"
+                        className={`w-full h-full object-cover transition-all duration-700 ${pages.length > 0 ? 'opacity-50' : 'opacity-100'}`}
+                    />
+                    {/* Dark Overlay only when pages are present to improve readability */}
+                    <div className={`absolute inset-0 bg-[#1A1410] mix-blend-multiply transition-opacity duration-700 ${pages.length > 0 ? 'opacity-60' : 'opacity-0'}`}></div>
+                </div>
+            )}
+
+            {/* 2. Scrollable Content Layer */}
+            <div className="relative z-10 w-full h-full overflow-y-auto p-4 custom-scrollbar" ref={containerRef}>
+                <div className="w-full mx-auto space-y-12 pb-32 pt-4">
+                    {pages.map((page) => (
+                        <div id={`gallery-page-${page.page}`} key={page.page} className="flex justify-center relative">
+                            <div className="max-w-full">
+                                <ScanPage
+                                    page={page}
+                                    originalDims={originalDims}
+                                    shouldFocus={false}
+                                    onLoaded={() => handleImageLoad(page.page)}
+                                />
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
         </div>
     );

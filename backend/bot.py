@@ -107,7 +107,12 @@ class GroundedGillBot(dspy.Module):
         
         # Helper to extract IDs
         def extract_ids(text):
-            return re.findall(r"\[[a-zA-Z0-9_]+_S\d+\]", text)
+            # Matches [ID] OR just ID (if it follows the pattern)
+            # We look for patterns like GEN_1_1_S01, with or without brackets
+            # The regex: (?:\[)?([a-zA-Z0-9_]+_S\d+)(?:\])?
+            matches = re.findall(r"(?:\[)?([a-zA-Z0-9_]+_S\d+)(?:\])?", text)
+            # Re-add brackets for consistency if they're missing, as the rest of the system expects them
+            return [f"[{m}]" for m in matches]
 
         if isinstance(citations, str):
              final_citations = extract_ids(citations)

@@ -16,7 +16,7 @@ const ResponseActions: React.FC<ResponseActionsProps> = ({ responseId, onReport 
     };
 
     return (
-        <div className="flex gap-3 text-xs text-[#8D6E63] mt-3 items-center">
+        <div className="flex gap-3 text-xs text-[#8D6E63] items-center">
             <span className="opacity-60 uppercase tracking-widest text-[10px]">Feedback:</span>
             <button
                 onClick={handlePositive}

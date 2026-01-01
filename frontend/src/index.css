@@ -5,30 +5,36 @@
 @layer base {
     html {
         font-family: 'Merriweather', serif;
-        background-color: #FDFBF7;
-        /* Light Parchment */
-        color: #3E2723;
-        /* Dark Wood/Leather Text */
+        background-color: #F9F7F1; /* Warm Cream */
+        color: #2C241B; /* Dark Coffee */
     }
 
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6 {
+    h1, h2, h3, h4, h5, h6 {
         font-family: 'Playfair Display', serif;
     }
 }
 
-.bg-parchment {
-    background-color: #FDFBF7;
+/* Custom Utilities */
+.font-ui {
+    font-family: 'Inter', sans-serif;
 }
 
-.bg-wood {
-    background-color: #3E2723;
+.bg-cream {
+    background-color: #F9F7F1;
+}
+
+.bg-paper {
+    background-color: #FFFDF5; /* Slightly lighter for cards */
+}
+
+.bg-coffee {
+    background-color: #2C241B;
+}
+
+.text-coffee {
+    color: #2C241B;
 }
 
 .text-gold {
-    color: #FFECB3;
+    color: #B45309; /* Darker Gold/Bronze for better contrast on cream */
 }

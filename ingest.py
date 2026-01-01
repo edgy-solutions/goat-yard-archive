@@ -291,7 +291,11 @@ class GillIngestionEngine:
             abbrevs = {
                 'gen', 'exod', 'lev', 'num', 'deut', 'josh', 'judg', 'ruth', 'sam', 'kgs', 'chron', 'ezra', 'neh', 'esth', 'job', 'ps', 'prov', 'eccl', 'cant', 'isa', 'jer', 'lam', 'ezek', 'dan', 'hos', 'joel', 'amos', 'obad', 'jon', 'mic', 'nah', 'hab', 'zeph', 'hag', 'zech', 'mal',
                 'matt', 'rom', 'cor', 'gal', 'eph', 'phil', 'col', 'thess', 'tim', 'titus', 'phlm', 'heb', 'jas', 'pet', 'john', 'jude', 'rev',
-                'ver', 'vol', 'chap', 'sect', 'bk', 'lib', 'cap', 'ibid', 'id', 'vid', 'viz', 'sc', 'eq', 'cf', 'vs', 'mss', 'obj'
+                'ver', 'vol', 'chap', 'sect', 'bk', 'lib', 'cap', 'ibid', 'id', 'vid', 'viz', 'sc', 'eq', 'cf', 'vs', 'mss', 'obj',
+                # Roman Numerals (Common in Gill for Chapters)
+                'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi', 'xii', 'xiii', 'xiv', 'xv', 'xvi', 'xvii', 'xviii', 'xix', 'xx',
+                'xxi', 'xxii', 'xxiii', 'xxiv', 'xxv', 'xxvi', 'xxvii', 'xxviii', 'xxix', 'xxx', 'xxxi', 'xxxii', 'xxxiii', 'xxxiv', 'xxxv', 
+                'xxxvi', 'xxxvii', 'xxxviii', 'xxxix', 'xl', 'xli', 'xlii', 'xliii', 'xliv', 'xlv', 'xlvi', 'xlvii', 'xlviii', 'xlix', 'l'
             }
             tokenizer._params.abbrev_types.update(abbrevs)
             raw_sentences = tokenizer.tokenize(full_text)

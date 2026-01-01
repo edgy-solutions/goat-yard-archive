@@ -5,21 +5,28 @@ import { TextWithVerses } from './TextWithVerses';
 interface HighlightedContentProps {
     content: string;
     sentenceData?: { sentence_id: string; text: string }[];
-    lemma?: string; // New Lemma field
-    citations?: string[]; // List of citations [ID_Sxx] from the answer
-    activeIds?: string[]; // IDs to explicitly highlight (if empty, highlight nothing specific)
+    lemma?: string;
+    verseRef?: string; // New Verse Ref field
+    citations?: string[];
+    activeIds?: string[];
+    footnotes?: string[];
 }
 
 const HighlightedContent: React.FC<HighlightedContentProps> = ({
     content,
     sentenceData,
     lemma,
-    activeIds = []
+    verseRef,
+    activeIds = [],
+    footnotes = []
 }) => {
     // Render Lemma (if active)
     const lemmaNode = lemma ? (
-        <span className="font-bold text-[#5D4037] mr-2 block mb-1">
-            <TextWithVerses text={lemma} />
+        <span className="font-bold text-[#5D4037] mr-2">
+            {verseRef && (
+                <span className="mr-1">{verseRef}.</span>
+            )}
+            <TextWithVerses text={lemma} renderMarkdown={true} />
         </span>
     ) : null;
 
@@ -28,7 +35,7 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
         return (
             <div className="leading-relaxed text-[#3E2723]">
                 {lemmaNode}
-                <ReactMarkdown>{content}</ReactMarkdown>
+                <TextWithVerses text={content} renderMarkdown={true} footnotes={footnotes} />
             </div>
         );
     }
@@ -46,13 +53,13 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
                     <span
                         key={id}
                         id={id}
-                        className={`transition-colors duration-200 ease-in-out px-0.5 rounded mx-0.5
+                        className={`transition-colors duration-200 ease-in-out px-0.5 rounded
                             ${isHighlighted ? 'bg-yellow-200 text-black border border-yellow-300 font-medium' : 'hover:bg-amber-50'}
                         `}
                         title={id}
                     >
                         {/* We use TextWithVerses to parse and add tooltips to Bible refs */}
-                        <TextWithVerses text={sent.text} />
+                        <TextWithVerses text={sent.text} renderMarkdown={true} footnotes={footnotes} />
                     </span>
                 );
             })}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import ScanGallery from './components/ScanGallery';
 import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
@@ -14,6 +14,7 @@ import Terms from './pages/Terms';
 import Footer from './components/Footer';
 import AnalyticsManager from './components/AnalyticsManager';
 import HighlightedContent from './components/HighlightedContent';
+import ReactMarkdown from 'react-markdown';
 
 // Palette removed as requested (reverting to single yellow highlight on selection)
 
@@ -43,6 +44,7 @@ interface EvidenceItem {
     footnotes?: string[];
     entities?: string[];
     sentence_data?: { sentence_id: string; text: string }[];
+    lemma?: string;
 }
 
 interface SearchResponse {
@@ -55,6 +57,7 @@ interface SearchResponse {
 function App() {
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
+    // Force HMR refresh
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
     const { getToken } = useAuth();
@@ -63,6 +66,7 @@ function App() {
 
     // Track the specifically selected citation sentence (e.g. S01)
     const [focusedSentenceId, setFocusedSentenceId] = useState<string | null>(null);
+    const [visiblePage, setVisiblePage] = useState<number | null>(null);
 
     // Handle Deep Linking (e.g. ?view=privacy)
     useEffect(() => {
@@ -303,8 +307,20 @@ function App() {
     // Close overlays
     const closeOverlay = () => setView('chat');
 
+    // Memoize the pages so we don't re-trigger ScanGallery's auto-scroll on every render (like when visiblePage updates)
+    const galleryPages = useMemo(() => getGalleryPages(activeEvidence), [activeEvidence]);
+
+    // Memoize dimensions to avoid recreating object on every render
+    const originalDims = useMemo(() => getOriginalDims(activeEvidence), [activeEvidence]);
+
+    // Stable handler for visibility changes
+    // useCallback ensures this function reference doesn't change unless dependencies do
+    const handleVisiblePageChange = useCallback((p: number) => {
+        setVisiblePage(p);
+    }, []);
+
     return (
-        <div className="flex h-[100dvh] overflow-hidden font-serif bg-parchment text-amber-950 relative">
+        <div className="flex h-[100dvh] overflow-hidden font-serif bg-cream text-coffee relative selection:bg-[#E6D5B8] selection:text-[#2C241B]">
             <Toaster position="top-center" richColors />
             <AnalyticsManager />
 
@@ -316,9 +332,8 @@ function App() {
 
             {/* Modal Backdrop & Container */}
             {(view === 'about' || view === 'contact' || view === 'privacy' || view === 'terms') && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    {/* Centered Modal Card */}
-                    <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-lg shadow-2xl border border-[#8D6E63] bg-[#FDFBF7] animate-in zoom-in-95 duration-200 flex flex-col">
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#2C241B]/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-xl shadow-2xl border border-[#D7CCC8] bg-[#FDFBF7] animate-in zoom-in-95 duration-200 flex flex-col">
                         <div className="flex-1 overflow-y-auto custom-scrollbar">
                             {view === 'about' && <About onClose={closeOverlay} />}
                             {view === 'contact' && <Contact onClose={closeOverlay} />}
@@ -330,246 +345,271 @@ function App() {
             )}
 
             {/* Left Pane: Chat & Context */}
-            {/* Mobile: Hidden if Gallery is Open. Desktop: Always 1/2 width */}
-            <div className={`w-full md:w-1/2 flex flex-col border-r border-[#8D6E63] shadow-2xl z-10 bg-[#FDFBF7]
+            <div className={`w-full md:w-1/2 flex flex-col border-r border-[#E5E0D8] z-10 bg-cream relative
                 ${showMobileGallery ? 'hidden md:flex' : 'flex'}
             `}>
 
-                {/* Header */}
+                {/* Header - Minimalist */}
                 <Header
                     onOpenAbout={() => setView('about')}
                     onOpenContact={() => setView('contact')}
                 />
 
                 {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 flex flex-col">
+                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 flex flex-col custom-scrollbar pb-32">
+
+                    {/* Empty State */}
+                    {!response && !loading && !error && (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center opacity-60 mt-10">
+                            <div className="text-4xl text-[#D7CCC8] mb-4">❦</div>
+                            <h2 className="text-xl font-bold text-[#5D4037] mb-2 font-display italic">The Library is Open</h2>
+                            <p className="text-sm text-[#8D6E63] max-w-xs mx-auto mb-8 font-ui">
+                                Ask Dr. Gill a question about scripture, theology, or the history of redemption.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-4xl px-4">
+                                {[
+                                    { q: "Who is the Angel of the Lord?", label: "Theology" },
+                                    { q: "Explain the Covenant of Grace.", label: "Covenant" },
+                                    { q: "What is Justification?", label: "Doctrine" }
+                                ].map((item) => (
+                                    <button
+                                        key={item.q}
+                                        onClick={() => { setQuery(item.q); handleSearch(); }}
+                                        className="bg-white border border-[#E5E0D8] p-6 rounded-xl text-[#5D4037] hover:bg-[#FAF9F5] hover:border-[#D7CCC8] hover:shadow-md transition-all text-left group h-full flex flex-col justify-between shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]"
+                                    >
+                                        <div>
+                                            <span className="text-[10px] uppercase tracking-widest font-ui text-[#A1887F] mb-2 block">{item.label}</span>
+                                            <span className="font-serif font-medium text-lg leading-snug block">{item.q}</span>
+                                        </div>
+                                        <div className="mt-4 flex justify-end">
+                                            <span className="text-[#D7CCC8] group-hover:text-[#8D6E63] transition-colors">→</span>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Error Banner */}
                     {error && (
-                        <div className="bg-red-50 border-l-4 border-red-800 text-red-900 p-4 rounded shadow-sm text-sm">
+                        <div className="bg-red-50/50 border-l-4 border-red-800/50 text-red-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm">
                             {(error.includes("My dear friend") || error.includes("Scriptures"))
-                                ? <span className="italic font-serif text-amber-900">{error}</span>
+                                ? <span className="italic font-serif text-[#5D4037]">{error}</span>
                                 : <><strong>Connection Error:</strong> {error}</>
                             }
-                            {/* Only show mock warning if NOT a rate limit error (based on content) */}
                             {!error.includes("My dear friend") && (
-                                <div className="text-xs mt-1 text-red-700">Using mock data for demonstration.</div>
+                                <div className="text-xs mt-1 text-red-700 font-ui uppercase tracking-wide">Offline Mode: Using Mock Data</div>
                             )}
                         </div>
                     )}
 
-                    {/* Chat Interaction */}
+                    {/* Loading State */}
                     {loading && (
-                        <div className="flex items-center space-x-3 text-amber-800 animate-pulse">
-                            <div className="w-2 h-2 bg-amber-800 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-                            <div className="w-2 h-2 bg-amber-800 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                            <div className="w-2 h-2 bg-amber-800 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                            <span className="text-sm font-medium italic">Consulting the library...</span>
+                        <div className="flex items-center justify-center py-10 space-x-3 text-[#8D6E63] animate-pulse">
+                            <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                            <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                            <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                            <span className="text-xs font-medium uppercase tracking-widest font-ui">Consulting the Expositor...</span>
                         </div>
                     )}
 
                     {response && (
-                        <div className="space-y-6">
+                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             {/* Answer Card */}
-                            <div className="bg-[#FFFDF5] p-5 rounded-lg shadow-sm border border-[#D7CCC8]">
-                                <div className="flex justify-end mb-2">
-                                    {response.verified ? (
-                                        <span className="flex items-center text-xs text-green-800 bg-green-100 px-2 py-1 rounded-full border border-green-200 font-bold uppercase tracking-wider">
-                                            ✓ Verified Source
-                                        </span>
-                                    ) : (
-                                        <span className="text-xs text-amber-800 bg-amber-100 px-2 py-1 rounded-full border border-amber-200">
-                                            ⚠️ Potential Hallucination
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="prose prose-sm max-w-none text-[#3E2723] leading-relaxed">
-                                    {response.answer.split('\n').map((line, i) => {
-                                        // Regex to match [ID_PATTERN] including lists: [GENESIS_29_34_S00, MATTHEW_1_1_S01]
-                                        // Allow comma and space in the capture group
-                                        const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
-                                        return (
-                                            <p key={i} className="mb-2">
-                                                {parts.map((part, partIdx) => {
-                                                    if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
-                                                        // Strip brackets
-                                                        const rawContent = part.replace(/^\[+|\]+$/g, '');
-                                                        // Split by comma to handle lists
-                                                        const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
+                            <div className="relative">
+                                {/* Decorative Quote */}
+                                <div className="absolute -top-4 -left-2 text-6xl text-[#E5E0D8] font-serif pointer-events-none">“</div>
 
-                                                        // If we found valid IDs, map them. If none match evidence, just render text.
-                                                        // We check if AT LEAST ONE id matches evidence to treat this block as citations.
-                                                        const hasMatch = ids.some(id => response.evidence.find(ev =>
-                                                            ev.sentence_data?.some(s => s.sentence_id === id) // Check raw ID match (no brackets)
-                                                        ));
+                                <div className="relative z-10">
+                                    <div className="flex justify-end mb-2">
+                                        {response.verified ? (
+                                            <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
+                                                ✓ Verified Source
+                                            </span>
+                                        ) : (
+                                            <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-full border border-amber-200 font-ui uppercase tracking-wider">
+                                                ⚠️ Unverified
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
+                                        {response.answer.split('\n').map((line, i) => {
+                                            const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
+                                            return (
+                                                <div key={i} className="mb-4">
+                                                    {parts.map((part, partIdx) => {
+                                                        if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
+                                                            const rawContent = part.replace(/^\[+|\]+$/g, '');
+                                                            const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
+                                                            const hasMatch = ids.some(id => response.evidence.find(ev =>
+                                                                ev.sentence_data?.some(s => s.sentence_id === id)
+                                                            ));
 
-                                                        if (hasMatch) {
-                                                            return (
-                                                                <span key={partIdx}>
-                                                                    {ids.map((id, idIdx) => {
-                                                                        const match = response.evidence.find(ev =>
-                                                                            ev.sentence_data?.some(s => s.sentence_id === id)
-                                                                        );
-
-                                                                        if (match) {
-                                                                            const isFocused = focusedSentenceId === id;
-                                                                            return (
-                                                                                <button
-                                                                                    key={`${partIdx}-${idIdx}`}
-                                                                                    onClick={() => handleCitationClick(match, id)}
-                                                                                    className={`font-bold hover:underline cursor-pointer px-1.5 rounded mx-0.5 text-xs align-middle shadow-sm transition-transform hover:scale-105
-                                                                                        ${isFocused
-                                                                                            ? 'bg-yellow-200 text-amber-950 border border-yellow-400'
-                                                                                            : 'bg-amber-50 text-amber-900 border border-amber-200'
-                                                                                        }
-                                                                                    `}
-                                                                                    title={`View Source: ${match.verse_ref || match.citation}`}
-                                                                                >
-                                                                                    {match.verse_ref ? `[${match.verse_ref}]` : `[${id}]`}
-                                                                                </button>
+                                                            if (hasMatch) {
+                                                                return (
+                                                                    <span key={partIdx} className="inline-flex flex-wrap gap-1 align-baseline mx-1">
+                                                                        {ids.map((id, idIdx) => {
+                                                                            const match = response.evidence.find(ev =>
+                                                                                ev.sentence_data?.some(s => s.sentence_id === id)
                                                                             );
-                                                                        }
-                                                                        // ID in list but not found in evidence? Render as text or ignore?
-                                                                        // Render as text to be safe
-                                                                        return <span key={`${partIdx}-${idIdx}`} className="text-gray-400 text-xs">[{id}]</span>;
-                                                                    })}
-                                                                </span>
-                                                            );
+
+                                                                            if (match) {
+                                                                                const isFocused = focusedSentenceId === id;
+                                                                                return (
+                                                                                    <button
+                                                                                        key={`${partIdx}-${idIdx}`}
+                                                                                        onClick={() => handleCitationClick(match, id)}
+                                                                                        className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline
+                                                                                            ${isFocused
+                                                                                                ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
+                                                                                                : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm'
+                                                                                            }
+                                                                                        `}
+                                                                                        title={`View Source: ${match.verse_ref || match.citation}`}
+                                                                                    >
+                                                                                        {match.verse_ref ? match.verse_ref.toUpperCase() : id}
+                                                                                    </button>
+                                                                                );
+                                                                            }
+                                                                            return null;
+                                                                        })}
+                                                                    </span>
+                                                                );
+                                                            }
+                                                            return null;
                                                         }
-                                                        return <span key={partIdx}>{part}</span>;
-                                                    }
-                                                    return <span key={partIdx}>{part}</span>;
-                                                })}
-                                            </p>
-                                        );
-                                    })}
+                                                        // Use ReactMarkdown for text parts to render italics/bold
+                                                        // Use span as wrapper to stay inline, but ReactMarkdown defaults to p/div blocks,
+                                                        // so we need to process it to allow inline rendering or just accept block behavior?
+                                                        // Actually, 'prose' handles paragraphs well. Let's try rendering inline components.
+                                                        return (
+                                                            <span key={partIdx}>
+                                                                <ReactMarkdown
+                                                                    components={{
+                                                                        p: ({ node, ...props }) => <span {...props} />,
+                                                                        a: ({ node, ...props }) => <span className="text-amber-800 underline" {...props} />
+                                                                    }}
+                                                                >
+                                                                    {part}
+                                                                </ReactMarkdown>
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className="mt-4 flex justify-end">
+                                        <ResponseActions
+                                            responseId={lastSearchedQuery}
+                                            onReport={handleReportOpen}
+                                        />
+                                    </div>
                                 </div>
-
-                                <ResponseActions
-                                    responseId={lastSearchedQuery} // Using query as ID for now since we lack UUID
-                                    onReport={handleReportOpen}
-                                />
-                            </div>
-
-                            {/* Citations / Sources */}
-                            <div className="flex flex-wrap gap-2">
-                                {response.evidence
-                                    // Filter to only show evidence that is actually CITED in the answer
-                                    .filter(ev => {
-                                        // If no citations in answer, show nothing
-                                        if (!response.citations || response.citations.length === 0) return false;
-                                        if (!ev.sentence_data) return false;
-
-                                        return ev.sentence_data.some(s =>
-                                            response.citations.includes(`[${s.sentence_id}]`)
-                                        );
-                                    })
-                                    // De-duplicate evidence buttons based on the DISPLAY LABEL
-                                    // If two buttons would show "MATTHEW 7:6", we only want one.
-                                    .filter((ev, index, self) =>
-                                        index === self.findIndex((t) => {
-                                            const tLabel = t.verse_ref || t.citation;
-                                            const evLabel = ev.verse_ref || ev.citation;
-                                            return tLabel === evLabel && t.page === ev.page;
-                                        })
-                                    )
-                                    .map((ev, idx) => (
-                                        <button
-                                            key={idx}
-                                            onClick={() => handleCitationClick(ev)}
-                                            className={`px-3 py-1 rounded text-sm transition-all duration-200 font-serif border
-                                            ${activeEvidence?.chunk_id === ev.chunk_id
-                                                    ? 'bg-[#5D4037] text-amber-50 border-[#3E2723] shadow-md'
-                                                    : 'bg-white/50 text-[#5D4037] border-[#D7CCC8] hover:bg-[#D7CCC8]/30 hover:shadow-sm'
-                                                }
-                                        `}
-                                            title={ev.citation}
-                                        >
-                                            {ev.verse_ref || ev.citation}
-                                        </button>
-                                    ))}
                             </div>
 
                             {/* Active Context Snippet */}
                             {activeEvidence && (
-                                <div className="mt-6 border-t border-[#D7CCC8] pt-4">
-                                    <div className="flex justify-between items-center mb-2 border-b border-[#D7CCC8] pb-1">
-                                        <h3 className="text-sm font-bold uppercase text-[#5D4037] tracking-widest">
-                                            Evidence Source: Vol {activeEvidence.vol}, p. {activeEvidence.page}
+                                <div className="mt-8 pt-6 border-t border-[#E5E0D8]">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-xs font-bold uppercase text-[#8D6E63] tracking-widest font-ui flex items-center gap-2">
+                                            <span className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full"></span>
+                                            Primary Source Evidence
+                                            {activeEvidence.citation && (
+                                                <span className="text-[#A1887F] font-normal normal-case tracking-normal ml-1">
+                                                    {activeEvidence.citation}
+                                                </span>
+                                            )}
                                         </h3>
                                         {/* Mobile: View Scan Button */}
                                         <button
                                             onClick={() => setShowMobileGallery(true)}
-                                            className="md:hidden text-xs bg-amber-100 text-amber-900 border border-amber-300 px-2 py-1 rounded shadow-sm"
+                                            className="md:hidden text-xs bg-[#FFFDF5] text-[#5D4037] border border-[#D7CCC8] px-3 py-1 rounded-full font-ui shadow-sm"
                                         >
-                                            View Scan »
+                                            View Original Scan →
                                         </button>
                                     </div>
 
-                                    {/* Entity Tags */}
-                                    {activeEvidence.entities && activeEvidence.entities.length > 0 && (
-                                        <div className="flex flex-wrap gap-2 mb-3 mt-2">
-                                            {activeEvidence.entities.map((ent, idx) => {
-                                                const q = lastSearchedQuery.toLowerCase();
-                                                const e = ent.toLowerCase();
-                                                // Highlight if query contains entity OR entity contains query
-                                                const isMatch = lastSearchedQuery && (e.includes(q) || q.includes(e));
+                                    <div className="p-6 bg-white rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-[#E5E0D8] text-sm text-[#3E2723] font-serif leading-relaxed relative overflow-hidden group">
+                                        {/* Paper texture overlay hint */}
+                                        <div className="absolute inset-0 bg-[#FDFBF7] opacity-50 pointer-events-none mix-blend-multiply"></div>
+
+                                        <div className="relative z-10">
+                                            {/* Highlighted Commentary Content */}
+                                            <HighlightedContent
+                                                content={activeEvidence.content}
+                                                sentenceData={activeEvidence.sentence_data}
+                                                citations={response.citations}
+                                                lemma={activeEvidence.lemma}
+                                                verseRef={activeEvidence.verse_ref}
+                                                activeIds={focusedSentenceId ? [focusedSentenceId] : []}
+                                                footnotes={activeEvidence.footnotes}
+                                            />
+
+                                            {/* Footnotes Display */}
+                                            {(() => {
+                                                if (!activeEvidence.footnotes || activeEvidence.footnotes.length === 0) return null;
+
+                                                // 1. Identify which footnotes are actually present in the text
+                                                // Check both content and sentence_data (in case footnotes are in individual sentences)
+                                                let textToSearch = activeEvidence.content || "";
+                                                if (activeEvidence.sentence_data) {
+                                                    textToSearch += " " + activeEvidence.sentence_data.map((s: { text?: string }) => s.text || "").join(" ");
+                                                }
+
+                                                const matches = textToSearch.matchAll(/\[\^(\d+)\]/g);
+                                                const activeIDs = new Set<string>();
+                                                for (const m of matches) {
+                                                    activeIDs.add(m[1]);
+                                                }
+
+                                                console.log("Footnote Debug:", {
+                                                    contentPreview: textToSearch.slice(0, 200),
+                                                    activeIDs: Array.from(activeIDs),
+                                                    footnotes: activeEvidence.footnotes
+                                                });
+
+                                                if (activeIDs.size === 0) return null;
+
                                                 return (
-                                                    <span
-                                                        key={idx}
-                                                        className={`text-xs px-2 py-1 rounded font-semibold border shadow-sm transition-all duration-300
-                                                            ${isMatch
-                                                                ? 'bg-amber-300 text-amber-900 border-amber-400 ring-2 ring-amber-500/50 scale-105'
-                                                                : 'bg-[#EFEBE9] text-[#4E342E] border-[#D7CCC8]'
-                                                            }
-                                                        `}
-                                                    >
-                                                        {ent}
-                                                    </span>
+                                                    <div className="mt-6 pt-4 border-t border-[#E5E0D8] text-xs">
+                                                        <h4 className="font-bold text-[#8D6E63] uppercase mb-2 font-ui tracking-wider text-[10px]">Original Footnotes</h4>
+                                                        <ul className="space-y-2 text-[#5D4037]/80">
+                                                            {activeEvidence.footnotes.map((fn, idx) => {
+                                                                // Extract ID from "[10] content..."
+                                                                const match = fn.match(/^\[(\d+)\]/);
+                                                                if (!match) return null;
+
+                                                                const id = match[1];
+                                                                if (!activeIDs.has(id)) return null;
+
+                                                                return (
+                                                                    <li id={`footnote-${id}`} key={idx} className="flex gap-2">
+                                                                        <span className="opacity-80 leading-relaxed font-serif text-xs">{fn}</span>
+                                                                    </li>
+                                                                );
+                                                            })}
+                                                        </ul>
+                                                    </div>
                                                 );
-                                            })}
+                                            })()}
                                         </div>
-                                    )}
-
-                                    <div className="p-4 bg-[#FFFDF5] border border-[#D7CCC8] rounded text-sm text-[#3E2723] shadow-inner font-merriweather leading-relaxed">
-
-                                        {/* Highlighted Commentary Content */}
-                                        <HighlightedContent
-                                            content={activeEvidence.content}
-                                            sentenceData={activeEvidence.sentence_data}
-                                            citations={response.citations}
-                                            activeIds={focusedSentenceId ? [focusedSentenceId] : []}
-                                        />
-
-                                        {/* Footnotes Display */}
-                                        {activeEvidence.footnotes && activeEvidence.footnotes.length > 0 && (
-                                            <div className="mt-4 pt-3 border-t border-[#EFEBE9] text-xs">
-                                                <h4 className="font-bold text-[#8D6E63] uppercase mb-1">Original Footnotes</h4>
-                                                <ul className="space-y-1 text-[#5D4037] list-disc list-inside">
-                                                    {activeEvidence.footnotes.map((fn, idx) => (
-                                                        <li key={idx} className="italic opacity-80">
-                                                            <span>{fn}</span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
                             )}
                         </div>
                     )}
 
-                    {/* Spacer removed, Footer moved to right pane */}
-
                 </div>
 
-                {/* Input Area */}
-                <div className="p-4 border-t border-[#8D6E63] bg-[#EFEBE9] shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
-                    <div className="flex gap-3">
+                {/* Floating Search Bar */}
+                <div className="absolute bottom-6 left-0 right-0 p-4 md:p-6 pointer-events-none z-20">
+                    <div className="max-w-3xl mx-auto shadow-[0_20px_40px_-12px_rgba(0,0,0,0.15)] rounded-full bg-white border border-[#E5E0D8]/50 p-1.5 flex items-center transition-all hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.2)] pointer-events-auto ring-1 ring-[#E5E0D8]/50">
                         <input
-                            className="flex-1 p-3 border border-[#BCAAA4] rounded bg-white text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:ring-2 focus:ring-[#8D6E63] focus:border-transparent font-serif shadow-inner"
-                            placeholder="Ask Dr. Gill a theological question..."
+                            className="flex-1 px-4 py-2 bg-transparent text-[#2C241B] placeholder-[#A1887F] focus:outline-none font-ui text-sm sm:text-base leading-relaxed"
+                            placeholder="Ask a question..."
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -577,59 +617,66 @@ function App() {
                         <button
                             onClick={handleSearch}
                             disabled={loading}
-                            className="bg-wood text-gold px-8 py-2 rounded font-bold uppercase tracking-wide hover:bg-[#2D1B18] disabled:opacity-50 transition-colors shadow-md border border-[#2D1B18]"
+                            className="bg-[#2C241B] text-[#E6D5B8] px-6 py-2 rounded-full font-medium text-sm hover:bg-[#3E3226] disabled:opacity-50 transition-colors font-ui tracking-wide shadow-sm"
                         >
                             Search
                         </button>
                     </div>
 
-                    {/* Available Books - Dynamic Pill */}
-                    {availableBooks.length > 0 && (
-                        <div className="mt-2 flex items-center space-x-2 text-xs text-[#5D4037]/80">
-                            <span className="font-bold uppercase tracking-wider text-[#3E2723] opacity-70">Library Contains:</span>
-                            <div className="flex flex-wrap gap-1">
-                                {availableBooks.map(book => (
-                                    <span key={book} className="bg-[#FFFDF5] px-2 py-0.5 rounded text-[#5D4037] border border-[#D7CCC8] shadow-sm">
-                                        {book}
-                                    </span>
-                                ))}
-                                <span className="italic opacity-60 ml-1 flex items-center text-[10px]">+ more D.V. soon</span>
-                            </div>
-                        </div>
-                    )}
-
+                    {/* Available Books - Discreet Bottom Label */}
+                    <div className="text-center mt-3">
+                        <span className="text-[10px] text-[#A1887F] font-ui tracking-wide">
+                            {availableBooks.length > 0 ? `Library Index: ${availableBooks.join(", ")}` : "Indexing Library..."}
+                        </span>
+                    </div>
                 </div>
             </div>
 
             {/* Right Pane: Scan Verification */}
-            {/* Mobile: Full Width if Gallery Open, else Hidden. Desktop: Always 1/2 Width */}
-            <div className={`w-full md:w-1/2 bg-[#3E2723] relative border-l-8 border-[#2D1B18] shadow-inner p-4 flex flex-col items-center justify-between
+            <div className={`w-full md:w-1/2 bg-[#1A1410] relative border-l border-[#2C241B] flex flex-col
                 ${showMobileGallery ? 'flex fixed inset-0 z-50 md:static md:flex' : 'hidden md:flex'}
             `}>
 
                 {/* Mobile Back Button */}
                 <button
                     onClick={() => setShowMobileGallery(false)}
-                    className="md:hidden absolute top-4 right-4 z-[60] bg-[#EFEBE9] text-[#3E2723] px-3 py-2 rounded shadow-lg border border-[#8D6E63] font-bold flex items-center gap-2"
+                    className="md:hidden absolute top-4 left-4 z-[60] bg-white/10 backdrop-blur-md text-[#E6D5B8] px-4 py-2 rounded-full border border-white/20 font-ui text-sm flex items-center gap-2"
                 >
-                    ✕ Back to Chat
+                    ← Back to Chat
                 </button>
 
-                {/* Background pattern or texture could go here */}
-                <div className="w-full flex-1 relative shadow-2xl rounded overflow-hidden border border-[#5D4037] min-h-0 mb-4">
+                {/* Scan Area */}
+                <div className="w-full flex-1 relative min-h-0 bg-[#1A1410] flex flex-col justify-center">
                     <ScanGallery
-                        pages={getGalleryPages(activeEvidence)}
+                        pages={galleryPages}
                         defaultImage={defaultImage}
-                        originalDims={getOriginalDims(activeEvidence)}
+                        originalDims={originalDims}
+                        onVisiblePageChange={handleVisiblePageChange}
                     />
 
-                    {/* Verification Overlay Label */}
-                    <div className="absolute top-4 left-4 bg-[#2D1B18]/90 text-gold px-4 py-2 rounded-sm text-sm pointer-events-none shadow-lg border border-[#5D4037] font-serif z-10">
-                        {activeEvidence ? `Vol ${activeEvidence.vol}, Page ${activeEvidence.page}` : "Library Archive"}
-                    </div>
+                    {/* Minimalist Overlay Label (Splash Only) */}
+                    {!activeEvidence && (
+                        <div className="absolute top-6 right-6 pointer-events-none z-10 text-right">
+                            <div className="text-[#E6D5B8] text-sm font-serif italic tracking-wider opacity-80">
+                                Dr. John Gill
+                            </div>
+                            <div className="text-white font-ui font-bold text-lg tracking-widest uppercase opacity-90">
+                                Exposition of the Bible
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Active Page Overlay */}
+                    {activeEvidence && (
+                        <div className="absolute top-6 right-6 pointer-events-none z-10 text-right">
+                            <div className="text-[#8D6E63] text-sm font-ui tracking-wide uppercase bg-[#1A1410]/80 px-3 py-1 rounded-full backdrop-blur-sm border border-[#8D6E63]/30 shadow-sm text-white/90">
+                                Vol. {activeEvidence.vol} — Page {visiblePage || activeEvidence.page}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                <div className="w-full rounded overflow-hidden shadow-lg border border-[#5D4037]">
+                <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-[#15100D] via-[#15100D]/90 to-transparent pt-12 pb-2">
                     <Footer onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
                 </div>
             </div>
