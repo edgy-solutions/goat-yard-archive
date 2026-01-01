@@ -37,8 +37,15 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (1)
+# Generated enums (2)
 # #########################################################################
+
+class BiblicalEra(str, Enum):
+    OldTestament = "OldTestament"
+    NewTestament = "NewTestament"
+    Intertestamental = "Intertestamental"
+    ChurchHistory = "ChurchHistory"
+    NotApplicable = "NotApplicable"
 
 class EntityCategory(str, Enum):
     Doctrine = "Doctrine"
@@ -54,16 +61,23 @@ class EntityCategory(str, Enum):
     ManuscriptOrVersion = "ManuscriptOrVersion"
 
 # #########################################################################
-# Generated classes (4)
+# Generated classes (5)
 # #########################################################################
 
 class ExtractedText(BaseModel):
     text: str
 
+class ExtractionResult(BaseModel):
+    entities: typing.List["GillEntity"]
+    cross_references: typing.List[str]
+
 class GillEntity(BaseModel):
     name: str
     category: EntityCategory
+    biblical_era: BiblicalEra
+    role: typing.Optional[str] = None
     normalized_name: typing.Optional[str] = None
+    description: typing.Optional[str] = None
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None

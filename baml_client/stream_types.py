@@ -23,16 +23,23 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (4)
+# Generated classes (5)
 # #########################################################################
 
 class ExtractedText(BaseModel):
     text: typing.Optional[str] = None
 
+class ExtractionResult(BaseModel):
+    entities: typing.List["GillEntity"]
+    cross_references: typing.List[str]
+
 class GillEntity(BaseModel):
     name: typing.Optional[str] = None
     category: typing.Optional[types.EntityCategory] = None
+    biblical_era: typing.Optional[types.BiblicalEra] = None
+    role: typing.Optional[str] = None
     normalized_name: typing.Optional[str] = None
+    description: typing.Optional[str] = None
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None

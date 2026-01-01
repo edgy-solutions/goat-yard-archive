@@ -203,6 +203,7 @@ class EvidenceItem(BaseModel):
     scan: Optional[Any]
     footnotes: Optional[List[str]] = []
     entities: Optional[List[str]] = []
+    sentence_data: Optional[List[Any]] = [] # New field for highlighting
     score: float
 
 class SearchResponse(BaseModel):
@@ -357,7 +358,7 @@ async def search(request: Request, req: SearchRequest):
                             }
                             
                             model_name = last_run.get("model") or "deepseek-chat"
-                        generation.update(usage_details=lf_usage, cost_details=lf_cost, model=model_name)
+                            generation.update(usage_details=lf_usage, cost_details=lf_cost, model=model_name)
                     
                     if gen_ctx:
                         gen_ctx.__exit__(None, None, None)
@@ -368,7 +369,10 @@ async def search(request: Request, req: SearchRequest):
                         lf_client.flush()
                 # ---------------------
                 
+            # Check if bot returned a manual verification failure
             verified = True
+            if "Verification Failed:" in answer:
+                 verified = False
                  
         except Exception as e:
             if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
@@ -393,6 +397,7 @@ async def search(request: Request, req: SearchRequest):
             scan=r["scan"],
             footnotes=r.get("footnotes", []),
             entities=r.get("entities", []),
+            sentence_data=r.get("sentence_data", []), # Pass it through
             score=r["score"]
         ))
 

@@ -93,7 +93,7 @@ class BamlSyncClient:
     
     def ExtractGillKnowledge(self, commentary_text: str,
         baml_options: BamlCallOptions = {},
-    ) -> typing.List["types.GillEntity"]:
+    ) -> types.ExtractionResult:
         # Check if on_tick is provided
         if 'on_tick' in baml_options:
             stream = self.stream.ExtractGillKnowledge(commentary_text=commentary_text,
@@ -104,7 +104,7 @@ class BamlSyncClient:
             result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractGillKnowledge", args={
                 "commentary_text": commentary_text,
             })
-            return typing.cast(typing.List["types.GillEntity"], result.cast_to(types, types, stream_types, False, __runtime__))
+            return typing.cast(types.ExtractionResult, result.cast_to(types, types, stream_types, False, __runtime__))
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> str:
@@ -172,14 +172,14 @@ class BamlStreamClient:
 
     def ExtractGillKnowledge(self, commentary_text: str,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlSyncStream[typing.List["stream_types.GillEntity"], typing.List["types.GillEntity"]]:
+    ) -> baml_py.BamlSyncStream[stream_types.ExtractionResult, types.ExtractionResult]:
         ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractGillKnowledge", args={
             "commentary_text": commentary_text,
         })
-        return baml_py.BamlSyncStream[typing.List["stream_types.GillEntity"], typing.List["types.GillEntity"]](
+        return baml_py.BamlSyncStream[stream_types.ExtractionResult, types.ExtractionResult](
           result,
-          lambda x: typing.cast(typing.List["stream_types.GillEntity"], x.cast_to(types, types, stream_types, True, __runtime__)),
-          lambda x: typing.cast(typing.List["types.GillEntity"], x.cast_to(types, types, stream_types, False, __runtime__)),
+          lambda x: typing.cast(stream_types.ExtractionResult, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ExtractionResult, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,

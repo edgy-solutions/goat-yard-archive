@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import ScanGallery from './components/ScanGallery';
-import ReactMarkdown from 'react-markdown';
 import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
 import { useAuth } from '@clerk/clerk-react';
@@ -14,8 +13,15 @@ import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Footer from './components/Footer';
 import AnalyticsManager from './components/AnalyticsManager';
+import HighlightedContent from './components/HighlightedContent';
 
-// Types (should actully be in types.ts but putting here for single-file portability if needed)
+// Palette removed as requested (reverting to single yellow highlight on selection)
+
+// ... (Types omitted for brevity, keeping existing)
+
+// ... (Inside App function component)
+
+
 interface Rect { x: number; y: number; w: number; h: number; }
 
 interface ScanPageHighlight {
@@ -36,6 +42,7 @@ interface EvidenceItem {
     score: number;
     footnotes?: string[];
     entities?: string[];
+    sentence_data?: { sentence_id: string; text: string }[];
 }
 
 interface SearchResponse {
@@ -53,6 +60,9 @@ function App() {
     const { getToken } = useAuth();
     // User hook removed as logic moved to AnalyticsManager
     const posthog = usePostHog();
+
+    // Track the specifically selected citation sentence (e.g. S01)
+    const [focusedSentenceId, setFocusedSentenceId] = useState<string | null>(null);
 
     // Handle Deep Linking (e.g. ?view=privacy)
     useEffect(() => {
@@ -105,6 +115,7 @@ function App() {
         setResponse(null);
         setResponse(null);
         setActiveEvidence(null);
+        setFocusedSentenceId(null);
         setShowMobileGallery(false);
         setLastSearchedQuery(query);
 
@@ -276,8 +287,11 @@ function App() {
             .catch(err => console.error("Failed to fetch books:", err));
     }, []);
 
-    const handleCitationClick = (evidence: EvidenceItem) => {
+    const handleCitationClick = (evidence: EvidenceItem, sentenceId?: string) => {
         setActiveEvidence(evidence);
+        // If a specific sentence ID is provided (from clicking a [Sxx] button), focus it.
+        // If undefined (generic click), clear focus so nothing is highlighted.
+        setFocusedSentenceId(sentenceId || null);
         setShowMobileGallery(true);
     };
 
@@ -366,27 +380,39 @@ function App() {
                                 </div>
                                 <div className="prose prose-sm max-w-none text-[#3E2723] leading-relaxed">
                                     {response.answer.split('\n').map((line, i) => {
-                                        // Regex to match [Vol X, p. Y]
-                                        const parts = line.split(/(\[Vol \d+, p\. \d+\])/g);
+                                        // Regex to match [ID_PATTERN] e.g. [GENESIS_29_34_S00]
+                                        const parts = line.split(/(\[[A-Z0-9_]+\])/g);
                                         return (
                                             <p key={i} className="mb-2">
                                                 {parts.map((part, partIdx) => {
-                                                    if (part.match(/^\[Vol \d+, p\. \d+\]$/)) {
-                                                        // Find matching evidence
-                                                        const match = response.evidence.find(ev => ev.citation === part);
+                                                    if (part.match(/^\[[A-Z0-9_]+\]$/)) {
+                                                        // Find matching evidence by checking if this ID exists in any evidence's sentence_data
+                                                        const match = response.evidence.find(ev =>
+                                                            ev.sentence_data?.some(s => `[${s.sentence_id}]` === part)
+                                                        );
+
                                                         if (match) {
+                                                            const id = part.replace(/^\[+|\]+$/g, '');
+                                                            // Check if this specific ID is the currently focused one
+                                                            const isFocused = focusedSentenceId === id;
+
                                                             return (
                                                                 <button
                                                                     key={partIdx}
-                                                                    onClick={() => handleCitationClick(match)}
-                                                                    className="text-amber-700 font-bold hover:underline cursor-pointer bg-amber-50 px-1 rounded mx-0.5 border border-amber-200 text-xs align-middle"
-                                                                    title="View Source"
+                                                                    onClick={() => handleCitationClick(match, id)}
+                                                                    className={`font-bold hover:underline cursor-pointer px-1.5 rounded mx-0.5 text-xs align-middle shadow-sm transition-transform hover:scale-105
+                                                                        ${isFocused
+                                                                            ? 'bg-yellow-200 text-amber-950 border border-yellow-400'
+                                                                            : 'bg-amber-50 text-amber-900 border border-amber-200'
+                                                                        }
+                                                                    `}
+                                                                    title={`View Source: ${match.verse_ref || match.citation}`}
                                                                 >
-                                                                    {part}
+                                                                    {match.verse_ref ? `[${match.verse_ref}]` : part}
                                                                 </button>
                                                             );
                                                         }
-                                                        return <span key={partIdx} className="text-gray-500 text-xs">{part}</span>;
+                                                        return <span key={partIdx}>{part}</span>;
                                                     }
                                                     return <span key={partIdx}>{part}</span>;
                                                 })}
@@ -403,20 +429,32 @@ function App() {
 
                             {/* Citations / Sources */}
                             <div className="flex flex-wrap gap-2">
-                                {response.evidence.map((ev, idx) => (
-                                    <button
-                                        key={idx}
-                                        onClick={() => handleCitationClick(ev)}
-                                        className={`px-3 py-1 rounded text-sm transition-all duration-200 font-serif border
+                                {response.evidence
+                                    // Filter to only show evidence that is actually CITED in the answer
+                                    .filter(ev => {
+                                        // If no citations in answer, show nothing (or maybe show all info if debugging? No, stricter is better)
+                                        if (!response.citations || response.citations.length === 0) return false;
+                                        if (!ev.sentence_data) return false;
+
+                                        return ev.sentence_data.some(s =>
+                                            response.citations.includes(`[${s.sentence_id}]`)
+                                        );
+                                    })
+                                    .map((ev, idx) => (
+                                        <button
+                                            key={idx}
+                                            onClick={() => handleCitationClick(ev)}
+                                            className={`px-3 py-1 rounded text-sm transition-all duration-200 font-serif border
                                             ${activeEvidence?.chunk_id === ev.chunk_id
-                                                ? 'bg-[#5D4037] text-amber-50 border-[#3E2723] shadow-md'
-                                                : 'bg-white/50 text-[#5D4037] border-[#D7CCC8] hover:bg-[#D7CCC8]/30 hover:shadow-sm'
-                                            }
+                                                    ? 'bg-[#5D4037] text-amber-50 border-[#3E2723] shadow-md'
+                                                    : 'bg-white/50 text-[#5D4037] border-[#D7CCC8] hover:bg-[#D7CCC8]/30 hover:shadow-sm'
+                                                }
                                         `}
-                                    >
-                                        {ev.citation}
-                                    </button>
-                                ))}
+                                            title={ev.citation}
+                                        >
+                                            {ev.verse_ref || ev.citation}
+                                        </button>
+                                    ))}
                             </div>
 
                             {/* Active Context Snippet */}
@@ -424,7 +462,7 @@ function App() {
                                 <div className="mt-6 border-t border-[#D7CCC8] pt-4">
                                     <div className="flex justify-between items-center mb-2 border-b border-[#D7CCC8] pb-1">
                                         <h3 className="text-sm font-bold uppercase text-[#5D4037] tracking-widest">
-                                            Evidence Source: {activeEvidence.verse_ref || "Unknown Verse"}
+                                            Evidence Source: Vol {activeEvidence.vol}, p. {activeEvidence.page}
                                         </h3>
                                         {/* Mobile: View Scan Button */}
                                         <button
@@ -461,9 +499,14 @@ function App() {
                                     )}
 
                                     <div className="p-4 bg-[#FFFDF5] border border-[#D7CCC8] rounded text-sm text-[#3E2723] shadow-inner font-merriweather leading-relaxed">
-                                        <div className="prose prose-sm max-w-none prose-p:my-1 prose-p:text-[#3E2723]">
-                                            <ReactMarkdown>{activeEvidence.content}</ReactMarkdown>
-                                        </div>
+
+                                        {/* Highlighted Commentary Content */}
+                                        <HighlightedContent
+                                            content={activeEvidence.content}
+                                            sentenceData={activeEvidence.sentence_data}
+                                            citations={response.citations}
+                                            activeIds={focusedSentenceId ? [focusedSentenceId] : []}
+                                        />
 
                                         {/* Footnotes Display */}
                                         {activeEvidence.footnotes && activeEvidence.footnotes.length > 0 && (

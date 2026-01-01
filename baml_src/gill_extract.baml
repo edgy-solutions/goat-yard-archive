@@ -23,18 +23,39 @@ enum EntityCategory {
 }
 
 // 2. The Entity Structure
+// 👇 NEW: Helper Enum for Disambiguation
+enum BiblicalEra {
+  OldTestament
+  NewTestament
+  Intertestamental
+  ChurchHistory
+  NotApplicable
+}
+
 class GillEntity {
-  name string @description("The entity name as it appears in the text")
+  name string @description("The entity name as it appears")
   category EntityCategory @description("The category this entity belongs to")
-  normalized_name string? @description("Normalize variations (e.g., 'Christ' -> 'Jesus Christ', 'the Lord' -> 'Jesus Christ')")
+  
+  // 👇 CRITICAL FOR DISAMBIGUATION (The "Joseph" Fix)
+  biblical_era BiblicalEra @description("If a person, which era do they belong to? Use NotApplicable for concepts.")
+  role string? @description("Specific role to distinguish same-named figures (e.g., 'Patriarch', 'Apostle', 'Husband of Mary').")
+
+  normalized_name string? @description("Normalize: 'Christ' -> 'Jesus Christ'. For 'Joseph', leave as 'Joseph' and let era/role disambiguate.")
+  description string? @description("A short 5-10 word context.")
+}
+
+// 👇 NEW: Wrapper Class to catch Scripture Links
+class ExtractionResult {
+  entities GillEntity[]
+  cross_references string[] @description("List of other Bible verses referenced in this text, normalized to 'BOOK_CH_VS' (e.g., 'ISA_53_06').")
 }
 
 // 3. The Extraction Function
-function ExtractGillKnowledge(commentary_text: string) -> GillEntity[] {
+function ExtractGillKnowledge(commentary_text: string) -> ExtractionResult {
   client OpenRouterText
   
   prompt #"
-    Analyze the following commentary by John Gill and extract key entities to build a Knowledge Graph.
+    Analyze this commentary by John Gill. Extract key entities and scripture references.
     
     **CRITICAL DISTINCTIONS:**
     - 'BiblicalFigure': People who appear IN the Bible narrative (Abraham, Moses, Peter, Jesus, etc.)
@@ -55,10 +76,37 @@ function ExtractGillKnowledge(commentary_text: string) -> GillEntity[] {
     - For locations: Use standard names (e.g., "the land of Canaan" -> "Canaan")
     - For cited authorities: Include title if mentioned (e.g., "R. Solomon Jarchi", "Josephus")
     
+    **DISAMBIGUATION INSTRUCTIONS:**
+    - For common names (Mary, Joseph, John, James, Saul), you MUST fill the 'biblical_era' and 'role' fields accurately.
+    - Example: "Joseph was sold" -> era: OldTestament, role: "Patriarch/Son of Jacob"
+    - Example: "Joseph took the child" -> era: NewTestament, role: "Husband of Mary"
+    - **INTRA-ERA COLLISIONS:** If a name refers to multiple people in the SAME era (e.g. multiple Zechariahs in OT, multiple Marys in NT), you MUST specify their distinct identity in the 'role' field.
+      - BAD: name="Zechariah", role="Biblical Figure"
+      - GOOD: name="Zechariah", role="Prophet / Son of Berechiah"
+      - GOOD: name="Zechariah", role="Priest / Son of Jehoiada"
+    - **WATCH FOR TYPOLOGY:** Gill frequently compares OT figures to NT figures. If he mentions "Joseph" (NT) inside a commentary on "Joseph" (OT), extract them as TWO SEPARATE entities.
+
+    **CRITICAL RULE: SCRIPTURE CITATIONS VS. ENTITIES**
+    Gill frequently abbreviates Bible books (e.g., "Rom. i. 4", "Mark xvi. 11").
+    
+    1. **CHECK THE PATTERN:** Does the "Name" look like a book abbreviation followed by numbers (Roman or Digit)?
+       - "Rom. i. 4" -> This is a CITATION.
+       - "Mark xvi. 11" -> This is a CITATION.
+       - "Mark" (alone) -> This is a BIBLICAL FIGURE.
+       
+    2. **THE ACTION:** - If it is a CITATION: Add it to the 'cross_references' list. **DO NOT** create a GillEntity for it.
+       - If it is a PERSON: Create a GillEntity with category 'BiblicalFigure'.
+       
+    **Ambiguity Check:** "Mark" is a person. "Mark xvi." is a book. Distinguish them by looking for the chapter numbers immediately following.
+
+    **SCRIPTURE REFERENCES:**
+    - Extract any direct bible verses Gill cites to support his argument.
+    - Normalize them to the format: BOOK_CHAPTER_VERSE (e.g., MAT_03_16).
+    
     **IMPORTANT:**
     - Only extract entities that are EXPLICITLY mentioned in the text
     - Do NOT extract pronouns or generic references unless they can be clearly resolved
-    - For OriginalWord, extract the transliterated Hebrew/Greek, not the English translation
+    - **DESCRIPTION**: Generate a concise (5-10 words) description for each entity to give it semantic context.
     
     Commentary Text:
     {{ commentary_text }}

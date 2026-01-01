@@ -19,6 +19,9 @@ type_map = {
     "types.ExtractedText": types.ExtractedText,
     "stream_types.ExtractedText": stream_types.ExtractedText,
 
+    "types.ExtractionResult": types.ExtractionResult,
+    "stream_types.ExtractionResult": stream_types.ExtractionResult,
+
     "types.GillEntity": types.GillEntity,
     "stream_types.GillEntity": stream_types.GillEntity,
 
@@ -28,6 +31,8 @@ type_map = {
     "types.VerseChunk": types.VerseChunk,
     "stream_types.VerseChunk": stream_types.VerseChunk,
 
+
+    "types.BiblicalEra": types.BiblicalEra,
 
     "types.EntityCategory": types.EntityCategory,
 

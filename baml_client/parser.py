@@ -26,9 +26,9 @@ class LlmResponseParser:
 
     def ExtractGillKnowledge(
         self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> typing.List["types.GillEntity"]:
+    ) -> types.ExtractionResult:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractGillKnowledge", llm_response=llm_response, mode="request")
-        return typing.cast(typing.List["types.GillEntity"], result)
+        return typing.cast(types.ExtractionResult, result)
 
     def ExtractTextFromImage(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -64,9 +64,9 @@ class LlmStreamParser:
 
     def ExtractGillKnowledge(
         self, llm_response: str, baml_options: BamlCallOptions = {},
-    ) -> typing.List["stream_types.GillEntity"]:
+    ) -> stream_types.ExtractionResult:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractGillKnowledge", llm_response=llm_response, mode="stream")
-        return typing.cast(typing.List["stream_types.GillEntity"], result)
+        return typing.cast(stream_types.ExtractionResult, result)
 
     def ExtractTextFromImage(
         self, llm_response: str, baml_options: BamlCallOptions = {},

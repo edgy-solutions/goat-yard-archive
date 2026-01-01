@@ -167,7 +167,7 @@ class GillSearchEngine:
                 response = self.chunks.query.fetch_objects(
                     filters=ref_filter,
                     limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data"],
                     return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
             else:
@@ -178,7 +178,7 @@ class GillSearchEngine:
                     query_properties=["content", "verse_ref"],
                     filters=filters,
                     limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data"],
                     return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
         else:
@@ -188,7 +188,7 @@ class GillSearchEngine:
                 query_properties=["content", "verse_ref"],
                 filters=filters,
                 limit=limit,
-                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes"],
+                return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data"],
                 return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
             )
         
@@ -237,6 +237,8 @@ class GillSearchEngine:
 
             # Format output
             # Format output
+            # DEBUG KEYS
+            print(f"DEBUG: Chunk keys: {list(obj.properties.keys())}")
             vol_val = obj.properties.get('volume')
             page_val = obj.properties.get('page_number')
             try:
@@ -245,8 +247,17 @@ class GillSearchEngine:
             except:
                 pass
 
+            # Parse sentence_data (JSON blob)
+            s_data = []
+            if obj.properties.get("sentence_data"):
+                try:
+                    s_data = json.loads(obj.properties["sentence_data"])
+                except:
+                    pass
+
             results.append({
                 "chunk_id": str(obj.uuid),
+                "sentence_data": s_data,
                 "content": obj.properties.get("content"),
                 "verse_ref": extracted_ref,
                 "citation": f"[Vol {vol_val}, p. {page_val}]",

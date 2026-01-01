@@ -9,13 +9,19 @@ class GillSignature(dspy.Signature):
     Answer questions by summarizing what "The Expositor" or "Dr. Gill" teaches in the provided context.
     Speak in a learned, reverent, and slightly archaic 18th-century academic tone, always referring to him in the third person (e.g., "Dr. Gill observes...", "The learned writer posits...").
     Do not append a list of citations or bibliography at the end of your response.
-    Base your answer ONLY on the provided context."""
+    Base your answer ONLY on the provided context.
+    ALWAYS support your claims with the provided Sentence IDs (e.g., [GEN_01_01_S05]).
+
+    CRITICAL CONSTRAINT:
+    If the provided 'context' is empty or does not contain the answer to the specific question, you MUST NOT attempt to answer from outside knowledge. 
+    Instead, reply exactly: "I regret that the provided extracts from the Doctor's writings do not appear to address this specific inquiry." and provide an empty citation list.
+    """
     
     context = dspy.InputField(desc="Excerpts from the learned Doctor's commentary with [Vol, Page] citations.")
     question = dspy.InputField(desc="The theological inquiry proposed.")
     
-    answer = dspy.OutputField(desc="A detailed answer in the voice of a contemporary disciple, citing specific volumes and pages.")
-    citations = dspy.OutputField(desc="A list of citations used, e.g. ['[Vol 1, p. 104]', '[Vol 2, p. 50]']")
+    answer = dspy.OutputField(desc="A detailed answer in the voice of a contemporary disciple, citing specific Sentence IDs (e.g., [GEN_46_06_S03]) for every claim.")
+    citations = dspy.OutputField(desc="A list of Sentence IDs used, e.g. ['[GEN_46_06_S01]', '[MAT_04_09_S03]']")
 
 class GroundedGillBot(dspy.Module):
     def __init__(self):
@@ -30,12 +36,45 @@ class GroundedGillBot(dspy.Module):
         
         for chunk in context_chunks:
             citation_tag = chunk.get("citation", "Unknown") # e.g. [Vol 1, p. 287]
-            valid_citations.add(citation_tag)
             verse_ref = chunk.get("verse_ref", "")
-            text = chunk.get("content", "")
-            formatted_context += f"Source {citation_tag} ({verse_ref}): {text}\n\n"
+            
+            # Sentence Granularity
+            sentence_data = chunk.get("sentence_data", [])
+            
+            formatted_context += f"SOURCE: {verse_ref} ({citation_tag})\n"
+            
+            if sentence_data and isinstance(sentence_data, list):
+                # Format: [S01] Text...
+                for sent in sentence_data:
+                    # Parse sentence ID to get suffix (e.g. GEN_46_06_S01 -> [S01])
+                    # Or just use the full ID? The user prompt implies short tags [S01] per chunk.
+                    # But if we have multiple chunks, [S01] is ambiguous.
+                    # Strategy: Use local index for readability, but LLM might get confused across chunks.
+                    # Better: Use the S-suffix if unique in this context block?
+                    # User example: "[S03] Gill notes..."
+                    # Let's use the local index format provided in ingestion "S01", "S02".
+                    # We will trust the LLM to contextually map it or we can prefix unique ID.
+                    
+                    s_id = sent.get("sentence_id", "")
+                    # Use FULL ID to ensure global uniqueness across multiple verses
+                    text = sent.get("text", "")
+                    formatted_context += f"[{s_id}] {text}\n"
+                    valid_citations.add(f"[{s_id}]")
+            else:
+                 # Fallback to blob
+                 text = chunk.get("content", "")
+                 if "Footnotes:" in text:
+                     # Separate footnotes for clarity
+                     main_text, footnotes = text.split("Footnotes:", 1)
+                     formatted_context += f"{main_text.strip()}\n"
+                     formatted_context += f"FOOTNOTES: {footnotes.strip()}\n"
+                 else:
+                     formatted_context += f"{text}\n"
+            
+            formatted_context += "\n"
             
         # 2. Generate
+        print(f"DEBUG: Valid Citations in Context: {valid_citations}")
         pred = self.generate_answer(context=formatted_context, question=question)
         
         # 3. Assertions (The Critic)
@@ -50,28 +89,68 @@ class GroundedGillBot(dspy.Module):
         
         # Parse citations if it's a string (sometimes LLMs output string repr of list)
         citations_list = pred.citations
-        if isinstance(citations_list, str):
-            # Use regex to find all valid citations of format [Vol X, p. Y]
-            # This is safer than splitting by comma which breaks the citation itself
-            import re
-            citations_list = re.findall(r"\[Vol \d+, p\. \d+\]", citations_list)
-
-        # Assertion 1: Format Check
-        # Regex for [Vol X, p. Y]
-        fmt_pattern = re.compile(r"\[Vol \d+, p\. \d+\]")
-        for cit in citations_list:
-            if not fmt_pattern.match(cit):
-                raise AssertionError(f"Citation '{cit}' does not match format [Vol X, p. Y].")
+        
+        # Deep Sanitize: Regardless of if it's a list, string, or nested mess, 
+        # we extract anything that looks like a valid ID.
+        raw_dump = str(citations_list)
+        import re
+        # Match [GEN_46_06_S01] style IDs
+        citations_list = re.findall(r"\[[a-zA-Z0-9_]+_S\d+\]", raw_dump)
+        
+        # ---------------------------------------------------------
+        # CRITICAL FIX: The "No-Free-Lunch" Check
+        # ---------------------------------------------------------
+        # If citations are empty, we MUST verify the answer is a "Refusal".
+        # If the answer is detailed (> 100 chars) but has no citations, it's a hallucination.
+        
+        if not citations_list:
+            # Define what a "Refusal" looks like based on your System Prompt
+            is_refusal = (
+                "does not appear" in pred.answer.lower() or 
+                "not address" in pred.answer.lower() or
+                "silent on this" in pred.answer.lower() or
+                "regret that" in pred.answer.lower()
+            )
             
+            if len(pred.answer) > 100 and not is_refusal:
+                # Manual Failure (dspy.Suggest missing)
+                return dspy.Prediction(
+                    answer="Verification Failed: Detailed answer provided without citations. Please retry query.",
+                    citations=[]
+                )
+            
+            # If it IS a refusal, we let it pass (Verified Negative)
+            return dspy.Prediction(answer=pred.answer, citations=[])
+
+        # ---------------------------------------------------------
+        # Standard Checks (Only run if citations exist)
+        # ---------------------------------------------------------
+        
+        # Assertion 1: Format Check
+        is_valid_format = all("_S" in c and "[" in c and "]" in c for c in citations_list)
+        
+        if not is_valid_format:
+             return dspy.Prediction(
+                 answer=f"Verification Failed: Invalid citation format found. Expected [GEN_XX_XX_SXX]. Citations: {citations_list}",
+                 citations=[]
+             )
+
         # Assertion 2: Hallucination Check
-        # Every cited source must be in valid_citations (from context)
+        citation_found = True
+        missing_cits = []
+        
         for cit in citations_list:
-            # We strip whitespace to be lenient
-            cit_clean = cit.strip()
-            # We allow partial match if really needed, but strict is better for grounding.
-            # actually strict equality is best given we formatted it.
-            if cit_clean not in valid_citations:
-                raise AssertionError(f"Citation '{cit_clean}' was not found in the provided context sources: {valid_citations}")
+            clean_cit = cit.strip()
+            # Strict check against valid_citations collected from context
+            if clean_cit not in valid_citations:
+                citation_found = False
+                missing_cits.append(clean_cit)
+        
+        if not citation_found:
+             return dspy.Prediction(
+                 answer=f"Verification Failed: Cited sources not found in context. Missing: {missing_cits}",
+                 citations=[]
+             )
             
         # If we get here, pass
         return dspy.Prediction(answer=pred.answer, citations=citations_list)

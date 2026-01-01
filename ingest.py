@@ -262,9 +262,33 @@ class GillIngestionEngine:
             return verse_ref.split(":")[1].lstrip("0")
         return ""
     
-    def get_or_create_entity(self, name: str, category: str, normalized_name: Optional[str] = None) -> str:
+    def get_or_create_entity(self, name: str, category: str, normalized_name: Optional[str] = None, description: Optional[str] = None, biblical_era: Optional[str] = None, role: Optional[str] = None) -> str:
         """Get existing entity UUID or create new entity."""
-        cache_key = (normalized_name or name, category)
+        
+        # Smart Disambiguation ID Logic (Always Disambiguate Strategy)
+        # 1. Start with Base ID
+        base_id = str(normalized_name).upper().replace(" ", "_") if normalized_name else str(name).upper().replace(" ", "_")
+        components = [base_id]
+        
+        # 2. Append Era if relevant (Skip "NotApplicable" concepts)
+        if biblical_era and biblical_era != "NotApplicable":
+             components.append(str(biblical_era).upper())
+             
+        # 3. Append Role if available
+        if role:
+             # Sanitize: Alphanumeric only, uppercase
+             safe_role = re.sub(r'[^a-zA-Z0-9]', '_', str(role).upper())
+             # Filter stopwords (OF, THE, A, AN) and empty strings
+             role_parts = [w for w in safe_role.split("_") if w and w not in ["OF", "THE", "A", "AN"]]
+             # Take up to 3 significant words to keep ID from getting massive
+             short_role = "_".join(role_parts[:3])
+             if short_role:
+                 components.append(short_role)
+        
+        dedup_id = "_".join(components)
+        
+        # Use this deduced ID as the cache key instead of (name, category)
+        cache_key = (dedup_id, category)
         if cache_key in self.entity_cache:
             return self.entity_cache[cache_key]
         
@@ -289,16 +313,31 @@ class GillIngestionEngine:
             safe_name = str(name)
             safe_category = str(category)
             safe_norm = str(normalized_name) if normalized_name else None
+            safe_desc = str(description) if description else None
+            safe_era = str(biblical_era) if biblical_era else None
+            safe_role = str(role) if role else None
             
-            # Deterministic UUID
+            # Deterministic UUID based on our smart unique ID
             import weaviate.util
-            entity_uuid = weaviate.util.generate_uuid5({"name": safe_name, "category": safe_category})
+            # We seed the UUID with the SMART deduplication ID we calculated
+            entity_uuid = weaviate.util.generate_uuid5({"dedup_id": dedup_id, "category": safe_category})
+
+            # Check if it already exists (Collision or Pre-existing)
+            exists = self.entities.query.fetch_object_by_id(entity_uuid)
+            if exists:
+                uuid_str = str(entity_uuid)
+                self.entity_cache[cache_key] = uuid_str
+                # logging.info(f"🔄 Entity Exists (UUID Check): {safe_name} -> {uuid_str}")
+                return uuid_str
 
             self.entities.data.insert(
                 properties={
                     "name": safe_name,
                     "category": safe_category,
-                    "normalized_name": safe_norm
+                    "normalized_name": safe_norm,
+                    "description": safe_desc,
+                    "biblical_era": safe_era,
+                    "role": safe_role
                 },
                 uuid=entity_uuid
             )
@@ -315,10 +354,17 @@ class GillIngestionEngine:
 
     
     class EntityStub:
-        def __init__(self, name, category, normalized_name=None):
+        def __init__(self, name, category, normalized_name=None, description=None):
+            self.name = name
+            self.category = category
+    class EntityStub:
+        def __init__(self, name, category, normalized_name=None, description=None, biblical_era=None, role=None):
             self.name = name
             self.category = category
             self.normalized_name = normalized_name
+            self.description = description
+            self.biblical_era = biblical_era
+            self.role = role
 
     def load_entities_from_cache(self, cache_file: Path) -> List[Any]:
         """Load entities from local JSON cache file."""
@@ -338,7 +384,10 @@ class GillIngestionEngine:
                 {
                     "name": e.name, 
                     "category": e.category, 
-                    "normalized_name": e.normalized_name
+                    "normalized_name": e.normalized_name,
+                    "description": getattr(e, 'description', None),
+                    "biblical_era": getattr(e, 'biblical_era', None),
+                    "role": getattr(e, 'role', None)
                 } 
                 for e in entities
             ]
@@ -348,15 +397,46 @@ class GillIngestionEngine:
         except Exception as e:
             logging.error(f"Error saving entity cache {cache_file}: {e}")
 
+    def is_citation_mistake(self, entity_name: str) -> bool:
+        """
+        Detects if an entity is actually a scripture citation.
+        Matches: 
+          - "Rom. i. 4"
+          - "Mark xvi. 11"
+          - "Gen 4:5"
+          - "1 Cor. v. 1"
+        """
+        # 1. Cleaning: Strip whitespace
+        name = entity_name.strip()
+        
+        # 2. The "Book Chapter" Regex
+        # Looks for:
+        #  - Optional number prefix (1 Cor, 2 Kings) -> (?:[1-3]\s+)?
+        #  - Name (Rom, Gen) -> [A-Z][a-z]+
+        #  - Optional dot -> \.?
+        #  - Whitespace -> \s+
+        #  - Chapter (digits or roman numerals) -> ([0-9]+|[ivxlcIVXLC]+)
+        citation_pattern = r"^(?:[1-3]\s+)?[A-Z][a-z]+\.?\s+([0-9]+|[ivxlcIVXLC]+)"
+        
+        # 3. Check Match
+        import re
+        if re.match(citation_pattern, name):
+            return True
+            
+        return False
+
     
-    def extract_entities(self, commentary_text: str) -> List[Any]:
+    def extract_entities(self, commentary_text: str) -> Tuple[List[Any], List[str]]:
         """Use BAML to extract entities from commentary text."""
         try:
-            entities = b.ExtractGillKnowledge(commentary_text)
-            return entities if entities else []
+            result = b.ExtractGillKnowledge(commentary_text)
+            # Handle new return structure (ExtractionResult)
+            if hasattr(result, 'entities'):
+                 return result.entities, getattr(result, 'cross_references', [])
+            return result, [] # Fallback if direct list (shouldn't happen with new BAML)
         except BamlError as e:
             logging.error(f"BAML error extracting entities: {e}")
-            return []
+            return [], []
             
     def load_alignment_json(self, page_name: str, alignment_dir: Path) -> List[Dict]:
         path = alignment_dir / f"{page_name}_alignment.json"
@@ -365,14 +445,31 @@ class GillIngestionEngine:
                 return json.load(f)
         return []
 
+    def parse_verse_ref(self, ref: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Parses 'BOOK CHAPTER:VERSE' into ('BOOK', 'CHAPTER:VERSE').
+        Handles numeric prefixes like '1 JOHN 1:1'.
+        """
+        if not ref:
+            return None, None
+            
+        import re
+        # Match "BOOK NAME" "CHAPTER:VERSE"
+        # The chapter:verse is always at the end (digits:digits)
+        match = re.search(r'^(.*?)\s+(\d+:\d+)$', ref)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+            
+        return None, None
+
     def process_page(self, page_name: str, data_dir: Path, alignment_dir: Path, qwen_dir: Path, volume_override: int = None, recycle_entities: bool = False, entity_cache_dir: Optional[Path] = None) -> int:
         """Process a single page and ingest into Weaviate."""
         logging.info(f"Processing {page_name}...")
         
         # Setup Cache Path
-        cache_file = None
         if entity_cache_dir:
-            cache_file = entity_cache_dir / f"{page_name}_entities.json"
+            # Namespace cache by Volume to avoid collisions
+            cache_file = entity_cache_dir / f"vol{volume}_{page_name}_entities.json"
         
         volume, page_num = self.parse_page_info(page_name, volume_override)
         
@@ -547,6 +644,12 @@ class GillIngestionEngine:
             # Clean text (remove footnotes and next-verse headers)
             commentary_text = self.clean_text(commentary_text)
             
+            # Blob Strategy: Append footnotes to the content so they are vector-searchable, 
+            # while keeping the 'footnotes' array separate for UI display.
+            vector_content = commentary_text
+            if footnotes:
+                vector_content += "\n\nFootnotes:\n" + "\n".join(footnotes)
+            
             # Process sentences
             sentence_data = self.process_sentences(verse_ref, commentary_text)
             
@@ -575,27 +678,47 @@ class GillIngestionEngine:
                         uuid = self.get_or_create_entity(
                             ent_dict.get("name"), 
                             ent_dict.get("category"), 
-                            ent_dict.get("normalized_name")
+                            ent_dict.get("normalized_name"),
+                            ent_dict.get("description"),
+                            ent_dict.get("biblical_era"),
+                            ent_dict.get("role")
                         )
                         if uuid:
                             entity_uuids.append(uuid)
                 else:
                     logging.info(f"⚪ Cache MISS for {verse_ref}")
                     # LLM Extraction
-                    extracted_entities = self.extract_entities(commentary_text)
+                    extracted_entities, cross_refs = self.extract_entities(commentary_text)
                     
                     # Store in Cache
                     serialized_ents = []
                     for entity in extracted_entities:
+                        # REGEX GUARD: Check for "Fake People" (actually citations)
+                        if self.is_citation_mistake(entity.name):
+                            logging.info(f"🧹 Sweeping away citation artifact: '{entity.name}'")
+                            # Add to cross_refs if possible, or just skip
+                            if 'cross_refs' in locals():
+                                # Normalize slightly if we want, but just appending is better than making a fake person
+                                cross_refs.append(entity.name) 
+                            continue
+
                         # Process and store
-                        uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name)
+                        # Try to get description/role/era safely
+                        desc = getattr(entity, 'description', None)
+                        era = getattr(entity, 'biblical_era', None)
+                        role = getattr(entity, 'role', None)
+                        
+                        uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name, desc, era, role)
                         if uuid:
                             entity_uuids.append(uuid)
                         
                         serialized_ents.append({
                             "name": entity.name, 
                             "category": entity.category, 
-                            "normalized_name": entity.normalized_name
+                            "normalized_name": entity.normalized_name,
+                            "description": desc,
+                            "biblical_era": era,
+                            "role": role
                         })
                     
                     page_entity_cache[verse_ref] = serialized_ents
@@ -604,16 +727,16 @@ class GillIngestionEngine:
             # Ingest
             try:
                 self.chunks.data.insert({
-                    "content": commentary_text,
+                    "content": vector_content,
                     "verse_ref": verse_ref,
-                    "book": book,
-                    "chapter": chapter,
+                    "book": self.parse_verse_ref(verse_ref)[0] if verse_ref else None,
+                    "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if verse_ref and ':' in verse_ref else 0,
                     "volume": volume,
                     "page_number": page_num,
-                    "original_text_snippet": original_snippet,
                     "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
-                    "sentence_data": sentence_data,
-                    "footnotes": footnotes
+                    "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
+                    "footnotes": footnotes,
+                    "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None
                 }, references={
                     "mentions_entity": entity_uuids
                 } if entity_uuids else None)

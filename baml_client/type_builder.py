@@ -20,14 +20,18 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","GillEntity","Metadata","VerseChunk",]
+          ["ExtractedText","ExtractionResult","GillEntity","Metadata","VerseChunk",]
         ), enums=set(
-          ["EntityCategory",]
+          ["BiblicalEra","EntityCategory",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 1
+    # Generated enums 2
     # #########################################################################
+
+    @property
+    def BiblicalEra(self) -> "BiblicalEraViewer":
+        return BiblicalEraViewer(self)
 
     @property
     def EntityCategory(self) -> "EntityCategoryViewer":
@@ -35,12 +39,16 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 4
+    # Generated classes 5
     # #########################################################################
 
     @property
     def ExtractedText(self) -> "ExtractedTextViewer":
         return ExtractedTextViewer(self)
+
+    @property
+    def ExtractionResult(self) -> "ExtractionResultViewer":
+        return ExtractionResultViewer(self)
 
     @property
     def GillEntity(self) -> "GillEntityViewer":
@@ -57,8 +65,62 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated enums 1
+# Generated enums 2
 # #########################################################################
+
+class BiblicalEraAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("BiblicalEra")
+        self._values: typing.Set[str] = set([  "OldTestament",  "NewTestament",  "Intertestamental",  "ChurchHistory",  "NotApplicable",  ])
+        self._vals = BiblicalEraValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "BiblicalEraValues":
+        return self._vals
+
+
+class BiblicalEraViewer(BiblicalEraAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class BiblicalEraValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def OldTestament(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("OldTestament"))
+    
+    @property
+    def NewTestament(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("NewTestament"))
+    
+    @property
+    def Intertestamental(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Intertestamental"))
+    
+    @property
+    def ChurchHistory(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ChurchHistory"))
+    
+    @property
+    def NotApplicable(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("NotApplicable"))
+    
+    
+
 
 class EntityCategoryAst:
     def __init__(self, tb: type_builder.TypeBuilder):
@@ -140,7 +202,7 @@ class EntityCategoryValues:
 
 
 # #########################################################################
-# Generated classes 4
+# Generated classes 5
 # #########################################################################
 
 class ExtractedTextAst:
@@ -182,11 +244,54 @@ class ExtractedTextProperties:
     
 
 
+class ExtractionResultAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ExtractionResult")
+        self._properties: typing.Set[str] = set([  "entities",  "cross_references",  ])
+        self._props = ExtractionResultProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ExtractionResultProperties":
+        return self._props
+
+
+class ExtractionResultViewer(ExtractionResultAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ExtractionResultProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def entities(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("entities"))
+    
+    @property
+    def cross_references(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("cross_references"))
+    
+    
+
+
 class GillEntityAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("GillEntity")
-        self._properties: typing.Set[str] = set([  "name",  "category",  "normalized_name",  ])
+        self._properties: typing.Set[str] = set([  "name",  "category",  "biblical_era",  "role",  "normalized_name",  "description",  ])
         self._props = GillEntityProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -223,8 +328,20 @@ class GillEntityProperties:
         return type_builder.ClassPropertyViewer(self.__bldr.property("category"))
     
     @property
+    def biblical_era(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("biblical_era"))
+    
+    @property
+    def role(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("role"))
+    
+    @property
     def normalized_name(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("normalized_name"))
+    
+    @property
+    def description(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
     
     
 

@@ -55,24 +55,48 @@ def setup_weaviate_schema():
             client.collections.create(
                 name="TheologicalEntity",
                 description="Entities extracted from Gill's Commentary",
+                # Ensure the vectorizer is set (matches your Chunk config)
+                vectorizer_config=Configure.Vectorizer.text2vec_transformers(),
                 properties=[
                     Property(
                         name="name", 
                         data_type=DataType.TEXT,
                         description="Entity name as it appears",
                         vectorize_property_name=False
+                        # Default tokenization (word) is good here
+                    ),
+                    Property(
+                        name="description",
+                        data_type=DataType.TEXT,
+                        description="Short context extracted by BAML",
+                        # We WANT to vectorize this
                     ),
                     Property(
                         name="category", 
                         data_type=DataType.TEXT,
                         description="Entity Category (e.g., BiblicalFigure)",
-                        skip_vectorization=True
+                        skip_vectorization=True,
+                        tokenization=Tokenization.FIELD
                     ),
                     Property(
                         name="normalized_name", 
                         data_type=DataType.TEXT, 
                         description="Normalized form for deduplication",
-                        skip_vectorization=True
+                        skip_vectorization=True,
+                        tokenization=Tokenization.FIELD
+                    ),
+                    Property(
+                        name="biblical_era",
+                        data_type=DataType.TEXT,
+                        description="Era (e.g., OldTestament, NewTestament)",
+                        skip_vectorization=True,
+                        tokenization=Tokenization.FIELD
+                    ),
+                    Property(
+                        name="role",
+                        data_type=DataType.TEXT,
+                        description="Disambiguating role (e.g., 'Patriarch')",
+                        # Vectorize this so "Husband of Mary" adds meaning!
                     )
                 ]
             )
@@ -97,6 +121,14 @@ def setup_weaviate_schema():
                         description="Verse reference (e.g., 'GEN 46:06')",
                         tokenization=Tokenization.FIELD,
                         skip_vectorization=True
+                    ),
+                    Property(
+                        name="scripture_refs",
+                        data_type=DataType.TEXT_ARRAY,
+                        description="Cross-referenced bible verses (e.g. ['ISA_53_06'])",
+                        skip_vectorization=True,
+                        index_filterable=False # Optimization: unlikely to filter by exact list, but maybe contains? Leave index_filterable=True default is fine for array? 
+                        # Actually standard filter is fine for contains.
                     ),
                     Property(
                         name="book", 
@@ -136,15 +168,11 @@ def setup_weaviate_schema():
                     ),
                     Property(
                         name="sentence_data",
-                        data_type=DataType.OBJECT_ARRAY,
-                        description="Sentence-level segmentation",
+                        data_type=DataType.TEXT, # Stored as JSON string (json.dumps on ingest, json.loads on search)
+                        description="Serialized sentence-level segmentation JSON",
+                        skip_vectorization=True,
                         index_filterable=False,
-                        index_searchable=False,
-                        nested_properties=[
-                            Property(name="sentence_id", data_type=DataType.TEXT),
-                            Property(name="text", data_type=DataType.TEXT),
-                            Property(name="index", data_type=DataType.INT)
-                        ]
+                        index_searchable=False
                     ),
                     Property(
                         name="footnotes",
