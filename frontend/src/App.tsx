@@ -296,12 +296,38 @@ function App() {
             .catch(err => console.error("Failed to fetch books:", err));
     }, []);
 
+    // Scroll logic removed (Split Pane implementation)
+
+    // Scroll Evidence Panel to specific highlight or top
+    useEffect(() => {
+        if (!activeEvidence) return;
+
+        // Give React a moment to render the new content
+        setTimeout(() => {
+            // If we have a focused sentence (e.g. from clicking [S01]), try to scroll to it
+            // The HighlightedContent component needs to attach IDs like `highlight-S01` to spans
+            if (focusedSentenceId) {
+                const el = document.getElementById(`highlight-${focusedSentenceId}`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    return;
+                }
+            }
+
+            // Fallback: Scroll the scroll container to top
+            const container = document.getElementById('evidence-scroll-container');
+            if (container) {
+                container.scrollTop = 0;
+            }
+        }, 100);
+    }, [activeEvidence, focusedSentenceId]);
+
     const handleCitationClick = (evidence: EvidenceItem, sentenceId?: string) => {
         setActiveEvidence(evidence);
         // If a specific sentence ID is provided (from clicking a [Sxx] button), focus it.
         // If undefined (generic click), clear focus so nothing is highlighted.
         setFocusedSentenceId(sentenceId || null);
-        setShowMobileGallery(true);
+        setShowMobileGallery(false);
     };
 
     // Close overlays
@@ -355,12 +381,12 @@ function App() {
                     onOpenContact={() => setView('contact')}
                 />
 
-                {/* Main Content Area - no scroll, evidence section has its own scroll */}
-                <div className="flex-1 overflow-hidden p-4 md:p-8 space-y-8 flex flex-col">
+                {/* Main Content Area - Split Panel Layout */}
+                <div className="flex-1 overflow-hidden flex flex-col relative">
 
-                    {/* Empty State */}
+                    {/* Empty State - Centered */}
                     {!response && !loading && !error && (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center opacity-60 mt-10">
+                        <div className="flex-1 flex flex-col items-center justify-center text-center opacity-60 p-4 pb-32">
                             <div className="text-4xl text-[#D7CCC8] mb-4">❦</div>
                             <h2 className="text-xl font-bold text-[#5D4037] mb-2 font-display italic">The Library is Open</h2>
                             <p className="text-sm text-[#8D6E63] max-w-xs mx-auto mb-8 font-ui">
@@ -391,9 +417,9 @@ function App() {
                         </div>
                     )}
 
-                    {/* Error Banner */}
+                    {/* Error Banner - Floating/Inline */}
                     {error && (
-                        <div className="bg-red-50/50 border-l-4 border-red-800/50 text-red-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm">
+                        <div className="m-4 bg-red-50/50 border-l-4 border-red-800/50 text-red-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm shrink-0">
                             {(error.includes("My dear friend") || error.includes("Scriptures"))
                                 ? <span className="italic font-serif text-[#5D4037]">{error}</span>
                                 : <><strong>Connection Error:</strong> {error}</>
@@ -404,9 +430,9 @@ function App() {
                         </div>
                     )}
 
-                    {/* Loading State */}
+                    {/* Loading State - Centered */}
                     {loading && (
-                        <div className="flex items-center justify-center py-10 space-x-3 text-[#8D6E63] animate-pulse">
+                        <div className="flex-1 flex items-center justify-center py-10 space-x-3 text-[#8D6E63] animate-pulse">
                             <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
                             <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                             <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
@@ -415,110 +441,110 @@ function App() {
                     )}
 
                     {response && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* Answer Card */}
-                            <div className="relative">
-                                {/* Decorative Quote */}
-                                <div className="absolute -top-4 -left-2 text-6xl text-[#E5E0D8] font-serif pointer-events-none">“</div>
+                        <div className="flex-1 overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {/* Answer Card - Scrollable Top Pane */}
+                            <div className={`flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 ${activeEvidence ? 'pb-4' : 'pb-32'}`}>
+                                <div className="relative">
+                                    {/* Decorative Quote */}
+                                    <div className="absolute -top-4 -left-2 text-6xl text-[#E5E0D8] font-serif pointer-events-none">“</div>
 
-                                <div className="relative z-10">
-                                    <div className="flex justify-end mb-2">
-                                        {response.verified ? (
-                                            <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
-                                                ✓ Verified Source
-                                            </span>
-                                        ) : (
-                                            <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-full border border-amber-200 font-ui uppercase tracking-wider">
-                                                ⚠️ Unverified
-                                            </span>
-                                        )}
-                                    </div>
-                                    <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
-                                        {response.answer.split('\n').map((line, i) => {
-                                            const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
-                                            return (
-                                                <div key={i} className="mb-4">
-                                                    {parts.map((part, partIdx) => {
-                                                        if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
-                                                            const rawContent = part.replace(/^\[+|\]+$/g, '');
-                                                            const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
-                                                            const hasMatch = ids.some(id => response.evidence.find(ev =>
-                                                                ev.sentence_data?.some(s => s.sentence_id === id)
-                                                            ));
+                                    <div className="relative z-10">
+                                        <div className="flex justify-end mb-2">
+                                            {response.verified ? (
+                                                <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
+                                                    ✓ Verified Source
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-full border border-amber-200 font-ui uppercase tracking-wider">
+                                                    ⚠️ Unverified
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
+                                            {response.answer.split('\n').map((line, i) => {
+                                                const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
+                                                return (
+                                                    <div key={i} className="mb-4">
+                                                        {parts.map((part, partIdx) => {
+                                                            if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
+                                                                const rawContent = part.replace(/^\[+|\]+$/g, '');
+                                                                const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
+                                                                const hasMatch = ids.some(id => response.evidence.find(ev =>
+                                                                    ev.sentence_data?.some(s => s.sentence_id === id)
+                                                                ));
 
-                                                            if (hasMatch) {
-                                                                return (
-                                                                    <span key={partIdx} className="inline-flex flex-wrap gap-1 align-baseline mx-1">
-                                                                        {ids.map((id, idIdx) => {
-                                                                            const match = response.evidence.find(ev =>
-                                                                                ev.sentence_data?.some(s => s.sentence_id === id)
-                                                                            );
-
-                                                                            if (match) {
-                                                                                const isFocused = focusedSentenceId === id;
-                                                                                return (
-                                                                                    <button
-                                                                                        key={`${partIdx}-${idIdx}`}
-                                                                                        onClick={() => handleCitationClick(match, id)}
-                                                                                        className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline
-                                                                                            ${isFocused
-                                                                                                ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
-                                                                                                : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm'
-                                                                                            }
-                                                                                        `}
-                                                                                        title={`View Source: ${match.verse_ref || match.citation}`}
-                                                                                    >
-                                                                                        {match.verse_ref ? match.verse_ref.toUpperCase() : id}
-                                                                                    </button>
+                                                                if (hasMatch) {
+                                                                    return (
+                                                                        <span key={partIdx} className="inline-flex flex-wrap gap-1 align-baseline mx-1">
+                                                                            {ids.map((id, idIdx) => {
+                                                                                const match = response.evidence.find(ev =>
+                                                                                    ev.sentence_data?.some(s => s.sentence_id === id)
                                                                                 );
-                                                                            }
-                                                                            return null;
-                                                                        })}
-                                                                    </span>
-                                                                );
-                                                            }
-                                                            return null;
-                                                        }
-                                                        // Use ReactMarkdown for text parts to render italics/bold
-                                                        // Use span as wrapper to stay inline, but ReactMarkdown defaults to p/div blocks,
-                                                        // so we need to process it to allow inline rendering or just accept block behavior?
-                                                        // Actually, 'prose' handles paragraphs well. Let's try rendering inline components.
-                                                        return (
-                                                            <span key={partIdx}>
-                                                                <ReactMarkdown
-                                                                    components={{
-                                                                        p: ({ node, ...props }) => <span {...props} />,
-                                                                        a: ({ node, ...props }) => <span className="text-amber-800 underline" {...props} />
-                                                                    }}
-                                                                >
-                                                                    {part}
-                                                                </ReactMarkdown>
-                                                            </span>
-                                                        );
-                                                    })}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
 
-                                    <div className="mt-4 flex justify-end">
-                                        <ResponseActions
-                                            responseId={lastSearchedQuery}
-                                            onReport={handleReportOpen}
-                                        />
+                                                                                if (match) {
+                                                                                    const isFocused = focusedSentenceId === id;
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={`${partIdx}-${idIdx}`}
+                                                                                            onClick={() => handleCitationClick(match, id)}
+                                                                                            className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline
+                                                                                                ${isFocused
+                                                                                                    ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
+                                                                                                    : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm'
+                                                                                                }
+                                                                                            `}
+                                                                                            title={`View Source: ${match.verse_ref || match.citation}`}
+                                                                                        >
+                                                                                            {match.verse_ref ? match.verse_ref.toUpperCase() : id}
+                                                                                        </button>
+                                                                                    );
+                                                                                }
+                                                                                return null;
+                                                                            })}
+                                                                        </span>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            }
+                                                            // ReactMarkdown Handling...
+                                                            return (
+                                                                <span key={partIdx}>
+                                                                    <ReactMarkdown
+                                                                        components={{
+                                                                            p: ({ node, ...props }) => <span {...props} />,
+                                                                            a: ({ node, ...props }) => <span className="text-amber-800 underline" {...props} />
+                                                                        }}
+                                                                    >
+                                                                        {part}
+                                                                    </ReactMarkdown>
+                                                                </span>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div className="mt-4 flex justify-end">
+                                            <ResponseActions
+                                                responseId={lastSearchedQuery}
+                                                onReport={handleReportOpen}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Active Context Snippet - pb-44 ensures text can scroll above floating search bar */}
+                            {/* Active Context Snippet - Fixed Bottom Pane */}
                             {activeEvidence && (
-                                <div className="mt-8 pt-6 pb-44 border-t border-[#E5E0D8]">
-                                    <div className="flex justify-between items-center mb-4">
+                                <div className="h-1/2 shrink-0 border-t border-[#E5E0D8] bg-white flex flex-col shadow-[0_-4px_24px_-8px_rgba(0,0,0,0.1)] z-10 transition-all duration-300">
+                                    {/* Header in Pane */}
+                                    <div className="p-4 border-b border-[#E5E0D8] bg-[#FDFBF7] flex justify-between items-center shrink-0">
                                         <h3 className="text-xs font-bold uppercase text-[#8D6E63] tracking-widest font-ui flex items-center gap-2">
                                             <span className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full"></span>
                                             Primary Source Evidence
                                             {activeEvidence.citation && (
-                                                <span className="text-[#A1887F] font-normal normal-case tracking-normal ml-1">
+                                                <span className="text-[#A1887F] font-normal normal-case tracking-normal ml-1 hidden sm:inline">
                                                     {activeEvidence.citation}
                                                 </span>
                                             )}
@@ -526,13 +552,14 @@ function App() {
                                         {/* Mobile: View Scan Button */}
                                         <button
                                             onClick={() => setShowMobileGallery(true)}
-                                            className="md:hidden text-xs bg-[#FFFDF5] text-[#5D4037] border border-[#D7CCC8] px-3 py-1 rounded-full font-ui shadow-sm"
+                                            className="md:hidden text-xs bg-white text-[#5D4037] border border-[#D7CCC8] px-3 py-1 rounded-full font-ui shadow-sm whitespace-nowrap"
                                         >
-                                            View Original Scan →
+                                            View Scan →
                                         </button>
                                     </div>
-                                    {/* Evidence content with independent scroll - pb-52 provides extra scroll room above search bar */}
-                                    <div id="evidence-scroll-container" className="p-6 pb-52 bg-white rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-[#E5E0D8] text-sm text-[#3E2723] font-serif leading-relaxed relative overflow-y-auto max-h-[50vh] custom-scrollbar group">
+
+                                    {/* Evidence content with independent scroll - pb-60 for search bar */}
+                                    <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-60 text-sm text-[#3E2723] font-serif leading-relaxed relative group">
                                         {/* Paper texture overlay hint */}
                                         <div className="absolute inset-0 bg-[#FDFBF7] opacity-50 pointer-events-none mix-blend-multiply"></div>
 
@@ -552,8 +579,6 @@ function App() {
                                             {(() => {
                                                 if (!activeEvidence.footnotes || activeEvidence.footnotes.length === 0) return null;
 
-                                                // 1. Identify which footnotes are actually present in the text
-                                                // Check both content and sentence_data (in case footnotes are in individual sentences)
                                                 let textToSearch = activeEvidence.content || "";
                                                 if (activeEvidence.sentence_data) {
                                                     textToSearch += " " + activeEvidence.sentence_data.map((s: { text?: string }) => s.text || "").join(" ");
@@ -565,12 +590,6 @@ function App() {
                                                     activeIDs.add(m[1]);
                                                 }
 
-                                                console.log("Footnote Debug:", {
-                                                    contentPreview: textToSearch.slice(0, 200),
-                                                    activeIDs: Array.from(activeIDs),
-                                                    footnotes: activeEvidence.footnotes
-                                                });
-
                                                 if (activeIDs.size === 0) return null;
 
                                                 return (
@@ -578,7 +597,6 @@ function App() {
                                                         <h4 className="font-bold text-[#8D6E63] uppercase mb-2 font-ui tracking-wider text-[10px]">Original Footnotes</h4>
                                                         <ul className="space-y-2 text-[#5D4037]/80">
                                                             {activeEvidence.footnotes.map((fn, idx) => {
-                                                                // Extract ID from "[10] content..."
                                                                 const match = fn.match(/^\[(\d+)\]/);
                                                                 if (!match) return null;
 
@@ -607,7 +625,7 @@ function App() {
                 {/* Floating Search Bar - with gradient fade backdrop */}
                 <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20">
                     {/* Gradient fade mask to hide text scrolling behind */}
-                    <div className="h-24 bg-gradient-to-t from-[#FAF9F5] via-[#FAF9F5]/80 to-transparent pointer-events-none"></div>
+                    <div className="h-12 md:h-24 bg-gradient-to-t from-[#FAF9F5] via-[#FAF9F5]/80 to-transparent pointer-events-none"></div>
 
                     <div className="bg-[#FAF9F5] pb-6 px-4 md:px-6">
                         <div className="max-w-3xl mx-auto shadow-[0_20px_40px_-12px_rgba(0,0,0,0.15)] rounded-full bg-white border border-[#E5E0D8]/50 p-1.5 flex items-center transition-all hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.2)] pointer-events-auto ring-1 ring-[#E5E0D8]/50">
@@ -645,7 +663,7 @@ function App() {
                 {/* Mobile Back Button */}
                 <button
                     onClick={() => setShowMobileGallery(false)}
-                    className="md:hidden absolute top-4 left-4 z-[60] bg-white/10 backdrop-blur-md text-[#E6D5B8] px-4 py-2 rounded-full border border-white/20 font-ui text-sm flex items-center gap-2"
+                    className="md:hidden absolute top-4 left-4 z-[60] bg-white text-[#2C241B] px-4 py-2 rounded-full border border-[#D7CCC8] font-ui text-sm flex items-center gap-2 shadow-md hover:bg-[#FDFBF7] transition-colors"
                 >
                     ← Back to Chat
                 </button>
@@ -681,8 +699,13 @@ function App() {
                     )}
                 </div>
 
-                <div className="absolute bottom-0 inset-x-0 z-50 bg-gradient-to-t from-[#15100D] via-[#15100D]/90 to-transparent pt-4 pb-3">
-                    <Footer onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
+                <div className="absolute bottom-0 inset-x-0 z-50 flex flex-col">
+                    {/* Gradient Fade Only Above Text */}
+                    <div className="h-6 bg-gradient-to-t from-[#15100D] to-transparent pointer-events-none"></div>
+                    {/* Solid Background for Text */}
+                    <div className="bg-[#15100D] pt-2 pb-4">
+                        <Footer onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
+                    </div>
                 </div>
             </div>
 

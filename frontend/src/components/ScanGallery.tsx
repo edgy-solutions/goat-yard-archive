@@ -29,23 +29,27 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
         if (onLoaded) onLoaded();
     };
 
-    // Draw Highlight & Handle Focus
-    useEffect(() => {
+    // Draw Function
+    const draw = React.useCallback(() => {
         if (!loaded || !imgRef.current || !canvasRef.current) return;
 
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // If no highlight boxes, clear
+        const img = imgRef.current;
+
+        // If dimensions are zero (hidden), abort
+        if (img.clientWidth === 0 || img.clientHeight === 0) return;
+
+        canvas.width = img.clientWidth;
+        canvas.height = img.clientHeight;
+
+        // If no highlight boxes, clear and return
         if (!page.boxes || page.boxes.length === 0) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             return;
         }
-
-        const img = imgRef.current;
-        canvas.width = img.clientWidth;
-        canvas.height = img.clientHeight;
 
         const sourceW = (originalDims ? originalDims.w : img.naturalWidth) || 2500;
         const sourceH = (originalDims ? originalDims.h : img.naturalHeight) || 3800;
@@ -70,10 +74,25 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
             ctx.lineWidth = 2;
             ctx.strokeRect(x, y, w, h);
         });
+    }, [page, originalDims, loaded]);
 
-        // Auto-scroll handled by parent now (Global Centering)
+    // Initial Draw & Effect Dependencies
+    useEffect(() => {
+        draw();
+    }, [draw, shouldFocus]);
 
-    }, [page, originalDims, loaded, shouldFocus]);
+    // Resize Observer to handle display:none -> block transitions
+    useEffect(() => {
+        if (!imgRef.current) return;
+
+        const resizeObserver = new ResizeObserver(() => {
+            // Force redraw when size changes (e.g. becoming visible)
+            draw();
+        });
+
+        resizeObserver.observe(imgRef.current);
+        return () => resizeObserver.disconnect();
+    }, [draw]);
 
     return (
         <div className="relative w-full mb-8 shadow-lg">

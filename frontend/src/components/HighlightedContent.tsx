@@ -81,7 +81,7 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
                 return (
                     <span
                         key={id}
-                        id={id}
+                        id={`highlight-${id}`}
                         className={`transition-colors duration-200 ease-in-out px-0.5 rounded
                             ${isHighlighted ? 'bg-yellow-200 text-black border border-yellow-300 font-medium' : 'hover:bg-amber-50'}
                         `}
