@@ -355,8 +355,8 @@ function App() {
                     onOpenContact={() => setView('contact')}
                 />
 
-                {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 flex flex-col custom-scrollbar">
+                {/* Main Content Area - no scroll, evidence section has its own scroll */}
+                <div className="flex-1 overflow-hidden p-4 md:p-8 space-y-8 flex flex-col">
 
                     {/* Empty State */}
                     {!response && !loading && !error && (
@@ -531,8 +531,8 @@ function App() {
                                             View Original Scan →
                                         </button>
                                     </div>
-
-                                    <div className="p-6 bg-white rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-[#E5E0D8] text-sm text-[#3E2723] font-serif leading-relaxed relative overflow-hidden group">
+                                    {/* Evidence content with independent scroll - pb-40 provides scroll room past search bar */}
+                                    <div id="evidence-scroll-container" className="p-6 pb-40 bg-white rounded-xl shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] border border-[#E5E0D8] text-sm text-[#3E2723] font-serif leading-relaxed relative overflow-y-auto max-h-[50vh] custom-scrollbar group">
                                         {/* Paper texture overlay hint */}
                                         <div className="absolute inset-0 bg-[#FDFBF7] opacity-50 pointer-events-none mix-blend-multiply"></div>
 
@@ -604,30 +604,35 @@ function App() {
 
                 </div>
 
-                {/* Floating Search Bar */}
-                <div className="absolute bottom-6 left-0 right-0 p-4 md:p-6 pointer-events-none z-20">
-                    <div className="max-w-3xl mx-auto shadow-[0_20px_40px_-12px_rgba(0,0,0,0.15)] rounded-full bg-white border border-[#E5E0D8]/50 p-1.5 flex items-center transition-all hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.2)] pointer-events-auto ring-1 ring-[#E5E0D8]/50">
-                        <input
-                            className="flex-1 px-4 py-2 bg-transparent text-[#2C241B] placeholder-[#A1887F] focus:outline-none font-ui text-sm sm:text-base leading-relaxed"
-                            placeholder="Ask a question..."
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                        />
-                        <button
-                            onClick={handleSearch}
-                            disabled={loading}
-                            className="bg-[#2C241B] text-[#E6D5B8] px-6 py-2 rounded-full font-medium text-sm hover:bg-[#3E3226] disabled:opacity-50 transition-colors font-ui tracking-wide shadow-sm"
-                        >
-                            Search
-                        </button>
-                    </div>
+                {/* Floating Search Bar - with gradient fade backdrop */}
+                <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20">
+                    {/* Gradient fade mask to hide text scrolling behind */}
+                    <div className="h-24 bg-gradient-to-t from-[#FAF9F5] via-[#FAF9F5]/80 to-transparent pointer-events-none"></div>
 
-                    {/* Available Books - Discreet Bottom Label */}
-                    <div className="text-center mt-3">
-                        <span className="text-[10px] text-[#A1887F] font-ui tracking-wide">
-                            {availableBooks.length > 0 ? `Library Index: ${availableBooks.join(", ")}` : "Indexing Library..."}
-                        </span>
+                    <div className="bg-[#FAF9F5] pb-6 px-4 md:px-6">
+                        <div className="max-w-3xl mx-auto shadow-[0_20px_40px_-12px_rgba(0,0,0,0.15)] rounded-full bg-white border border-[#E5E0D8]/50 p-1.5 flex items-center transition-all hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.2)] pointer-events-auto ring-1 ring-[#E5E0D8]/50">
+                            <input
+                                className="flex-1 px-4 py-2 bg-transparent text-[#2C241B] placeholder-[#A1887F] focus:outline-none font-ui text-sm sm:text-base leading-relaxed"
+                                placeholder="Ask a question..."
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                            />
+                            <button
+                                onClick={handleSearch}
+                                disabled={loading}
+                                className="bg-[#2C241B] text-[#E6D5B8] px-6 py-2 rounded-full font-medium text-sm hover:bg-[#3E3226] disabled:opacity-50 transition-colors font-ui tracking-wide shadow-sm"
+                            >
+                                Search
+                            </button>
+                        </div>
+
+                        {/* Available Books - Discreet Bottom Label */}
+                        <div className="text-center mt-3">
+                            <span className="text-[10px] text-[#A1887F] font-ui tracking-wide">
+                                {availableBooks.length > 0 ? `Library Index: ${availableBooks.join(", ")}` : "Indexing Library..."}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>

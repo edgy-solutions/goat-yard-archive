@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { TextWithVerses } from './TextWithVerses';
 
@@ -20,6 +20,30 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
     activeIds = [],
     footnotes = []
 }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Auto-scroll to highlighted sentence when activeIds changes
+    // Scrolls only within the evidence container, not the whole page
+    useEffect(() => {
+        if (activeIds.length > 0) {
+            const targetId = activeIds[0].replace(/[\[\]]/g, ''); // Remove brackets if present
+            const element = document.getElementById(targetId);
+            const container = document.getElementById('evidence-scroll-container');
+
+            if (element && container) {
+                // Calculate scroll position to center element in container
+                const elementRect = element.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                const scrollTop = element.offsetTop - container.offsetTop - (containerRect.height / 2) + (elementRect.height / 2);
+
+                container.scrollTo({
+                    top: Math.max(0, scrollTop),
+                    behavior: 'smooth'
+                });
+            }
+        }
+    }, [activeIds]);
+
     // Render Lemma (if active)
     const lemmaNode = lemma ? (
         <span className="font-bold text-[#5D4037] mr-2">

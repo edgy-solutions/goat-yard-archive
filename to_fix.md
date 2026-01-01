@@ -1,6 +1,5 @@
 # things to fix
-- add verse references to prompt
-- diagnose references missing from answers and why these are said to be Verified
+- fix ingestion issue with introductions
 - add webhooks for clerk to manage users
 - add user preferences
 - add running list of prompt/answers in UI
@@ -14,3 +13,5 @@
 - add langfuse
 - add user feedback/report issue feature
 - deal with privacy notices
+- add verse references to prompt
+- diagnose references missing from answers and why these are said to be Verified
