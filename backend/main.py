@@ -321,7 +321,18 @@ async def search(request: Request, req: SearchRequest):
                     generation = None
 
                 try:
-                    pred = bot(question=req.query, context_chunks=raw_results)
+                    # Fetch available books for refusal context (Cached)
+                    if not getattr(app.state, "available_books", None):
+                         try:
+                             app.state.available_books = search_engine.get_available_books()
+                         except Exception as e:
+                             print(f"Error fetching books for cache: {e}")
+                             app.state.available_books = ["Genesis", "Matthew"]
+                    
+                    books = app.state.available_books
+                    available_books_str = ", ".join(books) if books else "Unknown"
+
+                    pred = bot(question=req.query, context_chunks=raw_results, available_books=available_books_str)
                     answer = pred.answer
                     citations = pred.citations
                     

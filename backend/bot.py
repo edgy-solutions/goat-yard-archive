@@ -25,11 +25,12 @@ class GillSignature(dspy.Signature):
 
     CRITICAL CONSTRAINT:
     If the provided 'context' is empty or does not contain the answer to the specific question, you MUST NOT attempt to answer from outside knowledge. 
-    Instead, reply exactly: "I regret that the provided extracts from the Doctor's writings do not appear to address this specific inquiry." and provide an empty citation list.
+    Instead, reply exactly: "I regret that the provided extracts from the Doctor's writings do not appear to address this specific inquiry. Could it be that you are looking for something not in the library ({available_books})?" and provide an empty citation list.
     """
     
     context = dspy.InputField(desc="Excerpts from the learned Doctor's commentary with [Vol, Page] citations.")
     question = dspy.InputField(desc="The theological inquiry proposed.")
+    available_books = dspy.InputField(desc="String listing the books currently available in the library.")
     
     answer = dspy.OutputField(desc="A detailed answer in the voice of a contemporary disciple, citing specific Sentence IDs (e.g., [GEN_46_06_S03]) for every claim.")
     citations = dspy.OutputField(desc="A list of Sentence IDs used, e.g. ['[GEN_46_06_S01]', '[MAT_04_09_S03]']")
@@ -39,7 +40,7 @@ class GroundedGillBot(dspy.Module):
         super().__init__()
         self.generate_answer = dspy.ChainOfThought(GillSignature)
         
-    def forward(self, question: str, context_chunks: List[dict]):
+    def forward(self, question: str, context_chunks: List[dict], available_books: str = "Genesis, Matthew"):
         # 1. Format Context
         # We need to explicitly include the [Vol, Page] metadata in the text so the model can see it.
         formatted_context = ""
@@ -85,7 +86,7 @@ class GroundedGillBot(dspy.Module):
             
         # 2. Generate
         print(f"DEBUG: Valid Citations in Context: {valid_citations}")
-        pred = self.generate_answer(context=formatted_context, question=question)
+        pred = self.generate_answer(context=formatted_context, question=question, available_books=available_books)
         
         # 3. Assertions (The Critic)
         # Check 1: Format
