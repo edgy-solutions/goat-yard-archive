@@ -7,9 +7,9 @@ interface HeaderProps {
 
 export default function Header({ onOpenAbout, onOpenContact }: HeaderProps) {
     return (
-        <div className="p-4 lg:p-6 border-b border-[#D7CCC8] bg-[#FDFBF7]/90 backdrop-blur-md flex justify-between items-center sticky top-0 z-50 shadow-[0_4px_12px_-4px_rgba(44,36,27,0.1)] transition-all gap-2">
-            <div className="flex flex-col items-start gap-0.5 shrink-0">
-                <h1 className="font-serif text-2xl font-bold text-[#4A3B32] tracking-tight leading-none whitespace-nowrap">
+        <div className="header-container p-4 lg:p-6 border-b border-[#D7CCC8] bg-[#FDFBF7]/90 backdrop-blur-md flex justify-between items-center sticky top-0 z-50 shadow-[0_4px_12px_-4px_rgba(44,36,27,0.1)] transition-all">
+            <div className="header-left flex flex-col items-start gap-0.5">
+                <h1 className="header-title font-serif text-2xl font-bold text-[#4A3B32] tracking-tight leading-none">
                     Dr. Voluminous
                 </h1>
                 <span className="font-sans text-[0.65rem] font-bold uppercase tracking-[0.2em] text-[#B45309]">
@@ -17,11 +17,14 @@ export default function Header({ onOpenAbout, onOpenContact }: HeaderProps) {
                 </span>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
-                <nav className="flex space-x-3 text-xs font-bold font-sans uppercase tracking-wider text-[#8D6E63]">
+            <div className="header-right flex items-center">
+                <nav className="header-nav flex text-xs font-bold font-sans uppercase tracking-wider text-[#8D6E63]">
                     <button onClick={onOpenAbout} className="hover:text-[#4A3B32] transition-colors">About</button>
                     <button onClick={onOpenContact} className="hover:text-[#4A3B32] transition-colors">Contact</button>
+                    {/* Future: Donate/Store Link */}
                 </nav>
+
+                <div className="header-separator h-4 w-px bg-[#E5E0D8]"></div>
 
                 <div>
                     <SignedOut>

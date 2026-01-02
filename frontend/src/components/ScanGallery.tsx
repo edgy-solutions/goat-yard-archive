@@ -29,7 +29,7 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
         if (onLoaded) onLoaded();
     };
 
-    // Draw Function
+    // Draw Function wrapped in useCallback for reuse
     const draw = React.useCallback(() => {
         if (!loaded || !imgRef.current || !canvasRef.current) return;
 
@@ -81,7 +81,7 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
         draw();
     }, [draw, shouldFocus]);
 
-    // Resize Observer to handle display:none -> block transitions
+    // Resize Observer to handle display:none -> block transitions (mobile gallery toggle)
     useEffect(() => {
         if (!imgRef.current) return;
 
@@ -118,6 +118,7 @@ const ScanPage: React.FC<{ page: GalleryPage; originalDims: { w: number; h: numb
         </div>
     );
 };
+
 
 const ScanGallery: React.FC<ScanGalleryProps> = ({ pages, originalDims, defaultImage, onVisiblePageChange }) => {
     const containerRef = useRef<HTMLDivElement>(null);

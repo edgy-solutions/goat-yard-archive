@@ -296,38 +296,40 @@ function App() {
             .catch(err => console.error("Failed to fetch books:", err));
     }, []);
 
-    // Scroll logic removed (Split Pane implementation)
-
-    // Scroll Evidence Panel to specific highlight or top
-    useEffect(() => {
-        if (!activeEvidence) return;
-
-        // Give React a moment to render the new content
-        setTimeout(() => {
-            // If we have a focused sentence (e.g. from clicking [S01]), try to scroll to it
-            // The HighlightedContent component needs to attach IDs like `highlight-S01` to spans
-            if (focusedSentenceId) {
-                const el = document.getElementById(`highlight-${focusedSentenceId}`);
-                if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    return;
-                }
-            }
-
-            // Fallback: Scroll the scroll container to top
-            const container = document.getElementById('evidence-scroll-container');
-            if (container) {
-                container.scrollTop = 0;
-            }
-        }, 100);
-    }, [activeEvidence, focusedSentenceId]);
-
-    const handleCitationClick = (evidence: EvidenceItem, sentenceId?: string) => {
+    const handleCitationClick = (evidence: EvidenceItem, sentenceId?: string, event?: React.MouseEvent) => {
         setActiveEvidence(evidence);
         // If a specific sentence ID is provided (from clicking a [Sxx] button), focus it.
         // If undefined (generic click), clear focus so nothing is highlighted.
         setFocusedSentenceId(sentenceId || null);
+        // Don't auto-show gallery on mobile - user must click "View Scan" button
         setShowMobileGallery(false);
+
+        // Mobile-only: Scroll answer pane so clicked verse stays visible near top (~1/4 down)
+        // On mobile, the scroll container is .answer-pane-responsive (content-wrapper has overflow:hidden)
+        if (window.innerWidth < 768 && event?.currentTarget) {
+            const clickedButton = event.currentTarget as HTMLElement;
+            const answerPane = document.querySelector('.answer-pane-responsive') as HTMLElement;
+
+            if (answerPane) {
+                // Position clicked verse near top of pane - leave only ~60px (2-3 sentences) above
+                // This gives more room for the evidence pane below
+                const targetOffset = 60; // Fixed offset in pixels for minimal context above
+                const buttonRect = clickedButton.getBoundingClientRect();
+                const paneRect = answerPane.getBoundingClientRect();
+                const relativeButtonTop = buttonRect.top - paneRect.top + answerPane.scrollTop;
+
+                // Scroll so button is near top with small offset
+                const scrollTarget = relativeButtonTop - targetOffset;
+
+                // Delay slightly to let React re-render with new activeEvidence
+                setTimeout(() => {
+                    answerPane.scrollTo({
+                        top: Math.max(0, scrollTarget),
+                        behavior: 'smooth'
+                    });
+                }, 100);
+            }
+        }
     };
 
     // Close overlays
@@ -381,12 +383,12 @@ function App() {
                     onOpenContact={() => setView('contact')}
                 />
 
-                {/* Main Content Area - Split Panel Layout */}
-                <div className="flex-1 overflow-hidden flex flex-col relative">
+                {/* Main Content Area - responsive: mobile=split pane, desktop=natural flow */}
+                <div className="content-wrapper-responsive flex-1 p-4 md:p-8 flex flex-col">
 
-                    {/* Empty State - Centered */}
+                    {/* Empty State */}
                     {!response && !loading && !error && (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center opacity-60 p-4 pb-32">
+                        <div className="flex-1 flex flex-col items-center justify-center text-center opacity-60 mt-10">
                             <div className="text-4xl text-[#D7CCC8] mb-4">❦</div>
                             <h2 className="text-xl font-bold text-[#5D4037] mb-2 font-display italic">The Library is Open</h2>
                             <p className="text-sm text-[#8D6E63] max-w-xs mx-auto mb-8 font-ui">
@@ -417,9 +419,9 @@ function App() {
                         </div>
                     )}
 
-                    {/* Error Banner - Floating/Inline */}
+                    {/* Error Banner */}
                     {error && (
-                        <div className="m-4 bg-red-50/50 border-l-4 border-red-800/50 text-red-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm shrink-0">
+                        <div className="bg-red-50/50 border-l-4 border-red-800/50 text-red-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm">
                             {(error.includes("My dear friend") || error.includes("Scriptures"))
                                 ? <span className="italic font-serif text-[#5D4037]">{error}</span>
                                 : <><strong>Connection Error:</strong> {error}</>
@@ -430,9 +432,9 @@ function App() {
                         </div>
                     )}
 
-                    {/* Loading State - Centered */}
+                    {/* Loading State */}
                     {loading && (
-                        <div className="flex-1 flex items-center justify-center py-10 space-x-3 text-[#8D6E63] animate-pulse">
+                        <div className="flex items-center justify-center py-10 space-x-3 text-[#8D6E63] animate-pulse">
                             <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
                             <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                             <div className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
@@ -441,182 +443,181 @@ function App() {
                     )}
 
                     {response && (
-                        <div className="flex-1 overflow-hidden flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            {/* Answer Card - Scrollable Top Pane */}
-                            <div className={`flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 ${activeEvidence ? 'pb-4' : 'pb-32'}`}>
-                                <div className="relative">
-                                    {/* Decorative Quote */}
-                                    <div className="absolute -top-4 -left-2 text-6xl text-[#E5E0D8] font-serif pointer-events-none">“</div>
+                        <div className="answer-pane-responsive animate-in fade-in slide-in-from-bottom-4 duration-500 custom-scrollbar">
+                            {/* Answer Card */}
+                            <div className="relative">
+                                {/* Decorative Quote */}
+                                <div className="absolute -top-4 -left-2 text-6xl text-[#E5E0D8] font-serif pointer-events-none">“</div>
 
-                                    <div className="relative z-10">
-                                        <div className="flex justify-end mb-2">
-                                            {response.verified ? (
-                                                <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
-                                                    ✓ Verified Source
-                                                </span>
-                                            ) : (
-                                                <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-full border border-amber-200 font-ui uppercase tracking-wider">
-                                                    ⚠️ Unverified
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
-                                            {response.answer.split('\n').map((line, i) => {
-                                                const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
-                                                return (
-                                                    <div key={i} className="mb-4">
-                                                        {parts.map((part, partIdx) => {
-                                                            if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
-                                                                const rawContent = part.replace(/^\[+|\]+$/g, '');
-                                                                const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
-                                                                const hasMatch = ids.some(id => response.evidence.find(ev =>
-                                                                    ev.sentence_data?.some(s => s.sentence_id === id)
-                                                                ));
+                                <div className="relative z-10">
+                                    <div className="flex justify-end mb-2">
+                                        {response.verified ? (
+                                            <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
+                                                ✓ Verified Source
+                                            </span>
+                                        ) : (
+                                            <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-full border border-amber-200 font-ui uppercase tracking-wider">
+                                                ⚠️ Unverified
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
+                                        {response.answer.split('\n').map((line, i) => {
+                                            const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
+                                            return (
+                                                <div key={i} className="mb-4">
+                                                    {parts.map((part, partIdx) => {
+                                                        if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
+                                                            const rawContent = part.replace(/^\[+|\]+$/g, '');
+                                                            const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
+                                                            const hasMatch = ids.some(id => response.evidence.find(ev =>
+                                                                ev.sentence_data?.some(s => s.sentence_id === id)
+                                                            ));
 
-                                                                if (hasMatch) {
-                                                                    return (
-                                                                        <span key={partIdx} className="inline-flex flex-wrap gap-1 align-baseline mx-1">
-                                                                            {ids.map((id, idIdx) => {
-                                                                                const match = response.evidence.find(ev =>
-                                                                                    ev.sentence_data?.some(s => s.sentence_id === id)
+                                                            if (hasMatch) {
+                                                                return (
+                                                                    <span key={partIdx} className="inline-flex flex-wrap gap-1 align-baseline mx-1">
+                                                                        {ids.map((id, idIdx) => {
+                                                                            const match = response.evidence.find(ev =>
+                                                                                ev.sentence_data?.some(s => s.sentence_id === id)
+                                                                            );
+
+                                                                            if (match) {
+                                                                                const isFocused = focusedSentenceId === id;
+                                                                                return (
+                                                                                    <button
+                                                                                        key={`${partIdx}-${idIdx}`}
+                                                                                        onClick={(e) => handleCitationClick(match, id, e)}
+                                                                                        className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline
+                                                                                            ${isFocused
+                                                                                                ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
+                                                                                                : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm'
+                                                                                            }
+                                                                                        `}
+                                                                                        title={`View Source: ${match.verse_ref || match.citation}`}
+                                                                                    >
+                                                                                        {match.verse_ref ? match.verse_ref.toUpperCase() : id}
+                                                                                    </button>
                                                                                 );
-
-                                                                                if (match) {
-                                                                                    const isFocused = focusedSentenceId === id;
-                                                                                    return (
-                                                                                        <button
-                                                                                            key={`${partIdx}-${idIdx}`}
-                                                                                            onClick={() => handleCitationClick(match, id)}
-                                                                                            className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline
-                                                                                                ${isFocused
-                                                                                                    ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
-                                                                                                    : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm'
-                                                                                                }
-                                                                                            `}
-                                                                                            title={`View Source: ${match.verse_ref || match.citation}`}
-                                                                                        >
-                                                                                            {match.verse_ref ? match.verse_ref.toUpperCase() : id}
-                                                                                        </button>
-                                                                                    );
-                                                                                }
-                                                                                return null;
-                                                                            })}
-                                                                        </span>
-                                                                    );
-                                                                }
-                                                                return null;
+                                                                            }
+                                                                            return null;
+                                                                        })}
+                                                                    </span>
+                                                                );
                                                             }
-                                                            // ReactMarkdown Handling...
-                                                            return (
-                                                                <span key={partIdx}>
-                                                                    <ReactMarkdown
-                                                                        components={{
-                                                                            p: ({ node, ...props }) => <span {...props} />,
-                                                                            a: ({ node, ...props }) => <span className="text-amber-800 underline" {...props} />
-                                                                        }}
-                                                                    >
-                                                                        {part}
-                                                                    </ReactMarkdown>
-                                                                </span>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
+                                                            return null;
+                                                        }
+                                                        // Use ReactMarkdown for text parts to render italics/bold
+                                                        // Use span as wrapper to stay inline, but ReactMarkdown defaults to p/div blocks,
+                                                        // so we need to process it to allow inline rendering or just accept block behavior?
+                                                        // Actually, 'prose' handles paragraphs well. Let's try rendering inline components.
+                                                        return (
+                                                            <span key={partIdx}>
+                                                                <ReactMarkdown
+                                                                    components={{
+                                                                        p: ({ node, ...props }) => <span {...props} />,
+                                                                        a: ({ node, ...props }) => <span className="text-amber-800 underline" {...props} />
+                                                                    }}
+                                                                >
+                                                                    {part}
+                                                                </ReactMarkdown>
+                                                            </span>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
 
-                                        <div className="mt-4 flex justify-end">
-                                            <ResponseActions
-                                                responseId={lastSearchedQuery}
-                                                onReport={handleReportOpen}
-                                            />
-                                        </div>
+                                    <div className="mt-4 flex justify-end">
+                                        <ResponseActions
+                                            responseId={lastSearchedQuery}
+                                            onReport={handleReportOpen}
+                                        />
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    )}
 
-                            {/* Active Context Snippet - Fixed Bottom Pane */}
-                            {activeEvidence && (
-                                <div className="h-1/2 shrink-0 border-t border-[#E5E0D8] bg-white flex flex-col shadow-[0_-4px_24px_-8px_rgba(0,0,0,0.1)] z-10 transition-all duration-300">
-                                    {/* Header in Pane */}
-                                    <div className="p-4 border-b border-[#E5E0D8] bg-[#FDFBF7] flex justify-between items-center shrink-0">
-                                        <h3 className="text-xs font-bold uppercase text-[#8D6E63] tracking-widest font-ui flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full"></span>
-                                            Primary Source Evidence
-                                            {activeEvidence.citation && (
-                                                <span className="text-[#A1887F] font-normal normal-case tracking-normal ml-1 hidden sm:inline">
-                                                    {activeEvidence.citation}
-                                                </span>
-                                            )}
-                                        </h3>
-                                        {/* Mobile: View Scan Button */}
-                                        <button
-                                            onClick={() => setShowMobileGallery(true)}
-                                            className="md:hidden text-xs bg-white text-[#5D4037] border border-[#D7CCC8] px-3 py-1 rounded-full font-ui shadow-sm whitespace-nowrap"
-                                        >
-                                            View Scan →
-                                        </button>
-                                    </div>
+                    {/* Active Context Snippet - responsive: mobile=fixed bottom pane, desktop=inline */}
+                    {response && activeEvidence && (
+                        <div className="evidence-pane-responsive">
+                            <div className="evidence-pane-header">
+                                <h3 className="text-xs font-bold uppercase text-[#8D6E63] tracking-widest font-ui flex items-center gap-2">
+                                    <span className="w-1.5 h-1.5 bg-[#8D6E63] rounded-full"></span>
+                                    Primary Source Evidence
+                                    {activeEvidence.citation && (
+                                        <span className="text-[#A1887F] font-normal normal-case tracking-normal ml-1 hidden sm:inline">
+                                            {activeEvidence.citation}
+                                        </span>
+                                    )}
+                                </h3>
+                                {/* Mobile: View Scan Button */}
+                                <button
+                                    onClick={() => setShowMobileGallery(true)}
+                                    className="md:hidden text-xs bg-white text-[#5D4037] border border-[#D7CCC8] px-3 py-1 rounded-full font-ui shadow-sm whitespace-nowrap"
+                                >
+                                    View Scan →
+                                </button>
+                            </div>
+                            {/* Evidence content */}
+                            <div id="evidence-scroll-container" className="evidence-pane-content text-sm text-[#3E2723] font-serif leading-relaxed relative custom-scrollbar group">
+                                {/* Paper texture overlay hint */}
+                                <div className="absolute inset-0 bg-[#FDFBF7] opacity-50 pointer-events-none mix-blend-multiply"></div>
 
-                                    {/* Evidence content with independent scroll - pb-60 for search bar */}
-                                    <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-60 text-sm text-[#3E2723] font-serif leading-relaxed relative group">
-                                        {/* Paper texture overlay hint */}
-                                        <div className="absolute inset-0 bg-[#FDFBF7] opacity-50 pointer-events-none mix-blend-multiply"></div>
+                                <div className="relative z-10">
+                                    {/* Highlighted Commentary Content */}
+                                    <HighlightedContent
+                                        content={activeEvidence.content}
+                                        sentenceData={activeEvidence.sentence_data}
+                                        citations={response.citations}
+                                        lemma={activeEvidence.lemma}
+                                        verseRef={activeEvidence.verse_ref}
+                                        activeIds={focusedSentenceId ? [focusedSentenceId] : []}
+                                        footnotes={activeEvidence.footnotes}
+                                    />
 
-                                        <div className="relative z-10">
-                                            {/* Highlighted Commentary Content */}
-                                            <HighlightedContent
-                                                content={activeEvidence.content}
-                                                sentenceData={activeEvidence.sentence_data}
-                                                citations={response.citations}
-                                                lemma={activeEvidence.lemma}
-                                                verseRef={activeEvidence.verse_ref}
-                                                activeIds={focusedSentenceId ? [focusedSentenceId] : []}
-                                                footnotes={activeEvidence.footnotes}
-                                            />
+                                    {/* Footnotes Display */}
+                                    {(() => {
+                                        if (!activeEvidence.footnotes || activeEvidence.footnotes.length === 0) return null;
 
-                                            {/* Footnotes Display */}
-                                            {(() => {
-                                                if (!activeEvidence.footnotes || activeEvidence.footnotes.length === 0) return null;
+                                        let textToSearch = activeEvidence.content || "";
+                                        if (activeEvidence.sentence_data) {
+                                            textToSearch += " " + activeEvidence.sentence_data.map((s: { text?: string }) => s.text || "").join(" ");
+                                        }
 
-                                                let textToSearch = activeEvidence.content || "";
-                                                if (activeEvidence.sentence_data) {
-                                                    textToSearch += " " + activeEvidence.sentence_data.map((s: { text?: string }) => s.text || "").join(" ");
-                                                }
+                                        const matches = textToSearch.matchAll(/\[\^(\d+)\]/g);
+                                        const activeIDs = new Set<string>();
+                                        for (const m of matches) {
+                                            activeIDs.add(m[1]);
+                                        }
 
-                                                const matches = textToSearch.matchAll(/\[\^(\d+)\]/g);
-                                                const activeIDs = new Set<string>();
-                                                for (const m of matches) {
-                                                    activeIDs.add(m[1]);
-                                                }
+                                        if (activeIDs.size === 0) return null;
 
-                                                if (activeIDs.size === 0) return null;
+                                        return (
+                                            <div className="mt-6 pt-4 border-t border-[#E5E0D8] text-xs">
+                                                <h4 className="font-bold text-[#8D6E63] uppercase mb-2 font-ui tracking-wider text-[10px]">Original Footnotes</h4>
+                                                <ul className="space-y-2 text-[#5D4037]/80">
+                                                    {activeEvidence.footnotes.map((fn, idx) => {
+                                                        const match = fn.match(/^\[(\d+)\]/);
+                                                        if (!match) return null;
 
-                                                return (
-                                                    <div className="mt-6 pt-4 border-t border-[#E5E0D8] text-xs">
-                                                        <h4 className="font-bold text-[#8D6E63] uppercase mb-2 font-ui tracking-wider text-[10px]">Original Footnotes</h4>
-                                                        <ul className="space-y-2 text-[#5D4037]/80">
-                                                            {activeEvidence.footnotes.map((fn, idx) => {
-                                                                const match = fn.match(/^\[(\d+)\]/);
-                                                                if (!match) return null;
+                                                        const id = match[1];
+                                                        if (!activeIDs.has(id)) return null;
 
-                                                                const id = match[1];
-                                                                if (!activeIDs.has(id)) return null;
-
-                                                                return (
-                                                                    <li id={`footnote-${id}`} key={idx} className="flex gap-2">
-                                                                        <span className="opacity-80 leading-relaxed font-serif text-xs">{fn}</span>
-                                                                    </li>
-                                                                );
-                                                            })}
-                                                        </ul>
-                                                    </div>
-                                                );
-                                            })()}
-                                        </div>
-                                    </div>
+                                                        return (
+                                                            <li id={`footnote-${id}`} key={idx} className="flex gap-2">
+                                                                <span className="opacity-80 leading-relaxed font-serif text-xs">{fn}</span>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
-                            )}
+                            </div>
                         </div>
                     )}
 
@@ -709,7 +710,7 @@ function App() {
                 </div>
             </div>
 
-        </div >
+        </div>
     );
 }
 
