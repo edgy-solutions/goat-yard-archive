@@ -1,5 +1,4 @@
-import React, { useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { useEffect } from 'react';
 import { TextWithVerses } from './TextWithVerses';
 
 interface HighlightedContentProps {
@@ -20,7 +19,6 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
     activeIds = [],
     footnotes = []
 }) => {
-    const containerRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to highlighted sentence when activeIds changes
     // Scrolls only within the evidence container, positions near TOP
