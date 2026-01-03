@@ -196,7 +196,7 @@ class VerseAligner:
                                 split_idx = header_match.start()
                                 pre_content = spillover_content[:split_idx].strip()
                                 post_content = spillover_content[split_idx:].strip()
-                                
+
                                 if pre_content:
                                     # Determine ref for the pre-content
                                     pre_ref = f"{book}" # Book Intro (e.g. "GENESIS")
@@ -210,6 +210,15 @@ class VerseAligner:
                                     verses.append(self._create_verse_chunk(pre_content, pre_ref))
                                 
                                 # The rest is the distinct Chapter Intro
+                                # FIX: Strip the 'Chapter X' header itself from the content to avoid redundancy
+                                # post_content starts at split_idx (the start of '# Chapter...').
+                                # We want to remove that line.
+                                # Split by newline, skip the first line (the header), rejoin.
+                                post_lines = post_content.split('\n')
+                                if len(post_lines) > 0 and 'Chapter' in post_lines[0]:
+                                     # Drop the header line
+                                     post_content = '\n'.join(post_lines[1:]).strip()
+                                
                                 spillover_content = post_content
                                 spillover_ref = f"{book} {chapter}"
                             else:

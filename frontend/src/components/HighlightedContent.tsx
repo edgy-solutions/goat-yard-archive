@@ -47,13 +47,13 @@ const HighlightedContent: React.FC<HighlightedContentProps> = ({
         }
     }, [activeIds]);
 
-    // Render Lemma (if active)
-    const lemmaNode = lemma ? (
+    // Render Lemma (if active) OR just the Verse Ref (for Chapter headers)
+    const lemmaNode = (lemma || verseRef) ? (
         <span className="font-bold text-[#5D4037] mr-2">
             {verseRef && (
-                <span className="mr-1">{verseRef}.</span>
+                <span className="mr-1">{verseRef.toUpperCase()}.</span>
             )}
-            <TextWithVerses text={lemma} renderMarkdown={true} />
+            {lemma && <TextWithVerses text={lemma} renderMarkdown={true} />}
         </span>
     ) : null;
 
