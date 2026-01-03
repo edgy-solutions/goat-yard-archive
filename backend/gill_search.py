@@ -135,20 +135,19 @@ class GillSearchEngine:
         # 2b. Verse Reference Detection (Exact Lookup)
         # Regex for "Book Chapter:Verse" (e.g. Matthew 7:27, Genesis 1:1)
         # We try to match standard format. If found, we PRIORITIZE/FILTER by it.
-        # 2b. Verse Reference Detection (Exact Lookup)
-        # Regex for "Book Chapter:Verse" (e.g. Matthew 7:27, Mat 7:27, 2 Cor 1:1, Ecc 1:2)
-        # Matches: Optional digit prefix, followed by letters, optional dot, followed by numbers.
-        # Captures: 1. Full Ref string (ignored mostly), 2. Book Part, 3. Verse Part
+        # Regex for "Book Chapter:Verse" OR "Book Chapter" (e.g. Matthew 7:27, Gen 1)
+        # Matches: Optional digit prefix, followed by letters, optional dot, followed by numbers (and optional :numbers).
+        # Captures: 1. Full Ref string, 2. Book Part, 3. Number Part (Chapter or Ch:Vs)
         
         # Regex explanation:
         # \b                Phrase boundary
-        # (                 Group 1: Capture whole thing for debugging logic if needed
-        #  ((?:\d\s*)?[A-Za-z]+)   Group 2: Book Name (Optional digit + space, then letters). E.g. "1 John", "Mat"
-        #  \.?                  Optional dot (Mat.)
+        # (                 Group 1: Capture whole thing
+        #  ((?:\d\s*)?[A-Za-z]+)   Group 2: Book Name (e.g. "1 John", "Mat")
+        #  \.?                  Optional dot
         #  \s+                  Space
-        #  (\d+:\d+)            Group 3: Chapter:Verse
+        #  (\d+(?::\d+)?)       Group 3: Chapter(:Verse)? - Made trailing :digit optional
         # )
-        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+:\d+))\b', query, re.IGNORECASE)
+        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', query, re.IGNORECASE)
         
         if ref_match:
             raw_book = ref_match.group(2).lower() # Group 2 is the Book part

@@ -579,9 +579,9 @@ class GillIngestionEngine:
             return None, None
             
         import re
-        # Match "BOOK NAME" "CHAPTER:VERSE"
-        # The chapter:verse is always at the end (digits:digits)
-        match = re.search(r'^(.*?)\s+(\d+:\d+)$', ref)
+        # Match "BOOK NAME" "CHAPTER:VERSE" OR "BOOK NAME" "CHAPTER"
+        # The chapter:verse (or just chapter) is always at the end
+        match = re.search(r'^(.*?)\s+(\d+(?::\d+)?)$', ref)
         if match:
             return match.group(1).strip(), match.group(2).strip()
             
@@ -597,6 +597,10 @@ class GillIngestionEngine:
         if entity_cache_dir:
             # Namespace cache by Volume to avoid collisions
             cache_file = entity_cache_dir / f"vol{volume}_{page_name}_entities.json"
+        else:
+            cache_file = None
+
+
         
         # Load Entity Cache for this Page
         page_entity_cache = {}
@@ -786,10 +790,33 @@ class GillIngestionEngine:
             sentence_data, lemma = self.process_sentences(verse_ref, commentary_text)
             
             # Meta extraction
+            # Meta extraction
             parts = verse_ref.split()
             book = parts[0] if parts else metadata.get("book_name", "")
-            chapter_verse = parts[1] if len(parts) > 1 else ":"
-            chapter = int(chapter_verse.split(":")[0]) if ":" in chapter_verse else metadata.get("chapter", 0)
+            
+            # Handle Book Intro (e.g. "GENESIS")
+            if len(parts) == 1:
+                # No chapter/verse part
+                chapter_val = metadata.get("chapter", 0)
+                try:
+                     # If metadata is empty string or None, default to 0
+                    chapter = int(chapter_val) if chapter_val else 0
+                except:
+                    chapter = 0
+            else:
+                chapter_verse = parts[1]
+                if ":" in chapter_verse:
+                    try:
+                        chapter = int(chapter_verse.split(":")[0])
+                    except:
+                        chapter = 0
+                else:
+                    # Case: "GENESIS 1" -> parts[1] is "1"
+                    try:
+                        chapter = int(chapter_verse)
+                    except:
+                        # Fallback for "GENESIS Intro" -> "Intro" is not int
+                        chapter = 0
             
             verse_num = self.extract_verse_number(verse_ref)
             hebrew_data = metadata.get("hebrew_text") or {}
@@ -862,7 +889,7 @@ class GillIngestionEngine:
                     "content": vector_content,
                     "verse_ref": verse_ref,
                     "book": self.parse_verse_ref(verse_ref)[0] if verse_ref else None,
-                    "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if verse_ref and ':' in verse_ref else 0,
+                    "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if self.parse_verse_ref(verse_ref)[1] else 0,
                     "volume": volume,
                     "page_number": page_num,
                     "lemma": lemma, # Store the extracted lemma for UI display

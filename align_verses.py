@@ -186,11 +186,40 @@ class VerseAligner:
                     # It should be the verse BEFORE the first actual match
                     try:
                         first_verse_num = int(matches[0].group(1))
-                        # If first marked verse is 1, spillover is from previous chapter -> verse 0? 
-                        # Or just use metadata logic if available.
-                        # For now, simplistic N-1 logic.
-                        spillover_num = max(1, first_verse_num - 1)
-                        spillover_ref = f"{book} {chapter}:{spillover_num}"
+                        if first_verse_num == 1:
+                            # Check for specific "Chapter" header in spillover to split Book Intro / Prev Chapter from Chapter Intro
+                            # Matches "# Chapter I", "# Chapter 1", etc.
+                            header_match = re.search(r'(?m)^#\s*Chapter\s+[IVXLC\d]+', spillover_content)
+                            
+                            if header_match:
+                                # Found header! Split.
+                                split_idx = header_match.start()
+                                pre_content = spillover_content[:split_idx].strip()
+                                post_content = spillover_content[split_idx:].strip()
+                                
+                                if pre_content:
+                                    # Determine ref for the pre-content
+                                    pre_ref = f"{book}" # Book Intro (e.g. "GENESIS")
+                                    try:
+                                        c_int = int(chapter)
+                                        if c_int > 1:
+                                            pre_ref = f"{book} {c_int - 1} End"
+                                    except:
+                                        pass
+                                    
+                                    verses.append(self._create_verse_chunk(pre_content, pre_ref))
+                                
+                                # The rest is the distinct Chapter Intro
+                                spillover_content = post_content
+                                spillover_ref = f"{book} {chapter}"
+                            else:
+                                # No header split found, treat all as intro
+                                spillover_ref = f"{book} {chapter}"
+
+                        else:
+                            # Normal spillover from previous verse
+                            spillover_num = first_verse_num - 1
+                            spillover_ref = f"{book} {chapter}:{spillover_num}"
                     except ValueError:
                         # Fallback to metadata start if parsing fails
                         spillover_ref = f"{book} {chapter}:{start_verse_ref}"
