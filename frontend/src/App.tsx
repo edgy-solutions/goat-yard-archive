@@ -383,8 +383,8 @@ function App() {
                     onOpenContact={() => setView('contact')}
                 />
 
-                {/* Main Content Area - responsive: mobile=split pane, desktop=natural flow */}
-                <div className="content-wrapper-responsive flex-1 p-4 md:p-8 flex flex-col">
+                {/* Main Content Area - 50/50 split, with padding for search bar */}
+                <div className="content-wrapper-responsive flex-1 p-4 md:p-8 pb-24 flex flex-col">
 
                     {/* Empty State */}
                     {!response && !loading && !error && (
@@ -625,8 +625,8 @@ function App() {
 
                 {/* Floating Search Bar - with gradient fade backdrop */}
                 <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20">
-                    {/* Gradient fade mask to hide text scrolling behind */}
-                    <div className="h-12 md:h-24 bg-gradient-to-t from-[#FAF9F5] via-[#FAF9F5]/80 to-transparent pointer-events-none"></div>
+                    {/* Minimal gradient fade - just enough to blend search bar edge */}
+                    <div className="h-4 md:h-6 bg-gradient-to-t from-[#FAF9F5] to-transparent pointer-events-none"></div>
 
                     <div className="bg-[#FAF9F5] pb-6 px-4 md:px-6">
                         <div className="max-w-3xl mx-auto shadow-[0_20px_40px_-12px_rgba(0,0,0,0.15)] rounded-full bg-white border border-[#E5E0D8]/50 p-1.5 flex items-center transition-all hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.2)] pointer-events-auto ring-1 ring-[#E5E0D8]/50">

@@ -119,27 +119,27 @@
 }
 
 /* ============================================
-   RESPONSIVE CONTENT LAYOUT (Mobile-First)
-   Mobile = Split Pane, Desktop = Natural Flow
+   RESPONSIVE CONTENT LAYOUT
+   Both Mobile and Desktop: 50/50 Split Pane
    ============================================ */
 
-/* Mobile: Split pane layout with fixed bottom evidence panel */
+/* Split pane layout - flexible with max 50% response */
 .content-wrapper-responsive {
-    /* On mobile, we need the wrapper to NOT scroll so panes can be fixed 50/50 */
+    /* Wrapper does NOT scroll - panes scroll independently */
     overflow: hidden;
 }
 
 .answer-pane-responsive {
-    /* Mobile: Top half (50%), scrolls independently */
-    height: 50%;
-    flex-shrink: 0;
+    /* Response: shrinks to fit content, max 50% height */
+    flex: 0 0 auto;
+    max-height: 50%;
     overflow-y: auto;
 }
 
 .evidence-pane-responsive {
-    /* Mobile: Bottom half (50%), scrolls independently */
-    height: 50%;
-    flex-shrink: 0;
+    /* Evidence: takes remaining space, min 50% height */
+    flex: 1 1 auto;
+    min-height: 50%;
     border-top: 1px solid #E5E0D8;
     background-color: white;
     display: flex;
@@ -164,50 +164,4 @@
     padding: 1.5rem;
     padding-bottom: 15rem;
     /* Room for search bar */
-}
-
-/* Desktop: Natural flow layout (scrolls together, no fixed panes) */
-@media (min-width: 768px) {
-    .content-wrapper-responsive {
-        /* Desktop: Single scroll container */
-        overflow-y: auto;
-    }
-
-    .answer-pane-responsive {
-        /* Desktop: Natural height, no independent scroll */
-        flex: none;
-        overflow: visible;
-        height: auto;
-    }
-
-    .evidence-pane-responsive {
-        /* Desktop: Inline, natural height with capped scroll */
-        height: auto;
-        flex-shrink: 1;
-        border-top: none;
-        box-shadow: none;
-        margin-top: 2rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid #E5E0D8;
-        max-height: 50vh;
-        overflow-y: auto;
-    }
-
-    .evidence-pane-header {
-        /* Desktop: Inline header style */
-        padding: 0;
-        border-bottom: none;
-        background-color: transparent;
-        margin-bottom: 1rem;
-    }
-
-    .evidence-pane-content {
-        /* Desktop: Different padding */
-        padding: 1.5rem;
-        padding-bottom: 13rem;
-        background: white;
-        border-radius: 0.75rem;
-        box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.05);
-        border: 1px solid #E5E0D8;
-    }
 }
