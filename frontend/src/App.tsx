@@ -122,6 +122,7 @@ function App() {
         setFocusedSentenceId(null);
         setShowMobileGallery(false);
         setLastSearchedQuery(query);
+        setQuery("");
 
         // Track Search Event
         posthog.capture('search_performed', {
