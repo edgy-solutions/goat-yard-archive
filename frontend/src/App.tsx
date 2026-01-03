@@ -652,6 +652,11 @@ function App() {
                                 {availableBooks.length > 0 ? `Library Index: ${availableBooks.join(", ")}` : "Indexing Library..."}
                             </span>
                         </div>
+
+                        {/* Mobile-only: Copyright, Privacy, Terms footer */}
+                        <div className="md:hidden mt-2">
+                            <Footer variant="main" onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
+                        </div>
                     </div>
                 </div>
             </div>
@@ -703,9 +708,16 @@ function App() {
                 <div className="absolute bottom-0 inset-x-0 z-50 flex flex-col">
                     {/* Gradient Fade Only Above Text */}
                     <div className="h-6 bg-gradient-to-t from-[#15100D] to-transparent pointer-events-none"></div>
-                    {/* Solid Background for Text */}
+                    {/* Gallery footer */}
                     <div className="bg-[#15100D] pt-2 pb-4">
-                        <Footer onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
+                        {/* Mobile: Just powered by / text via */}
+                        <div className="md:hidden">
+                            <Footer variant="gallery" />
+                        </div>
+                        {/* Desktop: Full footer with copyright, privacy, terms, powered by, text via */}
+                        <div className="hidden md:block">
+                            <Footer variant="full" onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
+                        </div>
                     </div>
                 </div>
             </div>
