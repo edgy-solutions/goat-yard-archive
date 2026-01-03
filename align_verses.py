@@ -243,7 +243,7 @@ class VerseAligner:
                 text.strip(),
                 f"{book} {chapter}:{start_verse_ref}"
             ))
-            return verses
+            return [v for v in verses if v]
         
         # Handle matches
         found_verse_nums = set()
@@ -283,7 +283,7 @@ class VerseAligner:
                     logging.warning(f"  [Verify] Missing markers: {sorted_missing}")
                     logging.warning(f"  (These may be merged into the previous verse or spillover due to missing 'Ver.' labels)")
 
-        return verses
+        return [v for v in verses if v]
 
     def _create_verse_chunk(self, content: str, ref: str) -> Dict:
         """Helper to create verse chunk dict."""
