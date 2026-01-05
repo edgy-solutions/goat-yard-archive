@@ -4,9 +4,17 @@ import os
 import argparse
 from pathlib import Path
 from PIL import Image
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Base configuration
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+DEFAULT_DOCS_DIR = BASE_DIR / "docs"
 
 
-def find_volume_pdf(volume: int, docs_dir: str = "docs") -> str:
+
+def find_volume_pdf(volume: int, docs_dir: str = None) -> str:
     """
     Find the PDF file for a specific volume in the docs directory.
     
@@ -20,6 +28,9 @@ def find_volume_pdf(volume: int, docs_dir: str = "docs") -> str:
     Raises:
         FileNotFoundError: If no matching PDF is found
     """
+    if docs_dir is None:
+        docs_dir = str(DEFAULT_DOCS_DIR)
+        
     docs_path = Path(docs_dir)
     
     if not docs_path.exists():
@@ -53,7 +64,8 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
     """
     # Default output directory based on volume
     if output_dir is None:
-        output_dir = f"extracted_images_{volume}"
+        # Default to volume{N} in the data directory
+        output_dir = str(BASE_DIR / f"volume{volume}")
     
     try:
         doc = fitz.open(pdf_path)
@@ -114,12 +126,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--docs-dir",
-        default="docs",
-        help="Directory containing PDF files (default: docs)"
+        default=None,
+        help="Directory containing PDF files (default: $COMMENTARY_DATA_DIR/docs)"
     )
     parser.add_argument(
         "--output-dir",
-        help="Output directory (default: extracted_images_<volume>)"
+        help="Output directory (default: $COMMENTARY_DATA_DIR/volume<volume>)"
     )
     parser.add_argument(
         "--pdf-path",

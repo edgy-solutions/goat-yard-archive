@@ -18,7 +18,16 @@ Output: Creates {page_name}_reindexed.json with words in reading order.
 
 import json
 import argparse
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Base configuration
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+DEFAULT_EXTRACTED_DIR = BASE_DIR / "volume1"
+
 from typing import List, Dict, Tuple
 
 
@@ -318,7 +327,8 @@ def process_page(page_name: str, extracted_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description='Reindex OCR data to reading order')
     parser.add_argument('--page', type=str, help='Specific page to process (e.g., page100_image1)')
-    parser.add_argument('--extracted-dir', type=str, default='extracted_images', help='Directory with OCR JSON files')
+    parser.add_argument('--extracted-dir', type=str, default=str(DEFAULT_EXTRACTED_DIR), 
+                       help='Directory with OCR JSON files (default: $COMMENTARY_DATA_DIR/volume1)')
     args = parser.parse_args()
     
     extracted_dir = Path(args.extracted_dir)

@@ -9,8 +9,12 @@ import io
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Add parent directory to path (to find get_md.py in root)
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from get_md import clean_usfm_text, get_greek_verse, get_hebrew_verse
 

@@ -11,6 +11,7 @@ batch_logs/
 *.pdf
 .env
 *.log
+*.out
 frontend/node_modules/
 frontend/public/
 frontend/dist/

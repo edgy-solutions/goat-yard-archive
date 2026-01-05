@@ -4,7 +4,10 @@ Verse Alignment Script for Grounded Gill Commentary.
 
 Uses margin detection and fuzzy phrase matching to find bounding boxes
 for verse commentary text in two-column OCR data.
+
+Configurable via COMMENTARY_DATA_DIR env var.
 """
+import os
 import json
 import asyncio
 import argparse
@@ -16,6 +19,10 @@ from dotenv import load_dotenv
 import re
 
 load_dotenv()
+
+# Get configurable base path
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+
 
 # Configure logging
 logging.basicConfig(
@@ -34,7 +41,12 @@ from baml_client.types import VerseChunk
 class VerseAligner:
     """Aligns verse chunks to OCR bounding boxes."""
     
-    def __init__(self, extracted_dir: str = "extracted_images", output_dir: str = "outputs/alignment"):
+    def __init__(self, extracted_dir: str = None, output_dir: str = None):
+        if extracted_dir is None:
+            extracted_dir = BASE_DIR / "volume1"
+        if output_dir is None:
+            output_dir = BASE_DIR / "artifacts" / "alignment"
+            
         self.extracted_dir = Path(extracted_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
@@ -974,8 +986,8 @@ class VerseAligner:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Align verses to OCR bounding boxes")
-    parser.add_argument("--dir", default="extracted_images", help="Input directory")
-    parser.add_argument("--out", default="outputs/alignment", help="Output directory")
+    parser.add_argument("--dir", default=None, help="Input directory (default: $COMMENTARY_DATA_DIR/volume1)")
+    parser.add_argument("--out", default=None, help="Output directory (default: $COMMENTARY_DATA_DIR/artifacts/alignment)")
     parser.add_argument("--test-page", help="Process single page for testing")
     parser.add_argument("--debug", action="store_true", help="Generate debug images")
     args = parser.parse_args()

@@ -1089,10 +1089,17 @@ class GillIngestionEngine:
             logging.error(f"Visualization failed: {e}")
 
 if __name__ == "__main__":
+    # Base paths
+    BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+    
+    DEFAULT_DATA_DIR = BASE_DIR / "volume1"
+    DEFAULT_ALIGN_DIR = BASE_DIR / "artifacts" / "alignment" / "genesis"
+    DEFAULT_ENTITY_DIR = BASE_DIR / "artifacts" / "entities"
+
     import argparse
     parser = argparse.ArgumentParser(description="Ingest Gill Commentary")
-    parser.add_argument("--data-dir", default="extracted_images", help="Source data directory")
-    parser.add_argument("--alignment-dir", default="outputs/alignment/genesis", help="Alignment output directory")
+    parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="Source data directory")
+    parser.add_argument("--alignment-dir", default=str(DEFAULT_ALIGN_DIR), help="Alignment output directory")
     parser.add_argument("--weaviate-host", default="localhost", help="Weaviate host")
     parser.add_argument("--weaviate-port", type=int, default=80, help="Weaviate port")
     parser.add_argument("--test-page", help="Process only a specific page")
@@ -1100,7 +1107,7 @@ if __name__ == "__main__":
     parser.add_argument("--volume", type=int, help="Override volume number")
     parser.add_argument("--recycle-entities", action="store_true", help="Reuse existing entities from DB (skips LLM)")
     parser.add_argument("--limit", type=int, help="Limit number of pages to process (for testing)")
-    parser.add_argument("--entity-cache-dir", default="outputs/entities", help="Directory to cache entity extraction results")
+    parser.add_argument("--entity-cache-dir", default=str(DEFAULT_ENTITY_DIR), help="Directory to cache entity extraction results")
     
     args = parser.parse_args()
     

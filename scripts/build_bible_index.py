@@ -1,6 +1,10 @@
 import os
 import re
 import json
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Standard USFM Markers
 # \id MAT
@@ -94,8 +98,19 @@ USFM_TO_FULL = {
 # (Add OT mappings if needed, but starting with NT/common is safe)
 
 if __name__ == "__main__":
+    # Determine Bibles directory
+    _env_data_dir = os.getenv("COMMENTARY_DATA_DIR")
+    if _env_data_dir:
+        BIBLES_DIR = Path(_env_data_dir).parent / "bibles"
+    else:
+        # Fallback to repo root (assuming script is in scripts/ subdir)
+        BIBLES_DIR = Path(__file__).parent.parent
+    
     # Adjust path to where files were found: eng-kjv2006_usfm
-    data = parse_usfm("eng-kjv2006_usfm")
+    input_dir = BIBLES_DIR / "eng-kjv2006_usfm"
+    print(f"Reading USFM files from: {input_dir}")
+    
+    data = parse_usfm(str(input_dir))
     
     # Post-process to add Full Name keys
     expanded_data = {}

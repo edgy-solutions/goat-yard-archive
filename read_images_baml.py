@@ -20,6 +20,11 @@ from baml_py.errors import BamlValidationError
 # Load environment variables from .env file
 load_dotenv()
 
+# Base configuration
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+DEFAULT_EXTRACTED_DIR = BASE_DIR / "volume1"
+
+
 
 import re
 import random
@@ -563,13 +568,14 @@ def process_single_image(png_file, metadata, output_dir, model_pricing, baml_cap
         }
 
 
-def process_images_with_baml(api_key, directory_path="extracted_images", model_name="qwen/qwen3-vl-235b-a22b-thinking", 
+def process_images_with_baml(api_key, directory_path=None, model_name="qwen/qwen3-vl-235b-a22b-thinking", 
                              model_pricing=None, book_filter=None, chapter_start=None, chapter_end=None, filename_filter=None, pages=None, max_workers=1, skip_existing=True):
     """Process images using BAML for text extraction.
     
     Args:
         api_key: OpenRouter API key
-        directory_path: Directory containing images
+        directory_path: Directory containing images (default: $COMMENTARY_DATA_DIR/volume1)
+
         model_name: Model to use
         model_pricing: Pricing information
         book_filter: Optional book name filter
@@ -578,6 +584,9 @@ def process_images_with_baml(api_key, directory_path="extracted_images", model_n
         max_workers: Number of concurrent workers (default: 1 for sequential processing)
         skip_existing: Skip images that already have MD files in output directory (default: True)
     """
+    if directory_path is None:
+        directory_path = str(DEFAULT_EXTRACTED_DIR)
+
     
     # Set API key as environment variable for BAML to use
     os.environ["OPENROUTER_API_KEY"] = api_key

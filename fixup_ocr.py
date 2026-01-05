@@ -12,7 +12,17 @@ Key approach: Follow vision markdown text strictly as source of truth.
 import json
 import re
 import argparse
+import os
+from dotenv import load_dotenv
 from pathlib import Path
+
+load_dotenv()
+
+# Base configuration
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+# Default to volume1 for generic usage, matching other scripts
+DEFAULT_EXTRACTED_DIR = BASE_DIR / "volume1"
+DEFAULT_MARKDOWN_DIR = DEFAULT_EXTRACTED_DIR / "qwen_qwen3-vl-235b-a22b-thinking"
 from typing import List, Dict, Tuple, Optional
 from rapidfuzz import fuzz
 
@@ -434,10 +444,11 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description='Fix up OCR using vision model markdown')
     parser.add_argument('--page', type=str, help='Specific page to process')
-    parser.add_argument('--extracted-dir', type=str, default='extracted_images', help='OCR directory')
+    parser.add_argument('--extracted-dir', type=str, default=str(DEFAULT_EXTRACTED_DIR), 
+                       help='OCR directory (default: $COMMENTARY_DATA_DIR/volume1)')
     parser.add_argument('--markdown-dir', type=str, 
-                       default='extracted_images/qwen_qwen3-vl-235b-a22b-thinking',
-                       help='Vision model markdown directory')
+                       default=str(DEFAULT_MARKDOWN_DIR),
+                       help='Vision model markdown directory (default: $COMMENTARY_DATA_DIR/volume1/qwen_qwen3...)')
     args = parser.parse_args()
     
     extracted_dir = Path(args.extracted_dir)

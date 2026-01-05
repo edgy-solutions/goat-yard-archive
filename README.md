@@ -53,7 +53,7 @@ graph TD
     subgraph "Generation (bot.py)"
         Chunks --> Formatter[Context Formatter];
         Formatter -->|Context + Query| DSPy[DSPy Module];
-        DSPy -->|Prompt| LLM[LLM (DeepSeek-Chat)];
+        DSPy -->|Prompt| LLM["LLM (DeepSeek-Chat)"];
         LLM -->|Answer + Citations| Prediction[Raw Prediction];
     end
 

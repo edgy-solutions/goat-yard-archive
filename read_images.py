@@ -9,6 +9,9 @@ from datetime import datetime
 from baml_client.sync_client import b as baml_client
 import baml_py
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def setup_logging(output_dir, model_name):
     """Setup logging to both file and console.
@@ -617,7 +620,9 @@ def get_fallback_models():
 
 # Configuration
 API_KEY = os.getenv("OPENROUTER_API_KEY")
-DIRECTORY_PATH = "./extracted_images"  # Replace with your directory path
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+# Default to volume1 if loading from env, otherwise fallback to local extracted_images
+DIRECTORY_PATH = str(BASE_DIR / "volume1")
 
 if __name__ == "__main__":
     # Parse command-line arguments
@@ -649,7 +654,7 @@ Examples:
     parser.add_argument('--chapter-start', '-cs', type=int, help='Starting chapter (inclusive)')
     parser.add_argument('--chapter-end', '-ce', type=int, help='Ending chapter (inclusive)')
     parser.add_argument('--directory', '-d', type=str, default=DIRECTORY_PATH, 
-                       help=f'Directory containing images (default: {DIRECTORY_PATH})')
+                       help=f'Directory containing images (default: $COMMENTARY_DATA_DIR/volume1)')
     parser.add_argument('--model', '-m', type=str, 
                        help='Model to use (e.g., qwen/qwen3-vl-235b-a22b-thinking). If not specified, will show interactive selection.')
     

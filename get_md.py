@@ -6,7 +6,21 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 pytesseract.pytesseract.tesseract_cmd = 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+
+# Determine Bibles directory
+# Priority:
+# 1. $COMMENTARY_DATA_DIR/../bibles (if env var set)
+# 2. Local directory (relative to script)
+_env_data_dir = os.getenv("COMMENTARY_DATA_DIR")
+if _env_data_dir:
+    BIBLES_DIR = Path(_env_data_dir).parent / "bibles"
+else:
+    BIBLES_DIR = Path(__file__).parent
+
 
 # Global log file handle
 _log_file = None
@@ -279,21 +293,31 @@ def is_old_testament(book_name):
 
 def get_usfm_directory():
     """Get the path to the hbo_usfm directory."""
+    # Try BIBLES_DIR first
+    usfm_dir = BIBLES_DIR / 'hbo_usfm'
+    if usfm_dir.exists():
+        return usfm_dir
+        
+    # Fallback to script directory (for backward compatibility if env var not set/valid)
     script_dir = Path(__file__).parent
     usfm_dir = script_dir / 'hbo_usfm'
     return usfm_dir if usfm_dir.exists() else None
 
 def get_greek_usfm_directory(version='grctr'):
     """Get the path to the Greek USFM directory."""
+    # Try BIBLES_DIR first
+    usfm_dir = BIBLES_DIR / 'grctr_usfm'
+    if usfm_dir.exists():
+        return usfm_dir
+        
     script_dir = Path(__file__).parent
     usfm_dir = script_dir / 'grctr_usfm'
     return usfm_dir if usfm_dir.exists() else None
 
 def get_available_greek_versions():
     """Get list of available Greek USFM versions."""
-    script_dir = Path(__file__).parent
-    greek_dir = script_dir / 'grctr_usfm'
-    if not greek_dir.exists():
+    greek_dir = get_greek_usfm_directory()
+    if not greek_dir or not greek_dir.exists():
         return []
     
     # Check for version-specific directories or extract from filenames
@@ -303,6 +327,11 @@ def get_available_greek_versions():
 
 def get_english_usfm_directory():
     """Get the path to the eng-kjv2006_usfm directory."""
+    # Try BIBLES_DIR first
+    usfm_dir = BIBLES_DIR / 'eng-kjv2006_usfm'
+    if usfm_dir.exists():
+        return usfm_dir
+
     script_dir = Path(__file__).parent
     usfm_dir = script_dir / 'eng-kjv2006_usfm'
     return usfm_dir if usfm_dir.exists() else None
