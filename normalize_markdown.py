@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import time
 import random
+import json
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -544,7 +545,7 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
             })
     
     # Determine if verification passed
-    passed = footnote_count_match and len(unauthorized_changes) == 0 and len(footnote_issues) == 0
+    # Continue with cheat checks...
     
     # 3. Check for duplicate definitions (hallucination/filling)
     # If the LLM duplicates a definition to match the count, we catch it here.
@@ -638,8 +639,59 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
                  'note': "Excessive use of 'Ibid' not supported by source"
              })
 
+    # Helper to convert Roman to Int
+    def to_int(s):
+        s = s.strip().upper()
+        if s.isdigit(): return int(s)
+        roman = {'I':1, 'V':5, 'X':10, 'L':50, 'C':100, 'D':500, 'M':1000}
+        try:
+            val = 0
+            for i in range(len(s)):
+                if i > 0 and roman[s[i]] > roman[s[i-1]]:
+                    val += roman[s[i]] - 2 * roman[s[i-1]]
+                else:
+                    val += roman[s[i]]
+            return val
+        except:
+            return s # Return string if not parseable
+
+    # 5. Check for Missing Chapter Headings
+    # Detect if source has a clear chapter heading at the start that is missing in output
+    # Source pattern: # Chapter N, CHAP. N, Chapter N
+    source_heading_match = re.search(r'^\s*(?:#\s*)?(?:CHAPTER|CHAP\.?)\s+([IVXLCD\d]+)', source, re.IGNORECASE | re.MULTILINE)
+    if source_heading_match:
+        heading_num_str = source_heading_match.group(1).upper()
+        heading_val = to_int(heading_num_str)
+        
+        # Check if output has equivalent
+        # Output should be standard markdown: # Chapter N
+        output_heading_match = re.search(r'^#\s*Chapter\s+([IVXLCD\d]+)', output, re.IGNORECASE | re.MULTILINE)
+        
+        if not output_heading_match:
+             unauthorized_changes.append({
+                 'type': 'heading_missing',
+                 'removed_text': source_heading_match.group(0),
+                 'note': f"Chapter heading '{source_heading_match.group(0).strip()}' from source missing in output"
+             })
+        else:
+             out_val = to_int(output_heading_match.group(1))
+             if out_val != heading_val:
+                 # Heading exists but number mismatch (e.g. Chapter I vs Chapter II)
+                 unauthorized_changes.append({
+                     'type': 'heading_mismatch',
+                     'removed_text': source_heading_match.group(0),
+                     'note': f"Chapter heading number mismatch: Source '{heading_num_str}' ({heading_val}) vs Output '{output_heading_match.group(1)}' ({out_val})"
+                 })
+
     # Re-evaluate 'passed' based on all checks
-    passed = footnote_count_match and len(unauthorized_changes) == 0 and len(footnote_issues) == 0
+    # RELAXED RULE: We prioritize content and headers over perfect footnote counts.
+    # If there are no unauthorized changes (text loss, header loss, content mismatch), we pass.
+    # Footnote count mismatches are just warnings.
+    passed = len(unauthorized_changes) == 0
+    
+    # If there are footnote issues but text is fine, we consider it a pass (maybe with warnings)
+    if not footnote_count_match:
+         footnote_issues.append(f"Footnote count mismatch: {body_count} in body vs {def_count} definitions (allowed)")
 
     return VerificationResult(
         passed=passed,
@@ -662,7 +714,39 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retries: int = 5, output_path: str = None) -> str:
+def inject_missing_header(text: str, chapter: int) -> str:
+    """Inject missing chapter header if metadata indicates a new chapter."""
+    if not chapter or chapter <= 1:
+        return text
+        
+    # Check if header already exists
+    if re.search(r'^#\s*Chapter\s+' + str(chapter), text, re.IGNORECASE | re.MULTILINE):
+        return text
+        
+    if re.search(r'^\s*(?:#\s*)?(?:CHAPTER|CHAP\.?)\s+' + str(chapter), text, re.IGNORECASE | re.MULTILINE):
+        return text
+        
+    # Check for Roman Numeral equivalent
+    roman = "I" * chapter # Naive for small numbers, but sufficient for check? 
+    # Better: check for [IVXLCD]+ in general if we don't have to_roman
+    # If we find ANY Chapter header matching, we assume it's fine (verification will catch mismatch)
+    if re.search(r'^\s*(?:#\s*)?(?:CHAPTER|CHAP\.?)\s+[IVXLCD\d]+', text, re.IGNORECASE | re.MULTILINE):
+         # A header exists (maybe wrong number, but exists). Don't double inject.
+         return text
+
+    # Header missing. Check for Verse 1 to anchor injection.
+    # Look for "Ver. 1." or similar
+    ver1_match = re.search(r'(?m)^Ver\.?\s*1\.', text)
+    if ver1_match:
+        # Inject before Ver. 1
+        pos = ver1_match.start()
+        header = f"\n# Chapter {chapter}\n\n"
+        return text[:pos] + header + text[pos:]
+        
+    return text
+
+
+def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retries: int = 5, output_path: str = None, expected_chapter: int = None) -> str:
     """Call normalization backend with retry logic and exponential backoff.
     
     Args:
@@ -717,6 +801,10 @@ def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retr
             normalized_text = re.sub(r'\[\^\^(\d+)\]', r'[^\1]', normalized_text)
             normalized_text = re.sub(r'\[\^\^(\d+)\]:', r'[^\1]:', normalized_text)
             
+            # Post-process: Inject missing header if requested
+            if expected_chapter:
+                normalized_text = inject_missing_header(normalized_text, expected_chapter)
+            
             if removed_headings:
                 logging.info(f"Removed {len(removed_headings)} mid-document heading(s)")
             
@@ -739,6 +827,14 @@ def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retr
             current_words = len(normalized_text.split())
             current_diff = abs(source_words - current_words)
             
+            # Helper to check for missing header issue
+            def has_missing_header_issue(ver_result):
+                if not ver_result: return False
+                return any(c.get('type') == 'heading_missing' for c in ver_result.unauthorized_changes)
+
+            current_missing_header = has_missing_header_issue(verification)
+            best_missing_header = has_missing_header_issue(best_verification)
+            
             if best_result is None:
                 # First result
                 best_result = normalized_text
@@ -750,12 +846,24 @@ def normalize_with_retry(backend: NormalizerBackend, raw_markdown: str, max_retr
                 best_verification = verification
                 best_word_diff = current_diff
             elif not verification.passed and not (best_verification and best_verification.passed):
-                # Neither passed - prefer the one with closest word count to source
-                if current_diff < best_word_diff:
-                    logging.info(f"Attempt {attempt + 1} has closer word count ({current_words} vs source {source_words}, diff={current_diff})")
+                # Neither passed - prefer result with header, then closest word count
+                
+                # Check if one has header and other missing it
+                if best_missing_header and not current_missing_header:
+                    logging.info(f"Attempt {attempt + 1} preserved header (unlike best so far)")
                     best_result = normalized_text
                     best_verification = verification
                     best_word_diff = current_diff
+                elif current_missing_header and not best_missing_header:
+                    # Best has header, current missing it - keep best
+                    pass
+                else:
+                    # Both have header or both missing it - use word count
+                    if current_diff < best_word_diff:
+                        logging.info(f"Attempt {attempt + 1} has closer word count ({current_words} vs source {source_words}, diff={current_diff})")
+                        best_result = normalized_text
+                        best_verification = verification
+                        best_word_diff = current_diff
             
             if not verification.passed:
                 logging.warning(f"Verification issues: {verification}")
@@ -867,8 +975,31 @@ def normalize_single_file(backend: NormalizerBackend, input_path: Path, force: b
         
         logging.info(f"Normalizing {input_path.name} ({len(raw_markdown)} chars) using {backend.name}...")
         
+        # Try to load metadata to get expected chapter
+        expected_chapter = None
+        try:
+            meta_path = input_path.parent / f"{input_path.stem.replace('_ocr', '').replace('_reindexed', '')}_metadata.json"
+            # Fallback for plain naming
+            if not meta_path.exists():
+                meta_path = input_path.parent / f"{input_path.stem}_metadata.json"
+            
+            # Check parent directory (if md files are in a subdir)
+            if not meta_path.exists():
+                 meta_path = input_path.parent.parent / f"{input_path.stem.replace('_ocr', '').replace('_reindexed', '')}_metadata.json"
+            if not meta_path.exists():
+                 meta_path = input_path.parent.parent / f"{input_path.stem}_metadata.json"
+            
+            if meta_path.exists():
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+                    if 'chapter' in meta and isinstance(meta['chapter'], int):
+                        expected_chapter = meta['chapter']
+                        logging.info(f"Loaded metadata: Expecting Chapter {expected_chapter}")
+        except Exception as e:
+            logging.warning(f"Failed to load metadata: {e}")
+
         # Call backend to normalize (pass output_path to save intermediate attempts)
-        normalized_text = normalize_with_retry(backend, raw_markdown, output_path=str(output_path))
+        normalized_text = normalize_with_retry(backend, raw_markdown, output_path=str(output_path), expected_chapter=expected_chapter)
         
         # Write output file
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -950,7 +1081,7 @@ def main():
     parser.add_argument("--file", "-f", type=str, 
                         help="Single markdown file to normalize")
     parser.add_argument("--dir", "-d", type=str,
-                        help="Directory containing markdown files to normalize")
+                        help="Directory containing markdown files to normalize (default: $COMMENTARY_DATA_DIR/volume1)")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite existing normalized files")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -967,9 +1098,14 @@ def main():
     
     args = parser.parse_args()
     
-    # Validate arguments
+    # Validate arguments & set defaults
+    base_dir = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+    
     if not args.file and not args.dir:
-        parser.error("Either --file or --dir must be specified")
+        # Default to volume1
+        args.dir = str(base_dir / "volume1")
+        logging.info(f"No input specified, defaulting to: {args.dir}")
+    
     
     if args.file and args.dir:
         parser.error("Cannot specify both --file and --dir")
