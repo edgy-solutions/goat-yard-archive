@@ -22,9 +22,29 @@ def load_bible_index():
             except Exception as e:
                 print(f"Bible API: Error reading local file {p}: {e}")
 
-    # 2. Try MinIO (Fallback) - Only if enabled/needed
-    # (Stripped for brevity, can re-add if needed, but local is primary path)
-    print("Bible API: Local index not found. Skipping MinIO fallback (ensure file is generated).")
+    # 2. Try MinIO (Fallback) - HTTP Fetch via Service/Ingress
+    print("Bible API: Local index not found. Attempting download from MinIO...")
+    try:
+        import requests
+        # Default to internal K8s service URL (http://minio:9000)
+        # Frontend uses ingress/scans, which maps to minio service.
+        # We can simulate this internally by accessing the service directly.
+        # Using "scans" bucket name in path.
+        minio_base = os.getenv("MINIO_HTTP_ENDPOINT", "http://minio:9000")
+        url = f"{minio_base}/scans/kjv_fast_lookup.json"
+        
+        print(f"Bible API: Downloading from {url}...")
+        response = requests.get(url, timeout=5)
+        
+        if response.status_code == 200:
+            BIBLE_MAP = response.json()
+            print(f"Bible API: Successfully loaded {len(BIBLE_MAP)} verses from remote.")
+            return
+        else:
+            print(f"Bible API: Failed to download. Status: {response.status_code}")
+            
+    except Exception as e:
+        print(f"Bible API: Remote fetch failed: {e}")
 
 # Initial Load
 load_bible_index()
