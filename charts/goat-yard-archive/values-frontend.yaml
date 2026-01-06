@@ -37,7 +37,7 @@ api:
     WEAVIATE_GRPC_HOST: "weaviate.gya-backend.svc.cluster.local"
     WEAVIATE_PORT: "80"
     WEAVIATE_GRPC_PORT: "50051"
-    MINIO_HTTP_ENDPOINT: "http://gya-minio.gya-backend.svc.cluster.local:9000"
+    MINIO_HTTP_ENDPOINT: "http://gya-frontend-minio.gya-frontend.svc.cluster.local:9000"
   auth:
     clerkIssuer: "https://<your-app>.clerk.accounts.dev"
     clerkWebhookSecret: ""
