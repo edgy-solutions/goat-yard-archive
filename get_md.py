@@ -983,22 +983,60 @@ def validate_metadata_with_ollama(image_path, metadata):
             page_number=metadata.get('page_number')
         )
         
-        # Call Ollama validation
-        validated = baml_client.ValidateOCRMetadata(
-            image=image,
-            ocr_metadata=baml_metadata
-        )
-        
-        # Convert back to dictionary
-        # Normalize book name: strip ST. prefix and trailing punctuation
-        book_name = normalize_book_name(validated.book_name) if validated.book_name else None
-        
-        result = {
-            'book_name': book_name,
-            'chapter': validated.chapter,
-            'verse': validated.verse,
-            'page_number': validated.page_number
-        }
+        # Call Ollama validation with retry
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                validated = baml_client.ValidateOCRMetadata(
+                    image=image,
+                    ocr_metadata=baml_metadata
+                )
+                
+                # Convert back to dictionary
+                # Normalize book name: strip ST. prefix and trailing punctuation
+                book_name = normalize_book_name(validated.book_name) if validated.book_name else None
+                
+                result = {
+                    'book_name': book_name,
+                    'chapter': validated.chapter,
+                    'verse': validated.verse,
+                    'page_number': validated.page_number,
+                    'is_verse_continuation': getattr(validated, 'no_verse_markers', False) or False
+                }
+                log_print(f"DEBUG: Extracted is_verse_continuation (from no_verse_markers): {result['is_verse_continuation']}")
+                
+                # Quality Check: Did we lose significant data?
+                # If Input had Book/Chapter/Verse and Output has None, it's suspicious.
+                # Especially if ALL are None.
+                is_bad_result = False
+                
+                # Check for "Total Wipeout" (All None)
+                if not any(result.values()):
+                    log_print(f"DEBUG: Ollama returned all Nones (Attempt {attempt+1}/{max_retries})")
+                    is_bad_result = True
+                else:
+                    # Check for "Significant Loss"
+                    # If we had Book+Chapter and now have None+None, that's bad.
+                    if metadata.get('book_name') and metadata.get('chapter') and not result.get('book_name') and not result.get('chapter'):
+                        log_print(f"DEBUG: Ollama dropped Book and Chapter (Attempt {attempt+1}/{max_retries})")
+                        is_bad_result = True
+                
+                if is_bad_result:
+                    if attempt < max_retries - 1:
+                        log_print("Retrying Ollama validation...")
+                        continue
+                    else:
+                        log_print("Ollama failed to provide valid metadata after retries. Falling back to OCR.")
+                        return metadata
+                
+                # If we get here, result is acceptable
+                break
+                
+            except Exception as e:
+                log_print(f"Warning: Ollama attempt {attempt+1} failed: {e}")
+                if attempt == max_retries - 1:
+                     log_print("Using original OCR metadata")
+                     return metadata
         
         # Normalize mixed verse notation if present
         if result.get('verse') and result.get('chapter'):
@@ -2472,12 +2510,98 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             if current_ch:
                 # Determine which pattern and format accordingly
                 if 'prev_ch_verses_body' in locals():
-                    # Pattern 1: new chapter verses + prev chapter verses
-                    new_verses_str = f"{min(new_ch_verses)}-{max(new_ch_verses)}" if len(new_ch_verses) > 1 else str(new_ch_verses[0])
-                    prev_verses_str = f"{min(prev_ch_verses_body)}-{max(prev_ch_verses_body)}" if len(prev_ch_verses_body) > 1 else str(prev_ch_verses_body[0])
-                    body_verse = f"{current_ch - 1}:{prev_verses_str},{current_ch}:{new_verses_str}"
+                    # Pattern 1: High numbers (prev/current) + Low numbers (current/next)
+                    # We need to decide if header ch is the "High" ones or the "Low" ones.
+                    
+                    # Heuristic: Check intersection with header verses
+                    # If header has specific verses, use them. If not, check "Start vs End" logic.
+                    high_is_header = True # Default assumption
+                    
+                    # 1. Preferred: Check against previous metadata if available (Contextual Continuity)
+                    used_prev_meta = False
+                    if prev_metadata and prev_metadata.get('chapter') and prev_metadata.get('verse'):
+                        try:
+                            prev_ch = int(prev_metadata['chapter'])
+                            # Parse last verse from prev metadata
+                            prev_v_str = str(prev_metadata['verse'])
+                            prev_last_v = 0
+                            if ',' in prev_v_str:
+                                prev_last_v = int(prev_v_str.split(',')[-1])
+                            elif '-' in prev_v_str:
+                                prev_last_v = int(prev_v_str.split('-')[-1])
+                            else:
+                                prev_last_v = int(prev_v_str)
+                            
+                            # Check continuity with High Verses (e.g. Prev=23, High=[24,25])
+                            min_high = min(prev_ch_verses_body)
+                            if abs(min_high - prev_last_v) <= 5: # Reasonable gap
+                                # High verses continue previous chapter
+                                # So High Verses = prev_ch. 
+                                # If Header == prev_ch, then High = Header -> high_is_header = True
+                                # If Header == prev_ch + 1, then High != Header -> high_is_header = False (High is prev ch)
+                                
+                                if current_ch == prev_ch:
+                                    high_is_header = True
+                                    used_prev_meta = True
+                                    log_print(f"DEBUG: derived high_is_header=True from prev_metadata continuity (Prev Ch {prev_ch} -> High Verses {min_high})")
+                                elif current_ch == prev_ch + 1:
+                                    high_is_header = False
+                                    used_prev_meta = True
+                                    log_print(f"DEBUG: derived high_is_header=False from prev_metadata continuity (Prev Ch {prev_ch} -> High Verses {min_high}, Header is Ch {current_ch})")
+                        except:
+                            pass
+
+                    # 2. Fallback: Header Correlation (if no prev metadata or ambiguous)
+                    if not used_prev_meta and header_info.get('verse'):
+                        # Check overlap with high verses
+                        # Quick parse of header verse string
+                        h_verses = set()
+                        try:
+                            if ',' in str(header_info['verse']):
+                                h_verses = {int(v.strip()) for v in str(header_info['verse']).split(',') if v.strip().isdigit()}
+                            elif '-' in str(header_info['verse']):
+                                # Simple range check
+                                parts = str(header_info['verse']).split('-')
+                                if len(parts) == 2 and parts[0].strip().isdigit():
+                                    h_verses = {int(parts[0].strip())} # Just check start
+                            elif str(header_info['verse']).isdigit():
+                                h_verses = {int(header_info['verse'])}
+                        except:
+                            pass
+                        
+                        # proper set intersection
+                        if h_verses:
+                            high_match = len(h_verses.intersection(set(prev_ch_verses_body)))
+                            low_match = len(h_verses.intersection(set(new_ch_verses)))
+                            
+                            if high_match > low_match:
+                                high_is_header = True
+                                log_print(f"DEBUG: Header verses correlate with high verses -> Transition is Ch {current_ch} -> {current_ch + 1}")
+                            elif low_match > high_match:
+                                high_is_header = False
+                                log_print(f"DEBUG: Header verses correlate with low verses -> Transition is Ch {current_ch - 1} -> {current_ch}")
+                            else:
+                                # Ambiguous or neither. Fallback to default heuristic:
+                                # If header says "24,25", and we find 1,2 ... "24,25" is usually the bulk.
+                                # Gill headers usually describe the START or BULK.
+                                # If High numbers are > 10, they sort of imply they are the main content if they match header.
+                                pass
+
+                    if high_is_header:
+                        # Header = High Verses (current). Low Verses = Next Chapter.
+                        # Ex: Header=Ch2, Body=[24,25] (High), [1,2] (Low). -> 2:24-25, 3:1-2
+                        new_verses_str = f"{min(new_ch_verses)}-{max(new_ch_verses)}" if len(new_ch_verses) > 1 else str(new_ch_verses[0])
+                        prev_verses_str = f"{min(prev_ch_verses_body)}-{max(prev_ch_verses_body)}" if len(prev_ch_verses_body) > 1 else str(prev_ch_verses_body[0])
+                        body_verse = f"{current_ch}:{prev_verses_str},{current_ch + 1}:{new_verses_str}"
+                    else:
+                        # Original Logic: Header = Low Verses (current). High Verses = Prev Chapter.
+                        # Ex: Header=Ch3, Body=[24,25] (High), [1,2] (Low). -> 2:24-25, 3:1-2
+                        new_verses_str = f"{min(new_ch_verses)}-{max(new_ch_verses)}" if len(new_ch_verses) > 1 else str(new_ch_verses[0])
+                        prev_verses_str = f"{min(prev_ch_verses_body)}-{max(prev_ch_verses_body)}" if len(prev_ch_verses_body) > 1 else str(prev_ch_verses_body[0])
+                        body_verse = f"{current_ch - 1}:{prev_verses_str},{current_ch}:{new_verses_str}"
                 else:
                     # Pattern 2: prev chapter verses + next chapter first verse
+                    # Usually means Header = Current (High numbers), found `1`.
                     prev_verses_str = f"{min(prev_ch_verses)}-{max(prev_ch_verses)}" if len(prev_ch_verses) > 1 else str(prev_ch_verses[0])
                     body_verse = f"{current_ch}:{prev_verses_str},{current_ch + 1}:{next_ch_verse}"
             else:
@@ -2696,7 +2820,8 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
         'book_name': header_info['book_name'],
         'chapter': header_info['chapter'],
         'verse': header_info['verse'],
-        'page_number': header_info['page_number']
+        'page_number': header_info['page_number'],
+        'is_verse_continuation': header_info.get('is_verse_continuation')
     }
     
     # Steps 4-5: Validate against previous metadata and Bible structure
@@ -3013,7 +3138,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     
     log_print(f"\nDEBUG: Validating against previous metadata:")
     log_print(f"  Previous: book={prev_metadata.get('book_name')}, ch={prev_metadata.get('chapter')}, v={prev_metadata.get('verse')}, page={prev_metadata.get('page_number')}")
-    log_print(f"  Current:  book={current_metadata.get('book_name')}, ch={current_metadata.get('chapter')}, v={current_metadata.get('verse')}, page={current_metadata.get('page_number')}")
+    log_print(f"  Current:  book={current_metadata.get('book_name')}, ch={current_metadata.get('chapter')}, v={current_metadata.get('verse')}, page={current_metadata.get('page_number')}, continuation={current_metadata.get('is_verse_continuation')}")
     
     corrected = current_metadata.copy()
     corrections_made = []
@@ -3127,12 +3252,106 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     # Validate and correct chapter
     prev_chapter = prev_metadata.get('chapter')
     curr_chapter = current_metadata.get('chapter')
+    prev_v = prev_metadata.get('verse') # Need this early
+    
+    # Calculate effective previous chapter from verse notation
+    # If prev verse string is "2:24,3:1-2", effective end chapter is 3.
+    # If prev verse string is "10:26-29,11:1,2", effective end chapter is 11.
+    effective_prev_ch = prev_chapter
+    if prev_chapter and prev_v and ':' in str(prev_v):
+         try:
+             # Iterate through all segments to track chapter context
+             segments = str(prev_v).split(',')
+             current_context_ch = prev_chapter
+             for seg in segments:
+                 seg = seg.strip()
+                 if ':' in seg:
+                     ch_part = seg.split(':')[0]
+                     if ch_part.isdigit():
+                         current_context_ch = int(ch_part)
+             effective_prev_ch = current_context_ch
+             log_print(f"DEBUG: Calculated effective_prev_ch={effective_prev_ch} from '{prev_v}'")
+         except:
+             pass
+
     if prev_chapter is not None and curr_chapter is not None:
-        # Chapter should be same or +1
-        if curr_chapter not in [prev_chapter, prev_chapter + 1]:
-            # If current seems wrong, keep previous chapter
-            corrections_made.append(f"chapter: {curr_chapter} -> {prev_chapter}")
-            corrected['chapter'] = prev_chapter
+        # Chapter should be same or +1 relative to EITHER the start chapter or the end chapter of previous page
+        # This handles cases where prev page spans chapters (e.g. 31 -> 32) so next page can be 33
+        valid_chapters = {prev_chapter, prev_chapter + 1}
+        if effective_prev_ch:
+            valid_chapters.add(effective_prev_ch)
+            valid_chapters.add(effective_prev_ch + 1)
+            
+        if curr_chapter not in valid_chapters:
+            # If current seems wrong, keep previous chapter (or effective previous)
+            # Prefer effective_prev_ch if available and > prev_chapter
+            target_ch = effective_prev_ch if effective_prev_ch and effective_prev_ch > prev_chapter else prev_chapter
+            
+            corrections_made.append(f"chapter: {curr_chapter} -> {target_ch} (invalid jump from {prev_chapter}/{effective_prev_ch})")
+            corrected['chapter'] = target_ch
+        
+        # New check: False Positive Chapter Change Detection
+        # If chapter increased (Ch 1 -> 2), but verses are sequential (16 -> 17) and NOT starting at 1
+        # Then it's likely NOT a chapter change.
+        elif curr_chapter == prev_chapter + 1 or (effective_prev_ch and curr_chapter == effective_prev_ch + 1):
+             curr_v = current_metadata.get('verse') # prev_v already retrieved
+
+            
+             # Only flag as false positive if we are NOT continuing from a spanned chapter
+             # If effective_prev_ch == curr_chapter (e.g. 3 == 3), then we are just continuing Ch 3.
+             if effective_prev_ch != curr_chapter:
+                 if prev_v and curr_v:
+                     try:
+                         # Get last verse of prev
+                         # Get last verse of prev
+                         p_last = -1
+                         p_str = str(prev_v).strip()
+                         # Handle chapter-spanning notation like "31:18,32:1" -> extract "32:1" -> "1"
+                         if ',' in p_str: p_str = p_str.split(',')[-1]
+                         if ':' in p_str: p_str = p_str.split(':')[-1]
+                         if '-' in p_str: p_str = p_str.split('-')[-1]
+                         
+                         p_str = ''.join(c for c in p_str if c.isdigit())
+                         if p_str: p_last = int(p_str)
+
+                         # Get first verse of curr
+                         c_first = -1
+                         if ',' in str(curr_v): c_first = int(str(curr_v).split(',')[0])
+                         elif '-' in str(curr_v): c_first = int(str(curr_v).split('-')[0])
+                         elif ':' in str(curr_v): # Handle 2:17-21
+                             # If it has chapter, we need to respect the notation...
+                             # BUT if the notation was GENERATED based on the wrong chapter assumption?
+                             # The notation "2:17-21" comes from our previous logic.
+                             # If we strip the chapter...
+                             first_part = str(curr_v).split(',')[0]
+                             if ':' in first_part: c_first = int(first_part.split(':')[1].split('-')[0])
+                             else: c_first = int(first_part.split('-')[0])
+                         else: c_first = int(curr_v)
+
+                         if p_last > 0 and c_first > 0:
+                             diff = c_first - p_last
+                             if diff == 1 and c_first > 1:
+                                 # Sequential verses (16->17) across chapter change (1->2).
+                                 # This is suspicious. Chapter changes usually reset to 1.
+                                 # UNLESS the previous chapter ENDED at 16? 
+                                 # We can check max verses if we have the book.
+                                 
+                                 is_valid_transition = False
+                                 current_book_name = corrected.get('book_name') or prev_book
+                                 if current_book_name:
+                                     bible = build_bible_structure()
+                                     if current_book_name.upper() in bible:
+                                         max_v_prev = bible[current_book_name.upper()].get(prev_chapter, 999)
+                                         if p_last >= max_v_prev:
+                                             is_valid_transition = True # It ended exactly at max
+                                 
+                                 if not is_valid_transition:
+                                     log_print(f"DEBUG: False Positive Chapter Change detected: Ch {effective_prev_ch}->{curr_chapter} but verses {p_last}->{c_first} are sequential")
+                                     corrections_made.append(f"chapter: {curr_chapter} -> {effective_prev_ch} (sequential verses)")
+                                     corrected['chapter'] = effective_prev_ch
+                     except:
+                         pass
+
     elif prev_chapter is not None and curr_chapter is None:
         # If current chapter missing, use previous
         corrections_made.append(f"chapter: None -> {prev_chapter}")
@@ -3301,52 +3520,58 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     # Unknown chapter - skip overlap check
                     log_print(f"DEBUG: Cannot verify overlap - chapter unknown (prev={prev_chapter_for_compare}, curr={curr_chapter_for_compare})")
                 else:
-                    # Same book and same chapter - this is a real overlap
-                    log_print(f"DEBUG: Verse overlap detected: prev ends at {last_prev_verse}, current starts at {first_curr_verse}")
-                    expected_verse = last_prev_verse + 1
+                    # Check if this is a valid continuation
+                    is_continuation = current_metadata.get('is_verse_continuation', False)
                     
-                    # Remove overlapping verses instead of blindly shifting
-                    if ',' in curr_verse_str:
-                        # It's a list - remove overlapping verses
-                        verse_nums = [int(v.strip()) for v in curr_verse_str.split(',') if v.strip().isdigit()]
-                        non_overlapping = [v for v in verse_nums if v >= expected_verse]
-                        
-                        if non_overlapping:
-                            corrected_verse = ','.join(str(v) for v in non_overlapping)
-                            log_print(f"DEBUG: Removed overlapping verses: {verse_nums} -> {non_overlapping}")
-                        else:
-                            # All verses overlap - shift to expected range
-                            num_verses = len(verse_nums)
-                            corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
-                            corrected_verse = ','.join(corrected_verses)
-                            log_print(f"DEBUG: All verses overlapped, shifted: {verse_nums} -> {corrected_verses}")
-                    elif '-' in curr_verse_str:
-                        # It's a range - adjust to start at expected_verse
-                        parts = curr_verse_str.split('-')
-                        range_start = int(parts[0])
-                        range_end = int(parts[1])
-                        
-                        if range_end >= expected_verse:
-                            # Keep non-overlapping part of range
-                            corrected_verse = f"{expected_verse}-{range_end}"
-                            log_print(f"DEBUG: Trimmed overlapping range: {range_start}-{range_end} -> {expected_verse}-{range_end}")
-                        else:
-                            # Entire range overlaps - shift it
-                            range_size = range_end - range_start
-                            corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
-                            log_print(f"DEBUG: Entire range overlapped, shifted: {range_start}-{range_end} -> {corrected_verse}")
+                    if is_continuation:
+                        log_print(f"DEBUG: Verse overlap detected but allowed due to no_verse_markers=True")
                     else:
-                        # Single verse overlaps - replace with expected
-                        corrected_verse = str(expected_verse)
-                        log_print(f"DEBUG: Single verse overlapped, replaced: {first_curr_verse} -> {expected_verse}")
-                    
-                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (removed overlap with previous ending at {last_prev_verse})")
-                    corrected['verse'] = corrected_verse
-                    corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} to remove overlap with previous verse {last_prev_verse}"
-                    
-                    # Update curr_verse_str for gap detection
-                    curr_verse_str = corrected_verse
-                    curr_verse = corrected_verse
+                        # Same book and same chapter - this is a real overlap
+                        log_print(f"DEBUG: Verse overlap detected: prev ends at {last_prev_verse}, current starts at {first_curr_verse}")
+                        expected_verse = last_prev_verse + 1
+                        
+                        # Remove overlapping verses instead of blindly shifting
+                        if ',' in curr_verse_str:
+                            # It's a list - remove overlapping verses
+                            verse_nums = [int(v.strip()) for v in curr_verse_str.split(',') if v.strip().isdigit()]
+                            non_overlapping = [v for v in verse_nums if v >= expected_verse]
+                            
+                            if non_overlapping:
+                                corrected_verse = ','.join(str(v) for v in non_overlapping)
+                                log_print(f"DEBUG: Removed overlapping verses: {verse_nums} -> {non_overlapping}")
+                            else:
+                                # All verses overlap - shift to expected range
+                                num_verses = len(verse_nums)
+                                corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
+                                corrected_verse = ','.join(corrected_verses)
+                                log_print(f"DEBUG: All verses overlapped, shifted: {verse_nums} -> {corrected_verses}")
+                        elif '-' in curr_verse_str:
+                            # It's a range - adjust to start at expected_verse
+                            parts = curr_verse_str.split('-')
+                            range_start = int(parts[0])
+                            range_end = int(parts[1])
+                            
+                            if range_end >= expected_verse:
+                                # Keep non-overlapping part of range
+                                corrected_verse = f"{expected_verse}-{range_end}"
+                                log_print(f"DEBUG: Trimmed overlapping range: {range_start}-{range_end} -> {expected_verse}-{range_end}")
+                            else:
+                                # Entire range overlaps - shift it
+                                range_size = range_end - range_start
+                                corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
+                                log_print(f"DEBUG: Entire range overlapped, shifted: {range_start}-{range_end} -> {corrected_verse}")
+                        else:
+                            # Single verse overlaps - replace with expected
+                            corrected_verse = str(expected_verse)
+                            log_print(f"DEBUG: Single verse overlapped, replaced: {first_curr_verse} -> {expected_verse}")
+                        
+                        corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (removed overlap with previous ending at {last_prev_verse})")
+                        corrected['verse'] = corrected_verse
+                        corrected['verse_warning'] = f"OCR detected {curr_verse} but corrected to {corrected_verse} to remove overlap with previous verse {last_prev_verse}"
+                        
+                        # Update curr_verse_str for gap detection
+                        curr_verse_str = corrected_verse
+                        curr_verse = corrected_verse
             
             # Step 2: Check for unrealistic gaps (after overlap correction)
             # Only check gaps if we're in the SAME book AND SAME chapter (not after book/chapter changes)
@@ -3391,12 +3616,18 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                 if '-' in verse_only_str and len(verse_parts) > 10:
                     log_print(f"DEBUG: Unreasonably large range detected: {curr_verse_str} ({len(verse_parts)} verses)")
                     
-                    # Likely OCR error - assume it should be just the first 2 digits
-                    # e.g., "25-96" should be "25-26"
+                    # Correct based on OCR body markers if available
                     expected_verse = last_prev_verse + 1
-                    # Keep same range size but correct the numbers
-                    # Most common case: 2 verses per page for commentary
-                    corrected_verse = f"{expected_verse}-{expected_verse + 1}"
+                    
+                    found_in_range = [v for v in verse_parts if v in found_verses]
+                    if found_in_range:
+                        # Use the highest verse actually found in the OCR body
+                        max_found = max(found_in_range)
+                        log_print(f"DEBUG: Found verses in large range: {min(found_in_range)}-{max_found}. Correcting end to {max_found}")
+                        corrected_verse = f"{expected_verse}-{max_found}"
+                    else:
+                        # Fallback: Assume just 2 verses if we can't verify body content
+                        corrected_verse = f"{expected_verse}-{expected_verse + 1}"
                     
                     corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (unreasonably large range)")
                     corrected['verse'] = corrected_verse
@@ -3424,55 +3655,90 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                 # Check if first verse in current page has a gap from last verse of previous page
                 elif verse_diff > 1:
                     log_print(f"DEBUG: A verse gap detected: {last_prev_verse} -> {first_curr_verse} (gap: {verse_diff})")
-                    expected_verse = last_prev_verse + 1
                     
-                    # Correct the first verse in the notation
-                    if ':' in curr_verse_str:
-                        # Chapter-spanning notation like "25:34,26:1-2"
-                        # Replace the first verse number while preserving the structure
-                        from verse_notation import parse_verse_notation, format_verse_notation
-                        try:
-                            parsed = parse_verse_notation(curr_verse_str)
-                            if parsed and len(parsed[0]['verses']) > 0:
-                                # Replace first verse
-                                parsed[0]['verses'][0] = expected_verse
-                                # Reconstruct notation
-                                parts = []
-                                for span in parsed:
-                                    ch = span['chapter']
-                                    verses = span['verses']
-                                    if len(verses) == 1:
-                                        v_str = str(verses[0])
-                                    elif len(verses) == 2:
-                                        v_str = f"{verses[0]},{verses[1]}"
-                                    else:
-                                        v_str = f"{verses[0]}-{verses[-1]}"
-                                    parts.append(f"{ch}:{v_str}")
-                                corrected_verse = ','.join(parts)
-                        except:
-                            # Fallback to simple replacement
+                    # Check if the missing verse was actually found in the OCR body but dropped by Ollama
+                    missing_verse = last_prev_verse + 1
+                    restored = False
+                    
+                    if found_verses and missing_verse in found_verses:
+                        log_print(f"DEBUG: Missing verse {missing_verse} found in OCR body! Restoring it...")
+                        
+                        # Prepend missing verse to current verse string
+                        if '-' in curr_verse_str and not ':' in curr_verse_str:
+                             # Extend range: "17-19" -> "16-19"
+                             # Verify current start is missing_verse + 1?
+                             if first_curr_verse == missing_verse + 1:
+                                 new_verse_str = f"{missing_verse}-{curr_verse_str.split('-')[-1]}"
+                                 restored = True
+                        elif ',' in curr_verse_str and not ':' in curr_verse_str:
+                             # Add to list: "17,19" -> "16,17,19"
+                             new_verse_str = f"{missing_verse},{curr_verse_str}"
+                             restored = True
+                        elif curr_verse_str.isdigit():
+                             # Single verse: "17" -> "16,17"
+                             if first_curr_verse == missing_verse + 1:
+                                 new_verse_str = f"{missing_verse}-{first_curr_verse}" # consecutive
+                             else:
+                                 new_verse_str = f"{missing_verse},{curr_verse_str}"
+                             restored = True
+                        
+                        if restored:
+                            corrections_made.append(f"verse: {curr_verse_str} -> {new_verse_str} (restored missing verse {missing_verse} from OCR)")
+                            corrected['verse'] = new_verse_str
+                            corrected['verse_warning'] = f"Restored missing verse {missing_verse} detected in OCR body but dropped by validation"
+                    
+                    if not restored:
+                        # Standard gap correction (shifting)
+                        expected_verse = last_prev_verse + 1
+                    
+                        # Correct the first verse in the notation
+                        if ':' in curr_verse_str:
+                            # Chapter-spanning notation like "25:34,26:1-2"
+                            # Replace the first verse number while preserving the structure
+                            from verse_notation import parse_verse_notation, format_verse_notation
+                            try:
+                                parsed = parse_verse_notation(curr_verse_str)
+                                if parsed and len(parsed[0]['verses']) > 0:
+                                    # Replace first verse
+                                    parsed[0]['verses'][0] = expected_verse
+                                    # Reconstruct notation
+                                    parts = []
+                                    for span in parsed:
+                                        ch = span['chapter']
+                                        verses = span['verses']
+                                        if len(verses) == 1:
+                                            v_str = str(verses[0])
+                                        elif len(verses) == 2:
+                                            v_str = f"{verses[0]},{verses[1]}"
+                                        else:
+                                            v_str = f"{verses[0]}-{verses[-1]}"
+                                        parts.append(f"{ch}:{v_str}")
+                                    corrected_verse = ','.join(parts)
+                            except:
+                                # Fallback to simple replacement
+                                corrected_verse = str(expected_verse)
+                        elif '-' in verse_only_str:
+                            # Range - only adjust START to fix gap, keep END unchanged
+                            # The ending verse is likely correct (from body markers/header)
+                            # Only the starting verse was missed (OCR failure)
+                            # Only the starting verse was missed (OCR failure)
+                            parts = verse_only_str.split('-')
+                            new_start = expected_verse
+                            new_end = int(parts[1])  # Keep original ending
+                            corrected_verse = f"{new_start}-{new_end}"
+                            log_print(f"DEBUG: Adjusted range start to fix gap: {verse_only_str} -> {corrected_verse}")
+                        elif ',' in verse_only_str:
+                            # List like "34,36", correct first to expected
+                            parts = verse_only_str.split(',')
+                            parts[0] = str(expected_verse)
+                            corrected_verse = ','.join(parts)
+                        else:
+                            # Single verse
                             corrected_verse = str(expected_verse)
-                    elif '-' in verse_only_str:
-                        # Range - only adjust START to fix gap, keep END unchanged
-                        # The ending verse is likely correct (from body markers/header)
-                        # Only the starting verse was missed (OCR failure)
-                        parts = verse_only_str.split('-')
-                        new_start = expected_verse
-                        new_end = int(parts[1])  # Keep original ending
-                        corrected_verse = f"{new_start}-{new_end}"
-                        log_print(f"DEBUG: Adjusted range start to fix gap: {verse_only_str} -> {corrected_verse}")
-                    elif ',' in verse_only_str:
-                        # List like "34,36", correct first to expected
-                        parts = verse_only_str.split(',')
-                        parts[0] = str(expected_verse)
-                        corrected_verse = ','.join(parts)
-                    else:
-                        # Single verse
-                        corrected_verse = str(expected_verse)
-                    
-                    corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large gap from {last_prev_verse}, expected {expected_verse})")
-                    corrected['verse'] = corrected_verse
-                    corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
+                        
+                        corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large gap from {last_prev_verse}, expected {expected_verse})")
+                        corrected['verse'] = corrected_verse
+                        corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
             else:
                 log_print(f"DEBUG: Book or chapter changed - skipping gap detection (verses can restart at 1)")
     
@@ -3606,7 +3872,8 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
                         validate_ollama=False, max_pages=None, 
                         stop_on_book_change=False, stop_on_chapter_change=False,
                         continue_on_error=False,
-                        start_page=None, start_book=None, start_chapter=None, start_verse=None):
+                        start_page=None, start_book=None, start_chapter=None, start_verse=None,
+                        book_only=None):
     """
     Process multiple images in sequence, chaining metadata validation.
     
@@ -3648,6 +3915,25 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             start_index = i
             break
     
+    # Auto-load previous metadata if not provided and not starting from beginning
+    # This is useful if resuming a batch process from a middle image
+    prev_metadata = None # Initialize prev_metadata here, it will be overwritten by seed_expectations if present
+    if start_index > 0 and not (start_page or start_book or start_chapter or start_verse):
+        prev_image_path_tuple = sorted_images[start_index - 1]
+        prev_image_path = prev_image_path_tuple[0] # Get the actual path from the tuple
+        
+        # Construct metadata path, assuming common image extensions
+        base_name = os.path.splitext(prev_image_path)[0]
+        prev_meta_path = base_name + '_metadata.json'
+        
+        if os.path.exists(prev_meta_path):
+            try:
+                log_print(f"Auto-loading previous metadata from: {os.path.basename(prev_meta_path)}")
+                with open(prev_meta_path, 'r', encoding='utf-8') as f:
+                    prev_metadata = json.load(f)
+            except Exception as e:
+                log_print(f"Warning: Failed to auto-load previous metadata: {e}")
+    
     log_print(f"Starting from image {start_index + 1} of {len(sorted_images)}: {os.path.basename(start_image_path)}")
     
     if max_pages:
@@ -3660,7 +3946,8 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
     log_print(f"\n{'='*80}\n")
     
     # Process images sequentially
-    prev_metadata = None
+    # Process images sequentially
+    # prev_metadata = None # <--- This line was wiping out our auto-loaded metadata! Removed.
     
     # Store seed expectations separately for fallback
     seed_expectations = {}
@@ -3737,9 +4024,69 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             log_print(f"Current page: {page_num}")
         log_print(f"{'='*80}\n")
         
+        # Check if we are seeking a specific book
+        seeking_book = False
+        if book_only:
+            # Check if we have identified the current book yet
+            # We need to process the image to get metadata OR verify against known pattern
+            # For efficiency, we can try to peek at existing metadata first
+            seeking_book = True # Default to seeking until verified
+            
+            # Optimization: Check for existing metadata first to avoid OCR if skipping
+            temp_metadata = {}
+            if get_page_number_from_metadata(img_path): # Use existing function strictly? No, let's load it manually
+                base_name = os.path.splitext(img_path)[0]
+                meta_path = base_name + '_metadata.json'
+                if os.path.exists(meta_path):
+                     try:
+                        with open(meta_path, 'r', encoding='utf-8') as f:
+                            temp_metadata = json.load(f)
+                     except: 
+                        pass
+            
+            # If we don't have metadata, we MUST process the image to know the book
+            # But we can do a lighter pass? No, process_image does it all.
+            # So we will proceed to process logic, but check the result before saving/counting?
+            # Actually, process_image does the saving. 
+            # We'll just let it process. If it's the wrong book, we ignore/skip "counting" it or just log it?
+            # Better: if we find it's the wrong book AFTER processing, and we haven't started our target book yet, we ignore it.
+            # If we HAVE started, and it's wrong, we stop.
+            pass
+
         # Process the image (all steps 1-9 are done in process_image)
         try:
             metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama, prev_metadata)
+            
+            # Apply book filter logic
+            if book_only:
+                current_book = metadata.get('book_name')
+                
+                # Normalize names for comparison
+                target_book_norm = book_only.lower().strip()
+                current_book_norm = current_book.lower().strip() if current_book else ""
+                
+                # Check for match (fuzzy or exact)
+                is_match = target_book_norm in current_book_norm or current_book_norm in target_book_norm
+                
+                if not initial_book: # Function-scope var to track if we have STARTED matching
+                    if is_match:
+                         log_print(f"FOUND TARGET BOOK: '{current_book}' (matches '{book_only}') - Starting batch sequence.")
+                         initial_book = current_book # Mark as started
+                    else:
+                         log_print(f"Skipping page in '{current_book}' (Seeking '{book_only}')...")
+                         # Do not increment processed_count? 
+                         # Actually, we processed it (compute used), but effectively skipped the "batch" logic.
+                         continue
+                else:
+                    # We have already started processing the target book.
+                    # If this page does NOT match, we are done.
+                    if not is_match and current_book: 
+                        # Allow some tolerance for "None" books (failed OCR) inside a batch?
+                        # If explicitly different book:
+                        log_print(f"\n{'='*80}")
+                        log_print(f"STOPPING: Finished target book '{initial_book}' (Switching to '{current_book}')")
+                        log_print(f"{'='*80}\n")
+                        break
             
             # Apply seed expectations as fallback for first image if detection failed
             if processed_count == 0 and seed_expectations:
@@ -3868,6 +4215,7 @@ if __name__ == "__main__":
     start_book = None
     start_chapter = None
     start_verse = None
+    book_only = None
     log_file_path = None
     
     i = 2
@@ -3914,6 +4262,9 @@ if __name__ == "__main__":
         elif (sys.argv[i] == '--log-file' or sys.argv[i] == '-log-file') and i + 1 < len(sys.argv):
             log_file_path = sys.argv[i + 1]
             i += 2
+        elif sys.argv[i] == '--book-only' and i + 1 < len(sys.argv):
+            book_only = sys.argv[i + 1]
+            i += 2
         else:
             output_path = sys.argv[i]
             i += 1
@@ -3937,7 +4288,8 @@ if __name__ == "__main__":
                 start_page=start_page,
                 start_book=start_book,
                 start_chapter=start_chapter,
-                start_verse=start_verse
+                start_verse=start_verse,
+                book_only=book_only
             )
         else:
             # Single image processing mode

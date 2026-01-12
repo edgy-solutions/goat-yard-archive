@@ -4,8 +4,9 @@
 class Metadata {
   book_name string? @description("The book name found at the top center of the image")
   chapter int? @description("The chapter number (converted from Roman numerals to decimal). For chapter-spanning pages, this is the first chapter.")
-  verse string? @description("The verse number, range (e.g. '1-3'), list (e.g. '1,2,3'), or chapter-spanning notation (e.g. '27:42-46,28:1' for verses 42-46 of chapter 27 and verse 1 of chapter 28)")
+  verse string? @description("The verse number, range (e.g. '1-3'), list (e.g. '1,2,3'), or chapter-spanning notation")
   page_number int? @description("The page number found at top left or top right")
+  no_verse_markers bool? @description("Set to true ONLY if there are NO verse (Ver.) markers on this page except in header.")
 }
 
 // Define the extracted text structure for OpenRouter

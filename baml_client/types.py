@@ -84,6 +84,7 @@ class Metadata(BaseModel):
     chapter: typing.Optional[int] = None
     verse: typing.Optional[str] = None
     page_number: typing.Optional[int] = None
+    no_verse_markers: typing.Optional[bool] = None
 
 class VerseChunk(BaseModel):
     verse_ref: str
