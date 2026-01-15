@@ -594,7 +594,7 @@ def process_images_with_baml(api_key, directory_path=None, model_name="qwen/qwen
     # Create output directory first (needed for checking existing files)
     model_dir_name = model_name.replace("/", "_")
     output_dir = Path(directory_path) / model_dir_name
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     # Filter and collect PNG files
     all_png_files = list(Path(directory_path).glob("*.png"))
@@ -813,8 +813,8 @@ API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract text from images using BAML and OpenRouter")
-    parser.add_argument("--directory", "-d", default="extracted_images", 
-                       help="Directory containing images to process")
+    parser.add_argument("--directory", "-d", default=None, 
+                       help="Directory containing images to process (default: use COMMENTARY_DATA_DIR/volume1)")
     parser.add_argument("--model", "-m", default="qwen/qwen3-vl-235b-a22b-thinking",
                        help="Model to use for text extraction")
     parser.add_argument("--book", "-b", help="Filter by book name (e.g., Genesis)")
@@ -867,6 +867,6 @@ if __name__ == "__main__":
         chapter_end=args.chapter_end,
         filename_filter=args.filename,
         pages=pages_list,
-        max_workers=5,  # Use parallel processing
-        skip_existing=not args.force
+        max_workers=args.workers,
+        skip_existing=not args.force and not args.no_skip
     )
