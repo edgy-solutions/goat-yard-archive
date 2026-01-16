@@ -22,3 +22,6 @@ rapidfuzz
 
 # minio setup
 minio
+
+# pytesseract
+pytesseract
