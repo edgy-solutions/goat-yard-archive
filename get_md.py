@@ -9,7 +9,11 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
-pytesseract.pytesseract.tesseract_cmd = 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'
+# Configure Tesseract path
+# Check for Windows default path, otherwise rely on PATH (Linux/Custom)
+windows_tesseract_path = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+if os.path.exists(windows_tesseract_path):
+    pytesseract.pytesseract.tesseract_cmd = windows_tesseract_path
 
 # Determine Bibles directory
 # Priority:
@@ -1590,7 +1594,7 @@ def extract_chapter_verse_from_boxes(boxes):
                     # Check for verse marker with appended number/range/list
                     # Allow for OCR errors like "EV.21" where E is noise before V
                     v_match = re.search(r'[IV]V?\.?(.+)', verse_text, re.IGNORECASE)
-                    log_print(f"DEBUG:   Pattern 1 ([IV]V?\.?(.+)): match={v_match is not None}")
+                    log_print(f"DEBUG:   Pattern 1 ([IV]V?\\.?(.+)): match={v_match is not None}")
                     if v_match and v_match.start() <= 1:  # V should be near the start (allow 1 char before)
                         verse_part = v_match.group(1)
                         verse = parse_verse_text(verse_part)
@@ -1600,7 +1604,7 @@ def extract_chapter_verse_from_boxes(boxes):
                     
                     # Check for standalone verse marker (including OCR errors like "EV." for "V.")
                     verse_marker_match = re.search(r'[A-Z]?V\.?$', verse_text, re.IGNORECASE)
-                    log_print(f"DEBUG:   Pattern 2 ([A-Z]?V\.?$): match={verse_marker_match is not None}")
+                    log_print(f"DEBUG:   Pattern 2 ([A-Z]?V\\.?$): match={verse_marker_match is not None}")
                     if verse_marker_match:
                         log_print(f"DEBUG: Found verse marker '{verse_text}' at position {k}")
                         # Try to combine multiple boxes for verse list
