@@ -21,7 +21,7 @@ from baml_py.errors import BamlValidationError
 load_dotenv()
 
 # Base configuration
-BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd())).expanduser().resolve()
 DEFAULT_EXTRACTED_DIR = BASE_DIR / "volume1"
 
 
@@ -319,6 +319,9 @@ def call_baml_with_retry(baml_image, book, chapter, verse, page_number, hebrew_t
             elif "ConnectError" in error_msg or "NetworkError" in error_msg:
                 is_retryable = True
                 reason = "network error"
+            elif "missing field `choices`" in error_msg:
+                is_retryable = True
+                reason = "malformed response (missing choices)"
             
             if is_retryable and attempt < max_retries - 1:
                 # Calculate exponential backoff with jitter
@@ -592,12 +595,18 @@ def process_images_with_baml(api_key, directory_path=None, model_name="qwen/qwen
     os.environ["OPENROUTER_API_KEY"] = api_key
     
     # Create output directory first (needed for checking existing files)
+    # Create output directory first (needed for checking existing files)
     model_dir_name = model_name.replace("/", "_")
-    output_dir = Path(directory_path) / model_dir_name
+    
+    # Ensure directory path is expanded (handles ~)
+    directory_path_obj = Path(directory_path).expanduser().resolve()
+    directory_path = str(directory_path_obj)
+    
+    output_dir = directory_path_obj / model_dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Filter and collect PNG files
-    all_png_files = list(Path(directory_path).glob("*.png"))
+    all_png_files = list(directory_path_obj.glob("*.png"))
     png_files = []
     skipped_no_metadata = 0
     skipped_filtered = 0

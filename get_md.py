@@ -2033,6 +2033,7 @@ def find_verse_markers_in_ocr(ocr_data):
         return set()
     
     verses_found = set()
+    verses_ordered = []  # List to preserve order and duplicates
     text_boxes = ocr_data['text']
     
     # Get image width to determine columns
@@ -2050,7 +2051,7 @@ def find_verse_markers_in_ocr(ocr_data):
         # This margin (~1-2 pixels) only excludes truly centered single characters/thin dividers
         center_margin = max_x * 0.0005
     else:
-        return set()
+        return set(), []
     
     # Pattern to match "Ver" (case-sensitive!) with optional punctuation, followed by numbers
     # Must be at start of text (after optional whitespace)
@@ -2095,6 +2096,7 @@ def find_verse_markers_in_ocr(ocr_data):
             try:
                 verse_num = int(match.group(1))
                 verses_found.add(verse_num)
+                verses_ordered.append(verse_num)
                 column = "left" if x_pos < center_x else "right"
                 log_print(f"DEBUG: Found verse marker 'Ver. {verse_num}' in {column} column, OCR box {i}: '{text[:50]}'")
             except ValueError:
@@ -2144,6 +2146,7 @@ def find_verse_markers_in_ocr(ocr_data):
                         try:
                             verse_num = int(match.group(1))
                             verses_found.add(verse_num)
+                            verses_ordered.append(verse_num)
                             column = "left" if x_pos < center_x else "right"
                             log_print(f"DEBUG: Found verse marker 'Ver. {verse_num}' spanning boxes {i}-{i+1} in {column} column")
                         except ValueError:
@@ -2348,8 +2351,162 @@ def find_verse_markers_in_ocr(ocr_data):
         if corrected != sorted_verses:
             verses_found = set(corrected)
             log_print(f"DEBUG: After correcting outliers: {sorted(verses_found)}")
+            
+            # Propagate corrections to verses_ordered
+            # Just create a map of original -> corrected
+            correction_map = {}
+            for orig, corr in zip(sorted_verses, corrected):
+                if orig != corr:
+                    correction_map[orig] = corr
+            
+            if correction_map:
+                new_ordered = []
+                for v in verses_ordered:
+                    new_ordered.append(correction_map.get(v, v))
+                verses_ordered = new_ordered
+
+    return verses_found, verses_ordered
+
+
+def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, prev_book=None):
+    """
+    Reconstructs chapter-spanning verse notation from an ordered list of verses,
+    detecting duplicate resets (e.g., 1, 2, 8, 1, 2, 3 -> Ch X:1-8, Ch Y:1-3).
     
-    return verses_found
+    Args:
+        verses_ordered: List of ints in order of appearance (e.g., [6, 7, 8, 1, 1, 8])
+        prev_ch: The chapter number of the previous page (base context)
+        current_ch: Optional current chapter from header (if reliable)
+    
+    Returns:
+        String (e.g., "36:6-8,37:1-8,38:1-8") or None if no complex structure detected.
+    """
+    if not verses_ordered or len(verses_ordered) < 2:
+        return None
+        
+    # Detect Resets: A reset is when verse N is followed by verse M where M < N 
+    # (and M is usually small, like 1, 2, 3)
+    # OR when M == N and M is small (restarting same verse in new chapter?) - actually usually M < N.
+    
+    segments = []
+    current_segment = [verses_ordered[0]]
+    
+    for i in range(1, len(verses_ordered)):
+        v = verses_ordered[i]
+        prev_v = verses_ordered[i-1]
+        
+        # Reset detection conditions:
+        # 1. Drop in value (8 -> 1)
+        # 2. Duplicate value (1 -> 1) if value is small (<=5) -> likely new chapter starting at 1
+        is_reset = False
+        if v < prev_v:
+            # Drop in value
+            # Only consider it a chapter reset if likely restarting (e.g., dropping to <= 5)
+            # and the previous value was reasonable for end-of-chapter (e.g., > 5)
+            # Exception: Psalm 119 where verses drop locally? No, we assume standard prose.
+            if v <= 5: # Restarting at beginning
+                 is_reset = True
+        elif v == prev_v and v <= 5 and v == 1:
+            # Duplicate 1 -> 1. Definitely separate chapters (or repeated verse header).
+            # Assume separate chapters for safety.
+            is_reset = True
+            
+        if is_reset:
+            segments.append(current_segment)
+            current_segment = [v]
+        else:
+            current_segment.append(v)
+    
+    segments.append(current_segment)
+    
+    if len(segments) == 1:
+        return None # No resets found, not a multi-chapter sequence (use standard logic)
+        
+    # Assign chapters to segments
+    # Strategy: Start from prev_ch. Each segment increments chapter.
+    # Exception: If first segment matches prev_ch, use it. If not, maybe it's prev_ch + 1?
+    # Actually, we rely on prev_ch being the "Previous page's starting chapter" or "Previous metadata chapter".
+    
+    # Refined Strategy:
+    # 1. Use prev_ch as baseline.
+    # 2. Assign prev_ch, prev_ch+1, prev_ch+2...
+    
+    # Wait, we need to know if the first segment belongs to prev_ch or prev_ch + 1.
+    # Heuristic: Check continuity.
+    # But usually, if we are flowing text, the first segment IS the continuation of prev_ch.
+    # UNLESS prev_ch was finished on previous page.
+    
+    built_segments = []
+    
+    # Logic to determine start chapter:
+    # If standard flow: First segment = prev_ch (or prev_ch's continuation)
+    # But if prev page ended chapter, then first segment = prev_ch + 1.
+    # We'll stick to: First Segment = prev_ch (if not provided, default to 1) followed by +1, +2.
+    # BUT: If current_ch (header) is higher than prev_ch, maybe align to that?
+    # Ex: Page 622 header "Exodus 36". Prev meta "Exodus 36". 
+    # Verses: 6-8 (Seq 1), 1 (Seq 2), 1-8 (Seq 3).
+    # Seq 1 -> 36. Seq 2 -> 37. Seq 3 -> 38.
+    
+    # Safe bet: start_ch = prev_ch
+    start_ch = prev_ch if prev_ch else 1
+    
+    # Verify: if first segment starts with 1, it might already be a NEW chapter?
+    # If prev page ended at 20, and we start at 1... then start_ch should be prev_ch + 1.
+    # But if we start at 21... then start_ch is prev_ch.
+    
+    first_seg_start = segments[0][0]
+    if first_seg_start == 1:
+         # Suspicious. Did previous page end?
+         # Without knowing, assume it *might* be next chapter if prev_ch was fully formed.
+         # But safer to assume it's continuation unless strong evidence.
+         # Actually for Gill (verse-by-verse), if it starts at 1, it's virtually always a new chapter
+         # UNLESS prev page ended at non-verse boundary? But OCR finds verses.
+         pass 
+
+    result_parts = []
+    
+    for i, seg in enumerate(segments):
+        # Format segment verses
+        # Filter duplicates within segment and sort?
+        # Ordered list might have noise. "6, 7, 8".
+        seg_unique = sorted(list(set(seg)))
+        if not seg_unique: continue
+        
+        if len(seg_unique) == 1:
+            v_str = str(seg_unique[0])
+        else:
+            # Check for sequential
+            is_seq = True
+            for k in range(len(seg_unique)-1):
+                 if seg_unique[k+1] - seg_unique[k] != 1:
+                     is_seq = False
+                     break
+            if is_seq:
+                v_str = f"{seg_unique[0]}-{seg_unique[-1]}"
+            else:
+                 v_str = ",".join(map(str, seg_unique))
+                 
+        # Assign chapter
+        # If first segment starts with 1 and prev_ch > 0:
+        # It's ambiguous. But we'll increment for subsequent segments.
+        # Let's assume Segment 0 = start_ch.
+        
+        # Handling the "Start at 1" case:
+        # If we have multiple segments, and the first one starts at 1,
+        # AND we believe prev_ch ended...
+        # But we don't know if prev_ch ended.
+        # Let's trust the Caller to provide a good `prev_ch` (which is typically the chapter of the PREVIOUS page).
+        # We will increment from there.
+        
+        # Special Logic for Page 622:
+        # Ordered: 6,7,8 -> 1 -> 1,8
+        # Segments: [6,7,8], [1], [1,8]
+        # Chs: 36, 37, 38. Correct.
+        
+        ch_num = start_ch + i
+        result_parts.append(f"{ch_num}:{v_str}")
+        
+    return ",".join(result_parts)
 
 
 def validate_verses_against_content(metadata_verse, found_verses):
@@ -2443,7 +2600,9 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     
     # Step 2: Find verse markers in English OCR to validate and correct verses
     log_print(f"\nStep 2: Searching for verse markers in body to validate verses...")
-    found_verses = find_verse_markers_in_ocr(tsv_data_eng) or set()
+    found_verses, verses_ordered = find_verse_markers_in_ocr(tsv_data_eng)
+    if not found_verses: found_verses = set()
+    if not verses_ordered: verses_ordered = []
     
     if found_verses:
         log_print(f"Found {len(found_verses)} verse markers in body: {sorted(found_verses)}")
@@ -2704,8 +2863,25 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                 # When both header and Ollama agree, body markers may be incomplete (OCR errors)
                 ollama_verse_str = str(header_info.get('verse', ''))
                 if original_header_verse and ollama_verse_str == original_header_verse:
-                    log_print(f"DEBUG: Ollama matches original header '{original_header_verse}' - trusting header+Ollama over body markers")
-                    should_correct_ollama = False
+                    # Check for "Unreasonably Large Range" (e.g., 1-43 on a single page)
+                    # If range > 20 verses and confidence < 20%, do NOT trust it.
+                    is_large_range = False
+                    try:
+                        if '-' in ollama_verse_str and ':' not in ollama_verse_str:
+                            parts = ollama_verse_str.split('-')
+                            if len(parts) == 2:
+                                start, end = int(parts[0]), int(parts[1])
+                                if (end - start + 1) > 20:
+                                    is_large_range = True
+                    except:
+                        pass
+                    
+                    if is_large_range and verse_validation['confidence'] < 0.2:
+                        log_print(f"DEBUG: Header/Ollama agree on '{ollama_verse_str}' but range is large (>20) and confidence low ({verse_validation['confidence']:.1%}) - REJECTING trust")
+                        should_correct_ollama = True
+                    else:
+                        log_print(f"DEBUG: Ollama matches original header '{original_header_verse}' - trusting header+Ollama over body markers")
+                        should_correct_ollama = False
                 # Second priority: Check if Ollama has a range that CONTAINS all sequential body markers
                 # This suggests body markers are incomplete (OCR failures), not that Ollama is wrong
                 elif '-' in ollama_verse_str and ':' not in ollama_verse_str:
@@ -2761,8 +2937,45 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                 sorted_found = sorted(found_verses)
                 
                 # Check if this looks like a chapter transition
+                # Use robust reconstruction first if we have ordered verses
+                multi_ch_verse = None
+                if verses_ordered:
+                    base_chapter = 1
+                    if prev_metadata and prev_metadata.get('chapter'):
+                        base_chapter = int(prev_metadata['chapter'])
+                        # Check if we should increment chapter based on verse reset
+                        # If first found verse is 1, and previous chapter ended at high number (>1),
+                        # then this is likely a new chapter.
+                        try:
+                            prev_v_str = str(prev_metadata.get('verse', ''))
+                            prev_last_v = 0
+                            if '-' in prev_v_str:
+                                prev_last_v = int(prev_v_str.split('-')[-1])
+                            elif ',' in prev_v_str: # Handle lists/complex too? rough check
+                                prev_last_v = int(prev_v_str.split(',')[-1].split('-')[-1])
+                            else:
+                                prev_last_v = int(prev_v_str)
+                            
+                            if verses_ordered[0] == 1 and prev_last_v > 1:
+                                log_print(f"DEBUG: Verse reset detected (Prev Ch {base_chapter} ended at {prev_last_v}, New Page starts at 1) -> Incrementing base chapter to {base_chapter + 1}")
+                                base_chapter += 1
+                        except:
+                            pass
+                    elif header_info.get('chapter'):
+                        base_chapter = int(header_info['chapter'])
+                        
+                    multi_ch_verse = reconstruct_multi_chapter_verses(
+                        verses_ordered, 
+                        prev_ch=base_chapter,
+                        current_ch=header_info.get('chapter')
+                    )
+                
+                if multi_ch_verse:
+                    log_print(f"Correcting Ollama result based on multi-chapter analysis:")
+                    log_print(f"  {header_info['verse']} -> {multi_ch_verse}")
+                    header_info['verse'] = multi_ch_verse
                 # (verses start from 1 with high verses mixed in)
-                if sorted_found[0] == 1 and len(sorted_found) >= 2 and sorted_found[-1] > 10:
+                elif sorted_found[0] == 1 and len(sorted_found) >= 2 and sorted_found[-1] > 10:
                     # Chapter transition: high verses (>10) are from previous chapter
                     new_chapter_verses = [v for v in sorted_found if v <= 10]
                     prev_chapter_verses = [v for v in sorted_found if v > 10]
@@ -3274,7 +3487,9 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
          except:
              pass
 
-    if prev_chapter is not None and curr_chapter is not None:
+    same_book = (prev_book == curr_book)
+    
+    if same_book and prev_chapter is not None and curr_chapter is not None:
         # Chapter should be same or +1 relative to EITHER the start chapter or the end chapter of previous page
         # This handles cases where prev page spans chapters (e.g. 31 -> 32) so next page can be 33
         valid_chapters = {prev_chapter, prev_chapter + 1}
