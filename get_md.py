@@ -4400,6 +4400,44 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
                         json.dump(metadata, f, indent=2, ensure_ascii=False)
                     log_print(f"Updated metadata saved with seed expectations")
             
+            # Step Final: Synchronize verse notation with corrected chapter
+            # If chapter was corrected (e.g. 20 -> 25) but verse string still has old chapter (20:53-55), update it.
+            final_ch = corrected.get('chapter')
+            final_v_str = str(corrected.get('verse', ''))
+            
+            if final_ch and ':' in final_v_str:
+                # Check the first chapter prefix in the verse string
+                first_part = final_v_str.split(',')[0]
+                if ':' in first_part:
+                    try:
+                        v_ch_str = first_part.split(':')[0]
+                        v_ch = int(v_ch_str)
+                        
+                        if v_ch != final_ch:
+                            # Chapter mismatch detected!
+                            diff = final_ch - v_ch
+                            log_print(f"DEBUG: Synchronizing verse notation chapters: {v_ch} -> {final_ch} (offset {diff})")
+                            
+                            # Shift all chapter prefixes in the string
+                            new_parts = []
+                            for parts in final_v_str.split(','):
+                                if ':' in parts:
+                                    c_str, v_rest = parts.split(':', 1)
+                                    if c_str.strip().isdigit():
+                                        new_c = int(c_str) + diff
+                                        new_parts.append(f"{new_c}:{v_rest}")
+                                    else:
+                                        new_parts.append(parts)
+                                else:
+                                    new_parts.append(parts)
+                            
+                            new_v_final = ','.join(new_parts)
+                            corrections_made.append(f"verse notation: {final_v_str} -> {new_v_final} (sync with chapter {final_ch})")
+                            corrected['verse'] = new_v_final
+                            corrected['verse_warning'] = f"Synchronized verse notation chapters with main chapter {final_ch}"
+                    except Exception as e:
+                        log_print(f"DEBUG: Failed to sync verse chapters: {e}")
+            
             # Store initial book/chapter for comparison
             if processed_count == 0:
                 initial_book = metadata.get('book_name')
