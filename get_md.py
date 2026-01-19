@@ -3462,6 +3462,40 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                         corrected['chapter'] = prev_chapter
                         corrected['chapter_warning'] = f"OCR detected chapter {curr_chapter} but max is {validation['max_chapter']}"
             
+            # Case 4: Verse is out of range - clamp to max
+            # Error format: "Invalid verse range START-END for BOOK CH. Valid range: 1-MAX"
+            for error in validation['errors']:
+                if "Invalid verse range" in error and "Valid range:" in error:
+                    try:
+                        # Extract valid max
+                        valid_part = error.split('Valid range:')[1].strip()
+                        if '-' in valid_part:
+                            max_verse = int(valid_part.split('-')[1])
+                            
+                            # Parse current verse
+                            curr_v_str = str(curr_verse)
+                            new_v_str = curr_v_str
+                            
+                            if '-' in curr_v_str:
+                                start_v = int(curr_v_str.split('-')[0])
+                                end_v = int(curr_v_str.split('-')[1])
+                                
+                                if end_v > max_verse:
+                                    if start_v > max_verse:
+                                        # Entire range is invalid? Maybe wrong chapter.
+                                        # But if we can't fix chapter, clamp to max? 
+                                        # Or if start_v > max_verse, it's totally wrong.
+                                        pass 
+                                    else:
+                                        # Clamp end
+                                        new_v_str = f"{start_v}-{max_verse}"
+                                        log_print(f"DEBUG: Clamping verse range to max: {curr_v_str} -> {new_v_str}")
+                                        corrections_made.append(f"verse: {curr_v_str} -> {new_v_str} (exceeds max {max_verse})")
+                                        corrected['verse'] = new_v_str
+                                        corrected['verse_warning'] = f"Clamped verse range to chapter maximum {max_verse}"
+                    except Exception as e:
+                        log_print(f"DEBUG: Failed to auto-correct verse range: {e}")
+            
             # Re-validate after corrections
             curr_book = corrected.get('book_name')
             curr_chapter = corrected.get('chapter')
