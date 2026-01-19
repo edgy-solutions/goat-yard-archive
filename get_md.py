@@ -2308,7 +2308,6 @@ def find_verse_markers_in_ocr(ocr_data):
                         # Check if corrected value fits in the sequence (gap fill OR boundary extension)
                         # 1. Check if it fills a gap
                         fits_sequence = False
-                        sorted_others = [v for v in sorted_verses if v != v_val] # Use v_val from outer scope? No, v is loop var.
                         # Wait, v is the outlier. sorted_verses has it.
                         other_verses = sorted([x for x in sorted_verses if x != v])
                         
