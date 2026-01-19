@@ -2305,22 +2305,48 @@ def find_verse_markers_in_ocr(ocr_data):
                         corrected_v = int(corrected_str)
                         log_print(f"DEBUG: Trying 9->2 OCR correction: {v} -> {corrected_v}")
                         
-                        # Check if corrected value fills a gap in the sequence
-                        # Look through the sequence for a gap where corrected_v would fit
-                        for j in range(len(sorted_verses) - 1):
-                            if j != i and (j + 1) != i:  # Skip positions involving the outlier
-                                gap = sorted_verses[j + 1] - sorted_verses[j]
-                                if gap > 1:
-                                    # There's a gap - check if corrected_v fits
-                                    if sorted_verses[j] < corrected_v < sorted_verses[j + 1]:
-                                        log_print(f"DEBUG: Corrected value {corrected_v} fills gap between {sorted_verses[j]} and {sorted_verses[j+1]}")
-                                        # Verify it doesn't duplicate
-                                        # Verify it doesn't duplicate
-                                        if corrected_v not in [sorted_verses[k] for k in range(len(sorted_verses)) if k != i]:
-                                            log_print(f"DEBUG: Replacing outlier {v} with {corrected_v} (9->2 OCR correction)")
-                                            corrected.append(corrected_v)
-                                            correction_applied = True
-                                            break
+                        # Check if corrected value fits in the sequence (gap fill OR boundary extension)
+                        # 1. Check if it fills a gap
+                        fits_sequence = False
+                        sorted_others = [v for v in sorted_verses if v != v_val] # Use v_val from outer scope? No, v is loop var.
+                        # Wait, v is the outlier. sorted_verses has it.
+                        other_verses = sorted([x for x in sorted_verses if x != v])
+                        
+                        if not other_verses:
+                             # If this is the only verse, we can't validate sequence. Assume valid if sensible?
+                             # Or just trust OCR correction if it looks like a verse?
+                             # For safety, require context.
+                             pass
+                        else:
+                             # Check 1: Fills gap
+                             for j in range(len(other_verses) - 1):
+                                 if other_verses[j] < corrected_v < other_verses[j+1]:
+                                     gap = other_verses[j+1] - other_verses[j]
+                                     # Ideally gap should be 2 for a single insertion (28, 30 -> 29)
+                                     # But if gap is larger, it still fits better than 98
+                                     fits_sequence = True
+                                     log_print(f"DEBUG: Corrected value {corrected_v} fills gap between {other_verses[j]} and {other_verses[j+1]}")
+                                     break
+                            
+                             # Check 2: Extends start (29, 30 -> 28)
+                             if not fits_sequence:
+                                 if abs(corrected_v - other_verses[0]) == 1:
+                                     fits_sequence = True
+                                     log_print(f"DEBUG: Corrected value {corrected_v} extends sequence start (before {other_verses[0]})")
+                                 
+                             # Check 3: Extends end (29, 30 -> 31)
+                             if not fits_sequence:
+                                 if abs(corrected_v - other_verses[-1]) == 1:
+                                     fits_sequence = True
+                                     log_print(f"DEBUG: Corrected value {corrected_v} extends sequence end (after {other_verses[-1]})")
+                        
+                        if fits_sequence:
+                            # Verify it doesn't duplicate
+                            if corrected_v not in other_verses:
+                                log_print(f"DEBUG: Replacing outlier {v} with {corrected_v} (9->2 OCR correction)")
+                                corrected.append(corrected_v)
+                                correction_applied = True
+                                break
                     except ValueError:
                         pass
                 
