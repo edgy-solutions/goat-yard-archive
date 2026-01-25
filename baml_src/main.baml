@@ -62,7 +62,8 @@ client<llm> OpenRouterText {
 // Define the validation function
 function ValidateOCRMetadata(
   image: image,
-  ocr_metadata: Metadata
+  ocr_metadata: Metadata,
+  body_verses: string?
 ) -> Metadata {
   client Ollama
   
@@ -86,10 +87,18 @@ function ValidateOCRMetadata(
     - Verse: {{ ocr_metadata.verse }}
     - Page: {{ ocr_metadata.page_number }}
     
+    {% if body_verses %}
+    DETECTED BODY VERSES: {{ body_verses }}
+    Use these body verses as a strong hint. 
+    - If the header says "10-15" but body verses are exactly "10, 11, 12, 13" (and page layout suggests end of section), the header might be wrong or reading a smudge.
+    - If the body verses are sequential and consistent, favor them over a mismatched header.
+    {% endif %}
+    
     Please review the image and provide the corrected metadata if any errors are found. If the OCR is correct, return the same values. Pay special attention to:
     1. Distinguishing between 2 and 9 in the curly font
     2. Correctly parsing chapter-spanning headers into the chapter:verse notation
     3. Ensuring the chapter field reflects the first chapter in chapter-spanning pages
+    4. Reconciling header range with detected body verses
     
     {{ _.role("user") }}
     {{ image }}

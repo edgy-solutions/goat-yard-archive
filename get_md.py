@@ -943,13 +943,14 @@ def get_greek_verse(book_name, chapter, verse, greek_version='grctr'):
     return result if result else None
 
 
-def validate_metadata_with_ollama(image_path, metadata):
+def validate_metadata_with_ollama(image_path, metadata, found_body_verses=None):
     """
     Validate OCR metadata using Ollama vision model.
     
     Args:
         image_path: Path to the image file
         metadata: Dictionary with book_name, chapter, verse, page_number
+        found_body_verses: Optional list of verses found in the body text (as evidence)
     
     Returns:
         Validated metadata dictionary or original if validation fails
@@ -960,6 +961,15 @@ def validate_metadata_with_ollama(image_path, metadata):
     
     try:
         log_print("\nStep 3: Validating metadata with Ollama...")
+        
+        # Format body verses for prompt
+        body_verses_str = None
+        if found_body_verses:
+            try:
+                sorted_v = sorted([int(v) for v in found_body_verses])
+                body_verses_str = ", ".join(map(str, sorted_v))
+            except:
+                body_verses_str = str(found_body_verses)
         
         # Load image for BAML - convert to base64
         import base64
@@ -993,7 +1003,8 @@ def validate_metadata_with_ollama(image_path, metadata):
             try:
                 validated = baml_client.ValidateOCRMetadata(
                     image=image,
-                    ocr_metadata=baml_metadata
+                    ocr_metadata=baml_metadata,
+                    body_verses=body_verses_str
                 )
                 
                 # Convert back to dictionary
@@ -2961,7 +2972,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     # Step 3: Validate metadata with Ollama if requested
     if validate_ollama:
         log_print(f"\nStep 3: Validating with Ollama...")
-        header_info = validate_metadata_with_ollama(image_path, header_info)
+        header_info = validate_metadata_with_ollama(image_path, header_info, found_verses)
         log_print(f"After Ollama: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
         
         # Validate Ollama result against body verse markers and Bible structure

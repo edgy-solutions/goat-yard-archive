@@ -139,19 +139,19 @@ class BamlAsyncClient:
                 "raw_markdown": raw_markdown,
             })
             return typing.cast(str, result.cast_to(types, types, stream_types, False, __runtime__))
-    async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
+    async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.Metadata:
         # Check if on_tick is provided
         if 'on_tick' in baml_options:
             # Use streaming internally when on_tick is provided
-            stream = self.stream.ValidateOCRMetadata(image=image,ocr_metadata=ocr_metadata,
+            stream = self.stream.ValidateOCRMetadata(image=image,ocr_metadata=ocr_metadata,body_verses=body_verses,
                 baml_options=baml_options)
             return await stream.get_final_response()
         else:
             # Original non-streaming code
             result = await self.__options.merge_options(baml_options).call_function_async(function_name="ValidateOCRMetadata", args={
-                "image": image,"ocr_metadata": ocr_metadata,
+                "image": image,"ocr_metadata": ocr_metadata,"body_verses": body_verses,
             })
             return typing.cast(types.Metadata, result.cast_to(types, types, stream_types, False, __runtime__))
     
@@ -211,11 +211,11 @@ class BamlStreamClient:
           lambda x: typing.cast(str, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
-    def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
+    def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlStream[stream_types.Metadata, types.Metadata]:
         ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="ValidateOCRMetadata", args={
-            "image": image,"ocr_metadata": ocr_metadata,
+            "image": image,"ocr_metadata": ocr_metadata,"body_verses": body_verses,
         })
         return baml_py.BamlStream[stream_types.Metadata, types.Metadata](
           result,
@@ -259,11 +259,11 @@ class BamlHttpRequestClient:
             "raw_markdown": raw_markdown,
         }, mode="request")
         return result
-    async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
+    async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateOCRMetadata", args={
-            "image": image,"ocr_metadata": ocr_metadata,
+            "image": image,"ocr_metadata": ocr_metadata,"body_verses": body_verses,
         }, mode="request")
         return result
     
@@ -302,11 +302,11 @@ class BamlHttpStreamRequestClient:
             "raw_markdown": raw_markdown,
         }, mode="stream")
         return result
-    async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,
+    async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateOCRMetadata", args={
-            "image": image,"ocr_metadata": ocr_metadata,
+            "image": image,"ocr_metadata": ocr_metadata,"body_verses": body_verses,
         }, mode="stream")
         return result
     
