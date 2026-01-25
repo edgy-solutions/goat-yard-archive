@@ -2455,13 +2455,28 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
                         target_link_idx = seg_idx
                         break
         
+        # 3. Interleaved Continuation (Jump UP to match prev_last_v from previous page)
+        # Ex: Page starts Ch 5:1, 2. Then has Ch 4:49. (prev_last_v=34).
+        # v=49. prev_v=2. Gap=47.
+        # 49 > prev_last_v (34). Gap 15. Plausible continuation.
+        if not is_reset and not is_jump_back and prev_last_v:
+             if v - prev_v > 15: # Large gap in current sequence
+                 # Does it fit continuation of prev page?
+                 # Must be greater than prev_last_v (to avoid backtracking dupes)
+                 if v > prev_last_v and (v - prev_last_v) < 30:
+                     # It aligns with previous page logic, treat as split
+                     # We don't link it to a segment idx because prev page is "virtual"
+                     is_jump_back = True 
+                     # target_link_idx remains None, implying link to "Base Context"
+                     
         if is_reset:
             segments.append(current_segment)
             current_segment = [v]
         elif is_jump_back:
             segments.append(current_segment)
             # Record link: The NEW segment (which will be at len(segments)) links to target_link_idx
-            segment_links[len(segments)] = target_link_idx
+            if target_link_idx is not None:
+                segment_links[len(segments)] = target_link_idx
             current_segment = [v]
         else:
             current_segment.append(v)
