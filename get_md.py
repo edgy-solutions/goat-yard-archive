@@ -3139,10 +3139,44 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                         log_print(f"  {header_info['verse']} -> {corrected_verse}")
                         header_info['verse'] = corrected_verse
                 else:
-                    # No chapter transition, use simple range
-                    min_v = min(found_verses)
-                    max_v = max(found_verses)
-                    body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
+                    # No chapter transition, use simple range OR sparse list
+                    sorted_v = sorted(found_verses)
+                    min_v = sorted_v[0]
+                    max_v = sorted_v[-1]
+                    
+                    # Detect if we should use sparse notation (e.g., "17,84-88")
+                    # Check for gaps > 5 verses
+                    has_large_gaps = False
+                    for i in range(len(sorted_v) - 1):
+                        if sorted_v[i+1] - sorted_v[i] > 5:
+                            has_large_gaps = True
+                            break
+                    
+                    if has_large_gaps:
+                        # Construct sparse string
+                        parts = []
+                        current_part = [sorted_v[0]]
+                        for i in range(1, len(sorted_v)):
+                            if sorted_v[i] - sorted_v[i-1] > 5:
+                                # New part, flush old
+                                if len(current_part) == 1:
+                                    parts.append(str(current_part[0]))
+                                else:
+                                    parts.append(f"{current_part[0]}-{current_part[-1]}")
+                                current_part = [sorted_v[i]]
+                            else:
+                                current_part.append(sorted_v[i])
+                        # Flush last part
+                        if len(current_part) == 1:
+                            parts.append(str(current_part[0]))
+                        else:
+                            parts.append(f"{current_part[0]}-{current_part[-1]}")
+                        
+                        body_verse = ",".join(parts)
+                        log_print(f"DEBUG: Detected sparse range with gaps: {body_verse}")
+                    else:
+                        # Standard range
+                        body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
                     log_print(f"Correcting Ollama result based on body verse markers:")
                     log_print(f"  {header_info['verse']} -> {body_verse}")
                     header_info['verse'] = body_verse
