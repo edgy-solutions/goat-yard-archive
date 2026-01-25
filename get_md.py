@@ -3983,56 +3983,66 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     
                     if not restored:
                         # Standard gap correction (shifting)
-                        expected_verse = last_prev_verse + 1
-                    
-                        # Correct the first verse in the notation
-                        if ':' in curr_verse_str:
-                            # Chapter-spanning notation like "25:34,26:1-2"
-                            # Replace the first verse number while preserving the structure
-                            from verse_notation import parse_verse_notation, format_verse_notation
-                            try:
-                                parsed = parse_verse_notation(curr_verse_str)
-                                if parsed and len(parsed[0]['verses']) > 0:
-                                    # Replace first verse
-                                    parsed[0]['verses'][0] = expected_verse
-                                    # Reconstruct notation
-                                    parts = []
-                                    for span in parsed:
-                                        ch = span['chapter']
-                                        verses = span['verses']
-                                        if len(verses) == 1:
-                                            v_str = str(verses[0])
-                                        elif len(verses) == 2:
-                                            v_str = f"{verses[0]},{verses[1]}"
-                                        else:
-                                            v_str = f"{verses[0]}-{verses[-1]}"
-                                        parts.append(f"{ch}:{v_str}")
-                                    corrected_verse = ','.join(parts)
-                            except:
-                                # Fallback to simple replacement
-                                corrected_verse = str(expected_verse)
-                        elif '-' in verse_only_str:
-                            # Range - only adjust START to fix gap, keep END unchanged
-                            # The ending verse is likely correct (from body markers/header)
-                            # Only the starting verse was missed (OCR failure)
-                            # Only the starting verse was missed (OCR failure)
-                            parts = verse_only_str.split('-')
-                            new_start = expected_verse
-                            new_end = int(parts[1])  # Keep original ending
-                            corrected_verse = f"{new_start}-{new_end}"
-                            log_print(f"DEBUG: Adjusted range start to fix gap: {verse_only_str} -> {corrected_verse}")
-                        elif ',' in verse_only_str:
-                            # List like "34,36", correct first to expected
-                            parts = verse_only_str.split(',')
-                            parts[0] = str(expected_verse)
-                            corrected_verse = ','.join(parts)
-                        else:
-                            # Single verse
-                            corrected_verse = str(expected_verse)
                         
-                        corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large gap from {last_prev_verse}, expected {expected_verse})")
-                        corrected['verse'] = corrected_verse
-                        corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
+                        # CRITICAL CHECK: Is the detected start verse actually in the body?
+                        # If so, the gap is likely real (sparse commentary), so DO NOT correct it.
+                        is_start_confirmed = False
+                        if found_verses and first_curr_verse in found_verses:
+                             log_print(f"DEBUG: Start verse {first_curr_verse} confirmed in body markers. Skipping gap correction (gap is real).")
+                             is_start_confirmed = True
+                        
+                        if not is_start_confirmed:
+                            expected_verse = last_prev_verse + 1
+                        
+                            # Correct the first verse in the notation
+                            # Correct the first verse in the notation
+                            if ':' in curr_verse_str:
+                                # Chapter-spanning notation like "25:34,26:1-2"
+                                # Replace the first verse number while preserving the structure
+                                from verse_notation import parse_verse_notation, format_verse_notation
+                                try:
+                                    parsed = parse_verse_notation(curr_verse_str)
+                                    if parsed and len(parsed[0]['verses']) > 0:
+                                        # Replace first verse
+                                        parsed[0]['verses'][0] = expected_verse
+                                        # Reconstruct notation
+                                        parts = []
+                                        for span in parsed:
+                                            ch = span['chapter']
+                                            verses = span['verses']
+                                            if len(verses) == 1:
+                                                v_str = str(verses[0])
+                                            elif len(verses) == 2:
+                                                v_str = f"{verses[0]},{verses[1]}"
+                                            else:
+                                                v_str = f"{verses[0]}-{verses[-1]}"
+                                            parts.append(f"{ch}:{v_str}")
+                                        corrected_verse = ','.join(parts)
+                                except:
+                                    # Fallback to simple replacement
+                                    corrected_verse = str(expected_verse)
+                            elif '-' in verse_only_str:
+                                # Range - only adjust START to fix gap, keep END unchanged
+                                # The ending verse is likely correct (from body markers/header)
+                                # Only the starting verse was missed (OCR failure)
+                                # Only the starting verse was missed (OCR failure)
+                                parts = verse_only_str.split('-')
+                                new_start = expected_verse
+                                new_end = int(parts[1])  # Keep original ending
+                                corrected_verse = f"{new_start}-{new_end}"
+                                log_print(f"DEBUG: Adjusted range start to fix gap: {verse_only_str} -> {corrected_verse}")
+                            elif ',' in verse_only_str:
+                                # List like "34,36", correct first to expected
+                                parts = verse_only_str.split(',')
+                                parts[0] = str(expected_verse)
+                                corrected_verse = ','.join(parts)
+                            else:
+                                # Single verse
+                                corrected_verse = str(expected_verse)
+                            
+                            corrections_made.append(f"verse: {curr_verse} -> {corrected_verse} (large gap from {last_prev_verse}, expected {expected_verse})")
+                            corrected['verse'] = corrected_verse
+                            corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
             else:
                 log_print(f"DEBUG: Book or chapter changed - skipping gap detection (verses can restart at 1)")
     
