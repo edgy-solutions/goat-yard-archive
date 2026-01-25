@@ -2784,9 +2784,25 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     else:
                         # Original Logic: Header = Low Verses (current). High Verses = Prev Chapter.
                         # Ex: Header=Ch3, Body=[24,25] (High), [1,2] (Low). -> 2:24-25, 3:1-2
+                        
+                        # Check for Book Transition
+                        is_book_transition_page = False
+                        if prev_metadata and prev_metadata.get('book_name'):
+                            curr_b = header_info.get('book_name') or prev_metadata.get('book_name')
+                            if curr_b and curr_b != prev_metadata.get('book_name'):
+                                is_book_transition_page = True
+                                log_print(f"DEBUG: Book Transition Detected ({prev_metadata.get('book_name')} -> {curr_b}). Ignoring previous book verses in metadata.")
+                        
                         new_verses_str = f"{min(new_ch_verses)}-{max(new_ch_verses)}" if len(new_ch_verses) > 1 else str(new_ch_verses[0])
-                        prev_verses_str = f"{min(prev_ch_verses_body)}-{max(prev_ch_verses_body)}" if len(prev_ch_verses_body) > 1 else str(prev_ch_verses_body[0])
-                        body_verse = f"{current_ch - 1}:{prev_verses_str},{current_ch}:{new_verses_str}"
+                        
+                        if is_book_transition_page:
+                            # If book changed, the "High Verses" belong to the PREVIOUS book.
+                            # We can't include them in the CURRENT book's metadata.
+                            # So just output the new verses.
+                            body_verse = f"{current_ch}:{new_verses_str}"
+                        else:
+                            prev_verses_str = f"{min(prev_ch_verses_body)}-{max(prev_ch_verses_body)}" if len(prev_ch_verses_body) > 1 else str(prev_ch_verses_body[0])
+                            body_verse = f"{current_ch - 1}:{prev_verses_str},{current_ch}:{new_verses_str}"
                 else:
                     # Pattern 2: prev chapter verses + next chapter first verse
                     # Usually means Header = Current (High numbers), found `1`.
