@@ -2397,7 +2397,7 @@ def find_verse_markers_in_ocr(ocr_data):
     return verses_found, verses_ordered
 
 
-def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, prev_book=None):
+def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, prev_book=None, prev_last_v=None):
     """
     Reconstructs chapter-spanning verse notation from an ordered list of verses,
     detecting duplicate resets (e.g., 1, 2, 8, 1, 2, 3 -> Ch X:1-8, Ch Y:1-3)
@@ -2407,6 +2407,7 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
         verses_ordered: List of ints in order of appearance (e.g., [6, 7, 8, 1, 1, 8])
         prev_ch: The chapter number of the previous page (base context)
         current_ch: Optional current chapter from header (if reliable)
+        prev_last_v: The last verse number from the previous page (to detect resets)
     
     Returns:
         String (e.g., "36:6-8,37:1-8,38:1-8") or None if no complex structure detected.
@@ -2474,20 +2475,21 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
     start_ch = prev_ch if prev_ch else 1
     
     # Check if first segment resets to 1 (implying new chapter relative to prev_ch)
-    # If prev_ch=1, and first verse is 1... it's Ch 1 (unless prev page ended Ch 1?)
-    # If prev_ch=1, and first verse is 52... it's Ch 1.
+    # Use prev_last_v to make a better decision
+    current_ch_assignment = start_ch
     
-    segment_chapters = {}
-    
-    # Determine Chapter for Segment 0
     seg0_start = segments[0][0]
-    if seg0_start == 1 and prev_ch:
-         # Ambiguous. Assume next chapter ONLY if we have strong reason.
-         # For now, default to prev_ch unless header conflicts.
-         # But if the loop detected resets later, we handle relative increments.
-         current_ch_assignment = start_ch
-    else:
-         current_ch_assignment = start_ch
+    
+    # Logic: If we start at 1, and previous page ended at a high verse (e.g. > 1), 
+    # then we likely moved to next chapter.
+    # Ex: Num 4:34 -> Num 5:1.
+    if seg0_start == 1 and prev_last_v and prev_last_v > 1:
+         current_ch_assignment = start_ch + 1
+         log_print(f"DEBUG: reconstruction detected start at 1 after {prev_last_v} -> Start Ch {current_ch_assignment}")
+    # Fallback to simple check if prev_last_v not provided
+    elif seg0_start == 1 and prev_ch:
+         # Ambiguous without prev_last_v, but usually 1 means new chapter if reading sequentially
+         pass
 
     segment_chapters[0] = current_ch_assignment
     
@@ -2498,17 +2500,37 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
             parent_idx = segment_links[i]
             segment_chapters[i] = segment_chapters.get(parent_idx, start_ch)
         else:
-            # Implicitly a detected reset (since we broke segment)
-            # Increment chapter from the *previous physical segment's* chapter? 
-            # OR increment from the "last distinct chapter"?
-            # Usually resets imply Ch + 1.
-            # But if we just jumped back (Ch 1 -> Ch 2 -> Ch 1), a NEW reset would likely be Ch 2 or Ch 3?
-            # Creating a "new" chapter means incrementing the highest seen chapter?
-            # Or just prev_segment_ch + 1?
-            # If Seg 0 (Ch 1) -> Seg 1 (Ch 2) -> Seg 2 (Ch 1) -> Seg 3 (Reset)?
-            # Seg 3 is likely Ch 2 or Ch 3.
-            # Let's assume sequential increment from the immediately preceding segment IF it wasn't a jump back?
-            # Actually, robust logic: track `max_assigned_chapter`.
+            # Implicitly a detected reset or distinct segment
+            
+            # Check for Interleaved "Jump Back" to Previous Chapter context
+            # Case: We started at Ch 5 (current_ch_assignment > prev_ch).
+            # We see a segment starting with '49'. 
+            # 49 is likely Ch 4 (prev_ch).
+            seg_start = segments[i][0]
+            
+            # If we seemingly moved forward (start_ch > prev_ch)
+            # but this segment looks like it belongs to prev_ch?
+            # Heuristic: Segment start is "Large" (> 10) and distinct from current context.
+            if current_ch_assignment > prev_ch:
+                # We are technically in "Next Chapter" mode (e.g. Ch 5)
+                # If we see a large verse that fits "Previous Chapter" context?
+                # E.g. 49.
+                if seg_start > 15: # Arbitrary "non-start" threshold
+                     # Check if it connects to prev_last_v?
+                     # prev_last_v=34. seg_start=49. Gap 15. Not close.
+                     # But it is certainly NOT Ch 5:49 (if Ch 5 just started).
+                     # Assume it falls back to prev_ch.
+                     segment_chapters[i] = prev_ch
+                     continue
+
+            # Default: Increment chapter from previous segment?
+            # Or increment from 'start_ch' + i?
+            # If we had [1,2] (Ch 5) -> [49] (Ch 4)
+            # Next segment [3] should be Ch 5 (matches Seg 0).
+            # Detecting linkage to Seg 0 would be handled by 'segment_links' IF abs(3-2)<=2.
+            # So if it IS linked, we already handled it.
+            # If it is NOT linked (gap?), what then?
+            # Assume increment from "highest seen chapter" or just prev_seg + 1?
             prev_seg_ch = segment_chapters[i-1]
             segment_chapters[i] = prev_seg_ch + 1
             
@@ -3036,8 +3058,9 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                                 prev_last_v = int(prev_v_str)
                             
                             if verses_ordered[0] == 1 and prev_last_v > 1:
-                                log_print(f"DEBUG: Verse reset detected (Prev Ch {base_chapter} ended at {prev_last_v}, New Page starts at 1) -> Incrementing base chapter to {base_chapter + 1}")
-                                base_chapter += 1
+                                log_print(f"DEBUG: Verse reset detected (Prev Ch {base_chapter} ended at {prev_last_v}, New Page starts at 1) -> Will be handled by multi-chapter reconstruction")
+                                # Do NOT increment base_chapter here. Let reconstruct function decide.
+                                # base_chapter += 1
                         except:
                             pass
                     elif header_info.get('chapter'):
@@ -3046,7 +3069,8 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     multi_ch_verse = reconstruct_multi_chapter_verses(
                         verses_ordered, 
                         prev_ch=base_chapter,
-                        current_ch=header_info.get('chapter')
+                        current_ch=header_info.get('chapter'),
+                        prev_last_v=prev_last_v
                     )
                 
                 if multi_ch_verse:
