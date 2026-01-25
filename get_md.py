@@ -1361,7 +1361,7 @@ def parse_verse_text(verse_text):
     return None
 
 
-def extract_multi_chapter_span(boxes):
+def extract_multi_chapter_span(boxes, book_name=None):
     """
     Detect chapter-spanning pattern: CH. XXVII. V. 42-46. XXVIII. V. 1
     Returns (first_chapter, verse_notation) or (None, None) if not found.
@@ -1478,6 +1478,39 @@ def extract_multi_chapter_span(boxes):
             continue
         
         # Success! Build chapter-spanning notation
+        # VALIDATION: Check if ch2 is valid
+        if book_name and ch2:
+            bible = build_bible_structure()
+            norm_book = normalize_book_name(book_name)
+            if norm_book and norm_book in bible:
+                max_ch = max(bible[norm_book].keys())
+                
+                # Check 1: Exceeds max chapter
+                is_invalid = False
+                if ch2 > max_ch:
+                    log_print(f"DEBUG: Detected chapter {ch2} exceeds max {max_ch} for {book_name}")
+                    is_invalid = True
+                
+                # Check 2: Non-sequential jump (e.g., 21 -> 69)
+                # Allow ch1 (same), ch1+1 (next), maybe ch1+2?
+                # But 69 is definitely wrong.
+                if ch2 > ch1 + 1:
+                     log_print(f"DEBUG: Detected suspicious chapter jump {ch1} -> {ch2}")
+                     # Only flag as invalid if it's a huge jump (>5) or exceeds max
+                     if ch2 > ch1 + 5:
+                         is_invalid = True
+                
+                if is_invalid:
+                    # Correction Logic
+                    # If v2 is 1 (or small), assume it's the next chapter
+                    if ch1 < max_ch:
+                        corrected_ch2 = ch1 + 1
+                        log_print(f"DEBUG: Correcting invalid/non-sequential chapter {ch2} -> {corrected_ch2}")
+                        ch2 = corrected_ch2
+                    else:
+                        # At end of book?
+                        log_print(f"DEBUG: Cannot correct chapter (already at limit)")
+
         verse_notation = f"{ch1}:{v1},{ch2}:{v2}"
         log_print(f"DEBUG: Multi-chapter span detected: {verse_notation}")
         return ch1, verse_notation
@@ -1485,13 +1518,13 @@ def extract_multi_chapter_span(boxes):
     return None, None
 
 
-def extract_chapter_verse_from_boxes(boxes):
+def extract_chapter_verse_from_boxes(boxes, book_name=None):
     """Extract chapter and verse from a list of boxes, handling multi-box patterns."""
     if not boxes:
         return None, None
     
     # First, try to detect chapter-spanning pattern
-    chapter, verse_notation = extract_multi_chapter_span(boxes)
+    chapter, verse_notation = extract_multi_chapter_span(boxes, book_name)
     if chapter and verse_notation:
         log_print(f"DEBUG: Using multi-chapter notation: ch={chapter}, verse={verse_notation}")
         return chapter, verse_notation
@@ -1792,7 +1825,7 @@ def extract_header_info(tsv_data, img_width, img_height):
         log_print(f"DEBUG: Page number not found, searching all boxes for chapter/verse")
     
     if cv_boxes:
-        chapter, verse = extract_chapter_verse_from_boxes(cv_boxes)
+        chapter, verse = extract_chapter_verse_from_boxes(cv_boxes, book_name)
     
     log_print(f"\nDEBUG: Final result: book='{book_name}', ch={chapter}, v={verse}, page={page_number}\n")
     
