@@ -2400,7 +2400,8 @@ def find_verse_markers_in_ocr(ocr_data):
 def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, prev_book=None):
     """
     Reconstructs chapter-spanning verse notation from an ordered list of verses,
-    detecting duplicate resets (e.g., 1, 2, 8, 1, 2, 3 -> Ch X:1-8, Ch Y:1-3).
+    detecting duplicate resets (e.g., 1, 2, 8, 1, 2, 3 -> Ch X:1-8, Ch Y:1-3)
+    AND interleaved verses (e.g., 52, 1, 2, 53, 54 -> Ch 1:52, Ch 2:1-2, Ch 1:53-54).
     
     Args:
         verses_ordered: List of ints in order of appearance (e.g., [6, 7, 8, 1, 1, 8])
@@ -2413,35 +2414,53 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
     if not verses_ordered or len(verses_ordered) < 2:
         return None
         
-    # Detect Resets: A reset is when verse N is followed by verse M where M < N 
-    # (and M is usually small, like 1, 2, 3)
-    # OR when M == N and M is small (restarting same verse in new chapter?) - actually usually M < N.
-    
+    # Detect Resets and Interleaved Jumps
     segments = []
     current_segment = [verses_ordered[0]]
+    
+    # Store relationship: segment_index -> parent_segment_index (for interleaved chapters)
+    # If segment i maps to j, it means segment i continues the chapter of segment j
+    segment_links = {} 
     
     for i in range(1, len(verses_ordered)):
         v = verses_ordered[i]
         prev_v = verses_ordered[i-1]
         
-        # Reset detection conditions:
-        # 1. Drop in value (8 -> 1)
-        # 2. Duplicate value (1 -> 1) if value is small (<=5) -> likely new chapter starting at 1
         is_reset = False
+        is_jump_back = False
+        target_link_idx = None
+        
+        # 1. Reset Detection (Drop in value)
         if v < prev_v:
             # Drop in value
-            # Only consider it a chapter reset if likely restarting (e.g., dropping to <= 5)
-            # and the previous value was reasonable for end-of-chapter (e.g., > 5)
-            # Exception: Psalm 119 where verses drop locally? No, we assume standard prose.
             if v <= 5: # Restarting at beginning
                  is_reset = True
         elif v == prev_v and v <= 5 and v == 1:
-            # Duplicate 1 -> 1. Definitely separate chapters (or repeated verse header).
-            # Assume separate chapters for safety.
+            # Duplicate 1 -> 1.
             is_reset = True
             
+        # 2. Interleaved Jump Detection (Jump UP to match previous segment)
+        # Ex: Seg 0: [52]. Current Seg: [1, 2]. v: 53.
+        # 53 >> 2 (gap > 10). 53 is close to 52 (gap ~ 1).
+        if not is_reset and segments:
+            # Check against the END of previous segments
+            for seg_idx, seg in enumerate(segments):
+                last_v_in_seg = seg[-1]
+                # If v continues a previous segment (gap ~ 1)
+                if abs(v - last_v_in_seg) <= 2:
+                    # And v is significantly different from current local context
+                    if abs(v - prev_v) > 10:
+                        is_jump_back = True
+                        target_link_idx = seg_idx
+                        break
+        
         if is_reset:
             segments.append(current_segment)
+            current_segment = [v]
+        elif is_jump_back:
+            segments.append(current_segment)
+            # Record link: The NEW segment (which will be at len(segments)) links to target_link_idx
+            segment_links[len(segments)] = target_link_idx
             current_segment = [v]
         else:
             current_segment.append(v)
@@ -2449,58 +2468,91 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
     segments.append(current_segment)
     
     if len(segments) == 1:
-        return None # No resets found, not a multi-chapter sequence (use standard logic)
+        return None # No resets/jumps found, not a multi-chapter sequence (use standard logic)
         
     # Assign chapters to segments
-    # Strategy: Start from prev_ch. Each segment increments chapter.
-    # Exception: If first segment matches prev_ch, use it. If not, maybe it's prev_ch + 1?
-    # Actually, we rely on prev_ch being the "Previous page's starting chapter" or "Previous metadata chapter".
-    
-    # Refined Strategy:
-    # 1. Use prev_ch as baseline.
-    # 2. Assign prev_ch, prev_ch+1, prev_ch+2...
-    
-    # Wait, we need to know if the first segment belongs to prev_ch or prev_ch + 1.
-    # Heuristic: Check continuity.
-    # But usually, if we are flowing text, the first segment IS the continuation of prev_ch.
-    # UNLESS prev_ch was finished on previous page.
-    
-    built_segments = []
-    
-    # Logic to determine start chapter:
-    # If standard flow: First segment = prev_ch (or prev_ch's continuation)
-    # But if prev page ended chapter, then first segment = prev_ch + 1.
-    # We'll stick to: First Segment = prev_ch (if not provided, default to 1) followed by +1, +2.
-    # BUT: If current_ch (header) is higher than prev_ch, maybe align to that?
-    # Ex: Page 622 header "Exodus 36". Prev meta "Exodus 36". 
-    # Verses: 6-8 (Seq 1), 1 (Seq 2), 1-8 (Seq 3).
-    # Seq 1 -> 36. Seq 2 -> 37. Seq 3 -> 38.
-    
-    # Safe bet: start_ch = prev_ch
     start_ch = prev_ch if prev_ch else 1
     
-    # Verify: if first segment starts with 1, it might already be a NEW chapter?
-    # If prev page ended at 20, and we start at 1... then start_ch should be prev_ch + 1.
-    # But if we start at 21... then start_ch is prev_ch.
+    # Check if first segment resets to 1 (implying new chapter relative to prev_ch)
+    # If prev_ch=1, and first verse is 1... it's Ch 1 (unless prev page ended Ch 1?)
+    # If prev_ch=1, and first verse is 52... it's Ch 1.
     
-    first_seg_start = segments[0][0]
-    if first_seg_start == 1:
-         # Suspicious. Did previous page end?
-         # Without knowing, assume it *might* be next chapter if prev_ch was fully formed.
-         # But safer to assume it's continuation unless strong evidence.
-         # Actually for Gill (verse-by-verse), if it starts at 1, it's virtually always a new chapter
-         # UNLESS prev page ended at non-verse boundary? But OCR finds verses.
-         pass 
+    segment_chapters = {}
+    
+    # Determine Chapter for Segment 0
+    seg0_start = segments[0][0]
+    if seg0_start == 1 and prev_ch:
+         # Ambiguous. Assume next chapter ONLY if we have strong reason.
+         # For now, default to prev_ch unless header conflicts.
+         # But if the loop detected resets later, we handle relative increments.
+         current_ch_assignment = start_ch
+    else:
+         current_ch_assignment = start_ch
 
-    result_parts = []
+    segment_chapters[0] = current_ch_assignment
     
+    # Assign rest based on sequence or links
+    for i in range(1, len(segments)):
+        if i in segment_links:
+            # Linked segment - use same chapter as parent
+            parent_idx = segment_links[i]
+            segment_chapters[i] = segment_chapters.get(parent_idx, start_ch)
+        else:
+            # Implicitly a detected reset (since we broke segment)
+            # Increment chapter from the *previous physical segment's* chapter? 
+            # OR increment from the "last distinct chapter"?
+            # Usually resets imply Ch + 1.
+            # But if we just jumped back (Ch 1 -> Ch 2 -> Ch 1), a NEW reset would likely be Ch 2 or Ch 3?
+            # Creating a "new" chapter means incrementing the highest seen chapter?
+            # Or just prev_segment_ch + 1?
+            # If Seg 0 (Ch 1) -> Seg 1 (Ch 2) -> Seg 2 (Ch 1) -> Seg 3 (Reset)?
+            # Seg 3 is likely Ch 2 or Ch 3.
+            # Let's assume sequential increment from the immediately preceding segment IF it wasn't a jump back?
+            # Actually, robust logic: track `max_assigned_chapter`.
+            prev_seg_ch = segment_chapters[i-1]
+            segment_chapters[i] = prev_seg_ch + 1
+            
+    
+    # Sort and Merge Segments for Logical Sequential Output
+    # The physical reading order (Left Col -> Right Col) might have produced interleaved chapters (Ch 1 -> Ch 2 -> Ch 1).
+    # We must reorganize this into logical order: Ch 1 (all parts) -> Ch 2 (all parts).
+    
+    # 1. Flatten all verses into (chapter, verse) tuples
+    all_verses_with_ch = []
     for i, seg in enumerate(segments):
-        # Format segment verses
-        # Filter duplicates within segment and sort?
-        # Ordered list might have noise. "6, 7, 8".
-        seg_unique = sorted(list(set(seg)))
-        if not seg_unique: continue
+        ch = segment_chapters[i]
+        for v in seg:
+            all_verses_with_ch.append((ch, v))
+            
+    # 2. Sort by Chapter, then Verse
+    all_verses_with_ch.sort(key=lambda x: (x[0], x[1]))
+    
+    # 3. Re-group into segments by chapter
+    if not all_verses_with_ch:
+        return None
         
+    merged_parts = []
+    current_ch = all_verses_with_ch[0][0]
+    current_verses = [all_verses_with_ch[0][1]]
+    
+    for i in range(1, len(all_verses_with_ch)):
+        next_ch, next_v = all_verses_with_ch[i]
+        
+        if next_ch == current_ch:
+            # Same chapter, append verse if not duplicate
+            if next_v != current_verses[-1]:
+                current_verses.append(next_v)
+        else:
+            # New chapter, flush current
+            merged_parts.append((current_ch, current_verses))
+            current_ch = next_ch
+            current_verses = [next_v]
+            
+    merged_parts.append((current_ch, current_verses))
+    
+    # Format Result
+    result_parts = []
+    for ch, seg_unique in merged_parts:
         if len(seg_unique) == 1:
             v_str = str(seg_unique[0])
         else:
@@ -2514,26 +2566,8 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
                 v_str = f"{seg_unique[0]}-{seg_unique[-1]}"
             else:
                  v_str = ",".join(map(str, seg_unique))
-                 
-        # Assign chapter
-        # If first segment starts with 1 and prev_ch > 0:
-        # It's ambiguous. But we'll increment for subsequent segments.
-        # Let's assume Segment 0 = start_ch.
         
-        # Handling the "Start at 1" case:
-        # If we have multiple segments, and the first one starts at 1,
-        # AND we believe prev_ch ended...
-        # But we don't know if prev_ch ended.
-        # Let's trust the Caller to provide a good `prev_ch` (which is typically the chapter of the PREVIOUS page).
-        # We will increment from there.
-        
-        # Special Logic for Page 622:
-        # Ordered: 6,7,8 -> 1 -> 1,8
-        # Segments: [6,7,8], [1], [1,8]
-        # Chs: 36, 37, 38. Correct.
-        
-        ch_num = start_ch + i
-        result_parts.append(f"{ch_num}:{v_str}")
+        result_parts.append(f"{ch}:{v_str}")
         
     return ",".join(result_parts)
 
