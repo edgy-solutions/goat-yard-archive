@@ -84,21 +84,21 @@ function ValidateOCRMetadata(
     Current OCR Metadata:
     - Book: {{ ocr_metadata.book_name }}
     - Chapter: {{ ocr_metadata.chapter }}
-    - Verse: {{ ocr_metadata.verse }}
+    - Detected Header Verses: {{ ocr_metadata.verse }}
+   {% if body_verses %}
+    - Detected Body Verses: {{ body_verses }}
+   {% endif %}
     - Page: {{ ocr_metadata.page_number }}
-    
-    {% if body_verses %}
-    DETECTED BODY VERSES: {{ body_verses }}
-    Use these body verses as a strong hint. 
-    - If the header says "10-15" but body verses are exactly "10, 11, 12, 13" (and page layout suggests end of section), the header might be wrong or reading a smudge.
-    - If the body verses are sequential and consistent, favor them over a mismatched header.
-    {% endif %}
-    
+       
     Please review the image and provide the corrected metadata if any errors are found. If the OCR is correct, return the same values. Pay special attention to:
     1. Distinguishing between 2 and 9 in the curly font
     2. Correctly parsing chapter-spanning headers into the chapter:verse notation
     3. Ensuring the chapter field reflects the first chapter in chapter-spanning pages
-    4. Reconciling header range with detected body verses
+    {% if body_verses %}
+    4. Reconciling header range with detected body verses by using these body verses as a strong hint. 
+      - If the header says "10-15" but body verses are exactly "10, 11, 12, 13" (and page layout suggests end of section), the header might be wrong or reading a smudge.
+      - If the body verses are sequential and consistent, favor them over a mismatched header.
+    {% endif %}
     
     {{ _.role("user") }}
     {{ image }}
