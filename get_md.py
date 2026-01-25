@@ -2478,6 +2478,7 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
     # Use prev_last_v to make a better decision
     current_ch_assignment = start_ch
     
+    segment_chapters = {}
     seg0_start = segments[0][0]
     
     # Logic: If we start at 1, and previous page ended at a high verse (e.g. > 1), 
