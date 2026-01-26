@@ -4234,27 +4234,27 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     v_ch = int(v_ch_str)
                     
                     if v_ch != final_ch:
-                    # Chapter mismatch detected!
-                    diff = final_ch - v_ch
-                    log_print(f"DEBUG: Synchronizing verse notation chapters: {v_ch} -> {final_ch} (offset {diff})")
-                    
-                    # Shift all chapter prefixes in the string
-                    new_parts = []
-                    for parts in final_v_str.split(','):
-                        if ':' in parts:
-                            c_str, v_rest = parts.split(':', 1)
-                            if c_str.strip().isdigit():
-                                new_c = int(c_str) + diff
-                                new_parts.append(f"{new_c}:{v_rest}")
+                        # Chapter mismatch detected!
+                        diff = final_ch - v_ch
+                        log_print(f"DEBUG: Synchronizing verse notation chapters: {v_ch} -> {final_ch} (offset {diff})")
+                        
+                        # Shift all chapter prefixes in the string
+                        new_parts = []
+                        for parts in final_v_str.split(','):
+                            if ':' in parts:
+                                c_str, v_rest = parts.split(':', 1)
+                                if c_str.strip().isdigit():
+                                    new_c = int(c_str) + diff
+                                    new_parts.append(f"{new_c}:{v_rest}")
+                                else:
+                                    new_parts.append(parts)
                             else:
                                 new_parts.append(parts)
-                        else:
-                            new_parts.append(parts)
-                    
-                    new_v_final = ','.join(new_parts)
-                    corrections_made.append(f"verse notation: {final_v_str} -> {new_v_final} (sync with chapter {final_ch})")
-                    corrected['verse'] = new_v_final
-                    corrected['verse_warning'] = f"Synchronized verse notation chapters with main chapter {final_ch}"
+                        
+                        new_v_final = ','.join(new_parts)
+                        corrections_made.append(f"verse notation: {final_v_str} -> {new_v_final} (sync with chapter {final_ch})")
+                        corrected['verse'] = new_v_final
+                        corrected['verse_warning'] = f"Synchronized verse notation chapters with main chapter {final_ch}"
             except Exception as e:
                 log_print(f"DEBUG: Failed to sync verse chapters: {e}")
     
