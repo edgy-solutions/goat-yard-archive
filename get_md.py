@@ -2601,10 +2601,22 @@ def reconstruct_multi_chapter_verses(verses_ordered, prev_ch, current_ch=None, p
             # Next segment [3] should be Ch 5 (matches Seg 0).
             # Detecting linkage to Seg 0 would be handled by 'segment_links' IF abs(3-2)<=2.
             # So if it IS linked, we already handled it.
-            # If it is NOT linked (gap?), what then?
-            # Assume increment from "highest seen chapter" or just prev_seg + 1?
-            prev_seg_ch = segment_chapters[i-1]
-            segment_chapters[i] = prev_seg_ch + 1
+            
+            # Revised Logic:
+            # Check if this "reset" is actually just out-of-order verses in the SAME chapter.
+            # Ex: [1, 9] -> [3]. 3 < 9 (reset), but 3 > 1 (start of prev).
+            # This implies 3 is just interleaved in the same range.
+            
+            prev_seg_start = segments[i-1][0]
+            if seg_start > prev_seg_start:
+                # Likely same chapter, just messy order
+                segment_chapters[i] = segment_chapters[i-1]
+                log_print(f"DEBUG: reconstruction: Segment {i} start {seg_start} > Prev start {prev_seg_start} -> Treating as SAME chapter {segment_chapters[i]}")
+            else:
+                 # Likely new chapter (e.g. 1 after 1, or 1 after 16)
+                prev_seg_ch = segment_chapters[i-1]
+                segment_chapters[i] = prev_seg_ch + 1
+                log_print(f"DEBUG: reconstruction: Segment {i} start {seg_start} <= Prev start {prev_seg_start} -> Treating as NEW chapter {segment_chapters[i]}")
             
     
     # Sort and Merge Segments for Logical Sequential Output
