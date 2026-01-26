@@ -2236,7 +2236,7 @@ def find_verse_markers_in_ocr(ocr_data):
         
         # Pattern 1: [1, 2, ..., N] or [1, 3, ..., N] where N >> rest (last verses from PREVIOUS chapter)
         # Also handles sparse low verses like [1, 3] with high verses [17, 18]
-        if sorted_verses[0] == 1 and len(sorted_verses) >= 2 and len(sorted_verses) <= 5:
+        if sorted_verses[0] == 1 and len(sorted_verses) >= 2 and len(sorted_verses) <= 15:
             # Separate low verses (≤10) from high verses (>10)
             low_verses = [v for v in sorted_verses if v <= 10]
             high_verses = [v for v in sorted_verses if v > 10]
@@ -2250,7 +2250,7 @@ def find_verse_markers_in_ocr(ocr_data):
         
         # Pattern 2: [N, N+1, ..., 1] where 1 is at end (first verse from NEXT chapter)
         # Check if: sorted list has 1 in it, and the verses AFTER removing 1 are sequential and high
-        if not has_chapter_transition and 1 in sorted_verses and len(sorted_verses) >= 2 and len(sorted_verses) <= 5:
+        if not has_chapter_transition and 1 in sorted_verses and len(sorted_verses) >= 2 and len(sorted_verses) <= 15:
             # Remove verse 1 and check if remaining verses are sequential and high
             verses_without_1 = [v for v in sorted_verses if v != 1]
             
@@ -2400,6 +2400,13 @@ def find_verse_markers_in_ocr(ocr_data):
                 # Look for gaps of >1 in the sequence to find missing verse
                 if i == len(sorted_verses) - 1 and i > 0:
                     # Last verse is outlier - check for gap before it
+                    
+                    # Check if gap is too large to just be "next verse"
+                    if v - sorted_verses[i-1] > 5:
+                         log_print(f"DEBUG: Large gap detected at end ({sorted_verses[i-1]} -> {v}), keeping outlier")
+                         corrected.append(v)
+                         continue
+
                     for j in range(len(sorted_verses) - 1):
                         if sorted_verses[j + 1] - sorted_verses[j] > 1:
                             # Found a gap - infer missing verse
@@ -2412,9 +2419,14 @@ def find_verse_markers_in_ocr(ocr_data):
                         corrected.append(v)
                 elif i < len(sorted_verses) - 1 and i > 0:
                     # Middle outlier - infer from neighbors
-                    inferred = prev + 1
-                    log_print(f"DEBUG: Replacing outlier {v} with inferred verse {inferred} (sequential after {prev})")
-                    corrected.append(inferred)
+                    # ONLY infer if the gap is small (OCR error likely). If gap is large, it's a jump.
+                    if v - prev > 5:
+                         log_print(f"DEBUG: Large gap detected ({prev} -> {v}), keeping outlier (likely sparse/jump)")
+                         corrected.append(v)
+                    else:
+                        inferred = prev + 1
+                        log_print(f"DEBUG: Replacing outlier {v} with inferred verse {inferred} (sequential after {prev})")
+                        corrected.append(inferred)
                 else:
                     # Keep the original
                     corrected.append(v)
