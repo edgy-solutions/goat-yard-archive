@@ -4214,14 +4214,26 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     final_v_str = str(corrected.get('verse', ''))
     
     if final_ch and ':' in final_v_str:
-        # Check the first chapter prefix in the verse string
-        first_part = final_v_str.split(',')[0]
-        if ':' in first_part:
-            try:
-                v_ch_str = first_part.split(':')[0]
-                v_ch = int(v_ch_str)
-                
-                if v_ch != final_ch:
+        # Check if the main chapter is already explicitly present in the verse string
+        # If so, we assume the string is already absolute/correct and likely spans chapters
+        # E.g. final_ch=25, str="24:25,25:1" -> 25 is present, so don't shift 24->25
+        is_main_ch_present = False
+        for part in final_v_str.split(','):
+            if part.strip().startswith(f"{final_ch}:"):
+                is_main_ch_present = True
+                break
+        
+        if is_main_ch_present:
+             log_print(f"DEBUG: Main chapter {final_ch} found in verse string '{final_v_str}' - skipping synchronization")
+        else:
+            # Check the first chapter prefix in the verse string
+            first_part = final_v_str.split(',')[0]
+            if ':' in first_part:
+                try:
+                    v_ch_str = first_part.split(':')[0]
+                    v_ch = int(v_ch_str)
+                    
+                    if v_ch != final_ch:
                     # Chapter mismatch detected!
                     diff = final_ch - v_ch
                     log_print(f"DEBUG: Synchronizing verse notation chapters: {v_ch} -> {final_ch} (offset {diff})")
