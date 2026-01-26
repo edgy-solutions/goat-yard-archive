@@ -4255,8 +4255,8 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                         corrections_made.append(f"verse notation: {final_v_str} -> {new_v_final} (sync with chapter {final_ch})")
                         corrected['verse'] = new_v_final
                         corrected['verse_warning'] = f"Synchronized verse notation chapters with main chapter {final_ch}"
-            except Exception as e:
-                log_print(f"DEBUG: Failed to sync verse chapters: {e}")
+                except Exception as e:
+                    log_print(f"DEBUG: Failed to sync verse chapters: {e}")
     
     return corrected
 
