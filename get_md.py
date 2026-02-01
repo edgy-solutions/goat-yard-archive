@@ -279,6 +279,18 @@ def normalize_book_name(book_name):
     # Remove trailing punctuation
     normalized = normalized.rstrip('.,;:!? ')
     
+    # Normalize Roman numerals (I. -> 1, II. -> 2, III. -> 3)
+    # Handle "I. CHRONICLES" -> "1 CHRONICLES"
+    parts = normalized.split(' ', 1)
+    if len(parts) > 1:
+        first_word = parts[0].strip('.')
+        if first_word == 'I':
+            normalized = '1 ' + parts[1]
+        elif first_word == 'II':
+            normalized = '2 ' + parts[1]
+        elif first_word == 'III':
+            normalized = '3 ' + parts[1]
+    
     return normalized
 
 def is_new_testament(book_name):
@@ -3611,6 +3623,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                         log_print(f"DEBUG: Verse restarted and book invalid -> assuming transition to next book: {next_book}")
                         corrections_made.append(f"book: {curr_book} -> {next_book} (verse restart suggests new book)")
                         corrected['book_name'] = next_book
+                        curr_book = next_book # Update local variable
                         corrected['book_warning'] = f"OCR detected invalid book '{curr_book}', verse restart suggests {next_book}"
                         # Also reset chapter to 1 when transitioning to new book
                         if curr_chapter != 1:
@@ -3621,6 +3634,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     if prev_book:
                         corrections_made.append(f"book: {curr_book} -> {prev_book} (invalid book name)")
                         corrected['book_name'] = prev_book
+                        curr_book = prev_book # Update local variable
                         corrected['book_warning'] = f"OCR detected invalid book '{curr_book}', using previous book"
             
             # Case 2: Chapter is invalid/missing AND verse has restarted from 1
@@ -3645,6 +3659,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                                     log_print(f"DEBUG: Verse restarted, chapter invalid, and next chapter out of range -> new book: {next_book}")
                                     corrections_made.append(f"book: {corrected.get('book_name')} -> {next_book} (chapter overflow + verse restart)")
                                     corrected['book_name'] = next_book
+                                    curr_book = next_book # Update local variable
                                     corrected['chapter'] = 1
                                     corrected['book_warning'] = f"Chapter exceeded max, verse restart suggests new book {next_book}"
             
