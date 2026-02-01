@@ -1025,7 +1025,7 @@ def process_directory(backend: NormalizerBackend, dir_path: Path, force: bool = 
         tuple: (successful_count, failed_count)
     """
     # Find all .md files that are NOT already normalized
-    md_files = [f for f in dir_path.glob("*.md") if not f.stem.endswith("_normalized")]
+    md_files = [f for f in dir_path.glob("*.md") if "_normalized" not in f.stem]
     
     if not md_files:
         logging.warning(f"No markdown files found in {dir_path}")
