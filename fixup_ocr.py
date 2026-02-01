@@ -208,7 +208,7 @@ def fixup_ocr(ocr_words: List[Dict], md_words: List[str]) -> Tuple[List[Dict], i
     5. Move all tagged words to footnote section at end
     """
     if not ocr_words or not md_words:
-        return ocr_words, 0, 0
+        return ocr_words, [], 0
     
     body_words = []
     footnote_candidates = []
