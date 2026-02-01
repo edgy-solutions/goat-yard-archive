@@ -332,6 +332,8 @@ def process_page(page_name: str, extracted_dir: Path, overwrite: bool = False):
 def main():
     parser = argparse.ArgumentParser(description='Reindex OCR data to reading order')
     parser.add_argument('--page', type=str, help='Specific page to process (e.g., page100_image1)')
+    parser.add_argument('--extracted-dir', type=str, default=str(DEFAULT_EXTRACTED_DIR), 
+                       help='Directory with OCR JSON files (default: $COMMENTARY_DATA_DIR/volume1)')
     parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
     args = parser.parse_args()
     
