@@ -3307,6 +3307,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     metadata['greek_text'] = greek_verses
     
     # Step 7: Save final metadata
+    log_print(f"DEBUG: Final Metadata Content: {json.dumps(metadata, indent=2, ensure_ascii=False)}")
     json_path = base_name + '_metadata.json'
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
