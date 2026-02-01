@@ -3126,6 +3126,8 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                 multi_ch_verse = None
                 if verses_ordered:
                     base_chapter = 1
+                    prev_last_v = None
+
                     if prev_metadata and prev_metadata.get('chapter'):
                         base_chapter = int(prev_metadata['chapter'])
                         # Check if we should increment chapter based on verse reset
