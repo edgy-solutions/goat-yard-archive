@@ -314,6 +314,10 @@ def process_page(page_name: str, extracted_dir: Path, overwrite: bool = False):
     words = load_ocr(page_name, extracted_dir)
     print(f"  Loaded {len(words)} words")
     
+    if not words:
+        print("  WARNING: No words found in OCR. Skipping.")
+        return
+    
     # Detect layout
     layout = detect_layout(words)
     print(f"  Layout: column_split={layout['column_split']:.0f}, header_y={layout['header_y']:.0f}")
