@@ -3714,11 +3714,13 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
             # If current book missing, use previous
             corrections_made.append(f"book: None -> {prev_book}")
             corrected['book_name'] = prev_book
+            curr_book = prev_book # Update local variable for downstream logic
         elif curr_book != prev_book:
             # Book should only change if chapter restarts to 1
             if corrected.get('chapter') != 1:
                 corrections_made.append(f"book: {curr_book} -> {prev_book}")
                 corrected['book_name'] = prev_book
+                curr_book = prev_book # Update local variable for downstream logic
     
     # Validate and correct chapter
     prev_chapter = prev_metadata.get('chapter')
