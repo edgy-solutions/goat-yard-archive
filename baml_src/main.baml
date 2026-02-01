@@ -2,7 +2,7 @@
 
 // Define the metadata structure
 class Metadata {
-  book_name string? @description("The book name found at the top center of the image")
+  book_name string? @description("The name of the book of the bible found at the top center of the image")
   chapter int? @description("The chapter number (converted from Roman numerals to decimal). For chapter-spanning pages, this is the first chapter.")
   verse string? @description("The verse number, range (e.g. '1-3'), list (e.g. '1,2,3'), or chapter-spanning notation")
   page_number int? @description("The page number found at top left or top right")
