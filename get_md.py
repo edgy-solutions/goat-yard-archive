@@ -4021,7 +4021,17 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                         # Remove overlapping verses instead of blindly shifting
                         if ',' in curr_verse_str:
                             # It's a list - remove overlapping verses
-                            verse_nums = [int(v.strip()) for v in curr_verse_str.split(',') if v.strip().isdigit()]
+                            # robustly handle prefixes like "10:1"
+                            verse_nums = []
+                            for v in curr_verse_str.split(','):
+                                v_clean = v.strip()
+                                if ':' in v_clean:
+                                    v_clean = v_clean.split(':')[-1]
+                                if '-' in v_clean: # Handle range in list?
+                                     v_clean = v_clean.split('-')[0] # just take start for simplicty or ignore
+                                if v_clean.isdigit():
+                                    verse_nums.append(int(v_clean))
+
                             non_overlapping = [v for v in verse_nums if v >= expected_verse]
                             
                             if non_overlapping:
@@ -4036,18 +4046,30 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                         elif '-' in curr_verse_str:
                             # It's a range - adjust to start at expected_verse
                             parts = curr_verse_str.split('-')
-                            range_start = int(parts[0])
-                            range_end = int(parts[1])
                             
-                            if range_end >= expected_verse:
-                                # Keep non-overlapping part of range
-                                corrected_verse = f"{expected_verse}-{range_end}"
-                                log_print(f"DEBUG: Trimmed overlapping range: {range_start}-{range_end} -> {expected_verse}-{range_end}")
-                            else:
-                                # Entire range overlaps - shift it
-                                range_size = range_end - range_start
-                                corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
-                                log_print(f"DEBUG: Entire range overlapped, shifted: {range_start}-{range_end} -> {corrected_verse}")
+                            # Clean start/end parts of chapter prefixes
+                            start_str = parts[0].strip()
+                            if ':' in start_str: start_str = start_str.split(':')[-1]
+                            
+                            end_str = parts[1].strip()
+                            if ':' in end_str: end_str = end_str.split(':')[-1]
+                            
+                            try:
+                                range_start = int(start_str)
+                                range_end = int(end_str)
+                                
+                                if range_end >= expected_verse:
+                                    # Keep non-overlapping part of range
+                                    corrected_verse = f"{expected_verse}-{range_end}"
+                                    log_print(f"DEBUG: Trimmed overlapping range: {range_start}-{range_end} -> {expected_verse}-{range_end}")
+                                else:
+                                    # Entire range overlaps - shift it
+                                    range_size = range_end - range_start
+                                    corrected_verse = f"{expected_verse}-{expected_verse + range_size}"
+                                    log_print(f"DEBUG: Entire range overlapped, shifted: {range_start}-{range_end} -> {corrected_verse}")
+                            except ValueError:
+                                log_print(f"DEBUG: Could not parse range values from {curr_verse_str} - skipping fix")
+                                corrected_verse = curr_verse_str
                         else:
                             # Single verse overlaps - replace with expected
                             corrected_verse = str(expected_verse)
