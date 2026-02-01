@@ -3723,7 +3723,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     
     # Validate and correct book name
     prev_book = prev_metadata.get('book_name')
-    curr_book = current_metadata.get('book_name')
+    curr_book = corrected.get('book_name')
     if prev_book:
         if not curr_book:
             # If current book missing, use previous
@@ -4071,7 +4071,6 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                           curr_chapter_for_compare == prev_chapter_for_compare)
             
             log_print(f"DEBUG: Gap detection - same_book={same_book}, same_chapter={same_chapter} (prev_book={prev_book}, curr_book={curr_book}, prev_ch={prev_chapter_for_compare}, curr_ch={curr_chapter_for_compare})")
-            log_print(f"DEBUG: VAR CHECK: prev_book='{prev_book}' (type {type(prev_book)}), curr_book='{curr_book}' (type {type(curr_book)})")
             
             if same_book and same_chapter:
                 # Re-parse the potentially corrected verse string
