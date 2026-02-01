@@ -368,8 +368,13 @@ def save_fixedup(words: List[Dict], page_name: str, output_dir: Path):
     return output_path
 
 
-def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path):
+def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path, overwrite: bool = False):
     """Process a single page."""
+    output_path = extracted_dir / f"{page_name}_fixedup.json"
+    if output_path.exists() and not overwrite:
+        print(f"Skipping {page_name} (output exists)")
+        return
+
     print(f"\nProcessing {page_name}...")
     
     # Load reindexed OCR
@@ -449,17 +454,18 @@ def main():
     parser.add_argument('--markdown-dir', type=str, 
                        default=str(DEFAULT_MARKDOWN_DIR),
                        help='Vision model markdown directory (default: $COMMENTARY_DATA_DIR/volume1/qwen_qwen3...)')
+    parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
     args = parser.parse_args()
     
     extracted_dir = Path(args.extracted_dir)
     markdown_dir = Path(args.markdown_dir)
     
     if args.page:
-        process_page(args.page, extracted_dir, markdown_dir)
+        process_page(args.page, extracted_dir, markdown_dir, args.overwrite)
     else:
         for ocr_file in extracted_dir.glob('*_reindexed.json'):
             page_name = ocr_file.stem.replace('_reindexed', '')
-            process_page(page_name, extracted_dir, markdown_dir)
+            process_page(page_name, extracted_dir, markdown_dir, args.overwrite)
 
 
 if __name__ == '__main__':

@@ -301,8 +301,13 @@ def save_reindexed(words: List[Dict], page_name: str, output_dir: Path):
     return output_path
 
 
-def process_page(page_name: str, extracted_dir: Path):
+def process_page(page_name: str, extracted_dir: Path, overwrite: bool = False):
     """Process a single page."""
+    output_path = extracted_dir / f"{page_name}_reindexed.json"
+    if output_path.exists() and not overwrite:
+        print(f"Skipping {page_name} (output exists)")
+        return
+
     print(f"\nProcessing {page_name}...")
     
     # Load OCR
@@ -327,19 +332,18 @@ def process_page(page_name: str, extracted_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description='Reindex OCR data to reading order')
     parser.add_argument('--page', type=str, help='Specific page to process (e.g., page100_image1)')
-    parser.add_argument('--extracted-dir', type=str, default=str(DEFAULT_EXTRACTED_DIR), 
-                       help='Directory with OCR JSON files (default: $COMMENTARY_DATA_DIR/volume1)')
+    parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
     args = parser.parse_args()
     
     extracted_dir = Path(args.extracted_dir)
     
     if args.page:
-        process_page(args.page, extracted_dir)
+        process_page(args.page, extracted_dir, args.overwrite)
     else:
         # Process all pages with OCR files
         for ocr_file in extracted_dir.glob('*_ocr.json'):
             page_name = ocr_file.stem.replace('_ocr', '')
-            process_page(page_name, extracted_dir)
+            process_page(page_name, extracted_dir, args.overwrite)
 
 
 if __name__ == '__main__':
