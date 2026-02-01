@@ -1,4 +1,12 @@
 # things to fix
+- fix fixup_ocr.py for many of these case where most of page is in footnotes:
+    Processing page388_image1...
+    Loaded 1126 OCR words
+    Metadata: page=300, book=GENESIS
+    Excluded 4 header words: ['300', 'GENESIS.', 'CH.', 'V.']
+    Markdown: 1075 body words, 34 footnote words
+    Fixed 24 spelling errors (2.1%)
+    Moved 632 words to footnotes (56.1%)
 - fix bounding boxes:
     - should not straddle columns
     - should always extend from edge to margin or vice versa

@@ -955,7 +955,7 @@ def get_greek_verse(book_name, chapter, verse, greek_version='grctr'):
     return result if result else None
 
 
-def validate_metadata_with_ollama(image_path, metadata, found_body_verses=None):
+def validate_metadata_with_ollama(image_path, metadata, found_body_verses=None, use_legacy_validation=False):
     """
     Validate OCR metadata using Ollama vision model.
     
@@ -963,6 +963,7 @@ def validate_metadata_with_ollama(image_path, metadata, found_body_verses=None):
         image_path: Path to the image file
         metadata: Dictionary with book_name, chapter, verse, page_number
         found_body_verses: Optional list of verses found in the body text (as evidence)
+        use_legacy_validation: If True, use the old monolithic prompt.
     
     Returns:
         Validated metadata dictionary or original if validation fails
@@ -1001,40 +1002,73 @@ def validate_metadata_with_ollama(image_path, metadata, found_body_verses=None):
         
         image = baml_py.Image.from_base64(media_type, image_data)
         
-        # Convert metadata to BAML Metadata type
-        baml_metadata = baml_types.Metadata(
-            book_name=metadata.get('book_name'),
-            chapter=metadata.get('chapter'),
-            verse=metadata.get('verse'),
-            page_number=metadata.get('page_number')
-        )
+        result = {}
         
         # Call Ollama validation with retry
         max_retries = 2
         for attempt in range(max_retries):
             try:
-                validated = baml_client.ValidateOCRMetadata(
-                    image=image,
-                    ocr_metadata=baml_metadata,
-                    body_verses=body_verses_str
-                )
+                if use_legacy_validation:
+                    log_print(f"DEBUG: Using LEGACY monolithic validation (Attempt {attempt+1})")
+                    # Legacy Monolithic Call
+                    baml_metadata = baml_types.Metadata(
+                        book_name=metadata.get('book_name'),
+                        chapter=metadata.get('chapter'),
+                        verse=metadata.get('verse'),
+                        page_number=metadata.get('page_number')
+                    )
+                    
+                    validated = baml_client.ValidateOCRMetadata(
+                        image=image,
+                        ocr_metadata=baml_metadata,
+                        body_verses=body_verses_str
+                    )
+                    
+                    book_name = normalize_book_name(validated.book_name) if validated.book_name else None
+                    result = {
+                        'book_name': book_name,
+                        'chapter': validated.chapter,
+                        'verse': validated.verse,
+                        'page_number': validated.page_number,
+                        'is_verse_continuation': getattr(validated, 'no_verse_markers', False) or False
+                    }
+                else:
+                    log_print(f"DEBUG: Using SPLIT validation (Attempt {attempt+1})")
+                    
+                    # Step 1: Core Metadata (Book, Chapter, Page)
+                    log_print("  Step 3a: Validating Core Metadata...")
+                    baml_core_metadata = baml_types.MetadataCore(
+                        book_name=metadata.get('book_name'),
+                        chapter=metadata.get('chapter'),
+                        page_number=metadata.get('page_number')
+                    )
+                    
+                    validated_core = baml_client.ValidateMetadataCore(
+                        image=image,
+                        ocr_metadata=baml_core_metadata
+                    )
+                    
+                    # Step 2: Verse Metadata
+                    log_print("  Step 3b: Validating Verse Metadata...")
+                    validated_verses = baml_client.ValidateMetadataVerses(
+                        image=image,
+                        chapter=validated_core.chapter,
+                        verse_hint=str(metadata.get('verse', '')),
+                        body_verses=body_verses_str
+                    )
+                    
+                    book_name = normalize_book_name(validated_core.book_name) if validated_core.book_name else None
+                    result = {
+                        'book_name': book_name,
+                        'chapter': validated_core.chapter,
+                        'verse': validated_verses.verse,
+                        'page_number': validated_core.page_number,
+                        'is_verse_continuation': getattr(validated_verses, 'no_verse_markers', False) or False
+                    }
                 
-                # Convert back to dictionary
-                # Normalize book name: strip ST. prefix and trailing punctuation
-                book_name = normalize_book_name(validated.book_name) if validated.book_name else None
-                
-                result = {
-                    'book_name': book_name,
-                    'chapter': validated.chapter,
-                    'verse': validated.verse,
-                    'page_number': validated.page_number,
-                    'is_verse_continuation': getattr(validated, 'no_verse_markers', False) or False
-                }
-                log_print(f"DEBUG: Extracted is_verse_continuation (from no_verse_markers): {result['is_verse_continuation']}")
+                log_print(f"DEBUG: Extracted is_verse_continuation: {result['is_verse_continuation']}")
                 
                 # Quality Check: Did we lose significant data?
-                # If Input had Book/Chapter/Verse and Output has None, it's suspicious.
-                # Especially if ALL are None.
                 is_bad_result = False
                 
                 # Check for "Total Wipeout" (All None)
@@ -1043,7 +1077,6 @@ def validate_metadata_with_ollama(image_path, metadata, found_body_verses=None):
                     is_bad_result = True
                 else:
                     # Check for "Significant Loss"
-                    # If we had Book+Chapter and now have None+None, that's bad.
                     if metadata.get('book_name') and metadata.get('chapter') and not result.get('book_name') and not result.get('chapter'):
                         log_print(f"DEBUG: Ollama dropped Book and Chapter (Attempt {attempt+1}/{max_retries})")
                         is_bad_result = True
@@ -2800,7 +2833,7 @@ def validate_verses_against_content(metadata_verse, found_verses):
     }
 
 
-def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False, prev_metadata=None):
+def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False, prev_metadata=None, use_legacy_validation=False):
     """Main function to process image and generate markdown."""
     log_print(f"Processing image: {image_path}")
     log_print(f"Content language: {lang}\n")
@@ -3081,7 +3114,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     # Step 3: Validate metadata with Ollama if requested
     if validate_ollama:
         log_print(f"\nStep 3: Validating with Ollama...")
-        header_info = validate_metadata_with_ollama(image_path, header_info, found_verses)
+        header_info = validate_metadata_with_ollama(image_path, header_info, found_verses, use_legacy_validation=use_legacy_validation)
         log_print(f"After Ollama: book={header_info['book_name']}, ch={header_info['chapter']}, v={header_info['verse']}, page={header_info['page_number']}")
         
         # Validate Ollama result against body verse markers and Bible structure
@@ -4478,12 +4511,12 @@ def sort_images_by_page_number(images):
     return images_with_pages + images_without_pages
 
 
-def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None, 
-                        validate_ollama=False, max_pages=None, 
-                        stop_on_book_change=False, stop_on_chapter_change=False,
-                        continue_on_error=False,
-                        start_page=None, start_book=None, start_chapter=None, start_verse=None,
-                        book_only=None):
+def batch_process_images(image_path, lang, right_col_char_pos, 
+                           validate_ollama, max_pages, 
+                           stop_on_book_change, stop_on_chapter_change,
+                           continue_on_error,
+                           start_page, start_book, start_chapter, start_verse,
+                           book_only, use_legacy_validation):
     """
     Process multiple images in sequence, chaining metadata validation.
     
@@ -4665,7 +4698,7 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
 
         # Process the image (all steps 1-9 are done in process_image)
         try:
-            metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama, prev_metadata)
+            metadata = process_image(img_path, None, lang, right_col_char_pos, validate_ollama, prev_metadata, use_legacy_validation)
             
             # Apply book filter logic
             if book_only:
@@ -4799,6 +4832,7 @@ if __name__ == "__main__":
         log_print("  --right-col POS          - Right column character position")
         log_print("  --prev-metadata PATH     - Previous page metadata JSON for validation")
         log_print("  --validate-ollama        - Validate metadata using Ollama vision model")
+        log_print("  --legacy-validation      - Use legacy monolithic validation logic")
         log_print("\nBatch Processing Options:")
         log_print("  --batch                  - Process all images in directory starting from given image")
         log_print("  --max-pages N            - Maximum number of pages to process in batch mode")
@@ -4829,6 +4863,7 @@ if __name__ == "__main__":
     start_verse = None
     book_only = None
     log_file_path = None
+    use_legacy_validation = False
     
     i = 2
     while i < len(sys.argv):
@@ -4843,6 +4878,9 @@ if __name__ == "__main__":
             i += 2
         elif sys.argv[i] == '--validate-ollama':
             validate_ollama = True
+            i += 1
+        elif sys.argv[i] == '--legacy-validation':
+            use_legacy_validation = True
             i += 1
         elif sys.argv[i] == '--batch':
             batch_mode = True

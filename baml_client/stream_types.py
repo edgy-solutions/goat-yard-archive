@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (5)
+# Generated classes (7)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -46,6 +46,15 @@ class Metadata(BaseModel):
     chapter: typing.Optional[int] = None
     verse: typing.Optional[str] = None
     page_number: typing.Optional[int] = None
+    no_verse_markers: typing.Optional[bool] = None
+
+class MetadataCore(BaseModel):
+    book_name: typing.Optional[str] = None
+    chapter: typing.Optional[int] = None
+    page_number: typing.Optional[int] = None
+
+class MetadataVerses(BaseModel):
+    verse: typing.Optional[str] = None
     no_verse_markers: typing.Optional[bool] = None
 
 class VerseChunk(BaseModel):

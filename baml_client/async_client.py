@@ -139,6 +139,36 @@ class BamlAsyncClient:
                 "raw_markdown": raw_markdown,
             })
             return typing.cast(str, result.cast_to(types, types, stream_types, False, __runtime__))
+    async def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
+        baml_options: BamlCallOptions = {},
+    ) -> types.MetadataCore:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.ValidateMetadataCore(image=image,ocr_metadata=ocr_metadata,
+                baml_options=baml_options)
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(function_name="ValidateMetadataCore", args={
+                "image": image,"ocr_metadata": ocr_metadata,
+            })
+            return typing.cast(types.MetadataCore, result.cast_to(types, types, stream_types, False, __runtime__))
+    async def ValidateMetadataVerses(self, image: baml_py.Image,chapter: typing.Optional[int] = None,verse_hint: typing.Optional[str] = None,body_verses: typing.Optional[str] = None,
+        baml_options: BamlCallOptions = {},
+    ) -> types.MetadataVerses:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.ValidateMetadataVerses(image=image,chapter=chapter,verse_hint=verse_hint,body_verses=body_verses,
+                baml_options=baml_options)
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(function_name="ValidateMetadataVerses", args={
+                "image": image,"chapter": chapter,"verse_hint": verse_hint,"body_verses": body_verses,
+            })
+            return typing.cast(types.MetadataVerses, result.cast_to(types, types, stream_types, False, __runtime__))
     async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.Metadata:
@@ -211,6 +241,30 @@ class BamlStreamClient:
           lambda x: typing.cast(str, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.MetadataCore, types.MetadataCore]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="ValidateMetadataCore", args={
+            "image": image,"ocr_metadata": ocr_metadata,
+        })
+        return baml_py.BamlStream[stream_types.MetadataCore, types.MetadataCore](
+          result,
+          lambda x: typing.cast(stream_types.MetadataCore, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.MetadataCore, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def ValidateMetadataVerses(self, image: baml_py.Image,chapter: typing.Optional[int] = None,verse_hint: typing.Optional[str] = None,body_verses: typing.Optional[str] = None,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.MetadataVerses, types.MetadataVerses]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="ValidateMetadataVerses", args={
+            "image": image,"chapter": chapter,"verse_hint": verse_hint,"body_verses": body_verses,
+        })
+        return baml_py.BamlStream[stream_types.MetadataVerses, types.MetadataVerses](
+          result,
+          lambda x: typing.cast(stream_types.MetadataVerses, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.MetadataVerses, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlStream[stream_types.Metadata, types.Metadata]:
@@ -259,6 +313,20 @@ class BamlHttpRequestClient:
             "raw_markdown": raw_markdown,
         }, mode="request")
         return result
+    async def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateMetadataCore", args={
+            "image": image,"ocr_metadata": ocr_metadata,
+        }, mode="request")
+        return result
+    async def ValidateMetadataVerses(self, image: baml_py.Image,chapter: typing.Optional[int] = None,verse_hint: typing.Optional[str] = None,body_verses: typing.Optional[str] = None,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateMetadataVerses", args={
+            "image": image,"chapter": chapter,"verse_hint": verse_hint,"body_verses": body_verses,
+        }, mode="request")
+        return result
     async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -300,6 +368,20 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="NormalizeGillMarkdown", args={
             "raw_markdown": raw_markdown,
+        }, mode="stream")
+        return result
+    async def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateMetadataCore", args={
+            "image": image,"ocr_metadata": ocr_metadata,
+        }, mode="stream")
+        return result
+    async def ValidateMetadataVerses(self, image: baml_py.Image,chapter: typing.Optional[int] = None,verse_hint: typing.Optional[str] = None,body_verses: typing.Optional[str] = None,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateMetadataVerses", args={
+            "image": image,"chapter": chapter,"verse_hint": verse_hint,"body_verses": body_verses,
         }, mode="stream")
         return result
     async def ValidateOCRMetadata(self, image: baml_py.Image,ocr_metadata: types.Metadata,body_verses: typing.Optional[str] = None,

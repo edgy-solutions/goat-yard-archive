@@ -20,7 +20,7 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","ExtractionResult","GillEntity","Metadata","VerseChunk",]
+          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","VerseChunk",]
         ), enums=set(
           ["BiblicalEra","EntityCategory",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
@@ -39,7 +39,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 5
+    # Generated classes 7
     # #########################################################################
 
     @property
@@ -57,6 +57,14 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def Metadata(self) -> "MetadataViewer":
         return MetadataViewer(self)
+
+    @property
+    def MetadataCore(self) -> "MetadataCoreViewer":
+        return MetadataCoreViewer(self)
+
+    @property
+    def MetadataVerses(self) -> "MetadataVersesViewer":
+        return MetadataVersesViewer(self)
 
     @property
     def VerseChunk(self) -> "VerseChunkViewer":
@@ -202,7 +210,7 @@ class EntityCategoryValues:
 
 
 # #########################################################################
-# Generated classes 5
+# Generated classes 7
 # #########################################################################
 
 class ExtractedTextAst:
@@ -393,6 +401,96 @@ class MetadataProperties:
     @property
     def page_number(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("page_number"))
+    
+    @property
+    def no_verse_markers(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("no_verse_markers"))
+    
+    
+
+
+class MetadataCoreAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("MetadataCore")
+        self._properties: typing.Set[str] = set([  "book_name",  "chapter",  "page_number",  ])
+        self._props = MetadataCoreProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "MetadataCoreProperties":
+        return self._props
+
+
+class MetadataCoreViewer(MetadataCoreAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class MetadataCoreProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def book_name(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("book_name"))
+    
+    @property
+    def chapter(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("chapter"))
+    
+    @property
+    def page_number(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("page_number"))
+    
+    
+
+
+class MetadataVersesAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("MetadataVerses")
+        self._properties: typing.Set[str] = set([  "verse",  "no_verse_markers",  ])
+        self._props = MetadataVersesProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "MetadataVersesProperties":
+        return self._props
+
+
+class MetadataVersesViewer(MetadataVersesAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class MetadataVersesProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def verse(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("verse"))
     
     @property
     def no_verse_markers(self) -> type_builder.ClassPropertyViewer:

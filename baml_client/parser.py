@@ -48,6 +48,18 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="NormalizeGillMarkdown", llm_response=llm_response, mode="request")
         return typing.cast(str, result)
 
+    def ValidateMetadataCore(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.MetadataCore:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateMetadataCore", llm_response=llm_response, mode="request")
+        return typing.cast(types.MetadataCore, result)
+
+    def ValidateMetadataVerses(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.MetadataVerses:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateMetadataVerses", llm_response=llm_response, mode="request")
+        return typing.cast(types.MetadataVerses, result)
+
     def ValidateOCRMetadata(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.Metadata:
@@ -85,6 +97,18 @@ class LlmStreamParser:
     ) -> str:
         result = self.__options.merge_options(baml_options).parse_response(function_name="NormalizeGillMarkdown", llm_response=llm_response, mode="stream")
         return typing.cast(str, result)
+
+    def ValidateMetadataCore(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.MetadataCore:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateMetadataCore", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.MetadataCore, result)
+
+    def ValidateMetadataVerses(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.MetadataVerses:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateMetadataVerses", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.MetadataVerses, result)
 
     def ValidateOCRMetadata(
         self, llm_response: str, baml_options: BamlCallOptions = {},

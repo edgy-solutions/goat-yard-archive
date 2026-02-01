@@ -28,6 +28,12 @@ type_map = {
     "types.Metadata": types.Metadata,
     "stream_types.Metadata": stream_types.Metadata,
 
+    "types.MetadataCore": types.MetadataCore,
+    "stream_types.MetadataCore": stream_types.MetadataCore,
+
+    "types.MetadataVerses": types.MetadataVerses,
+    "stream_types.MetadataVerses": stream_types.MetadataVerses,
+
     "types.VerseChunk": types.VerseChunk,
     "stream_types.VerseChunk": stream_types.VerseChunk,
 

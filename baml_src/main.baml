@@ -9,6 +9,19 @@ class Metadata {
   no_verse_markers bool? @description("Set to true ONLY if there are NO verse (Ver.) markers on this page except in header.")
 }
 
+// Define the core metadata structure (split validation step 1)
+class MetadataCore {
+  book_name string? @description("The name of the book of the bible found at the top center of the image")
+  chapter int? @description("The chapter number (converted from Roman numerals to decimal). For chapter-spanning pages, this is the first chapter.")
+  page_number int? @description("The page number found at top left or top right")
+}
+
+// Define the verse metadata structure (split validation step 2)
+class MetadataVerses {
+  verse string? @description("The verse number, range (e.g. '1-3'), list (e.g. '1,2,3'), or chapter-spanning notation")
+  no_verse_markers bool? @description("Set to true ONLY if there are NO verse (Ver.) markers on this page except in header.")
+}
+
 // Define the extracted text structure for OpenRouter
 class ExtractedText {
   text string @description("The extracted text from the image")
@@ -59,7 +72,7 @@ client<llm> OpenRouterText {
   }
 }
 
-// Define the validation function
+// Define the validation function (LEGACY / MONOLITHIC)
 function ValidateOCRMetadata(
   image: image,
   ocr_metadata: Metadata,
@@ -98,6 +111,80 @@ function ValidateOCRMetadata(
     4. Reconciling header range with detected body verses by using these body verses as a strong hint. 
       - If the header says "10-15" but body verses are exactly "10, 11, 12, 13" (and page layout suggests end of section), the header might be wrong or reading a smudge.
       - If the body verses are sequential and consistent, favor them over a mismatched header.
+    {% endif %}
+    
+    {{ _.role("user") }}
+    {{ image }}
+    
+    {{ ctx.output_format }}
+  "#
+}
+
+// Define the validation function (STEP 1: CORE METADATA)
+function ValidateMetadataCore(
+  image: image,
+  ocr_metadata: MetadataCore
+) -> MetadataCore {
+  client Ollama
+  
+  prompt #"
+    Please check the OCR metadata returned below specifically for the PAGE NUMBER, BOOK NAME, and CHAPTER NUMBER.
+    
+    LOCATION:
+    - Page Number: Top far left OR top far right.
+    - Book Name: Top center.
+    - Chapter Number: Opposite side of page number, usually "CH. <Roman Numeral>".
+    
+    INSTRUCTIONS:
+    - Return the corrected values if possible.
+    - Distinguish between 2 and 9 carefully (curly font).
+    - Convert Roman numerals to decimal (e.g. XXVII -> 27).
+    - If the page spans multiple chapters (e.g. "CH. XXVII... XXVIII"), use the FIRST chapter number.
+    
+    Current OCR Metadata:
+    - Book: {{ ocr_metadata.book_name }}
+    - Chapter: {{ ocr_metadata.chapter }}
+    - Page: {{ ocr_metadata.page_number }}
+    
+    {{ _.role("user") }}
+    {{ image }}
+    
+    {{ ctx.output_format }}
+  "#
+}
+
+// Define the validation function (STEP 2: VERSES)
+function ValidateMetadataVerses(
+  image: image,
+  chapter: int?,
+  verse_hint: string?,
+  body_verses: string?
+) -> MetadataVerses {
+  client Ollama
+  
+  prompt #"
+    Please identify the VERSE RANGE described in the header of this image.
+    
+    LOCATION:
+    - Usually "V. <number>", "V. <start>-<end>", or similar.
+    - Found near the Chapter number in the header.
+    
+    VERSE FORMATTING:
+    - Single verse: "3"
+    - Range: "3-5"
+    - List: "3,4,5"
+    - Chapter-spanning: "27:42-46,28:1"
+    
+    INSTRUCTIONS:
+    1. Read the header verse notation carefully. distinguish 2 vs 9.
+    2. If the page spans chapters (e.g. "CH. 27 V. 40 ... CH. 28 V. 1"), use the chapter-spanning notation.
+    3. Use the provided Body Verses as a strong hint for what verses are actually discussed on the page.
+    
+    CONTEXT:
+    - Chapter: {{ chapter }}
+    - OCR Header Verse Hint: {{ verse_hint }}
+    {% if body_verses %}
+    - Detected Body Verses: {{ body_verses }}
     {% endif %}
     
     {{ _.role("user") }}
