@@ -1081,7 +1081,7 @@ def main():
     parser.add_argument("--file", "-f", type=str, 
                         help="Single markdown file to normalize")
     parser.add_argument("--dir", "-d", type=str,
-                        help="Directory containing markdown files to normalize (default: $COMMENTARY_DATA_DIR/volume1)")
+                        help="Directory containing markdown files to normalize (default: $COMMENTARY_DATA_DIR/volume1/qwen_qwen3-vl-235b-a22b-thinking)")
     parser.add_argument("--force", action="store_true",
                         help="Overwrite existing normalized files")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -1103,7 +1103,7 @@ def main():
     
     if not args.file and not args.dir:
         # Default to volume1
-        args.dir = str(base_dir / "volume1")
+        args.dir = str(base_dir / "volume1/qwen_qwen3-vl-235b-a22b-thinking")
         logging.info(f"No input specified, defaulting to: {args.dir}")
     
     
