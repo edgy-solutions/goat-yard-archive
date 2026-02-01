@@ -2231,6 +2231,46 @@ def find_verse_markers_in_ocr(ocr_data):
         log_print(f"DEBUG: Applied OCR corrections to verse markers: {sorted(verses_found)} -> {sorted(corrected_verses)}")
         verses_found = corrected_verses
     
+    # NEW: Spatial Consistency Check
+    # Filter out verses that are spatially out of order (e.g. 1 -> 9 -> 3 in the same column)
+    # verses_ordered preserves the physical reading order (top-down, left-right)
+    # We look for local spikes that violate the monotonic increase of verses
+    if len(verses_ordered) >= 3:
+        spatially_invalid = set()
+        for i in range(1, len(verses_ordered) - 1):
+            prev = verses_ordered[i-1]
+            curr = verses_ordered[i]
+            next_v = verses_ordered[i+1]
+            
+            # Check for pattern: Low -> High -> Low (Spike)
+            # e.g. 1 -> 9 -> 3
+            # We assume verses generally increase. Decreases usually mean chapter change (High -> 1) or column wrap.
+            
+            # If current is significantly higher than BOTH neighbors
+            if curr > prev and curr > next_v:
+                # Calculate jumps
+                jump_up = curr - prev
+                jump_down = curr - next_v
+                
+                # If both jumps are "significant" (e.g. > 2), it's likely an OCR error or outlier
+                # But allow for chapter resets (e.g. 52 -> 1 is valid, but 1 -> 52 -> 3 is not)
+                # Wait, 1 -> 52 -> 3 IS a spike. 
+                # What about 52 -> 1 -> 2? (High -> Low -> High). Valid chapter reset.
+                # What about 30 -> 31 -> 1? (High -> High -> Low). Valid.
+                
+                # We specifically look for "High Middle" spike.
+                if jump_up > 2 and jump_down > 2:
+                    # Also check if prev and next are "close" to each other
+                    # e.g. 1 -> 9 -> 3 (1 and 3 are close)
+                    if abs(next_v - prev) <= 5:
+                         log_print(f"DEBUG: Spatially invalid verse detected: {curr} (between {prev} and {next_v}). Removing.")
+                         spatially_invalid.add(curr)
+        
+        if spatially_invalid:
+            verses_found = verses_found - spatially_invalid
+            # Clean up verses_ordered too for consistency (though not strictly used below)
+            verses_ordered = [v for v in verses_ordered if v not in spatially_invalid]
+    
     # Additional check: Correct outliers by inferring the correct verse number
     # Use known OCR error pattern: 2 -> 9 (e.g., 22 -> 29)
     # E.g., [21, 23, 24, 29] -> check if 29 contains '9' -> try 22 -> [21, 22, 23, 24]
