@@ -4511,12 +4511,12 @@ def sort_images_by_page_number(images):
     return images_with_pages + images_without_pages
 
 
-def batch_process_images(image_path, lang, right_col_char_pos, 
-                           validate_ollama, max_pages, 
-                           stop_on_book_change, stop_on_chapter_change,
-                           continue_on_error,
-                           start_page, start_book, start_chapter, start_verse,
-                           book_only, use_legacy_validation):
+def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None, 
+                        validate_ollama=False, max_pages=None, 
+                        stop_on_book_change=False, stop_on_chapter_change=False,
+                        continue_on_error=False,
+                        start_page=None, start_book=None, start_chapter=None, start_verse=None,
+                        book_only=None, use_legacy_validation=False):
     """
     Process multiple images in sequence, chaining metadata validation.
     
@@ -4939,7 +4939,8 @@ if __name__ == "__main__":
                 start_book=start_book,
                 start_chapter=start_chapter,
                 start_verse=start_verse,
-                book_only=book_only
+                book_only=book_only,
+                use_legacy_validation=use_legacy_validation
             )
         else:
             # Single image processing mode
