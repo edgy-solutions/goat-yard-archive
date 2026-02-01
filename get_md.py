@@ -3548,20 +3548,18 @@ def extract_last_verse_from_notation(verse_notation):
             return chapter, verse if verse else None
         else:
             # Old format (no chapter marker)
-            if '-' in verse_str:
-                last_v = verse_str.split('-')[-1].strip()
-                # Remove any non-digit characters
-                last_v = ''.join(c for c in last_v if c.isdigit())
-                verse = int(last_v) if last_v else None
-            elif ',' in verse_str:
-                last_v = verse_str.split(',')[-1].strip()
+            # Split by comma first to get the last segment
+            last_segment = verse_str.split(',')[-1].strip()
+            
+            if '-' in last_segment:
+                last_v = last_segment.split('-')[-1].strip()
                 # Remove any non-digit characters
                 last_v = ''.join(c for c in last_v if c.isdigit())
                 verse = int(last_v) if last_v else None
             else:
                 # Remove any non-digit characters
-                verse_str = ''.join(c for c in verse_str if c.isdigit())
-                verse = int(verse_str) if verse_str else None
+                last_v_str = ''.join(c for c in last_segment if c.isdigit())
+                verse = int(last_v_str) if last_v_str else None
             
             return None, verse
     except Exception as e:
