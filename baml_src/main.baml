@@ -163,7 +163,7 @@ function ValidateMetadataVerses(
   client Ollama
   
   prompt #"
-    Please identify the VERSE RANGE described in the header of this image.
+    Please check the OCR metadata returned below for accuracy by identifying the VERSE RANGE described in the header of this image.
     
     LOCATION:
     - Usually "V. <number>", "V. <start>-<end>", or similar.
@@ -176,9 +176,14 @@ function ValidateMetadataVerses(
     - Chapter-spanning: "27:42-46,28:1"
     
     INSTRUCTIONS:
-    1. Read the header verse notation carefully. distinguish 2 vs 9.
+    1. Read the header verse notation carefully since it uses a curly font. distinguish 2 vs 9.
     2. If the page spans chapters (e.g. "CH. 27 V. 40 ... CH. 28 V. 1"), use the chapter-spanning notation.
     3. Use the provided Body Verses as a strong hint for what verses are actually discussed on the page.
+    4. ALWAYS convert Roman numerals to decimal numbers. (e.g. 'IV' -> '4'). Never return Roman numerals.
+    
+    EXAMPLES:
+    - "CH. IV. V. 1-7" -> "4:1-7"
+    - "CH. III. V. 34, 35, IV. V. 1" -> "3:34,35,4:1"
     
     CONTEXT:
     - Chapter: {{ chapter }}
