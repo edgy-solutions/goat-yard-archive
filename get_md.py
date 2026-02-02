@@ -3425,6 +3425,56 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                             except Exception as e:
                                 log_print(f"DEBUG: Error checking validity: {e}")
                                 pass
+                            except Exception as e:
+                                log_print(f"DEBUG: Error checking validity: {e}")
+                                pass
+
+                    # SECONDARY CHECK: Sparseness vs Sequentiality
+                    # If body has gaps (likely "has_large_gaps" is True or just not sequential)
+                    # AND Ollama is sequential
+                    # AND they share the same start verse
+                    # Then prefer Ollama (assume body marker is misread, e.g. 32 -> 39)
+                    if use_body_correction:
+                         try:
+                             ollama_v_str = str(header_info.get('verse', ''))
+                             parsed_ollama = parse_verse_notation(ollama_v_str)
+                             
+                             # Check if Ollama is sequential (no gaps)
+                             ollama_is_sequential = False
+                             if len(parsed_ollama) == 1 and len(parsed_ollama[0]['verses']) > 0:
+                                 v_list = parsed_ollama[0]['verses']
+                                 # strictly sequential?
+                                 if v_list == list(range(v_list[0], v_list[-1] + 1)):
+                                     ollama_is_sequential = True
+                             
+                             # Check if Body is sparse/has gaps
+                             # has_large_gaps was calculated earlier, but let's check for ANY gap > 1
+                             body_has_gaps = False
+                             sorted_body = sorted(list(found_verses))
+                             if len(sorted_body) > 1:
+                                 for i in range(len(sorted_body) - 1):
+                                     if sorted_body[i+1] - sorted_body[i] > 1:
+                                         body_has_gaps = True
+                                         break
+                             
+                             if ollama_is_sequential and body_has_gaps:
+                                 # Check if start verse matches
+                                 ollama_start = parsed_ollama[0]['verses'][0]
+                                 body_start = sorted_body[0]
+                                 
+                                 if ollama_start == body_start:
+                                     # Check if counts are "reasonably" close (e.g. Body: 2 verses [31, 39], Ollama: 2 verses [31, 32])
+                                     # If they are, it's very likely a misread number in Body.
+                                     len_ollama = len(parsed_ollama[0]['verses'])
+                                     len_body = len(sorted_body)
+                                     
+                                     if abs(len_ollama - len_body) <= 2:
+                                         log_print(f"DEBUG: Rejecting body correction because Body is sparse ({body_verse}) while Ollama is sequential ({ollama_v_str}) and starts same.")
+                                         log_print(f"DEBUG: Assuming body marker misread (e.g. 32->39). Keeping Ollama.")
+                                         use_body_correction = False
+                         except Exception as e:
+                             log_print(f"DEBUG: Error checking sparseness: {e}")
+                             pass
 
                     if use_body_correction:
                         log_print(f"Correcting Ollama result based on body verse markers:")
