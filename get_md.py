@@ -3437,6 +3437,24 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                              ollama_v_str = str(header_info.get('verse', ''))
                              parsed_ollama = parse_verse_notation(ollama_v_str)
                              
+                             # If standard parsing failed (likely no chapter prefix like "31-32"), try manual parsing
+                             if not parsed_ollama:
+                                 try:
+                                     # Handle "Start-End" range
+                                     if '-' in ollama_v_str and ':' not in ollama_v_str and ',' not in ollama_v_str:
+                                         parts = ollama_v_str.split('-')
+                                         start, end = int(parts[0]), int(parts[1])
+                                         parsed_ollama = [{'chapter': 0, 'verses': list(range(start, end + 1))}]
+                                     # Handle "A,B,C" list
+                                     elif ',' in ollama_v_str and ':' not in ollama_v_str:
+                                         parts = [int(p) for p in ollama_v_str.split(',') if p.strip()]
+                                         parsed_ollama = [{'chapter': 0, 'verses': sorted(parts)}]
+                                     # Handle single number
+                                     elif ollama_v_str.isdigit():
+                                         parsed_ollama = [{'chapter': 0, 'verses': [int(ollama_v_str)]}]
+                                 except:
+                                     pass
+                             
                              # Check if Ollama is sequential (no gaps)
                              ollama_is_sequential = False
                              if len(parsed_ollama) == 1 and len(parsed_ollama[0]['verses']) > 0:
