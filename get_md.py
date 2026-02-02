@@ -2841,7 +2841,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     log_print(f"Content language: {lang}\n")
     
     # Load Bible structure for validation
-    books_data = load_bible_structure()
+    books_data = build_bible_structure()
     
     if output_path:
         base_name = os.path.splitext(output_path)[0]
@@ -3094,14 +3094,15 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     current_ch = header_info.get('chapter')
                     curr_book = header_info.get('book_name')
                     if current_ch and curr_book and curr_book in books_data:
-                         if 'chapters' in books_data[curr_book] and current_ch in books_data[curr_book]['chapters']:
-                             max_v = books_data[curr_book]['chapters'][current_ch]
-                             if max_v < max_v: # wait, logic
-                                 pass
+                         # books_data[curr_book] is the chapters dictionary directly
+                         chapter_data = books_data[curr_book]
+                         if current_ch in chapter_data:
+                             max_v_limit = chapter_data[current_ch]
+                             
                              # Check max verse in found_verses
                              max_found = max(found_verses)
-                             if max_found > max_v:
-                                 log_print(f"DEBUG: Body verses contain {max_found} > max {max_v} for {curr_book} {current_ch}. Ignoring body count superiority.")
+                             if max_found > max_v_limit:
+                                 log_print(f"DEBUG: Body verses contain {max_found} > max {max_v_limit} for {curr_book} {current_ch}. Ignoring body count superiority.")
                                  body_is_valid = False
                     
                     if body_is_valid:
@@ -3123,8 +3124,9 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     current_ch = header_info.get('chapter')
                     curr_book = header_info.get('book_name')
                     if current_ch and curr_book and curr_book in books_data:
-                         if 'chapters' in books_data[curr_book] and current_ch in books_data[curr_book]['chapters']:
-                             max_v_limit = books_data[curr_book]['chapters'][current_ch]
+                         chapter_data = books_data[curr_book]
+                         if current_ch in chapter_data:
+                             max_v_limit = chapter_data[current_ch]
                              if max_v > max_v_limit:
                                  log_print(f"DEBUG: Low confidence body range {min_v}-{max_v} exceeds max {max_v_limit}. Rejecting.")
                                  body_is_valid_low_conf = False
