@@ -3425,9 +3425,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                             except Exception as e:
                                 log_print(f"DEBUG: Error checking validity: {e}")
                                 pass
-                            except Exception as e:
-                                log_print(f"DEBUG: Error checking validity: {e}")
-                                pass
+
 
                     # SECONDARY CHECK: Sparseness vs Sequentiality
                     # If body has gaps (likely "has_large_gaps" is True or just not sequential)
@@ -3462,16 +3460,26 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                                  ollama_start = parsed_ollama[0]['verses'][0]
                                  body_start = sorted_body[0]
                                  
+                                 log_print(f"DEBUG: Comparing Starts: Ollama {ollama_start} vs Body {body_start}")
+                                 
                                  if ollama_start == body_start:
                                      # Check if counts are "reasonably" close (e.g. Body: 2 verses [31, 39], Ollama: 2 verses [31, 32])
                                      # If they are, it's very likely a misread number in Body.
                                      len_ollama = len(parsed_ollama[0]['verses'])
                                      len_body = len(sorted_body)
                                      
+                                     log_print(f"DEBUG: Comparing Lengths: Ollama {len_ollama} vs Body {len_body}")
+                                     
                                      if abs(len_ollama - len_body) <= 2:
                                          log_print(f"DEBUG: Rejecting body correction because Body is sparse ({body_verse}) while Ollama is sequential ({ollama_v_str}) and starts same.")
                                          log_print(f"DEBUG: Assuming body marker misread (e.g. 32->39). Keeping Ollama.")
                                          use_body_correction = False
+                                     else:
+                                         log_print(f"DEBUG: Length diff {abs(len_ollama - len_body)} > 2. Keeping body.")
+                                 else:
+                                     log_print(f"DEBUG: Start mismatch. Keeping body.")
+                             else:
+                                 log_print(f"DEBUG: Check failed: Sequential={ollama_is_sequential}, BodyGaps={body_has_gaps}")
                          except Exception as e:
                              log_print(f"DEBUG: Error checking sparseness: {e}")
                              pass
