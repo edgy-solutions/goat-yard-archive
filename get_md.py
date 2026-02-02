@@ -3340,9 +3340,61 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     else:
                         # Standard range
                         body_verse = f"{min_v}-{max_v}" if max_v > min_v else str(min_v)
-                    log_print(f"Correcting Ollama result based on body verse markers:")
-                    log_print(f"  {header_info['verse']} -> {body_verse}")
-                    header_info['verse'] = body_verse
+                    
+                    # FINAL CHECK: Is the body_verse actually valid for this chapter?
+                    # If body_verse says "292" but chapter has 31 verses, DO NOT USE IT.
+                    # Keep Ollama's result if it is valid.
+                    use_body_correction = True
+                    current_ch = header_info.get('chapter')
+                    book = header_info.get('book_name')
+                    
+                    if current_ch and book and book in books_data:
+                        ch_data = books_data[book]
+                        if 'chapters' in ch_data and current_ch in ch_data['chapters']:
+                            max_v_limit = ch_data['chapters'][current_ch]
+                            # Check max verse in body_verse
+                            try:
+                                # Quick parse of max verse in body_verse string
+                                # e.g. "292" or "10-292" or "1,5,292"
+                                # We know sorted_v[-1] is the max found verse
+                                max_body_v = sorted_v[-1] 
+                                if max_body_v > max_v_limit:
+                                    log_print(f"DEBUG: Body markers found verse {max_body_v}, but {book} {current_ch} only has {max_v_limit} verses.")
+                                    # Check if Ollama result IS valid
+                                    ollama_v_str = str(header_info.get('verse', ''))
+                                    
+                                    # Parse Ollama max verse
+                                    # Use robust parsed_ollama from earlier if available, or re-parse
+                                    ollama_is_valid = True # Assume true unless proven false
+                                    try:
+                                        # Simple heuristic check for Ollama validity
+                                        if '-' in ollama_v_str:
+                                            ov_max = int(ollama_v_str.split('-')[-1].split(':')[-1])
+                                        elif ',' in ollama_v_str:
+                                            ov_max = int(ollama_v_str.split(',')[-1].split('-')[-1].split(':')[-1])
+                                        else:
+                                            ov_max = int(ollama_v_str.split(':')[-1])
+                                            
+                                        if ov_max <= max_v_limit:
+                                            ollama_is_valid = True
+                                        else:
+                                            ollama_is_valid = False
+                                    except:
+                                        pass
+                                    
+                                    if ollama_is_valid:
+                                        log_print(f"DEBUG: Rejecting body marker correction because body verse {max_body_v} is invalid, while Ollama verse '{ollama_v_str}' appears valid.")
+                                        use_body_correction = False
+                                    else:
+                                       log_print(f"DEBUG: Both body ({max_body_v}) and Ollama ({header_info.get('verse')}) exceed max verse {max_v_limit}. Using body as fallback.")
+                            except Exception as e:
+                                log_print(f"DEBUG: Error checking validity: {e}")
+                                pass
+
+                    if use_body_correction:
+                        log_print(f"Correcting Ollama result based on body verse markers:")
+                        log_print(f"  {header_info['verse']} -> {body_verse}")
+                        header_info['verse'] = body_verse
     
     # Create basic metadata
     metadata = {
