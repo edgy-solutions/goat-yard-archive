@@ -3267,7 +3267,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     if ':' in current_verse_str and ',' in current_verse_str:
                         # Extract chapters from notation like "23:20-24,24:1-2"
                         try:
-                            from verse_notation import parse_verse_notation
+
                             parsed = parse_verse_notation(current_verse_str)
                             if len(parsed) >= 2:
                                 prev_ch = parsed[0]['chapter']
