@@ -3520,7 +3520,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     if prev_metadata:
         log_print("\nStep 4-5: Validating against previous metadata and Bible structure...")
         # Pass found_verses from Step 2 to avoid re-finding them
-        metadata = validate_and_correct_metadata(metadata, prev_metadata, tsv_data_eng, found_verses)
+        metadata = validate_and_correct_metadata(metadata, prev_metadata, tsv_data_eng, found_verses, books_data)
     
     # Step 6: Add Hebrew or Greek verses to validated metadata based on book
     book_name = metadata.get('book_name')
@@ -3811,7 +3811,7 @@ def extract_last_verse_from_notation(verse_notation):
         return None, None
 
 
-def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None, found_verses=None):
+def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None, found_verses=None, books_data=None):
     """
     Validate current metadata against previous page and auto-correct obvious errors.
     Uses Bible structure to validate book names, chapter ranges, and verse ranges.
@@ -3821,11 +3821,17 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     Args:
         current_metadata: Current page metadata
         prev_metadata: Previous page metadata
+        prev_metadata: Previous page metadata
         ocr_data: Optional OCR data for content-based validation
         found_verses: Optional list of verse markers found in content
+        books_data: Optional Bible structure data for validation
     """
     if not prev_metadata:
         return current_metadata
+    
+    # Ensure books_data is available if not passed
+    if books_data is None:
+        books_data = build_bible_structure()
     
     log_print(f"\nDEBUG: Validating against previous metadata:")
     log_print(f"  Previous: book={prev_metadata.get('book_name')}, ch={prev_metadata.get('chapter')}, v={prev_metadata.get('verse')}, page={prev_metadata.get('page_number')}")
