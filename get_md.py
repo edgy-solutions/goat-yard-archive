@@ -3082,14 +3082,31 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                      reason = "invalid range (likely wrong order)"
                 
                 # Check if body found MORE verses (significantly)
+                # Check if body found MORE verses (significantly)
                 body_verse_count = len(found_verses)
                 if body_verse_count > header_verse_count:
-                    should_replace = True
-                    reason = f"body has more verses ({body_verse_count} vs {header_verse_count})"
+                    # check if body verses are actually valid?
+                    # If body has 292, but chapter has 31 verses, this is junk.
+                    body_is_valid = True
+                    current_ch = header_info.get('chapter')
+                    curr_book = header_info.get('book_name')
+                    if current_ch and curr_book and curr_book in books_data:
+                         if 'chapters' in books_data[curr_book] and current_ch in books_data[curr_book]['chapters']:
+                             max_v = books_data[curr_book]['chapters'][current_ch]
+                             if max_v < max_v: # wait, logic
+                                 pass
+                             # Check max verse in found_verses
+                             max_found = max(found_verses)
+                             if max_found > max_v:
+                                 log_print(f"DEBUG: Body verses contain {max_found} > max {max_v} for {curr_book} {current_ch}. Ignoring body count superiority.")
+                                 body_is_valid = False
+                    
+                    if body_is_valid:
+                        should_replace = True
+                        reason = f"body has more verses ({body_verse_count} vs {header_verse_count})"
                     
             except Exception as e:
                 log_print(f"WARNING: Robust verse parsing failed for '{header_verse_str}': {e}")
-                # Fallback to naive logic if robust fails (unlikely)
                 pass
             
             # Check for very low confidence with complete body range
@@ -4353,6 +4370,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                                  is_start_confirmed = True
                             
                             if not is_start_confirmed:
+                                log_print(f"DEBUG: is_start_confirmed=False. Proceeding to fix gap. expected_verse={expected_verse}")
                                 expected_verse = last_prev_verse + 1
                             
                                 # Correct the first verse in the notation
