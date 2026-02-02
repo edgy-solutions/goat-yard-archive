@@ -4446,7 +4446,8 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                 # e.g. Prev: 22:15, Curr: 23:16 -> Verse is sequential (15->16), but chapter inc (22->23).
                 # This suggests the chapter didn't actually change, but OCR/Ollama thought it did.
                 fake_transition = False
-                if prev_book == curr_book and curr_chapter_for_compare == prev_ch + 1:
+                prev_ch = prev_chapter # Use prev_chapter from scope
+                if prev_book == curr_book and prev_ch and curr_chapter_for_compare == prev_ch + 1:
                      # Check verse sequentiality
                      # If first_curr_verse is close to last_prev_verse (e.g. within 1-2 verses)
                      if abs(first_curr_verse - last_prev_verse) <= 2:
