@@ -4418,6 +4418,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     
                     # Check if the missing verse was actually found in the OCR body but dropped by Ollama
                     missing_verse = last_prev_verse + 1
+                    expected_verse = last_prev_verse + 1
                     restored = False
                     
                     if found_verses and missing_verse in found_verses:
