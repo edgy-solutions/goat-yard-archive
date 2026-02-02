@@ -2840,6 +2840,9 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
     log_print(f"Processing image: {image_path}")
     log_print(f"Content language: {lang}\n")
     
+    # Load Bible structure for validation
+    books_data = load_bible_structure()
+    
     if output_path:
         base_name = os.path.splitext(output_path)[0]
     else:
@@ -3112,10 +3115,23 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             # Check for very low confidence with complete body range
             if not should_replace and verse_validation['confidence'] < 0.25:
                 # Body has complete sequential range?
+                # Body has complete sequential range?
                 expected_body_verses = set(range(min_v, max_v + 1))
                 if found_verses == expected_body_verses:
-                    should_replace = True
-                    reason = f"very low confidence ({verse_validation['confidence']:.1%}) and body has complete range"
+                    # VALIDITY CHECK: matching body range isn't enough if it's biologically impossible
+                    body_is_valid_low_conf = True
+                    current_ch = header_info.get('chapter')
+                    curr_book = header_info.get('book_name')
+                    if current_ch and curr_book and curr_book in books_data:
+                         if 'chapters' in books_data[curr_book] and current_ch in books_data[curr_book]['chapters']:
+                             max_v_limit = books_data[curr_book]['chapters'][current_ch]
+                             if max_v > max_v_limit:
+                                 log_print(f"DEBUG: Low confidence body range {min_v}-{max_v} exceeds max {max_v_limit}. Rejecting.")
+                                 body_is_valid_low_conf = False
+                    
+                    if body_is_valid_low_conf:
+                        should_replace = True
+                        reason = f"very low confidence ({verse_validation['confidence']:.1%}) and body has complete range"
             
             if should_replace:
                 log_print(f"Replacing header verse ({reason}): {header_info['verse']} -> {body_verse}")
