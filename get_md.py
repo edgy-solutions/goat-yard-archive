@@ -4553,24 +4553,26 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                 
                 # Check for "Chapter Regression"
                 # e.g. Prev: 23:1, Curr: 22:2 -> Verse is sequential (1->2), but chapter dec (23->22).
-                if not fake_transition and prev_book == curr_book and prev_ch and curr_chapter_for_compare < prev_ch:
+                # Use prev_chapter_for_compare (effective last chapter of prev page) instead of prev_chapter (start of prev page)
+                pch = prev_chapter_for_compare
+                if not fake_transition and prev_book == curr_book and pch and curr_chapter_for_compare < pch:
                      # Check verse sequentiality
                      # If first_curr_verse is close to last_prev_verse (e.g. within 1-2 verses)
                      if abs(first_curr_verse - last_prev_verse) <= 2:
                          # It's likely a continuation of the previous chapter
-                         log_print(f"DEBUG: suspected chapter regression: {prev_ch}:{last_prev_verse} -> {curr_chapter_for_compare}:{first_curr_verse}")
-                         log_print(f"DEBUG: Verses are sequential despite chapter decrement. Correcting chapter {curr_chapter_for_compare} -> {prev_ch}")
+                         log_print(f"DEBUG: suspected chapter regression: {pch}:{last_prev_verse} -> {curr_chapter_for_compare}:{first_curr_verse}")
+                         log_print(f"DEBUG: Verses are sequential despite chapter decrement. Correcting chapter {curr_chapter_for_compare} -> {pch}")
                          
-                         corrected['chapter'] = prev_ch
+                         corrected['chapter'] = pch
                          
                          # Update verse string to match new chapter if needed
                          curr_v_str = str(corrected.get('verse', ''))
                          if ':' in curr_v_str:
                              if str(curr_chapter_for_compare) + ':' in curr_v_str:
-                                 new_v_str = curr_v_str.replace(f"{curr_chapter_for_compare}:", f"{prev_ch}:")
+                                 new_v_str = curr_v_str.replace(f"{curr_chapter_for_compare}:", f"{pch}:")
                                  corrected['verse'] = new_v_str
                          
-                         corrections_made.append(f"chapter: {curr_chapter_for_compare} -> {prev_ch} (regression detected, sequential verses {last_prev_verse}->{first_curr_verse})")
+                         corrections_made.append(f"chapter: {curr_chapter_for_compare} -> {pch} (regression detected, sequential verses {last_prev_verse}->{first_curr_verse})")
                          fake_transition = True
 
                 if not fake_transition:
