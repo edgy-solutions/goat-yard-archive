@@ -3385,8 +3385,8 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                     
                     if current_ch and book and book in books_data:
                         ch_data = books_data[book]
-                        if 'chapters' in ch_data and current_ch in ch_data['chapters']:
-                            max_v_limit = ch_data['chapters'][current_ch]
+                        if current_ch in ch_data:
+                            max_v_limit = ch_data[current_ch]
                             # Check max verse in body_verse
                             try:
                                 # Quick parse of max verse in body_verse string
