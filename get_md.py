@@ -4441,7 +4441,39 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                             corrected['verse'] = corrected_verse
                             corrected['verse_warning'] = f"OCR detected {curr_verse} but auto-corrected to {corrected_verse} based on previous verse {last_prev_verse}"
             else:
-                log_print(f"DEBUG: Book or chapter changed - skipping gap detection (verses can restart at 1)")
+                # Book or chapter changed
+                # Check for "Fake Chapter Transition"
+                # e.g. Prev: 22:15, Curr: 23:16 -> Verse is sequential (15->16), but chapter inc (22->23).
+                # This suggests the chapter didn't actually change, but OCR/Ollama thought it did.
+                fake_transition = False
+                if prev_book == curr_book and curr_chapter_for_compare == prev_ch + 1:
+                     # Check verse sequentiality
+                     # If first_curr_verse is close to last_prev_verse (e.g. within 1-2 verses)
+                     if abs(first_curr_verse - last_prev_verse) <= 2:
+                         # It's likely a continuation of the previous chapter
+                         log_print(f"DEBUG: suspected fake chapter transition: {prev_ch}:{last_prev_verse} -> {curr_chapter_for_compare}:{first_curr_verse}")
+                         log_print(f"DEBUG: Verses are sequential despite chapter increment. Correcting chapter {curr_chapter_for_compare} -> {prev_ch}")
+                         
+                         corrected['chapter'] = prev_ch
+                         
+                         # Update verse string to match new chapter if needed
+                         # e.g. "23:16-19" -> "22:16-19" or "16-19"
+                         curr_v_str = str(corrected.get('verse', ''))
+                         if ':' in curr_v_str:
+                             # Replace 23: with 22:
+                             # Simple heuristic replace for now, or rebuild
+                             if str(curr_chapter_for_compare) + ':' in curr_v_str:
+                                 new_v_str = curr_v_str.replace(f"{curr_chapter_for_compare}:", f"{prev_ch}:")
+                                 corrected['verse'] = new_v_str
+                             elif str(curr_chapter_for_compare) in curr_v_str: 
+                                 # complex case, maybe just strip chapter?
+                                 pass
+                         
+                         corrections_made.append(f"chapter: {curr_chapter_for_compare} -> {prev_ch} (fake transition detected, sequential verses {last_prev_verse}->{first_curr_verse})")
+                         fake_transition = True
+
+                if not fake_transition:
+                    log_print(f"DEBUG: Book or chapter changed - skipping gap detection (verses can restart at 1)")
     
     # Note: Verse content validation already done in Step 2 (passed via found_verses parameter)
     # No need to re-run find_verse_markers_in_ocr() here
