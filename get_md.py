@@ -2833,6 +2833,8 @@ def validate_verses_against_content(metadata_verse, found_verses):
     }
 
 
+from verse_notation import parse_verse_notation
+
 def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=None, validate_ollama=False, prev_metadata=None, use_legacy_validation=False):
     """Main function to process image and generate markdown."""
     log_print(f"Processing image: {image_path}")
@@ -3059,35 +3061,36 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
             should_replace = False
             reason = ""
             
-            # Check for wrong order (e.g., "19-16")
-            if '-' in header_verse_str:
-                parts = header_verse_str.split('-')
-                try:
-                    start, end = int(parts[0]), int(parts[1])
-                    if start > end:
-                        should_replace = True
-                        reason = "wrong order"
-                except:
-                    pass
-            
-            # Check if body found MORE verses
-            if not should_replace:
-                try:
-                    if '-' in header_verse_str:
-                        parts = header_verse_str.split('-')
-                        header_verse_count = int(parts[1]) - int(parts[0]) + 1
-                    elif ',' in header_verse_str:
-                        header_verse_count = len(header_verse_str.split(','))
-                    else:
-                        header_verse_count = 1
+            # Robustly parse header verses using verse_notation
+            try:
+                parsed_header = parse_verse_notation(header_verse_str)
+                header_verses_flat = []
+                for ch_dict in parsed_header:
+                    header_verses_flat.extend(ch_dict['verses'])
+                
+                header_verse_count = len(header_verses_flat)
+                
+                # Check for wrong order (e.g., "19-16" -> parsed might be empty or handling it weirdly?)
+                # Actually parse_verse_notation handles ranges like range(start, end).
+                # If start > end, range is empty.
+                # So if we see a range string but get 0 verses, it might be wrong order.
+                # Let's check raw string for simple cases still, or rely on count.
+                
+                # If naive check sees '-', but robust parsed 0 verses, that's a sign of issue (like 19-16)
+                if '-' in header_verse_str and header_verse_count == 0:
+                     should_replace = True
+                     reason = "invalid range (likely wrong order)"
+                
+                # Check if body found MORE verses (significantly)
+                body_verse_count = len(found_verses)
+                if body_verse_count > header_verse_count:
+                    should_replace = True
+                    reason = f"body has more verses ({body_verse_count} vs {header_verse_count})"
                     
-                    body_verse_count = len(found_verses)
-                    
-                    if body_verse_count > header_verse_count:
-                        should_replace = True
-                        reason = f"body has more verses ({body_verse_count} vs {header_verse_count})"
-                except:
-                    pass
+            except Exception as e:
+                log_print(f"WARNING: Robust verse parsing failed for '{header_verse_str}': {e}")
+                # Fallback to naive logic if robust fails (unlikely)
+                pass
             
             # Check for very low confidence with complete body range
             if not should_replace and verse_validation['confidence'] < 0.25:
@@ -3133,16 +3136,13 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                 # When both header and Ollama agree, body markers may be incomplete (OCR errors)
                 ollama_verse_str = str(header_info.get('verse', ''))
                 if original_header_verse and ollama_verse_str == original_header_verse:
-                    # Check for "Unreasonably Large Range" (e.g., 1-43 on a single page)
-                    # If range > 20 verses and confidence < 20%, do NOT trust it.
-                    is_large_range = False
+                    # Check for "Unreasonably Large Range"
+                    # Use robust parsing
                     try:
-                        if '-' in ollama_verse_str and ':' not in ollama_verse_str:
-                            parts = ollama_verse_str.split('-')
-                            if len(parts) == 2:
-                                start, end = int(parts[0]), int(parts[1])
-                                if (end - start + 1) > 20:
-                                    is_large_range = True
+                        parsed_ollama = parse_verse_notation(ollama_verse_str)
+                        total_verses = sum(len(ch['verses']) for ch in parsed_ollama)
+                        if total_verses > 20:
+                             is_large_range = True
                     except:
                         pass
                     
@@ -3154,12 +3154,18 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                         should_correct_ollama = False
                 # Second priority: Check if Ollama has a range that CONTAINS all sequential body markers
                 # This suggests body markers are incomplete (OCR failures), not that Ollama is wrong
-                elif '-' in ollama_verse_str and ':' not in ollama_verse_str:
+                elif '-' in ollama_verse_str: # Check range existence generally
                     try:
-                        parts = ollama_verse_str.split('-')
-                        if len(parts) == 2:
-                            ollama_first = int(parts[0])
-                            ollama_last = int(parts[1])
+                        parsed = parse_verse_notation(ollama_verse_str)
+                        # flattening verses
+                        ollama_verses_flat = []
+                        for ch in parsed:
+                            ollama_verses_flat.extend(ch['verses'])
+                        
+                        if len(ollama_verses_flat) > 0:
+                            ollama_first = min(ollama_verses_flat)
+                            ollama_last = max(ollama_verses_flat)
+                            
                             sorted_body = sorted(found_verses)
                             
                             # Check if ALL body markers are within Ollama's range
@@ -3176,24 +3182,26 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                             else:
                                 should_correct_ollama = True
                         else:
-                            should_correct_ollama = True
+                             should_correct_ollama = True
                     except:
                         should_correct_ollama = True
                 # Third priority: Check if Ollama found a range that matches our sparse range detection
                 elif is_sparse_range and '-' in ollama_verse_str:
-                    # Parse Ollama's range
+                    # Parse Ollama's range robustly
                     try:
-                        if ':' not in ollama_verse_str:  # Simple range
-                            parts = ollama_verse_str.split('-')
-                            if len(parts) == 2:
-                                ollama_first = int(parts[0])
-                                ollama_last = int(parts[1])
-                                # If Ollama found same endpoints as body markers, trust it!
-                                if ollama_first == min_v and ollama_last == max_v:
-                                    log_print(f"DEBUG: Ollama found correct sparse range {min_v}-{max_v}, keeping Ollama result")
-                                    should_correct_ollama = False
-                                else:
-                                    should_correct_ollama = True
+                        parsed = parse_verse_notation(ollama_verse_str)
+                        ollama_verses_flat = []
+                        for ch in parsed:
+                            ollama_verses_flat.extend(ch['verses'])
+
+                        if len(ollama_verses_flat) > 0:
+                            ollama_first = min(ollama_verses_flat)
+                            ollama_last = max(ollama_verses_flat)
+                            
+                            # If Ollama found same endpoints as body markers, trust it!
+                            if ollama_first == min_v and ollama_last == max_v:
+                                log_print(f"DEBUG: Ollama found correct sparse range {min_v}-{max_v}, keeping Ollama result")
+                                should_correct_ollama = False
                             else:
                                 should_correct_ollama = True
                         else:
