@@ -4278,46 +4278,58 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                             corrected['verse'] = new_verse_str
                             corrected['verse_warning'] = f"Restored missing verse {missing_verse} detected in OCR body but dropped by validation"
                     
-                    if not restored:
-                        # Standard gap correction (shifting)
-                        
-                        # CRITICAL CHECK: Is the detected start verse actually in the body?
-                        # If so, the gap is likely real (sparse commentary), so DO NOT correct it.
-                        is_start_confirmed = False
-                        if found_verses and first_curr_verse in found_verses:
-                             log_print(f"DEBUG: Start verse {first_curr_verse} confirmed in body markers. Skipping gap correction (gap is real).")
-                             is_start_confirmed = True
-                        
-                        if not is_start_confirmed:
-                            expected_verse = last_prev_verse + 1
-                        
-                            # Correct the first verse in the notation
-                            # Correct the first verse in the notation
-                            if ':' in curr_verse_str:
-                                # Chapter-spanning notation like "25:34,26:1-2"
-                                # Replace the first verse number while preserving the structure
-                                from verse_notation import parse_verse_notation, format_verse_notation
-                                try:
-                                    parsed = parse_verse_notation(curr_verse_str)
-                                    if parsed and len(parsed[0]['verses']) > 0:
-                                        # Replace first verse
-                                        parsed[0]['verses'][0] = expected_verse
-                                        # Reconstruct notation
-                                        parts = []
-                                        for span in parsed:
-                                            ch = span['chapter']
-                                            verses = span['verses']
-                                            if len(verses) == 1:
-                                                v_str = str(verses[0])
-                                            elif len(verses) == 2:
-                                                v_str = f"{verses[0]},{verses[1]}"
-                                            else:
-                                                v_str = f"{verses[0]}-{verses[-1]}"
-                                            parts.append(f"{ch}:{v_str}")
-                                        corrected_verse = ','.join(parts)
-                                except:
-                                    # Fallback to simple replacement
-                                    corrected_verse = str(expected_verse)
+                        if not restored:
+                            # Standard gap correction (shifting)
+                            
+                            # CRITICAL CHECK: Is the detected start verse actually in the body?
+                            # If so, the gap is likely real (sparse commentary), so DO NOT correct it.
+                            # BUT ONLY IF the verse is actually VALID for this chapter!
+                            is_start_confirmed = False
+                            
+                            # Check Bible validity first
+                            is_verse_valid = True
+                            if curr_chapter_for_compare and curr_book in books_data:
+                                ch_data = books_data[curr_book]
+                                if 'chapters' in ch_data and curr_chapter_for_compare in ch_data['chapters']:
+                                    max_v = ch_data['chapters'][curr_chapter_for_compare]
+                                    if first_curr_verse > max_v:
+                                        is_verse_valid = False
+                                        log_print(f"DEBUG: Start verse {first_curr_verse} is > max {max_v} for {curr_book} {curr_chapter_for_compare}. Ignoring body marker confirmation.")
+                            
+                            if is_verse_valid and found_verses and first_curr_verse in found_verses:
+                                 log_print(f"DEBUG: Start verse {first_curr_verse} confirmed in body markers and is valid. Skipping gap correction (gap is real).")
+                                 is_start_confirmed = True
+                            
+                            if not is_start_confirmed:
+                                expected_verse = last_prev_verse + 1
+                            
+                                # Correct the first verse in the notation
+                                # Correct the first verse in the notation
+                                if ':' in curr_verse_str:
+                                    # Chapter-spanning notation like "25:34,26:1-2"
+                                    # Replace the first verse number while preserving the structure
+                                    from verse_notation import parse_verse_notation, format_verse_notation
+                                    try:
+                                        parsed = parse_verse_notation(curr_verse_str)
+                                        if parsed and len(parsed[0]['verses']) > 0:
+                                            # Replace first verse
+                                            parsed[0]['verses'][0] = expected_verse
+                                            # Reconstruct notation
+                                            parts = []
+                                            for span in parsed:
+                                                ch = span['chapter']
+                                                verses = span['verses']
+                                                if len(verses) == 1:
+                                                    v_str = str(verses[0])
+                                                elif len(verses) == 2:
+                                                    v_str = f"{verses[0]},{verses[1]}"
+                                                else:
+                                                    v_str = f"{verses[0]}-{verses[-1]}"
+                                                parts.append(f"{ch}:{v_str}")
+                                            corrected_verse = ','.join(parts)
+                                    except:
+                                        # Fallback to simple replacement
+                                        corrected_verse = str(expected_verse)
                             elif '-' in verse_only_str:
                                 # Range - only adjust START to fix gap, keep END unchanged
                                 # The ending verse is likely correct (from body markers/header)
