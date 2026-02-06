@@ -4269,27 +4269,72 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                         if ',' in curr_verse_str:
                             # It's a list - remove overlapping verses
                             # robustly handle prefixes like "10:1"
-                            verse_nums = []
-                            for v in curr_verse_str.split(','):
-                                v_clean = v.strip()
-                                if ':' in v_clean:
-                                    v_clean = v_clean.split(':')[-1]
-                                if '-' in v_clean: # Handle range in list?
-                                     v_clean = v_clean.split('-')[0] # just take start for simplicty or ignore
-                                if v_clean.isdigit():
-                                    verse_nums.append(int(v_clean))
-
-                            non_overlapping = [v for v in verse_nums if v >= expected_verse]
+                            # It's a list - remove overlapping verses but PRESERVE ranges
+                            corrected_segments = []
+                            original_segments = curr_verse_str.split(',')
                             
-                            if non_overlapping:
-                                corrected_verse = ','.join(str(v) for v in non_overlapping)
-                                log_print(f"DEBUG: Removed overlapping verses: {verse_nums} -> {non_overlapping}")
+                            for seg in original_segments:
+                                seg = seg.strip()
+                                
+                                # Parse segment to get verse numbers
+                                v_clean = seg
+                                ch_prefix = ""
+                                if ':' in v_clean:
+                                    parts = v_clean.split(':', 1)
+                                    ch_prefix = parts[0] + ":"
+                                    v_clean = parts[1]
+                                
+                                if '-' in v_clean:
+                                    # Handle range
+                                    try:
+                                        r_start = int(v_clean.split('-')[0])
+                                        r_end = int(v_clean.split('-')[1])
+                                        
+                                        if r_end < expected_verse:
+                                            # Fully overlapping, skip
+                                            continue
+                                        elif r_start >= expected_verse:
+                                            # No overlap, keep as is
+                                            corrected_segments.append(seg)
+                                        else:
+                                            # Partial overlap, trim start
+                                            corrected_segments.append(f"{ch_prefix}{expected_verse}-{r_end}")
+                                    except:
+                                        # Parse error, keep safe
+                                        corrected_segments.append(seg)
+                                else:
+                                    # Single verse
+                                    try:
+                                        v_num = int(v_clean)
+                                        if v_num >= expected_verse:
+                                            corrected_segments.append(seg)
+                                    except:
+                                        corrected_segments.append(seg)
+
+                            if corrected_segments:
+                                corrected_verse = ','.join(corrected_segments)
+                                log_print(f"DEBUG: Removed overlapping verses: {original_segments} -> {corrected_segments}")
                             else:
-                                # All verses overlap - shift to expected range
-                                num_verses = len(verse_nums)
-                                corrected_verses = [str(expected_verse + i) for i in range(num_verses)]
-                                corrected_verse = ','.join(corrected_verses)
-                                log_print(f"DEBUG: All verses overlapped, shifted: {verse_nums} -> {corrected_verses}")
+                                # All verses overlap - shift to expected range using first segment
+                                # Assuming simplified shift for now as fallback
+                                try:
+                                    # Estimate count from first segment
+                                    count = 1
+                                    first_seg = original_segments[0]
+                                    if '-' in first_seg:
+                                        parts = first_seg.split('-')
+                                        s = int(''.join(c for c in parts[0] if c.isdigit()))
+                                        e = int(''.join(c for c in parts[1] if c.isdigit()))
+                                        count = e - s + 1
+                                    
+                                    if count > 1:
+                                        corrected_verse = f"{expected_verse}-{expected_verse + count - 1}"
+                                    else:
+                                        corrected_verse = str(expected_verse)
+                                        
+                                    log_print(f"DEBUG: All verses overlapped, shifted to: {corrected_verse}")
+                                except:
+                                    corrected_verse = str(expected_verse)
                         elif '-' in curr_verse_str:
                             # It's a range - adjust to start at expected_verse
                             parts = curr_verse_str.split('-')
