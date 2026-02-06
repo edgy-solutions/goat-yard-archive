@@ -4447,6 +4447,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                             corrections_made.append(f"verse: {curr_verse_str} -> {new_verse_str} (restored missing verse {missing_verse} from OCR)")
                             corrected['verse'] = new_verse_str
                             corrected['verse_warning'] = f"Restored missing verse {missing_verse} detected in OCR body but dropped by validation"
+                            corrected_verse = new_verse_str
                     
                         if not restored:
                             # Standard gap correction (shifting)
@@ -4472,7 +4473,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                             
                             if not is_start_confirmed:
                                 log_print(f"DEBUG: is_start_confirmed=False. Proceeding to fix gap. expected_verse={expected_verse}")
-                                expected_verse = last_prev_verse + 1
+                                # expected_verse already set at top of block 
                             
                                 # Correct the first verse in the notation
                                 # Correct the first verse in the notation
