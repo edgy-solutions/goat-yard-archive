@@ -3958,6 +3958,16 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
             
             if not validation['valid']:
                 log_print(f"DEBUG: Still invalid after corrections: {validation['errors']}")
+
+                # Attempt to fix "Spillover Verses" (invalid for current ch, valid for previous)
+                if prev_metadata and same_book and books_data:
+                    try:
+                        # Get max verses
+                         # Use effective_prev_ch calculated below (moving calculation up needed? No, effective_prev_ch is calc at 3993. Need to move it up or use raw prev_chapter)
+                         # Actually I'll move effective_prev_ch calculation UP before this block
+                         pass 
+                    except:
+                        pass
     
     # Validate and correct page number
     if prev_metadata.get('page_number') is not None:
@@ -3984,7 +3994,6 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     
     # Validate and correct chapter
     prev_chapter = prev_metadata.get('chapter')
-    curr_chapter = current_metadata.get('chapter')
     prev_v = prev_metadata.get('verse') # Need this early
     
     # Calculate effective previous chapter from verse notation
@@ -4006,6 +4015,114 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
              log_print(f"DEBUG: Calculated effective_prev_ch={effective_prev_ch} from '{prev_v}'")
          except:
              pass
+
+    # NOW check for invalid verses that might be spillovers from effective_prev_ch
+    curr_chapter_temp = corrected.get('chapter')
+    curr_verse_temp = corrected.get('verse')
+    
+    if curr_chapter_temp and curr_verse_temp and books_data and same_book and effective_prev_ch:
+         book_data = books_data.get(curr_book, {})
+         chapters_data = book_data.get('chapters', {})
+         
+         curr_max = chapters_data.get(str(curr_chapter_temp))
+         prev_max = chapters_data.get(str(effective_prev_ch))
+         
+         if curr_max and prev_max:
+             # Parse current verses
+             # If valid in prev but invalid in curr, reassign prefix
+             parsed_curr = []
+             needs_rewrite = False
+             
+             try:
+                 # Helper to parse flat list of (ch, v) from string
+                 # (simplistic parser for this specific fix)
+                 segments = str(curr_verse_temp).split(',')
+                 
+                 final_segments = []
+                 current_seg_ch = curr_chapter_temp
+                 
+                 for seg in segments:
+                     seg = seg.strip()
+                     if ':' in seg:
+                         parts = seg.split(':', 1)
+                         if parts[0].isdigit(): current_seg_ch = int(parts[0])
+                         v_part = parts[1]
+                     else:
+                         v_part = seg
+                         
+                     # Expand ranges to check individual verses? 
+                     # Actually, checking range bounds is enough.
+                     if '-' in v_part:
+                         v_s = int(v_part.split('-')[0])
+                         v_e = int(v_part.split('-')[1])
+                         verses_to_check = [v_s, v_e]
+                         is_range = True
+                     else:
+                         verses_to_check = [int(v_part)]
+                         is_range = False
+                         
+                     # Check validity
+                     # If verse > curr_max AND verse <= prev_max
+                     # Then it belongs to prev_ch!
+                     
+                     segment_reassigned = False
+                     reassigned_ch = current_seg_ch
+                     
+                     if current_seg_ch == curr_chapter_temp: # Only check if currently assigned to current chapter
+                         all_fit_prev = True
+                         any_invalid_curr = False
+                         
+                         for v in verses_to_check:
+                             if v > curr_max: any_invalid_curr = True
+                             if v > prev_max: all_fit_prev = False
+                         
+                         if any_invalid_curr and all_fit_prev:
+                             # Reassign!
+                             reassigned_ch = effective_prev_ch
+                             segment_reassigned = True
+                             needs_rewrite = True
+                             log_print(f"DEBUG: Verse {seg} invalid for Ch {curr_chapter_temp} (max {curr_max}) but fits Ch {effective_prev_ch} (max {prev_max}). Reassigning.")
+                     
+                     # Reconstruct segment
+                     if reassigned_ch != current_seg_ch or segment_reassigned:
+                         # Always explicitly prefix reassigned segments
+                         final_segments.append(f"{reassigned_ch}:{v_part}")
+                     else:
+                         # Keep original (normalized later if needed, but best to keep explicit if mixed)
+                         if ':' in seg:
+                             final_segments.append(seg)
+                         else:
+                             # If we are mixing chapters, we MUST be explicit about current too if it wasn't
+                             if needs_rewrite: 
+                                 final_segments.append(f"{current_seg_ch}:{v_part}")
+                             else:
+                                 final_segments.append(seg)
+                 
+                 if needs_rewrite:
+                    # Sort segments? 
+                    # 23:56 should come before 24:1
+                    # Python's sort is stable. 
+                    
+                    # Logic to sort: Parse ch:v start from each segment
+                    def sort_key(s):
+                        part = s.split(':')[0] if ':' in s else str(curr_chapter_temp)
+                        if part.isdigit(): return int(part)
+                        return 999999
+                    
+                    final_segments.sort(key=sort_key)
+                    
+                    new_verse_str = ",".join(final_segments)
+                    corrections_made.append(f"verse: {curr_verse_temp} -> {new_verse_str} (reassigned spillover verses)")
+                    corrected['verse'] = new_verse_str
+             except Exception as e:
+                 log_print(f"DEBUG: Error trying to fix spillover verses: {e}")
+
+    prev_chapter = prev_metadata.get('chapter') # Refresh if needed, but we used local vars
+    # prev_v already retrieved
+    curr_chapter = corrected.get('chapter') # Refresh after potential update?? No, we only updated verse.
+    
+    # Calculate effective previous chapter from verse notation
+    # ... (Removing original block which is now duplicate) ...
 
     same_book = (prev_book == curr_book)
     
