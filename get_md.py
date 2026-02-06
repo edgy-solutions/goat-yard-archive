@@ -4451,6 +4451,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                     
                         if not restored:
                             # Standard gap correction (shifting)
+                            corrected_verse = curr_verse_str
                             
                             # CRITICAL CHECK: Is the detected start verse actually in the body?
                             # If so, the gap is likely real (sparse commentary), so DO NOT correct it.
