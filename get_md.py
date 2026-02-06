@@ -3725,21 +3725,18 @@ def extract_first_verse_from_notation(verse_notation):
             
             return chapter, verse if verse else None
         else:
-            # Old format (no chapter marker)
-            if '-' in verse_str:
-                first_v = verse_str.split('-')[0].strip()
+            # Old format (no chapter marker) - ALWAYS split by comma first
+            first_segment = verse_str.split(',')[0].strip()
+            
+            if '-' in first_segment:
+                first_v = first_segment.split('-')[0].strip()
                 # Remove any non-digit characters
-                first_v = ''.join(c for c in first_v if c.isdigit())
-                verse = int(first_v) if first_v else None
-            elif ',' in verse_str:
-                first_v = verse_str.split(',')[0].strip()
-                # Remove any non-digit characters
-                first_v = ''.join(c for c in first_v if c.isdigit())
-                verse = int(first_v) if first_v else None
+                first_v_digits = ''.join(c for c in first_v if c.isdigit())
+                verse = int(first_v_digits) if first_v_digits else None
             else:
                 # Remove any non-digit characters
-                verse_str = ''.join(c for c in verse_str if c.isdigit())
-                verse = int(verse_str) if verse_str else None
+                first_v_digits = ''.join(c for c in first_segment if c.isdigit())
+                verse = int(first_v_digits) if first_v_digits else None
             
             return None, verse
     except Exception as e:
