@@ -869,13 +869,13 @@ class VerseAligner:
                 draw.rectangle([right_margin, min_y, all_right, max_y], 
                               fill=(0, 0, 255, 60), outline=(0, 0, 255, 200), width=2)
     
-    def process_page(self, page_name: str, debug: bool = False, overwrite: bool = False) -> List[Dict]:
+    def process_page(self, page_name: str, debug: bool = False, overwrite: bool = False) -> Tuple[str, List[Dict]]:
         """Process a single page and return alignment results."""
         output_path = self.output_dir / f"{page_name}_alignment.json"
         
         if output_path.exists() and not overwrite:
             logging.info(f"Skipping {page_name} - Output exists (use --overwrite to force)")
-            return []
+            return "SKIPPED", []
             
         logging.info(f"Processing {page_name}...")
         
@@ -885,7 +885,7 @@ class VerseAligner:
             markdown = self.load_markdown(page_name)
         except FileNotFoundError as e:
             logging.error(str(e))
-            return []
+            return "ERROR_MISSING_DATA", []
         
         logging.info(f"Loaded {len(words)} words")
         
@@ -897,7 +897,7 @@ class VerseAligner:
         verses = self.extract_verses(markdown, page_name)
         if not verses:
             logging.warning("No verses extracted")
-            return []
+            return "NO_VERSES", []
         
         results = []
         
@@ -992,14 +992,41 @@ class VerseAligner:
         if debug and results:
             self.generate_debug_image(page_name, results, words, bounds)
         
-        return results
+        return "SUCCESS", results
     
     def run(self, debug: bool = False, overwrite: bool = False):
         """Process all pages."""
         md_files = sorted(list(self.extracted_dir.glob("*.md")))
+        stats = {
+            "TOTAL": len(md_files),
+            "SUCCESS": 0,
+            "SKIPPED": 0,
+            "ERROR_MISSING_DATA": 0,
+            "NO_VERSES": 0,
+            "OTHER_ERROR": 0
+        }
+        
+        print(f"Found {stats['TOTAL']} pages to process...")
+        
         for md_file in md_files:
             page_name = md_file.stem
-            self.process_page(page_name, debug, overwrite)
+            try:
+                status, _ = self.process_page(page_name, debug, overwrite)
+                stats[status] = stats.get(status, 0) + 1
+            except Exception as e:
+                logging.error(f"Critical error processing {page_name}: {e}")
+                stats["OTHER_ERROR"] += 1
+                
+        logging.info("="*40)
+        logging.info("PROCESSING COMPLETED")
+        logging.info(f"Total Pages:      {stats['TOTAL']}")
+        logging.info(f"Successfully Run: {stats['SUCCESS']}")
+        logging.info(f"Skipped (Exist):  {stats['SKIPPED']}")
+        logging.info(f"No Verses Found:  {stats['NO_VERSES']}")
+        logging.info(f"Missing Data:     {stats['ERROR_MISSING_DATA']}")
+        if stats['OTHER_ERROR'] > 0:
+            logging.info(f"Critical Errors:  {stats['OTHER_ERROR']}")
+        logging.info("="*40)
 
 
 if __name__ == "__main__":
