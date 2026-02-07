@@ -44,10 +44,21 @@ class VerseAligner:
     def __init__(self, extracted_dir: str = None, output_dir: str = None):
         if extracted_dir is None:
             extracted_dir = BASE_DIR / "volume1"
-        if output_dir is None:
-            output_dir = BASE_DIR / "artifacts" / "alignment"
             
         self.extracted_dir = Path(extracted_dir)
+            
+        if output_dir is None:
+            # Default to alignment/volumeX if input is volumeX
+            base_align = BASE_DIR / "artifacts" / "alignment"
+            dir_name = self.extracted_dir.name
+            
+            # If input directory is 'volumeX', output to 'alignment/volumeX'
+            if "volume" in dir_name.lower():
+                output_dir = base_align / dir_name
+            else:
+                # Fallback to root alignment folder
+                output_dir = base_align
+            
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
         
