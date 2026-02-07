@@ -3960,14 +3960,7 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
                 log_print(f"DEBUG: Still invalid after corrections: {validation['errors']}")
 
                 # Attempt to fix "Spillover Verses" (invalid for current ch, valid for previous)
-                if prev_metadata and same_book and books_data:
-                    try:
-                        # Get max verses
-                         # Use effective_prev_ch calculated below (moving calculation up needed? No, effective_prev_ch is calc at 3993. Need to move it up or use raw prev_chapter)
-                         # Actually I'll move effective_prev_ch calculation UP before this block
-                         pass 
-                    except:
-                        pass
+                pass
     
     # Validate and correct page number
     if prev_metadata.get('page_number') is not None:
@@ -4020,7 +4013,8 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
     curr_chapter_temp = corrected.get('chapter')
     curr_verse_temp = corrected.get('verse')
     
-    if curr_chapter_temp and curr_verse_temp and books_data and same_book and effective_prev_ch:
+    is_same_book = (curr_book == prev_metadata.get('book_name'))
+    if curr_chapter_temp and curr_verse_temp and books_data and is_same_book and effective_prev_ch:
          book_data = books_data.get(curr_book, {})
          chapters_data = book_data.get('chapters', {})
          
