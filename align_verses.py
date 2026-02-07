@@ -468,6 +468,7 @@ class VerseAligner:
         
         # Cascading thresholds: try high first, back off
         thresholds = [80, 70, 60, 50, 40]
+        best_score = 0.0
         
         for threshold in thresholds:
             # Use FULL phrase for this threshold attempt
