@@ -857,8 +857,14 @@ class VerseAligner:
                 draw.rectangle([right_margin, min_y, all_right, max_y], 
                               fill=(0, 0, 255, 60), outline=(0, 0, 255, 200), width=2)
     
-    def process_page(self, page_name: str, debug: bool = False) -> List[Dict]:
+    def process_page(self, page_name: str, debug: bool = False, overwrite: bool = False) -> List[Dict]:
         """Process a single page and return alignment results."""
+        output_path = self.output_dir / f"{page_name}_alignment.json"
+        
+        if output_path.exists() and not overwrite:
+            logging.info(f"Skipping {page_name} - Output exists (use --overwrite to force)")
+            return []
+            
         logging.info(f"Processing {page_name}...")
         
         # Load data
@@ -976,12 +982,12 @@ class VerseAligner:
         
         return results
     
-    def run(self, debug: bool = False):
+    def run(self, debug: bool = False, overwrite: bool = False):
         """Process all pages."""
-        md_files = list(self.extracted_dir.glob("*.md"))
+        md_files = sorted(list(self.extracted_dir.glob("*.md")))
         for md_file in md_files:
             page_name = md_file.stem
-            self.process_page(page_name, debug)
+            self.process_page(page_name, debug, overwrite)
 
 
 if __name__ == "__main__":
@@ -990,11 +996,13 @@ if __name__ == "__main__":
     parser.add_argument("--out", default=None, help="Output directory (default: $COMMENTARY_DATA_DIR/artifacts/alignment)")
     parser.add_argument("--test-page", help="Process single page for testing")
     parser.add_argument("--debug", action="store_true", help="Generate debug images")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output files")
     args = parser.parse_args()
     
     aligner = VerseAligner(args.dir, args.out)
     
     if args.test_page:
-        aligner.process_page(args.test_page, args.debug)
+        # Always overwrite for explicit single page test
+        aligner.process_page(args.test_page, args.debug, overwrite=True)
     else:
-        aligner.run(args.debug)
+        aligner.run(args.debug, args.overwrite)
