@@ -4493,6 +4493,8 @@ def validate_and_correct_metadata(current_metadata, prev_metadata, ocr_data=None
             same_chapter = (prev_chapter_for_compare is not None and curr_chapter_for_compare is not None and 
                           curr_chapter_for_compare == prev_chapter_for_compare)
             
+            is_large_range = False # Initialize to prevent UnboundLocalError
+            
             log_print(f"DEBUG: Gap detection - same_book={same_book}, same_chapter={same_chapter} (prev_book={prev_book}, curr_book={curr_book}, prev_ch={prev_chapter_for_compare}, curr_ch={curr_chapter_for_compare})")
             
             if same_book and same_chapter:
