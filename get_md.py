@@ -3173,6 +3173,7 @@ def process_image(image_path, output_path=None, lang='eng', right_col_char_pos=N
                 if original_header_verse and ollama_verse_str == original_header_verse:
                     # Check for "Unreasonably Large Range"
                     # Use robust parsing
+                    is_large_range = False
                     try:
                         parsed_ollama = parse_verse_notation(ollama_verse_str)
                         total_verses = sum(len(ch['verses']) for ch in parsed_ollama)
