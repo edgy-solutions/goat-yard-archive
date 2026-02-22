@@ -1,0 +1,41 @@
+# values-test.yaml
+# Overrides for Test Environment Deployment
+
+# 1. API Configuration
+api:
+  env:
+    # Point to Weaviate in gya-test namespace
+    WEAVIATE_URL: "http://weaviate.gya-test.svc.cluster.local"
+    # GRPC Host (internal service name, no scheme)
+    WEAVIATE_GRPC_HOST: "weaviate.gya-test.svc.cluster.local"
+    # Point to MinIO in gya-test namespace
+    # Service name is gya-minio due to fullnameOverride in values-frontend.yaml
+    MINIO_HTTP_ENDPOINT: "http://gya-minio.gya-test.svc.cluster.local:9000"
+
+# 2. Postgres Configuration
+postgres:
+  # Point to Postgres in gya-test namespace
+  # Service name is gya-backend-postgres due to fullnameOverride in values-backend.yaml
+  host: "gya-backend-postgres.gya-test.svc.cluster.local"
+
+# 3. Disable Production Features
+# Disable Cloudflared tunnel to avoid conflicts (requires unique token)
+cloudflared:
+  enabled: false
+
+# 4. Ingress Configuration
+ingress:
+  enabled: true
+  className: "nginx" # Assuming nginx, adjust if using traefik or other
+  hosts:
+    - host: test.chart-example.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: ui
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /scans
+          pathType: Prefix
+          service: minio
