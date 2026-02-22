@@ -398,4 +398,4 @@ class BamlHttpStreamRequestClient:
         return result
     
 
-b = BamlSyncClient(DoNotUseDirectlyCallManager({}))
+b = BamlSyncClient(DoNotUseDirectlyCallManager({}))

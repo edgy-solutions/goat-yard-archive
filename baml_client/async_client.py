@@ -393,4 +393,4 @@ class BamlHttpStreamRequestClient:
         return result
     
 
-b = BamlAsyncClient(DoNotUseDirectlyCallManager({}))
+b = BamlAsyncClient(DoNotUseDirectlyCallManager({}))

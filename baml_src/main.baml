@@ -33,6 +33,8 @@ client<llm> Ollama {
   options {
     model "qwen2.5vl:32b"
     base_url "http://192.168.1.188:11434/v1"
+    //model "qwen3-vl-8k:32b"
+    //base_url "http://192.168.1.179:11434/v1"
     api_key "ollama"
     temperature 0.1
     options: {

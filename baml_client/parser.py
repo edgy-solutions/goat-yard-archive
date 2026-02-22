@@ -116,4 +116,4 @@ class LlmStreamParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateOCRMetadata", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.Metadata, result)
 
-    
+    

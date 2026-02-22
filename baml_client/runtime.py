@@ -338,4 +338,4 @@ def disassemble(function: typing.Callable) -> None:
         return
 
     print(f"----- function {function.__name__} -----")
-    __runtime__.disassemble(function.__name__)
+    __runtime__.disassemble(function.__name__)
