@@ -26,7 +26,7 @@ cloudflared:
 # 4. Ingress Configuration
 ingress:
   enabled: true
-  className: "nginx" # Assuming nginx, adjust if using traefik or other
+  className: "" # Assuming nginx, adjust if using traefik or other
   hosts:
     - host: test.chart-example.local
       paths:
