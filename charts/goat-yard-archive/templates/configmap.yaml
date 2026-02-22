@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "goat-yard-archive.fullname" . }}-config
+  labels:
+    app.kubernetes.io/name: {{ include "goat-yard-archive.name" . }}
+    helm.sh/chart: {{ include "goat-yard-archive.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  # Internal Services
+  {{- if .Values.api.env.WEAVIATE_URL }}
+  WEAVIATE_URL: {{ .Values.api.env.WEAVIATE_URL | quote }}
+  {{- end }}
+  {{- if .Values.api.env.WEAVIATE_GRPC_HOST }}
+  WEAVIATE_GRPC_HOST: {{ .Values.api.env.WEAVIATE_GRPC_HOST | quote }}
+  {{- end }}
+  {{- if .Values.api.env.WEAVIATE_PORT }}
+  WEAVIATE_PORT: {{ .Values.api.env.WEAVIATE_PORT | quote }}
+  {{- end }}
+  {{- if .Values.api.env.WEAVIATE_GRPC_PORT }}
+  WEAVIATE_GRPC_PORT: {{ .Values.api.env.WEAVIATE_GRPC_PORT | quote }}
+  {{- end }}
+  {{- if .Values.api.env.MINIO_HTTP_ENDPOINT }}
+  MINIO_HTTP_ENDPOINT: {{ .Values.api.env.MINIO_HTTP_ENDPOINT | quote }}
+  {{- end }}
+  
+  # External Integrations (Non-Sensitive)
+  {{- if .Values.api.env.LANGFUSE_BASE_URL }}
+  LANGFUSE_BASE_URL: {{ .Values.api.env.LANGFUSE_BASE_URL | quote }}
+  {{- end }}
+  {{- if .Values.api.env.LANGFUSE_PUBLIC_KEY }}
+  LANGFUSE_PUBLIC_KEY: {{ .Values.api.env.LANGFUSE_PUBLIC_KEY | quote }}
+  {{- end }}
+  
+  # Clerk
+  {{- if .Values.api.auth.clerkIssuer }}
+  CLERK_ISSUER: {{ .Values.api.auth.clerkIssuer | quote }}
+  {{- end }}
+  {{- if .Values.ui.auth.clerkPublishableKey }}
+  VITE_CLERK_PUBLISHABLE_KEY: {{ .Values.ui.auth.clerkPublishableKey | quote }}
+  {{- end }}
+
+  # UI Env
+  {{- range $key, $value := .Values.ui.env }}
+  {{ $key }}: {{ $value | toString | quote }}
+  {{- end }}

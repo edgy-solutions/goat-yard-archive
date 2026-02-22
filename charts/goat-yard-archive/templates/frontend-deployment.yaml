@@ -33,15 +33,11 @@ spec:
               containerPort: 3000
               protocol: TCP
           # Frontend Runtime Config
-          env:
-            - name: VITE_CLERK_PUBLISHABLE_KEY
-              value: {{ .Values.ui.auth.clerkPublishableKey | quote }}
-            {{- if .Values.ui.env }}
-            {{- range $key, $value := .Values.ui.env }}
-            - name: {{ $key }}
-              value: {{ $value | toString | quote }}
-            {{- end }}
-            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "goat-yard-archive.fullname" . }}-config
+            - secretRef:
+                name: {{ include "goat-yard-archive.fullname" . }}-secrets
           resources:
             requests:
               cpu: 100m

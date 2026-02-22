@@ -34,12 +34,23 @@ api:
     # Adjust 'weaviate' to your actual service name
     WEAVIATE_URL: "http://weaviate.gya-backend.svc.cluster.local"
     # GRPC Host (internal service name, no scheme)
-    WEAVIATE_GRPC_HOST: "weaviate.gya-backend.svc.cluster.local"
+    WEAVIATE_GRPC_HOST: "weaviate-grpc.gya-backend.svc.cluster.local"
     WEAVIATE_PORT: "80"
     WEAVIATE_GRPC_PORT: "50051"
     MINIO_HTTP_ENDPOINT: "http://gya-frontend-minio.gya-frontend.svc.cluster.local:9000"
+    
+    # EXTERNAL APIS (Now mapped to ConfigMap and Secret via envFrom)
+    # Provide placeholders here. Override these via 'helm install --set api.env.OPENROUTER_API_KEY=...' 
+    # or by providing a custom values.yaml during deployment.
+    OPENROUTER_API_KEY: ""
+    OPENROUTER_API_KEY_ANON: ""
+    LANGFUSE_BASE_URL: "https://cloud.langfuse.com"
+    LANGFUSE_SECRET_KEY: ""
+    LANGFUSE_PUBLIC_KEY: ""
+  
   auth:
-    clerkIssuer: "https://<your-app>.clerk.accounts.dev"
+    # Clerk configuration (Now mapped to ConfigMap and Secret)
+    clerkIssuer: "https://striking-calf-57.clerk.accounts.dev"
     clerkWebhookSecret: ""
 
 postgres:

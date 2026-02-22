@@ -7,7 +7,7 @@ api:
     # Point to Weaviate in gya-test namespace
     WEAVIATE_URL: "http://weaviate.gya-test.svc.cluster.local"
     # GRPC Host (internal service name, no scheme)
-    WEAVIATE_GRPC_HOST: "weaviate.gya-test.svc.cluster.local"
+    WEAVIATE_GRPC_HOST: "weaviate-grpc.gya-test.svc.cluster.local"
     # Point to MinIO in gya-test namespace
     # Service name is gya-minio due to fullnameOverride in values-frontend.yaml
     MINIO_HTTP_ENDPOINT: "http://gya-minio.gya-test.svc.cluster.local:9000"
