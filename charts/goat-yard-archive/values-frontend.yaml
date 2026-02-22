@@ -13,6 +13,9 @@ tolerations: &dmzTol
 nameOverride: "gya-frontend"
 fullnameOverride: "gya-frontend"
 
+imagePullSecrets:
+  - name: ghcr-secret
+
 api:
   enabled: true
   replicaCount: 1
