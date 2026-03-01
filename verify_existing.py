@@ -3,11 +3,16 @@
 
 import sys
 import io
+import argparse
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.path.insert(0, '.')
 from normalize_markdown import verify_normalization, post_process_headings
 from pathlib import Path
 import logging
+
+parser = argparse.ArgumentParser(description="Verify existing normalized files.")
+parser.add_argument("--page", type=str, help="Specific page to process (e.g., page100_image1)")
+args = parser.parse_args()
 
 # Find normalized files across all extracted_images* directories
 base_path = Path(r'C:\Users\cnogr\git\extract')
@@ -26,14 +31,13 @@ for img_dir in dirs_to_scan:
     
     normalized_files = sorted(list(img_dir.rglob('*_normalized.md')))
     
-    # Filter files if argument provided
-    if len(sys.argv) > 1:
-        filter_str = sys.argv[1]
-        normalized_files = [f for f in normalized_files if filter_str in f.name]
+    # Filter files if --page provided
+    if args.page:
+        normalized_files = [f for f in normalized_files if args.page in f.name]
     
     if not normalized_files:
-        if len(sys.argv) > 1:
-            print(f"  No files matching '{sys.argv[1]}' found in {img_dir.name}.")
+        if args.page:
+            print(f"  No files matching '{args.page}' found in {img_dir.name}.")
         else:
             print("  No normalized files found.")
         continue

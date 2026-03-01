@@ -1033,15 +1033,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Align verses to OCR bounding boxes")
     parser.add_argument("--dir", default=None, help="Input directory (default: $COMMENTARY_DATA_DIR/volume1)")
     parser.add_argument("--out", default=None, help="Output directory (default: $COMMENTARY_DATA_DIR/artifacts/alignment)")
-    parser.add_argument("--test-page", help="Process single page for testing")
+    parser.add_argument("--page", help="Process single page for testing")
     parser.add_argument("--debug", action="store_true", help="Generate debug images")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output files")
     args = parser.parse_args()
     
     aligner = VerseAligner(args.dir, args.out)
     
-    if args.test_page:
+    if args.page:
         # Always overwrite for explicit single page test
-        aligner.process_page(args.test_page, args.debug, overwrite=True)
+        aligner.process_page(args.page, args.debug, overwrite=True)
     else:
         aligner.run(args.debug, args.overwrite)

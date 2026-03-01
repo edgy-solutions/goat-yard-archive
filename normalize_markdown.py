@@ -1078,8 +1078,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Normalize OCR-extracted markdown from John Gill's Bible Commentary"
     )
+    parser.add_argument("--page", type=str,
+                        help="Specific page to process (e.g., vol1_page100_image1)")
     parser.add_argument("--file", "-f", type=str, 
-                        help="Single markdown file to normalize")
+                        help="Single markdown file path to normalize (legacy)")
     parser.add_argument("--dir", "-d", type=str,
                         help="Directory containing markdown files to normalize (default: $COMMENTARY_DATA_DIR/volume1/qwen_qwen3-vl-235b-a22b-thinking)")
     parser.add_argument("--force", action="store_true",
@@ -1101,14 +1103,14 @@ def main():
     # Validate arguments & set defaults
     base_dir = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
     
-    if not args.file and not args.dir:
+    if not args.file and not args.dir and not args.page:
         # Default to volume1
         args.dir = str(base_dir / "volume1/qwen_qwen3-vl-235b-a22b-thinking")
         logging.info(f"No input specified, defaulting to: {args.dir}")
     
     
-    if args.file and args.dir:
-        parser.error("Cannot specify both --file and --dir")
+    if sum(bool(x) for x in [args.file, args.dir, args.page]) > 1:
+        parser.error("Cannot specify more than one of --file, --dir, or --page")
     
     # Setup logging
     setup_logging(verbose=args.verbose)
@@ -1128,9 +1130,40 @@ def main():
     
     start_time = datetime.now()
     
-    if args.file:
-        # Single file mode
-        input_path = Path(args.file)
+    if args.page or args.file:
+        # Single file/page mode
+        if args.page:
+            # Construct the path based on the page name
+            # Assume volume dir based on volume prefix if exists, otherwise volume1
+            # Actually, standardizing directory path. Best to search if not sure, but let's try standard path first
+            
+            # Extract volume from page name (e.g. vol1_page105_image1 -> volume1)
+            vol_dir = "volume1"
+            import re
+            m = re.match(r'^(vol\d+)_', args.page)
+            if m:
+                vol_dir = m.group(1).replace('vol', 'volume')
+            
+            qwen_dir_name = "qwen_qwen3-vl-235b-a22b-thinking"
+            input_path = base_dir / vol_dir / qwen_dir_name / f"{args.page}.md"
+            
+            # If standard path doesn't exist, try to find it dynamically in all qwen dirs
+            if not input_path.exists():
+                 logging.info(f"Standard path {input_path} not found. Searching for {args.page}.md...")
+                 # look in all volume folders
+                 found = False
+                 for vol_folder in base_dir.glob("volume*"):
+                     for qwen_folder in vol_folder.glob("qwen*"):
+                          candidate = qwen_folder / f"{args.page}.md"
+                          if candidate.exists():
+                               input_path = candidate
+                               found = True
+                               break
+                     if found:
+                          break
+        else:
+            input_path = Path(args.file)
+            
         if not input_path.exists():
             logging.error(f"File not found: {input_path}")
             sys.exit(1)
