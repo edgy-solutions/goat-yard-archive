@@ -8,6 +8,11 @@ from dagster import (
     StaticPartitionsDefinition,
     MultiPartitionsDefinition,
     asset,
+    AssetDep,
+    AllPartitionMapping,
+    MultiPartitionMapping,
+    DimensionPartitionMapping,
+    IdentityPartitionMapping,
 )
 
 # 1. Define Partitions
@@ -251,7 +256,13 @@ def ingest(context: AssetExecutionContext, align_verses):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_partitions)
+@asset(
+    partitions_def=volume_partitions,
+    deps=[AssetDep("get_md", partition_mapping=MultiPartitionMapping({
+        "volume": DimensionPartitionMapping("volume", IdentityPartitionMapping()),
+        "page": DimensionPartitionMapping("page", AllPartitionMapping())
+    }))]
+)
 def verify_verse_continuity_validation(context: AssetExecutionContext):
     """
     Scope: Per Volume
@@ -269,7 +280,7 @@ def verify_verse_continuity_validation(context: AssetExecutionContext):
     run_cli_script(context, cmd)
 
 
-@asset
+@asset(deps=[AssetDep("ingest", partition_mapping=AllPartitionMapping())])
 def verify_db_ingestion_global(context: AssetExecutionContext):
     """
     Scope: Global
@@ -282,7 +293,7 @@ def verify_db_ingestion_global(context: AssetExecutionContext):
     run_cli_script(context, cmd)
 
 
-@asset
+@asset(deps=[AssetDep("get_md", partition_mapping=AllPartitionMapping())])
 def optimize_dspy_normalizer(context: AssetExecutionContext):
     """
     Scope: Global / Ad-hoc
@@ -340,7 +351,7 @@ def verify_markdown_headers_validation(context: AssetExecutionContext):
         raise Exception(f"Command failed with return code {process.returncode}")
 
 
-@asset
+@asset(deps=[AssetDep("ingest", partition_mapping=AllPartitionMapping())])
 def scan_duplicate_entities_global(context: AssetExecutionContext):
     """
     Scope: Global
@@ -369,15 +380,23 @@ def build_kjv_fast_lookup_global(context: AssetExecutionContext):
     run_cli_script(context, cmd)
 
 
-@asset
-def upload_to_minio_global(context: AssetExecutionContext, build_kjv_fast_lookup_global):
+@asset(
+    partitions_def=volume_partitions,
+    deps=[
+        "extract_images", 
+        AssetDep("build_kjv_fast_lookup_global", partition_mapping=AllPartitionMapping())
+    ]
+)
+def upload_to_minio(context: AssetExecutionContext, build_kjv_fast_lookup_global):
     """
-    Scope: Global
+    Scope: Per Volume
     setup_minio.py
-    Syncs the newly built `kjv_fast_lookup.json` map natively into the MinIO `scans` bucket alongside all frontend default page graphics.
+    Syncs the newly built `kjv_fast_lookup.json` map natively and the volume's `scans` into the MinIO bucket alongside global frontend default graphics.
     """
+    volume = context.partition_key
     cmd = [
-        "python", os.path.join(SCRIPTS_DIR, "setup_minio.py")
+        "python", os.path.join(SCRIPTS_DIR, "setup_minio.py"),
+        "--volume", volume
     ]
     
     # Needs to run in repo root because setup_minio.py relies on Path("frontend/public/scans") and Path("kjv_fast_lookup.json")

@@ -72,10 +72,11 @@ def main(filter_str=None):
     else:
         print("⚠️ Warning: kjv_fast_lookup.json not found in root. Skipping upload.")
     
-    # Apply Filter
+    # Apply Filter natively against Volumes instead of arbitrary strings
     if filter_str:
-        print(f"🔍 Filtering for files containing: '{filter_str}'")
-        files = [f for f in files if filter_str in str(f)]
+        print(f"🔍 Filtering for Volume: '{filter_str}'")
+        # Ensure we keep the global assets (gill_*.png and the kjv index)
+        files = [f for f in files if (f in root_images) or (f == kjv_index) or (f"volume{filter_str}" in f.parts)]
 
     print(f"Found {len(files)} files to sync.")
 
@@ -108,7 +109,7 @@ def main(filter_str=None):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Sync images to MinIO")
-    parser.add_argument("--filter", help="Partial filename match to filter uploads (e.g. 'page280')")
+    parser.add_argument("--volume", help="Volume number (e.g. '1') to synchronize exclusively.")
     args = parser.parse_args()
     
-    main(filter_str=args.filter)
+    main(filter_str=args.volume)
