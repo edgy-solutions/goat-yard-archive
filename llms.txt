@@ -1,0 +1,33 @@
+# Dr. Voluminous: System Context & Documentation
+
+This file helps AI agents understand the architecture and purpose of the Goat Yard Archive repository: a Retrieval-Augmented Generation (RAG) system for John Gill's Exposition of the Entire Bible.
+
+## Project Architecture
+
+The project contains three distinct components:
+
+1. **Ingestion Pipeline (Dagster + Python CLI Scripts)**
+   - **Purpose**: Transform raw PDFs into structured markdown, extract original-language verses, and align them to exact bounding boxes on the original page scans.
+   - **Orchestrator**: Dagster (see `gill_commentary_pipeline/assets.py`).
+   - **Key Scripts** (in `gill_commentary_pipeline/scripts/`):
+     - `extract_images.py`: PDF -> PNGs
+     - `get_md.py`: OCR geometry, metadata generation (Ollama), and clean USFM Greek/Hebrew extraction.
+     - `read_images_baml.py`: BAML-powered vision model extraction of commentary to markdown.
+     - `reindex_ocr.py` / `fixup_ocr.py` / `normalize_markdown.py`: OCR and Markdown correction loop.
+     - `align_verses.py`: Fuzzy matching verse positions to coordinates.
+     - `ingest.py`: Loading entities and verses into Weaviate.
+
+2. **Backend API (FastAPI + DSPy + Weaviate)**
+   - **Purpose**: Serve queries with precise sentence-level citations in the persona of an 18th-century theologian.
+   - **Search Framework**: `backend/gill_search.py` (Keyword + Vector hybrid search on `CommentaryChunk` and `TheologicalEntity` Weaviate collections).
+   - **Generator**: DSPy + DeepSeek via OpenRouter (see `backend/bot.py`).
+   - **Verifier**: The `GroundedGillBot` critic strictly ensures every citation provided by the LLM maps directly back to the physical page and sentence coordinates provided in the context search.
+
+3. **Frontend UI (React/Next.js)**
+   - **Purpose**: Split-pane interface allowing users to chat with Dr. Voluminous on the left pane and view deep-linked image scans with canvas highlight bounding boxes on the right pane.
+
+## Core Directives for AIs
+- If you need pipeline runbook commands, refer to `AGENTS.md`.
+- Ensure changes to prompt engineering use BAML (`baml_src/main.baml`).
+- Do not make breaking changes to the Weaviate schema structure without re-aligning `ingest.py`.
+- Preserve the 18th-century persona and strict DSPy citation assertions in the backend.

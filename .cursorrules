@@ -1,0 +1,36 @@
+# .cursorrules - Project Guidelines for AI Agents
+
+## Tech Stack
+- **Languages**: Python 3.11+ (Backend/Pipeline), TypeScript (Frontend).
+- **Frontend**: React, Next.js, TailwindCSS (Split-pane view).
+- **Backend API**: FastAPI.
+- **AI Processing**: DSPy (LLM orchestration & RAG generation), BAML (Vision/Extraction), Ollama (Local Validation), OpenRouter (Remote Vision/Chat).
+- **Database**: Weaviate (Vector + Hybrid Knowledge Graph). Neo4j (experimental).
+- **Orchestration**: Dagster.
+
+## Coding Style & Project Conventions
+1. **Python**:
+   - Always add type hints natively supported by Python 3.9+ (e.g., `dict[str, Any]`, `list[str]`).
+   - Use absolute paths built with `Path` from `pathlib` over `os.path` where possible.
+   - For all Python command execution, avoid using raw subprocess logic unless writing specific Dagster orchestration.
+   - Strict handling of citations. DSPy backend must ensure every generated answer references an existing `Sentence ID` present in the retrieved context.
+
+2. **Dagster Orchestration**:
+   - The data ingestion pipeline logic operates entirely through `gill_commentary_pipeline`.
+   - Never run data extraction via ad-hoc CLI unless specifically testing isolated functions. `dagster dev` is the intended orchestrator.
+   - When modifying extraction scripts (`gill_commentary_pipeline/scripts/`), ensure they maintain support for the `--page` standard parameter so they can be securely orchestrated per-page in the Dagster UI.
+
+3. **Prompts & Models**:
+   - Do NOT edit LLM prompts as raw string literals in Python for vision tasks. They are centralized in `baml_src/main.baml`. After modifying `main.baml`, you MUST regenerate the client via `baml-cli generate`.
+   - The backend (DSPy) holds its own specific prompt logic in `backend/bot.py`, aiming specifically for an 18th-century persona strictly grounding itself on the generated textual coordinates from Weaviate.
+
+4. **USFM / Language Handling**:
+   - Always preserve original Greek/Hebrew texts.
+   - Leverage `get_md.py`'s `clean_usfm_text()` when needing normalized Greek/Hebrew text strings. Do not invent your own Regex to parse USFM tags if not needed.
+
+## Database (Weaviate) Safety
+- There are two primary schema collections: `CommentaryChunk` and `TheologicalEntity`.
+- Do NOT issue destructive mutations directly to Weaviate without backup validation or verifying scope.
+- `CommentaryChunk` `sentence_data` strings are critical to RAG generation citations.
+
+Review `llms.txt` for an architectural summary or `AGENTS.md` for safety and explicit runbook directions.

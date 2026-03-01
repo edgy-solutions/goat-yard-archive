@@ -1,5 +1,11 @@
 # Dr. Voluminous: The Digital Archives of Dr. John Gill
 
+## Documentation Guide
+Welcome to the Goat Yard Archive repository for John Gill's Exposition of the Entire Bible! We have compartmentalized our internal logic documentation to best serve autonomous AI agents and standard developers alike:
+- 🤖 **AI Context**: Read `llms.txt` to discover the architectural blueprint.
+- 🚦 **Agent Guardrails**: Read `AGENTS.md` for explicit safety limits and the full pipeline ingestion runbook.
+- ⌨️ **Coding Standards**: Read `.cursorrules` for our standard tech stack protocols.
+
 ## Backend Architecture & Request Flow
 
 This system uses a **Retrieval-Augmented Generation (RAG)** pipeline to provide grounded, theological answers based on the writings of Dr. John Gill. The backend assumes the persona of an 18th-century contemporary to maintain tonal consistency.
@@ -109,4 +115,14 @@ The `scripts/ingest.py` and `normalize_markdown.py` scripts handle the transform
     *   As text is processed, **BAML** (Better Another Modeling Language) is used to extract entities (e.g., "The Chaldee Paraphrase says...").
     *   These entities are deduplicated and inserted into `TheologicalEntity`.
     *   The `CommentaryChunk` is then linked to these entities, creating a traversable graph (e.g., "Find all commentary mentioning *Gamaliel*").
+
+### 3. Pipeline Orchestration (Dagster)
+As of the latest architecture updates, all python pipeline ingestion scripts (like `get_md.py`, `align_verses.py`) currently exist inside `gill_commentary_pipeline/scripts/`.
+
+To safely chain their operations together, they are orchestrated via a native **Dagster** environment spanning across statically partitioned definitions (Volumes 1 through 9) and natively dynamic sub-partitions for pages mapping back to each discrete printed document slice. 
+
+To execute and visualize the entire process:
+```powershell
+dagster dev
+```
 
