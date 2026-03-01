@@ -73,3 +73,69 @@ BIBLE_BOOK_MAP = {
     "jude": "JUDE", "jd": "JUDE",
     "rev": "REVELATION", "re": "REVELATION", "revelation": "REVELATION"
 }
+
+from typing import List
+
+CANONICAL_BOOKS = [
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
+    "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel",
+    "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther",
+    "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song Of Solomon", 
+    "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel",
+    "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum",
+    "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi",
+    "Matthew", "Mark", "Luke", "John", "Acts", "Romans",
+    "1 Corinthians", "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
+    "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon",
+    "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John",
+    "Jude", "Revelation"
+]
+
+def format_book_ranges(books: List[str]) -> List[str]:
+    """Sort books into canonical order and group consecutive books into ranges."""
+    if not books:
+        return []
+        
+    def get_sort_key(book_name: str):
+        try:
+            return (0, CANONICAL_BOOKS.index(book_name))
+        except ValueError:
+            return (1, book_name)
+
+    # Dedup and sort books
+    sorted_books = sorted(list(set(books)), key=get_sort_key)
+    
+    formatted_books = []
+    i = 0
+    n = len(sorted_books)
+    
+    while i < n:
+        start_book = sorted_books[i]
+        try:
+            start_index = CANONICAL_BOOKS.index(start_book)
+        except ValueError:
+            formatted_books.append(start_book)
+            i += 1
+            continue
+            
+        j = i
+        while j + 1 < n:
+            next_book = sorted_books[j+1]
+            try:
+                next_index = CANONICAL_BOOKS.index(next_book)
+                if next_index == start_index + (j + 1 - i):
+                    j += 1
+                else:
+                    break
+            except ValueError:
+                break
+                
+        if j > i:
+            formatted_books.append(f"{start_book}-{sorted_books[j]}")
+        else:
+            formatted_books.append(start_book)
+            
+        i = j + 1
+        
+    return formatted_books
+

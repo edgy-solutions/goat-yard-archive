@@ -20,6 +20,7 @@ from .database import init_db
 from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
+from .bible_mapping import format_book_ranges
 
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -454,7 +455,8 @@ async def get_books():
     if not search_engine:
         # Fallback if engine down
         return {"books": ["Genesis", "Matthew"]}
-    return {"books": search_engine.get_available_books()}
+    raw_books = search_engine.get_available_books()
+    return {"books": format_book_ranges(raw_books)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
