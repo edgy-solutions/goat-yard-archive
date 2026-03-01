@@ -53,7 +53,15 @@ The pipeline transforms raw PDFs of John Gill's Commentary into a vector databas
 
 *Warning: Step 7 natively creates `Sentence-Level Granularity` inside Weaviate explicitly needed by the `DSPy` Retrieval QA Bot.*
 
+### Step 8: Validation (Dagster Monitors)
+- **Action**: Native `dagster` diagnostic checks asserting the structural safety of the output. 
+- **Subprocess**: 
+  - `verify_verse_continuity_validation` scans for sequentially dropped or missing verses globally.
+  - `verify_markdown_headers_validation` ensures `# CHAP.` syntax natively bonded logically throughout the LLM `.md` payloads.
+  - `verify_db_ingestion_global` catches legacy formats persisting inside Weaviate visually.
+  - `scan_duplicate_entities_global` tracks Entity/UUID fragmentation continuously in the graph index natively.
+
 ## 🧪 Quick Test/Verification Tasks
 - Verify BAML function syntax is safe: `baml-cli check`.
 - Query current LLM cost stats from pipeline ingestion runs: `cat metrics.jsonl`.
-- Confirm USFM clean status: `uv run pytest test_usfm_cleaning.py`.
+- Confirm USFM clean status by testing strictly inside the preserved suite: `uv run pytest test/`.

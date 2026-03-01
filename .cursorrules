@@ -20,6 +20,7 @@
    - The data ingestion pipeline logic operates entirely through `pipeline`.
    - Never run data extraction via ad-hoc CLI unless specifically testing isolated functions. `uv run dagster dev` is the intended orchestrator.
    - When modifying extraction scripts (`pipeline/scripts/`), ensure they maintain support for the `--page` standard parameter so they can be securely orchestrated per-page in the Dagster UI.
+   - All validation testing and data pipeline verification must run centrally as Dagster Assets to preserve the UI orchestration mapping.
 
 3. **Prompts & Models**:
    - Do NOT edit LLM prompts as raw string literals in Python for vision tasks. They are centralized in `baml_src/main.baml`. After modifying `main.baml`, you MUST regenerate the client via `baml-cli generate`.

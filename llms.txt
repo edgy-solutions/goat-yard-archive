@@ -16,6 +16,8 @@ The project contains three distinct components:
      - `reindex_ocr.py` / `fixup_ocr.py` / `normalize_markdown.py`: OCR and Markdown correction loop.
      - `align_verses.py`: Fuzzy matching verse positions to coordinates.
      - `ingest.py`: Loading entities and verses into Weaviate.
+     - `train_dspy.py`: Optimizer exposing the DSPy LLM Prompt generation natively to `deepseek-chat`.
+     - `update_metadata_text.py` & `purge_weaviate.py`: Native support toolings integrated into the script ecosystem natively.
 
 2. **Backend API (FastAPI + DSPy + Weaviate)**
    - **Purpose**: Serve queries with precise sentence-level citations in the persona of an 18th-century theologian.

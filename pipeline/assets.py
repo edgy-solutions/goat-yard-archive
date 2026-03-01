@@ -302,3 +302,54 @@ def optimize_dspy_normalizer(context: AssetExecutionContext):
     ]
     
     run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_partitions)
+def verify_markdown_headers_validation(context: AssetExecutionContext):
+    """
+    Scope: Per Volume
+    audit_missing_headers.py
+    Explicitly scans each page in the partition to confirm the LLM output properly attached `# CHAP.` headers to the raw `.md` data.
+    """
+    volume = context.partition_key
+    volume_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    
+    if not os.path.exists(volume_dir):
+        context.log.warning(f"Data directory not found for Volume {volume}. Skipping.")
+        return
+        
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "audit_missing_headers.py"),
+        volume_dir
+    ]
+    
+    # Passing the directory to the script requires the script to accept it if it was modified, 
+    # but the script actually hardcodes volumes internally using COMMENTARY_DATA_DIR. 
+    # To be safe and utilize the partition naturally, we can set the env var for the subprocess.
+    env = os.environ.copy()
+    env["COMMENTARY_DATA_DIR"] = volume_dir
+    
+    context.log.info(f"Running command: {' '.join(cmd)}")
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=None, env=env
+    )
+    for line in process.stdout:
+        context.log.info(line.strip())
+    process.wait()
+    if process.returncode != 0:
+        raise Exception(f"Command failed with return code {process.returncode}")
+
+
+@asset
+def scan_duplicate_entities_global(context: AssetExecutionContext):
+    """
+    Scope: Global
+    deduplicate_entities.py scan
+    Continuously hits Weaviate to warn the pipeline UI if fragmented entities (same name/era) start occurring inside the graph unexpectedly.
+    """
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "deduplicate_entities.py"),
+        "scan"
+    ]
+    
+    run_cli_script(context, cmd)
