@@ -1160,82 +1160,6 @@ wheels = [
 ]
 
 [[package]]
-name = "gill-commentary-pipeline"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "baml-py" },
-    { name = "dspy-ai" },
-    { name = "openai" },
-    { name = "protobuf" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "tenacity" },
-    { name = "weaviate-client" },
-]
-
-[package.optional-dependencies]
-backend = [
-    { name = "bcrypt" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "langfuse" },
-    { name = "passlib" },
-    { name = "psycopg2-binary" },
-    { name = "pydantic" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "python-multipart" },
-    { name = "slowapi" },
-    { name = "sqlalchemy" },
-    { name = "svix" },
-    { name = "uvicorn" },
-]
-pipeline = [
-    { name = "dagster" },
-    { name = "dagster-webserver" },
-    { name = "matplotlib" },
-    { name = "minio" },
-    { name = "networkx" },
-    { name = "nltk" },
-    { name = "pytesseract" },
-    { name = "rapidfuzz" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "baml-py", specifier = "==0.211.1" },
-    { name = "bcrypt", marker = "extra == 'backend'" },
-    { name = "dagster", marker = "extra == 'pipeline'" },
-    { name = "dagster-webserver", marker = "extra == 'pipeline'" },
-    { name = "dspy-ai", specifier = "==3.0.4" },
-    { name = "fastapi", marker = "extra == 'backend'", specifier = "==0.127.0" },
-    { name = "httpx", marker = "extra == 'backend'", specifier = "==0.28.1" },
-    { name = "langfuse", marker = "extra == 'backend'" },
-    { name = "matplotlib", marker = "extra == 'pipeline'" },
-    { name = "minio", marker = "extra == 'pipeline'" },
-    { name = "networkx", marker = "extra == 'pipeline'" },
-    { name = "nltk", marker = "extra == 'pipeline'" },
-    { name = "openai", specifier = "==2.14.0" },
-    { name = "passlib", marker = "extra == 'backend'" },
-    { name = "protobuf", specifier = "<6.0.0" },
-    { name = "psycopg2-binary", marker = "extra == 'backend'", specifier = "==2.9.9" },
-    { name = "pydantic", marker = "extra == 'backend'", specifier = "==2.12.0" },
-    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'backend'", specifier = "==2.8.0" },
-    { name = "pytesseract", marker = "extra == 'pipeline'" },
-    { name = "python-dotenv", specifier = "==1.2.1" },
-    { name = "python-multipart", marker = "extra == 'backend'", specifier = "==0.0.18" },
-    { name = "rapidfuzz", marker = "extra == 'pipeline'" },
-    { name = "requests", specifier = "==2.32.5" },
-    { name = "slowapi", marker = "extra == 'backend'", specifier = "==0.1.9" },
-    { name = "sqlalchemy", marker = "extra == 'backend'", specifier = "==2.0.25" },
-    { name = "svix", marker = "extra == 'backend'", specifier = "==1.15.0" },
-    { name = "tenacity", specifier = "==9.1.2" },
-    { name = "uvicorn", marker = "extra == 'backend'", specifier = "==0.35.0" },
-    { name = "weaviate-client", specifier = "==4.18.3" },
-]
-provides-extras = ["backend", "pipeline"]
-
-[[package]]
 name = "googleapis-common-protos"
 version = "1.72.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2570,6 +2494,82 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/30/02/00fa585abfd9fe9d73e5f6e554dc36cc2b842898cbfc46d70353dae227f8/pillow-12.1.1-pp311-pypy311_pp73-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8089c852a56c2966cf18835db62d9b34fef7ba74c726ad943928d494fa7f4735", size = 5963343, upload-time = "2026-02-11T04:23:02.934Z" },
     { url = "https://files.pythonhosted.org/packages/f2/26/c56ce33ca856e358d27fda9676c055395abddb82c35ac0f593877ed4562e/pillow-12.1.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:cb9bb857b2d057c6dfc72ac5f3b44836924ba15721882ef103cecb40d002d80e", size = 7029880, upload-time = "2026-02-11T04:23:04.783Z" },
 ]
+
+[[package]]
+name = "pipeline"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "baml-py" },
+    { name = "dspy-ai" },
+    { name = "openai" },
+    { name = "protobuf" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "tenacity" },
+    { name = "weaviate-client" },
+]
+
+[package.optional-dependencies]
+backend = [
+    { name = "bcrypt" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "langfuse" },
+    { name = "passlib" },
+    { name = "psycopg2-binary" },
+    { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
+    { name = "slowapi" },
+    { name = "sqlalchemy" },
+    { name = "svix" },
+    { name = "uvicorn" },
+]
+pipeline = [
+    { name = "dagster" },
+    { name = "dagster-webserver" },
+    { name = "matplotlib" },
+    { name = "minio" },
+    { name = "networkx" },
+    { name = "nltk" },
+    { name = "pytesseract" },
+    { name = "rapidfuzz" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "baml-py", specifier = "==0.211.1" },
+    { name = "bcrypt", marker = "extra == 'backend'" },
+    { name = "dagster", marker = "extra == 'pipeline'" },
+    { name = "dagster-webserver", marker = "extra == 'pipeline'" },
+    { name = "dspy-ai", specifier = "==3.0.4" },
+    { name = "fastapi", marker = "extra == 'backend'", specifier = "==0.127.0" },
+    { name = "httpx", marker = "extra == 'backend'", specifier = "==0.28.1" },
+    { name = "langfuse", marker = "extra == 'backend'" },
+    { name = "matplotlib", marker = "extra == 'pipeline'" },
+    { name = "minio", marker = "extra == 'pipeline'" },
+    { name = "networkx", marker = "extra == 'pipeline'" },
+    { name = "nltk", marker = "extra == 'pipeline'" },
+    { name = "openai", specifier = "==2.14.0" },
+    { name = "passlib", marker = "extra == 'backend'" },
+    { name = "protobuf", specifier = "<6.0.0" },
+    { name = "psycopg2-binary", marker = "extra == 'backend'", specifier = "==2.9.9" },
+    { name = "pydantic", marker = "extra == 'backend'", specifier = "==2.12.0" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'backend'", specifier = "==2.8.0" },
+    { name = "pytesseract", marker = "extra == 'pipeline'" },
+    { name = "python-dotenv", specifier = "==1.2.1" },
+    { name = "python-multipart", marker = "extra == 'backend'", specifier = "==0.0.18" },
+    { name = "rapidfuzz", marker = "extra == 'pipeline'" },
+    { name = "requests", specifier = "==2.32.5" },
+    { name = "slowapi", marker = "extra == 'backend'", specifier = "==0.1.9" },
+    { name = "sqlalchemy", marker = "extra == 'backend'", specifier = "==2.0.25" },
+    { name = "svix", marker = "extra == 'backend'", specifier = "==1.15.0" },
+    { name = "tenacity", specifier = "==9.1.2" },
+    { name = "uvicorn", marker = "extra == 'backend'", specifier = "==0.35.0" },
+    { name = "weaviate-client", specifier = "==4.18.3" },
+]
+provides-extras = ["backend", "pipeline"]
 
 [[package]]
 name = "platformdirs"

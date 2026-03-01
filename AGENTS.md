@@ -6,7 +6,7 @@ This document is to be utilized by autonomous agents navigating the repository t
 1. **Do not destruct pipeline data**. Never execute `rm -rf` against `extracted_images/` or any `volumeN/` output directory without explicit instruction.
 2. **Weaviate Data**. `ingest.py` pushes aggressively to Weaviate. If you re-ingest data, understand that it will either update or duplicate entities. Be extremely careful when executing `purge_weaviate.py`.
 3. **BAML Runtime Generation**. If you change `baml_src/main.baml`, you *must* run `baml-cli generate` inside the Python virtual environment before deploying or testing dependent logic (`get_md.py`, `read_images_baml.py`).
-4. **Dagster**. The primary data extraction processes have been relocated to `gill_commentary_pipeline/scripts/` and wrapped within Dagster (`assets.py`). Use `uv run dagster dev` to execute the pipeline over orchestrating individual scripts with ad-hoc Python loops unless testing logic for `--page`.
+4. **Dagster**. The primary data extraction processes have been relocated to `pipeline/scripts/` and wrapped within Dagster (`assets.py`). Use `uv run dagster dev` to execute the pipeline over orchestrating individual scripts with ad-hoc Python loops unless testing logic for `--page`.
 
 ---
 
@@ -14,7 +14,7 @@ This document is to be utilized by autonomous agents navigating the repository t
 
 The pipeline transforms raw PDFs of John Gill's Commentary into a vector database full of strict references to coordinates and verses.
 
-*All scripts are executed against `gill_commentary_pipeline/scripts/*` or via Dagster.*
+*All scripts are executed against `pipeline/scripts/*` or via Dagster.*
 
 ### Step 1: Source Extraction
 - **Action**: Extract PNGs from PDF.

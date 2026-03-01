@@ -8,8 +8,8 @@ The project contains three distinct components:
 
 1. **Ingestion Pipeline (Dagster + Python CLI Scripts)**
    - **Purpose**: Transform raw PDFs into structured markdown, extract original-language verses, and align them to exact bounding boxes on the original page scans.
-   - **Orchestrator**: Dagster (see `gill_commentary_pipeline/assets.py`).
-   - **Key Scripts** (in `gill_commentary_pipeline/scripts/`):
+   - **Orchestrator**: Dagster (see `pipeline/assets.py`).
+   - **Key Scripts** (in `pipeline/scripts/`):
      - `extract_images.py`: PDF -> PNGs
      - `get_md.py`: OCR geometry, metadata generation (Ollama), and clean USFM Greek/Hebrew extraction.
      - `read_images_baml.py`: BAML-powered vision model extraction of commentary to markdown.

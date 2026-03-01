@@ -117,7 +117,7 @@ The `scripts/ingest.py` and `normalize_markdown.py` scripts handle the transform
     *   The `CommentaryChunk` is then linked to these entities, creating a traversable graph (e.g., "Find all commentary mentioning *Gamaliel*").
 
 ### 3. Pipeline Orchestration (Dagster)
-As of the latest architecture updates, all python pipeline ingestion scripts (like `get_md.py`, `align_verses.py`) currently exist inside `gill_commentary_pipeline/scripts/`.
+As of the latest architecture updates, all python pipeline ingestion scripts (like `get_md.py`, `align_verses.py`) currently exist inside `pipeline/scripts/`.
 
 To safely chain their operations together, they are orchestrated via a native **Dagster** environment spanning across statically partitioned definitions (Volumes 1 through 9) and natively dynamic sub-partitions for pages mapping back to each discrete printed document slice. 
 

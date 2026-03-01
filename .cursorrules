@@ -17,9 +17,9 @@
    - Strict handling of citations. DSPy backend must ensure every generated answer references an existing `Sentence ID` present in the retrieved context.
 
 2. **Dagster Orchestration**:
-   - The data ingestion pipeline logic operates entirely through `gill_commentary_pipeline`.
+   - The data ingestion pipeline logic operates entirely through `pipeline`.
    - Never run data extraction via ad-hoc CLI unless specifically testing isolated functions. `uv run dagster dev` is the intended orchestrator.
-   - When modifying extraction scripts (`gill_commentary_pipeline/scripts/`), ensure they maintain support for the `--page` standard parameter so they can be securely orchestrated per-page in the Dagster UI.
+   - When modifying extraction scripts (`pipeline/scripts/`), ensure they maintain support for the `--page` standard parameter so they can be securely orchestrated per-page in the Dagster UI.
 
 3. **Prompts & Models**:
    - Do NOT edit LLM prompts as raw string literals in Python for vision tasks. They are centralized in `baml_src/main.baml`. After modifying `main.baml`, you MUST regenerate the client via `baml-cli generate`.
