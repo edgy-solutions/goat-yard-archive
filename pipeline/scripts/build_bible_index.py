@@ -130,6 +130,7 @@ if __name__ == "__main__":
         except:
             pass
             
-    with open("kjv_fast_lookup.json", "w", encoding='utf-8') as f:
+    out_path = BIBLES_DIR.parent / "kjv_fast_lookup.json"
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(expanded_data, f, indent=2)
     print(f"✅ Indexed {len(expanded_data)} keys.")

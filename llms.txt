@@ -23,7 +23,7 @@ The project contains three distinct components:
    - **Purpose**: Serve queries with precise sentence-level citations in the persona of an 18th-century theologian.
    - **Search Framework**: `backend/gill_search.py` (Keyword + Vector hybrid search on `CommentaryChunk` and `TheologicalEntity` Weaviate collections).
      - **Graph-RAG Strategy**: Leverages the `mentions_entity` cross-reference to traverse relationships (e.g., discovering Peter and Andrew are related via co-occurrence in chunks).
-   - **Verse Lookup Engine**: Loads a `kjv_fast_lookup.json` (flattened from USFM via build scripts) into memory to serve extremely fast O(1) `/api/verse/{ref}` requests.
+   - **Verse Lookup Engine**: Loads a `kjv_fast_lookup.json` (flattened from USFM natively via Dagster asset `build_kjv_fast_lookup_global`) into memory to serve extremely fast O(1) `/api/verse/{ref}` requests.
    - **Generator**: DSPy + DeepSeek via OpenRouter (see `backend/bot.py`).
    - **Verifier**: The `GroundedGillBot` critic strictly ensures every citation provided by the LLM maps directly back to the physical page and sentence coordinates provided in the context search.
 

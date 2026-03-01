@@ -61,6 +61,12 @@ The pipeline transforms raw PDFs of John Gill's Commentary into a vector databas
   - `verify_db_ingestion_global` catches legacy formats persisting inside Weaviate visually.
   - `scan_duplicate_entities_global` tracks Entity/UUID fragmentation continuously in the graph index natively.
 
+### Step 9: Object Syncing & Index Compilation (Dagster)
+- **Action**: Native `dagster` triggers to generate UI backend JSON maps and push media to MinIO storage instances.
+- **Subprocess**: 
+  - `build_kjv_fast_lookup_global` automatically converts raw USFM bibles into the flat O(1) `kjv_fast_lookup.json` Verse API.
+  - `upload_to_minio_global` inherently waits for the JSON index, then pushes it alongside all local `/scans/` PNG datasets to the `localhost:9000` MinIO bucket seamlessly.
+
 ## 🧪 Quick Test/Verification Tasks
 - Verify BAML function syntax is safe: `baml-cli check`.
 - Query current LLM cost stats from pipeline ingestion runs: `cat metrics.jsonl`.

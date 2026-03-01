@@ -126,3 +126,5 @@ To execute and visualize the entire process:
 dagster dev
 ```
 
+*Note: In addition to ingestion, Dagster globally orchestrates the generation of `kjv_fast_lookup.json` (via `build_kjv_fast_lookup_global`) and the synchronization of all Frontend image assets cleanly into MinIO remote buckets (via `upload_to_minio_global`).*
+

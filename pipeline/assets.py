@@ -353,3 +353,34 @@ def scan_duplicate_entities_global(context: AssetExecutionContext):
     ]
     
     run_cli_script(context, cmd)
+
+
+@asset
+def build_kjv_fast_lookup_global(context: AssetExecutionContext):
+    """
+    Scope: Global
+    build_bible_index.py
+    Builds the flat JSON KJV Index `kjv_fast_lookup.json` acting as the O(1) Verse API.
+    """
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "build_bible_index.py")
+    ]
+    
+    run_cli_script(context, cmd)
+
+
+@asset
+def upload_to_minio_global(context: AssetExecutionContext, build_kjv_fast_lookup_global):
+    """
+    Scope: Global
+    setup_minio.py
+    Syncs the newly built `kjv_fast_lookup.json` map natively into the MinIO `scans` bucket alongside all frontend default page graphics.
+    """
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "setup_minio.py")
+    ]
+    
+    # Needs to run in repo root because setup_minio.py relies on Path("frontend/public/scans") and Path("kjv_fast_lookup.json")
+    cwd = os.path.dirname(PIPELINE_DIR)
+    
+    run_cli_script(context, cmd, cwd=cwd)
