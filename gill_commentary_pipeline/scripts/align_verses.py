@@ -8,6 +8,7 @@ for verse commentary text in two-column OCR data.
 Configurable via COMMENTARY_DATA_DIR env var.
 """
 import os
+import sys
 import json
 import asyncio
 import argparse
@@ -33,6 +34,9 @@ logging.basicConfig(
         logging.FileHandler('alignment.log', encoding='utf-8')
     ]
 )
+
+# Add the root directory to sys.path to access baml_client
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 # Import BAML client
 from baml_client import b

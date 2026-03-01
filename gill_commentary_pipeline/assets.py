@@ -7,7 +7,6 @@ from dagster import (
     DynamicPartitionsDefinition,
     StaticPartitionsDefinition,
     MultiPartitionsDefinition,
-    DynamicPartitionsRequest,
     asset,
 )
 
@@ -91,11 +90,12 @@ def extract_images(context: AssetExecutionContext):
     partition_keys_to_add = [str(p) for p in set(discovered_pages)]
     context.log.info(f"Discovered {len(partition_keys_to_add)} pages for volume {volume}: {partition_keys_to_add}")
     
-    # Yield the request to add these new page partitions dynamically
-    return DynamicPartitionsRequest(
-        partitions_def_name="page_partitions", 
-        partition_keys=partition_keys_to_add
-    )
+    # Add these new page partitions to the instance directly
+    if partition_keys_to_add:
+        context.instance.add_dynamic_partitions(
+            partitions_def_name="page_partitions",
+            partition_keys=partition_keys_to_add
+        )
 
 
 @asset(partitions_def=volume_page_partitions)

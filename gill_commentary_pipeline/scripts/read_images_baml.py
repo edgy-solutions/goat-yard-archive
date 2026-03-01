@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
+# Add the root directory to sys.path to access baml_client
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+
 from baml_client.sync_client import b
 from baml_py import Image, Collector
 from baml_py.baml_py import ClientRegistry
