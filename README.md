@@ -121,9 +121,12 @@ As of the latest architecture updates, all python pipeline ingestion scripts (li
 
 To safely chain their operations together, they are orchestrated via a native **Dagster** environment spanning across statically partitioned definitions (Volumes 1 through 9) and natively dynamic sub-partitions for pages mapping back to each discrete printed document slice. 
 
-To execute and visualize the entire process:
+To prevent OpenRouter / LLM rate limits from crushing the multi-threading graph, the Dagster AI generation nodes are strictly governed by an `openrouter = 5` concurrent key limit bounded formally in `dagster.yaml`.
+
+To execute and visualize the entire process, **you must ensure Dagster can securely find its configuration mapping on boot** by sourcing your local directory path:
 ```powershell
-dagster dev
+$env:DAGSTER_HOME = $PWD  # For Windows PowerShell
+uv run dagster dev
 ```
 
 *Note: In addition to ingestion, Dagster globally orchestrates the generation of `kjv_fast_lookup.json` (via `build_kjv_fast_lookup_global`), and subsequently targets the synchronization of only the active volume Frontend image assets cleanly into MinIO remote buckets (via `upload_to_minio`).*

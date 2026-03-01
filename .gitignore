@@ -18,3 +18,13 @@ frontend/dist/
 
 # Dagster temporary directories
 .tmp_dagster_home*/
+
+# Dagster local storage/sqlite
+storage/
+history/
+schedules/
+.dagster/
+dagster.db
+dagster.db-journal
+dagster.yaml
+.telemetry

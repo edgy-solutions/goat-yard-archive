@@ -118,7 +118,10 @@ def get_md(context: AssetExecutionContext, extract_images):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
+@asset(
+    partitions_def=volume_page_partitions,
+    op_tags={"dagster/concurrency_key": "openrouter"}
+)
 def read_images_baml(context: AssetExecutionContext, get_md):
     """
     Scope: Per Volume + Page
@@ -175,7 +178,10 @@ def fixup_ocr(context: AssetExecutionContext, reindex_ocr):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
+@asset(
+    partitions_def=volume_page_partitions,
+    op_tags={"dagster/concurrency_key": "openrouter"}
+)
 def normalize_markdown(context: AssetExecutionContext, fixup_ocr):
     """
     Scope: Per Volume + Page
