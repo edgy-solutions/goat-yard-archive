@@ -49,6 +49,7 @@ The pipeline transforms raw PDFs of John Gill's Commentary into a vector databas
 - **Action**: Pushes data to `Weaviate` locally.
 - **Subprocess**: `ingest.py --data-dir volumeX/ --alignment-dir artifacts/alignment/volumeX/`
 - **Output**: Populates `TheologicalEntity` vertices (BAML extraction) and `CommentaryChunk` edges inside the Database.
+- **Disambiguation Note**: Relies on a "Lookup-Before-Create" pattern or BAML's `biblical_era`/`role` metadata to prevent merging ambiguous entities (e.g., `JOSEPH_OT` vs `JOSEPH_NT`).
 
 *Warning: Step 7 natively creates `Sentence-Level Granularity` inside Weaviate explicitly needed by the `DSPy` Retrieval QA Bot.*
 

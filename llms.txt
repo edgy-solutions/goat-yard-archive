@@ -20,14 +20,17 @@ The project contains three distinct components:
 2. **Backend API (FastAPI + DSPy + Weaviate)**
    - **Purpose**: Serve queries with precise sentence-level citations in the persona of an 18th-century theologian.
    - **Search Framework**: `backend/gill_search.py` (Keyword + Vector hybrid search on `CommentaryChunk` and `TheologicalEntity` Weaviate collections).
+     - **Graph-RAG Strategy**: Leverages the `mentions_entity` cross-reference to traverse relationships (e.g., discovering Peter and Andrew are related via co-occurrence in chunks).
+   - **Verse Lookup Engine**: Loads a `kjv_fast_lookup.json` (flattened from USFM via build scripts) into memory to serve extremely fast O(1) `/api/verse/{ref}` requests.
    - **Generator**: DSPy + DeepSeek via OpenRouter (see `backend/bot.py`).
    - **Verifier**: The `GroundedGillBot` critic strictly ensures every citation provided by the LLM maps directly back to the physical page and sentence coordinates provided in the context search.
 
 3. **Frontend UI (React/Next.js)**
    - **Purpose**: Split-pane interface allowing users to chat with Dr. Voluminous on the left pane and view deep-linked image scans with canvas highlight bounding boxes on the right pane.
+   - **Verse Tooltips**: Custom `TextWithVerses` components use regex to find Gill's reference style (e.g., `Mark xvi. 11`) and pop up tooltips powered by the `/api/verse` backend endpoint.
 
 ## Core Directives for AIs
 - If you need pipeline runbook commands, refer to `AGENTS.md`.
-- Ensure changes to prompt engineering use BAML (`baml_src/main.baml`).
+- Ensure changes to prompt engineering use BAML (`baml_src/main.baml`). Disambiguating entities (like Joseph the Patriarch vs Joseph the Husband of Mary) should rely heavily on BAML's `biblical_era` and `role` fields during extraction.
 - Do not make breaking changes to the Weaviate schema structure without re-aligning `ingest.py`.
-- Preserve the 18th-century persona and strict DSPy citation assertions in the backend.
+- Preserve the 18th-century persona and strict DSPy citation assertions in the backend. If the context mentions an entity only in passing and cannot fully answer the question, the LLM must refuse to answer rather than hallucinate.
