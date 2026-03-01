@@ -57,7 +57,7 @@ The pipeline transforms raw PDFs of John Gill's Commentary into a vector databas
 - **Action**: Native `dagster` diagnostic checks asserting the structural safety of the output. 
 - **Subprocess**: 
   - `verify_verse_continuity_validation` scans for sequentially dropped or missing verses globally.
-  - `verify_markdown_headers_validation` ensures `# CHAP.` syntax natively bonded logically throughout the LLM `.md` payloads.
+  - `verify_markdown_headers_validation` waits for `read_images_baml` completion to ensure `# CHAP.` syntax natively bonded logically throughout the payloads.
   - `verify_db_ingestion_global` catches legacy formats persisting inside Weaviate visually.
   - `scan_duplicate_entities_global` tracks Entity/UUID fragmentation continuously in the graph index natively.
 
@@ -65,7 +65,7 @@ The pipeline transforms raw PDFs of John Gill's Commentary into a vector databas
 - **Action**: Native `dagster` triggers to generate UI backend JSON maps and push media to MinIO storage instances.
 - **Subprocess**: 
   - `build_kjv_fast_lookup_global` automatically converts raw USFM bibles into the flat O(1) `kjv_fast_lookup.json` Verse API.
-  - `upload_to_minio_global` inherently waits for the JSON index, then pushes it alongside all local `/scans/` PNG datasets to the `localhost:9000` MinIO bucket seamlessly.
+  - `upload_to_minio` inherently waits for the JSON index and the volume extraction to finish, then pushes the JSON alongside specific local `/scans/volumeN/` PNG datasets to the `localhost:9000` MinIO bucket seamlessly.
 
 ## 🧪 Quick Test/Verification Tasks
 - Verify BAML function syntax is safe: `baml-cli check`.
