@@ -1,13 +1,48 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "gill_commentary_pipeline"
 version = "0.1.0"
+description = "A Dagster orchestration pipeline and FastAPI backend for the Gill Commentary RAG system."
+requires-python = ">=3.11"
 dependencies = [
+    "python-dotenv==1.2.1",
+    "requests==2.32.5",
+    "weaviate-client==4.18.3",
+    "dspy-ai==3.0.4",
+    "baml-py==0.211.1",
+    "openai==2.14.0",
+    "tenacity==9.1.2",
+    "protobuf<6.0.0",
+]
+
+[project.optional-dependencies]
+backend = [
+    "fastapi==0.127.0",
+    "uvicorn==0.35.0",
+    "pydantic==2.12.0",
+    "httpx==0.28.1",
+    "langfuse",
+    "passlib",
+    "bcrypt",
+    "python-multipart==0.0.18",
+    "slowapi==0.1.9",
+    "sqlalchemy==2.0.25",
+    "psycopg2-binary==2.9.9",
+    "svix==1.15.0",
+    "pyjwt[crypto]==2.8.0",
+]
+pipeline = [
     "dagster",
     "dagster-webserver",
+    "networkx",
+    "matplotlib",
+    "nltk",
+    "rapidfuzz",
+    "minio",
+    "pytesseract",
 ]
 
 [tool.dagster]
