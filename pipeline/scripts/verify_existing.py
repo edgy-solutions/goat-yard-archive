@@ -15,7 +15,8 @@ parser.add_argument("--page", type=str, help="Specific page to process (e.g., pa
 args = parser.parse_args()
 
 # Find normalized files across all extracted_images* directories
-base_path = Path(r'C:\Users\cnogr\git\extract')
+import os
+base_path = Path(os.environ.get('COMMENTARY_DATA_DIR', '.'))
 grand_passed = 0
 grand_failed = 0
 dir_summaries = []

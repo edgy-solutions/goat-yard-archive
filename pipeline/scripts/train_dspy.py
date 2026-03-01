@@ -94,7 +94,7 @@ def verification_metric(example, prediction, trace=None) -> float:
 def train_optimizer(
     examples: List[Tuple[str, str]],
     model: str = "deepseek/deepseek-chat",
-    output_path: str = "optimized_normalizer.json",
+    output_path: str = os.path.join(os.path.dirname(__file__), "..", "models", "optimized_normalizer.json"),
     num_fewshot: int = 3,
     max_examples: int = 50
 ):
@@ -185,13 +185,13 @@ def main():
     
     parser = argparse.ArgumentParser(description="Train DSPy prompt optimizer for Gill's Commentary normalization")
     parser.add_argument("--dir", "-d", 
-                        default=r"C:\Users\cnogr\git\extract\extracted_images\qwen_qwen3-vl-235b-a22b-thinking",
+                        default=os.environ.get("COMMENTARY_DATA_DIR", "."),
                         help="Directory containing source and normalized files")
     parser.add_argument("--model", "-m",
                         default="deepseek/deepseek-chat",
                         help="LLM model to use for optimization")
     parser.add_argument("--output", "-o",
-                        default="optimized_normalizer.json",
+                        default=os.path.join(os.path.dirname(__file__), "..", "models", "optimized_normalizer.json"),
                         help="Output path for optimized model")
     parser.add_argument("--num-fewshot", "-n",
                         type=int, default=3,

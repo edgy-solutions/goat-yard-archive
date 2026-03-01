@@ -168,9 +168,9 @@ class DSPyBackend(NormalizerBackend):
         
         # Try to load optimized model if path provided or default exists
         if optimized_path is None:
-            # Check for default optimized model in script directory
+            # Check for default optimized model in models directory
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            optimized_path = os.path.join(script_dir, "optimized_normalizer.json")
+            optimized_path = os.path.join(script_dir, "..", "models", "optimized_normalizer.json")
         
         if optimized_path and os.path.exists(optimized_path):
             try:

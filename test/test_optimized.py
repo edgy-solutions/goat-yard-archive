@@ -1,6 +1,10 @@
 """Quick test of the optimized DSPy model."""
 import os
 import dspy
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'pipeline', 'scripts'))
+
 from train_dspy import GillNormalizer
 from normalize_markdown import verify_normalization
 
@@ -11,12 +15,19 @@ dspy.configure(lm=lm)
 
 print("Loading optimized model...")
 optimized = GillNormalizer()
-optimized.load('optimized_normalizer.json')
+optimized.load(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'pipeline', 'models', 'optimized_normalizer.json'))
 print("Model loaded!")
 
 # Test on page 95
-source_path = r'C:\Users\cnogr\git\extract\extracted_images\qwen_qwen3-vl-235b-a22b-thinking\page95_image1.md'
+base_dir = os.environ.get('COMMENTARY_DATA_DIR', '.')
+source_path = os.environ.get('TEST_MARKDOWN_FILE', os.path.join(base_dir, 'volume1', 'page95_image1.md'))
 print(f"\nTesting: {os.path.basename(source_path)}")
+
+if not os.path.exists(source_path):
+    print(f"Skipping file read; test markdown file {source_path} not found.")
+    print("Set TEST_MARKDOWN_FILE environment variable to explicitly test inference.")
+    import sys
+    sys.exit(0)
 
 with open(source_path, 'r', encoding='utf-8') as f:
     source = f.read()
