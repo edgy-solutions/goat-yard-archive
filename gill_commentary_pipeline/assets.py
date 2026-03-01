@@ -1,0 +1,251 @@
+import os
+import subprocess
+from typing import List
+
+from dagster import (
+    AssetExecutionContext,
+    DynamicPartitionsDefinition,
+    StaticPartitionsDefinition,
+    MultiPartitionsDefinition,
+    DynamicPartitionsRequest,
+    asset,
+)
+
+# 1. Define Partitions
+# Static partition for Volumes 1 through 9
+volume_partitions = StaticPartitionsDefinition([str(i) for i in range(1, 10)])
+
+# Dynamic partition for Pages
+page_partitions = DynamicPartitionsDefinition(name="page_partitions")
+
+# Multi-partition combining both
+volume_page_partitions = MultiPartitionsDefinition(
+    {
+        "volume": volume_partitions,
+        "page": page_partitions,
+    }
+)
+
+# Base directory for data
+COMMENTARY_DATA_DIR = os.getenv("COMMENTARY_DATA_DIR", "/data/commentary")
+PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
+
+
+# 2. Helper function for running subprocess and piping logs to Dagster context
+def run_cli_script(context: AssetExecutionContext, cmd: List[str], cwd: str = None):
+    """
+    Runs a shell command via subprocess, piping output to the Dagster context logger.
+    """
+    cmd_str = " ".join(cmd)
+    context.log.info(f"Running command: {cmd_str}")
+    
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        cwd=cwd
+    )
+    
+    # Stream output to Dagster log
+    for line in process.stdout:
+        context.log.info(line.strip())
+        
+    process.wait()
+    
+    if process.returncode != 0:
+        raise Exception(f"Command failed with return code {process.returncode}")
+
+
+# 3. Asset Definitions
+
+@asset(partitions_def=volume_partitions)
+def extract_images(context: AssetExecutionContext):
+    """
+    Scope: Per Volume
+    Extracts images for a volume and yields a DynamicPartitionsRequest to add pages.
+    """
+    volume = context.partition_key
+    
+    cmd = ["python", os.path.join(SCRIPTS_DIR, "extract_images.py"), volume]
+    
+    # Run the script
+    run_cli_script(context, cmd)
+    
+    # After extraction, determine which pages were created.
+    # We simulate reading the directory to find the generated pages.
+    volume_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    
+    discovered_pages = []
+    if os.path.exists(volume_dir):
+        for filename in os.listdir(volume_dir):
+            if filename.startswith("page") and filename.endswith("_image.png"):
+                # Extract the page identifier, e.g. "100" from "page100_image.png"
+                # Since downstream scripts use {y} as "100" (or similar depending on script args)
+                page_id = filename.split("_image")[0].replace("page", "")
+                if page_id not in discovered_pages:
+                    discovered_pages.append(page_id)
+                    
+    # Ensure partition keys are strings and unique
+    partition_keys_to_add = [str(p) for p in set(discovered_pages)]
+    context.log.info(f"Discovered {len(partition_keys_to_add)} pages for volume {volume}: {partition_keys_to_add}")
+    
+    # Yield the request to add these new page partitions dynamically
+    return DynamicPartitionsRequest(
+        partitions_def_name="page_partitions", 
+        partition_keys=partition_keys_to_add
+    )
+
+
+@asset(partitions_def=volume_page_partitions)
+def get_md(context: AssetExecutionContext, extract_images):
+    """
+    Scope: Per Volume + Page
+    get_md.py --image "volume{x}/page{y}_image.png"
+    """
+    volume = context.partition_key.keys_by_dimension["volume"]
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    image_path = f"volume{volume}/page{page}_image.png"
+    cmd = ["python", os.path.join(SCRIPTS_DIR, "get_md.py"), "--image", image_path]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def read_images_baml(context: AssetExecutionContext, get_md):
+    """
+    Scope: Per Volume + Page
+    read_images_baml.py --pages {y}
+    """
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    cmd = ["python", os.path.join(SCRIPTS_DIR, "read_images_baml.py"), "--pages", page]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def reindex_ocr(context: AssetExecutionContext, read_images_baml):
+    """
+    Scope: Per Volume + Page
+    reindex_ocr.py --extracted-dir "$COMMENTARY_DATA_DIR/volume{x}" --page {y}
+    """
+    volume = context.partition_key.keys_by_dimension["volume"]
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "reindex_ocr.py"), 
+        "--extracted-dir", extracted_dir, 
+        "--page", page
+    ]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def fixup_ocr(context: AssetExecutionContext, reindex_ocr):
+    """
+    Scope: Per Volume + Page
+    fixup_ocr.py --extracted-dir "$COMMENTARY_DATA_DIR/volume{x}" 
+                 --markdown-dir "$COMMENTARY_DATA_DIR/volume{x}/qwen_qwen3-vl-235b-a22b-thinking" 
+                 --page {y}
+    """
+    volume = context.partition_key.keys_by_dimension["volume"]
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    markdown_dir = os.path.join(extracted_dir, "qwen_qwen3-vl-235b-a22b-thinking")
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "fixup_ocr.py"), 
+        "--extracted-dir", extracted_dir,
+        "--markdown-dir", markdown_dir,
+        "--page", page
+    ]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def normalize_markdown(context: AssetExecutionContext, fixup_ocr):
+    """
+    Scope: Per Volume + Page
+    normalize_markdown.py --dir "$COMMENTARY_DATA_DIR/volume{x}/qwen_qwen3-vl-235b-a22b-thinking" 
+                          --force --backend dspy --model deepseek/deepseek-chat --page {y}
+    """
+    volume = context.partition_key.keys_by_dimension["volume"]
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    markdown_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", "qwen_qwen3-vl-235b-a22b-thinking")
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "normalize_markdown.py"),
+        "--dir", markdown_dir,
+        "--force",
+        "--backend", "dspy",
+        "--model", "deepseek/deepseek-chat",
+        "--page", page
+    ]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def verify_existing(context: AssetExecutionContext, normalize_markdown):
+    """
+    Scope: Per Volume + Page
+    verify_existing.py --page {y}
+    """
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    cmd = ["python", os.path.join(SCRIPTS_DIR, "verify_existing.py"), "--page", page]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def align_verses(context: AssetExecutionContext, verify_existing):
+    """
+    Scope: Per Volume + Page
+    align_verses.py --dir "$COMMENTARY_DATA_DIR/volume{x}" --page {y}
+    """
+    volume = context.partition_key.keys_by_dimension["volume"]
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "align_verses.py"), 
+        "--dir", extracted_dir, 
+        "--page", page
+    ]
+    
+    run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_page_partitions)
+def ingest(context: AssetExecutionContext, align_verses):
+    """
+    Scope: Per Volume + Page
+    ingest.py --data-dir "$COMMENTARY_DATA_DIR/volume{x}" 
+              --alignment-dir "$COMMENTARY_DATA_DIR/artifacts/alignment/volume{x}" 
+              --page {y}
+    """
+    volume = context.partition_key.keys_by_dimension["volume"]
+    page = context.partition_key.keys_by_dimension["page"]
+    
+    data_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    alignment_dir = os.path.join(COMMENTARY_DATA_DIR, "artifacts", "alignment", f"volume{volume}")
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "ingest.py"),
+        "--data-dir", data_dir,
+        "--alignment-dir", alignment_dir,
+        "--page", page
+    ]
+    
+    run_cli_script(context, cmd)
