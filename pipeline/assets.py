@@ -315,7 +315,13 @@ def optimize_dspy_normalizer(context: AssetExecutionContext):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_partitions)
+@asset(
+    partitions_def=volume_partitions,
+    deps=[AssetDep("read_images_baml", partition_mapping=MultiPartitionMapping({
+        "volume": DimensionPartitionMapping("volume", IdentityPartitionMapping()),
+        "page": DimensionPartitionMapping("page", AllPartitionMapping())
+    }))]
+)
 def verify_markdown_headers_validation(context: AssetExecutionContext):
     """
     Scope: Per Volume
