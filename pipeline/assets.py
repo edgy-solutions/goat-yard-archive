@@ -249,3 +249,56 @@ def ingest(context: AssetExecutionContext, align_verses):
     ]
     
     run_cli_script(context, cmd)
+
+
+@asset(partitions_def=volume_partitions)
+def verify_verse_continuity_validation(context: AssetExecutionContext):
+    """
+    Scope: Per Volume
+    verify_verse_continuity.py "$COMMENTARY_DATA_DIR/volume{x}"
+    Validates the generated _metadata.json files to ensure no verses are missing from the volume sequence.
+    """
+    volume = context.partition_key
+    volume_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "verify_verse_continuity.py"),
+        volume_dir
+    ]
+    
+    run_cli_script(context, cmd)
+
+
+@asset
+def verify_db_ingestion_global(context: AssetExecutionContext):
+    """
+    Scope: Global
+    verify_ingestion_test.py
+    Hits the local Weaviate DB and asserts that chunks aren't lingering with unresolved footnotes or format issues.
+    """
+    cmd = ["python", os.path.join(SCRIPTS_DIR, "verify_ingestion_test.py")]
+    
+    # Weaviate testing script runs fast
+    run_cli_script(context, cmd)
+
+
+@asset
+def optimize_dspy_normalizer(context: AssetExecutionContext):
+    """
+    Scope: Global / Ad-hoc
+    train_dspy.py
+    Retrains the LLM prompt using DSPy's BootstrapFewShot optimizer.
+    """
+    # Assuming volume 1 qwen for training examples as a default
+    examples_dir = os.path.join(COMMENTARY_DATA_DIR, "volume1", "qwen_qwen3-vl-235b-a22b-thinking")
+    
+    if not os.path.exists(examples_dir):
+        context.log.warning(f"Training directory not found at {examples_dir}. Skipping.")
+        return
+        
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "train_dspy.py"),
+        "--dir", examples_dir
+    ]
+    
+    run_cli_script(context, cmd)
