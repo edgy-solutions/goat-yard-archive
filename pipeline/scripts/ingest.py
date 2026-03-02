@@ -1092,6 +1092,20 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # Intelligently derive volume from data_dir if not explicitly provided
+    if not args.volume:
+        try:
+            data_path_name = Path(args.data_dir).resolve().name
+            if 'volume' in data_path_name.lower():
+                extracted = data_path_name.lower().replace('volume', '')
+                if extracted.isdigit():
+                    args.volume = int(extracted)
+                    logging.info(f"Automatically derived Volume {args.volume} from data directory '{data_path_name}'")
+        except Exception as e:
+            logging.warning(f"Could not automatically detect volume from data-dir {args.data_dir}: {e}")
+            
+    print(f"Starting Ingestion Engine (Target Volume: {args.volume or 'Unknown'})")
+    
     with GillIngestionEngine(args.weaviate_host, args.weaviate_port) as engine:
         if args.visualize:
             engine.visualize_connections()
