@@ -256,7 +256,8 @@ def ingest(context: AssetExecutionContext, align_verses):
         "python", os.path.join(SCRIPTS_DIR, "ingest.py"),
         "--data-dir", data_dir,
         "--alignment-dir", alignment_dir,
-        "--page", page
+        "--page", page,
+        "--volume", str(volume)
     ]
     
     run_cli_script(context, cmd)

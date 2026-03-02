@@ -140,27 +140,8 @@ class GillIngestionEngine:
             except:
                 pass
 
-        # Case 2: page100_image1 (Legacy format)
-        if len(parts) >= 2 and "page" in parts[0]:
-            try:
-                page_num = int(parts[0].replace("page", ""))
-                # If image1 -> vol 1 usually (Genesis), image7 -> vol 7 (Matthew)
-                # But some files are image1 for Matthew (legacy issue)
-                # Rely on volume_override or image suffix
-                img_part = parts[1]
-                if "image" in img_part:
-                     vol_suffix = int(img_part.replace("image", ""))
-                     # Heuristic: image7 -> vol7. image1 -> vol1.
-                     extracted_vol = vol_suffix
-                else:
-                    extracted_vol = 1
-                
-                return (volume_override if volume_override else extracted_vol), page_num
-            except:
-                pass
-                
         # Default fallback
-        logging.warning(f"Could not parse volume/page from {page_name}")
+        logging.warning(f"Could not parse volume/page from {page_name}. Defaulting to Volume 1 unless overridden.")
         return (volume_override if volume_override else 1), 0
     
     def load_adjacent_markdown(self, page_name: str, qwen_dir: Path) -> Tuple[str, str, str]:
