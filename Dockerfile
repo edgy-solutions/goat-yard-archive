@@ -10,8 +10,8 @@ WORKDIR /app
 # Copy project definition and lock file first for caching
 COPY pyproject.toml uv.lock /app/
 
-# Install the backend dependencies
-RUN uv sync --extra backend --no-dev
+# Install the backend dependencies (ignore building the project package)
+RUN uv sync --extra backend --no-dev --no-install-project
 
 # Copy the rest of the source
 COPY . /app/
