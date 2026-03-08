@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Usage: ./scripts/deploy_helm.sh [prod|test]
+# Usage: ./scripts/deploy_helm.sh [prod|test] [--force-conflicts]
 
 # K3s sets KUBECONFIG to /etc/rancher/k3s/k3s.yaml by default on Ubuntu sessions.
 # We explicitly override this to the user's config to avoid permission denied errors
@@ -11,8 +11,13 @@ export KUBECONFIG=~/.kube/config
 ENV=$1
 CHART_DIR="./charts/goat-yard-archive"
 
+FORCE_FLAG=""
+if [ "$2" == "--force-conflicts" ]; then
+    FORCE_FLAG="--force-conflicts"
+fi
+
 if [ -z "$ENV" ]; then
-    echo "Usage: $0 [prod|test]"
+    echo "Usage: $0 [prod|test] [--force-conflicts]"
     exit 1
 fi
 
@@ -43,6 +48,7 @@ if [ "$ENV" == "prod" ]; then
     helm upgrade --install gya-backend "$CHART_DIR" \
       -f "$CHART_DIR/values-backend.yaml" \
       --namespace gya-backend \
+      $FORCE_FLAG \
       --wait
 
     echo "----------------------------------------"
@@ -54,6 +60,7 @@ if [ "$ENV" == "prod" ]; then
     helm upgrade --install gya-frontend "$CHART_DIR" \
       -f "$CHART_DIR/values-frontend.yaml" \
       --namespace gya-frontend \
+      $FORCE_FLAG \
       --wait
       
     echo "✅ Production deployment complete!"
@@ -88,21 +95,34 @@ elif [ "$ENV" == "test" ]; then
     helm upgrade --install gya-backend-test "$CHART_DIR" \
       -f "$CHART_DIR/values-backend.yaml" \
       --namespace "$NAMESPACE" \
+      $FORCE_FLAG \
       --wait
 
     echo "----------------------------------------"
     echo "🛠️  TEST: Deploying Frontend Features (API, UI, MinIO)..."
     echo "----------------------------------------"
+    # Secrets handling: Provide a generic secrets.yaml or environment-specific secrets-test.yaml
+    SECRET_ARGS=""
+    if [ -f "$CHART_DIR/secrets.yaml" ]; then
+        SECRET_ARGS="$SECRET_ARGS -f $CHART_DIR/secrets.yaml"
+    fi
+    if [ -f "$CHART_DIR/secrets-test.yaml" ]; then
+        SECRET_ARGS="$SECRET_ARGS -f $CHART_DIR/secrets-test.yaml"
+    fi
+
     # Verify values-test.yaml exists
     if [ ! -f "$CHART_DIR/values-test.yaml" ]; then
         echo "❌ Error: $CHART_DIR/values-test.yaml not found!"
         exit 1
     fi
 
-    helm upgrade --install gya-frontend-test "$CHART_DIR" \
+    # Use eval to handle the conditionally concatenated string of secrets files safely
+    eval helm upgrade --install gya-frontend-test "$CHART_DIR" \
       -f "$CHART_DIR/values-frontend.yaml" \
       -f "$CHART_DIR/values-test.yaml" \
+      $SECRET_ARGS \
       --namespace "$NAMESPACE" \
+      $FORCE_FLAG \
       --wait
 
     echo "✅ Test deployment complete!"
