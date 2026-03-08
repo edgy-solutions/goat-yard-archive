@@ -121,7 +121,21 @@ def main(filter_str=None):
     for i, file_path in enumerate(files):
         # We want all files (scans, index, gills) neatly at the root of the bucket
         # because the frontend expects /scans/vol7_page133_image1.png directly.
-        object_name = file_path.name
+        if file_path.is_relative_to(BASE_DIR):
+            try:
+                rel_parts = file_path.relative_to(BASE_DIR).parts
+                vol_folder = rel_parts[0]  # e.g., 'volume7'
+                if vol_folder.startswith("volume"):
+                    vol_num = vol_folder.replace("volume", "")
+                    # Construct 'vol7_page133_image1.png'
+                    object_name = f"vol{vol_num}_{file_path.name}"
+                else:
+                    object_name = file_path.name
+            except Exception:
+                object_name = file_path.name
+        else:
+            # Files like gill3.png or kjv_fast_lookup.json
+            object_name = file_path.name
         
         # Determine content type
         content_type, _ = mimetypes.guess_type(file_path)
