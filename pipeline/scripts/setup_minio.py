@@ -6,6 +6,9 @@ import mimetypes
 from pathlib import Path
 from minio import Minio
 from minio.error import S3Error
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configuration (match values.yaml)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000") # Use port-forward or ingress
@@ -35,12 +38,26 @@ def set_public_policy(client, bucket_name):
     print(f"✅ Public Read policy set for {bucket_name}")
 
 def main(filter_str=None):
+    # Strip protocol from endpoint as Minio client requires raw host
+    endpoint = MINIO_ENDPOINT
+    secure_connection = False
+    
+    if endpoint.startswith("https://"):
+        endpoint = endpoint.replace("https://", "")
+        secure_connection = True
+    elif endpoint.startswith("http://"):
+        endpoint = endpoint.replace("http://", "")
+        
+    # Remove any trailing paths (like /scans) if someone adds it to the endpoint var
+    if "/" in endpoint:
+        endpoint = endpoint.split("/")[0]
+
     # Initialize Client
     client = Minio(
-        MINIO_ENDPOINT,
+        endpoint,
         access_key=ACCESS_KEY,
         secret_key=SECRET_KEY,
-        secure=False
+        secure=secure_connection
     )
 
     # Make bucket
