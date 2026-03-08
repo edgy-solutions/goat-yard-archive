@@ -18,8 +18,11 @@ BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "scans")
 BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
 FRONTEND_PUBLIC_DIR = Path("frontend/public")
 
+import sys
+
 if not SECRET_KEY:
-    raise ValueError("MINIO_SECRET_KEY environment variable must be set")
+    print("❌ ERROR: MINIO_SECRET_KEY environment variable is not set or empty.")
+    sys.exit(1)
 
 def set_public_policy(client, bucket_name):
     """Set Public Read Only policy for the bucket."""
@@ -39,7 +42,7 @@ def set_public_policy(client, bucket_name):
 
 def main(filter_str=None):
     # Strip protocol from endpoint as Minio client requires raw host
-    endpoint = MINIO_ENDPOINT
+    endpoint = MINIO_ENDPOINT.strip()
     secure_connection = False
     
     if endpoint.startswith("https://"):
@@ -50,15 +53,23 @@ def main(filter_str=None):
         
     # Remove any trailing paths (like /scans) if someone adds it to the endpoint var
     if "/" in endpoint:
+        # Since http:// was already stripped, the first slash delineates the host from the path
         endpoint = endpoint.split("/")[0]
 
+    print(f"🔌 Connecting to MinIO via '{endpoint}' (secure={secure_connection}) with bucket '{BUCKET_NAME}'...")
+
     # Initialize Client
-    client = Minio(
-        endpoint,
-        access_key=ACCESS_KEY,
-        secret_key=SECRET_KEY,
-        secure=secure_connection
-    )
+    try:
+        client = Minio(
+            endpoint,
+            access_key=ACCESS_KEY,
+            secret_key=SECRET_KEY,
+            secure=secure_connection,
+            region="us-east-1" # Bypasses XML region check which fails on local ingresses
+        )
+    except Exception as e:
+        print(f"❌ Failed to initialize Minio client configuration: {e}")
+        sys.exit(1)
 
     # Make bucket
     try:
@@ -67,9 +78,9 @@ def main(filter_str=None):
             print(f"✅ Created bucket: {BUCKET_NAME}")
         else:
             print(f"ℹ️ Bucket {BUCKET_NAME} already exists")
-    except S3Error as e:
-        print(f"❌ Error connecting to MinIO: {e}")
-        return
+    except Exception as e:
+        print(f"❌ Critical connection error to MinIO: {e}\nCheck MINIO_ENDPOINT ({endpoint}) or network routing.")
+        sys.exit(1)
 
     # Set Policy
     try:
