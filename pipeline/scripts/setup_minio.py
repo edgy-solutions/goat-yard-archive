@@ -8,11 +8,14 @@ from minio import Minio
 from minio.error import S3Error
 
 # Configuration (match values.yaml)
-MINIO_ENDPOINT = "localhost:9000" # Use port-forward or ingress
-ACCESS_KEY = "minio"
-SECRET_KEY = "!mandy77"
-BUCKET_NAME = "scans"
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000") # Use port-forward or ingress
+ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
+SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
+BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "scans")
 SOURCE_DIR = Path("frontend/public/scans")
+
+if not SECRET_KEY:
+    raise ValueError("MINIO_SECRET_KEY environment variable must be set")
 
 def set_public_policy(client, bucket_name):
     """Set Public Read Only policy for the bucket."""
