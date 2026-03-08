@@ -135,13 +135,15 @@ def main(filter_str=None):
                 BUCKET_NAME, 
                 object_name, 
                 str(file_path),
-                content_type=content_type
+                content_type=content_type,
+                part_size=100 * 1024 * 1024  # 100MB threshold bypasses broken multipart proxy XML responses
             )
             if i % 100 == 0:
                 print(f"Uploaded {i}/{len(files)}: {object_name}")
-        except S3Error as e:
+        except Exception as e:
             print(f"❌ Failed to upload {object_name}: {e}")
-
+            # Do not sys.exit() here, let it try the rest of the files
+            
     print("✅ Sync Complete!")
 
 if __name__ == "__main__":
