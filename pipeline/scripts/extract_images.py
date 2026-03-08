@@ -90,17 +90,27 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
 
         for img_index, img_info in enumerate(image_list):
             xref = img_info[0]  # Get the XREF of the image
-            base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
-            image_ext = base_image["ext"]
 
             try:
+                # Render the image to a Pixmap instead of extracting the raw XREF stream.
+                # Extracting raw streams on 1,000 page PDFs exhausts C-level file handles internally in PyMuPDF
+                # causing random "document closed" errors. Pixmaps are safely managed.
+                pix = fitz.Pixmap(doc, xref)
+                
+                # If image is CMYK, convert to RGB first because Pillow handles RGB better
+                if pix.n >= 5:
+                    cmyk = pix
+                    pix = fitz.Pixmap(fitz.csRGB, cmyk)
+                    del cmyk # Free original
+                    
+                image_ext = "png" # Force PNG standardization for the pipeline
+                image_bytes = pix.tobytes("png")
+
                 # Open the image using PIL (Pillow)
                 image = Image.open(io.BytesIO(image_bytes))
 
                 # Save the image with volume-aware naming
                 # Format: page{page_num}_image{volume}.{ext}
-                # This matches the expected format for ingestion pipeline
                 image_filename = os.path.join(
                     output_dir, 
                     f"page{page_num + 1}_image{volume}.{image_ext}"
@@ -110,12 +120,11 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
                 
                 # Close PIL image to release memory
                 image.close()
+                del image_bytes
+                del pix
+                
             except Exception as e:
                 print(f"Error processing image {img_index + 1} on page {page_num + 1}: {e}")
-                
-            # Explicitly clear variables to prevent PyMuPDF C-level garbage collector from corrupting the document reference
-            del base_image
-            del image_bytes
             
         # Free page object reference explicitly per PyMuPDF best practices on massive documents
         del page
