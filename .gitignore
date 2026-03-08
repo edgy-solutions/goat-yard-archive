@@ -13,7 +13,7 @@ batch_logs/
 *.log
 *.out
 frontend/node_modules/
-frontend/public/
+frontend/public/scans/
 frontend/dist/
 
 # Dagster temporary directories
