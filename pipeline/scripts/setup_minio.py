@@ -119,13 +119,9 @@ def main(filter_str=None):
     print(f"Found {len(files)} files to sync.")
 
     for i, file_path in enumerate(files):
-        # Rel path in bucket
-        # If it's a scan (in BASE_DIR), keep relative structure (e.g., volume1/pageX.png)
-        # If it's a default image or index, put at root of bucket
-        if BASE_DIR in file_path.parents:
-            object_name = file_path.relative_to(BASE_DIR).as_posix()
-        else:
-            object_name = file_path.name
+        # We want all files (scans, index, gills) neatly at the root of the bucket
+        # because the frontend expects /scans/vol7_page133_image1.png directly.
+        object_name = file_path.name
         
         # Determine content type
         content_type, _ = mimetypes.guess_type(file_path)
