@@ -62,7 +62,7 @@ def main(filter_str=None):
 
     # Upload Scans
     print(f"📂 Scanning extracted volumes in {BASE_DIR}...")
-    files = list(BASE_DIR.glob("volume*/*"))
+    files = list(BASE_DIR.glob("volume*/*.png"))
     files = [f for f in files if f.is_file()]
     
     # Also add the default gill images from frontend public dir
