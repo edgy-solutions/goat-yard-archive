@@ -107,9 +107,19 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
                 )
                 image.save(image_filename)
                 print(f"Saved: {image_filename}")
+                
+                # Close PIL image to release memory
+                image.close()
             except Exception as e:
                 print(f"Error processing image {img_index + 1} on page {page_num + 1}: {e}")
-
+                
+            # Explicitly clear variables to prevent PyMuPDF C-level garbage collector from corrupting the document reference
+            del base_image
+            del image_bytes
+            
+        # Free page object reference explicitly per PyMuPDF best practices on massive documents
+        del page
+    
     doc.close()
     print(f"\n✅ Extraction complete: {len(doc)} pages processed")
     print(f"   Output directory: {output_dir}")
