@@ -3,6 +3,11 @@ set -e
 
 # Usage: ./scripts/deploy_helm.sh [prod|test]
 
+# K3s sets KUBECONFIG to /etc/rancher/k3s/k3s.yaml by default on Ubuntu sessions.
+# We explicitly override this to the user's config to avoid permission denied errors
+# when running helm/kubectl without sudo.
+export KUBECONFIG=~/.kube/config
+
 ENV=$1
 CHART_DIR="./charts/goat-yard-archive"
 
