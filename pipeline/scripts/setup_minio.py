@@ -12,7 +12,8 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000") # Use port-forwar
 ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "scans")
-SOURCE_DIR = Path("frontend/public/scans")
+BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
+FRONTEND_PUBLIC_DIR = Path("frontend/public")
 
 if not SECRET_KEY:
     raise ValueError("MINIO_SECRET_KEY environment variable must be set")
@@ -60,20 +61,26 @@ def main(filter_str=None):
         print(f"❌ Error setting policy: {e}")
 
     # Upload Scans
-    print(f"📂 Scanning {SOURCE_DIR}...")
-    files = list(SOURCE_DIR.glob("**/*"))
+    print(f"📂 Scanning extracted volumes in {BASE_DIR}...")
+    files = list(BASE_DIR.glob("volume*/*"))
     files = [f for f in files if f.is_file()]
     
-    # Also add the default gill images from parent dir
-    root_images = list(SOURCE_DIR.parent.glob("gill*.png"))
+    # Also add the default gill images from frontend public dir
+    root_images = list(FRONTEND_PUBLIC_DIR.glob("gill*.png"))
     files.extend(root_images)
     
-    # [NEW] Add KJV Index
-    kjv_index = Path("kjv_fast_lookup.json")
+    # Add KJV Index based on build_bible_index logic
+    _env_data_dir = os.getenv("COMMENTARY_DATA_DIR")
+    if _env_data_dir:
+        kjv_index = Path(_env_data_dir).parent / "kjv_fast_lookup.json"
+    else:
+        # Fallback to repo root, assuming setup_minio is in scripts/
+        kjv_index = Path(__file__).parent.parent.parent / "kjv_fast_lookup.json"
+        
     if kjv_index.exists():
         files.append(kjv_index)
     else:
-        print("⚠️ Warning: kjv_fast_lookup.json not found in root. Skipping upload.")
+        print(f"⚠️ Warning: {kjv_index} not found. Skipping upload.")
     
     # Apply Filter natively against Volumes instead of arbitrary strings
     if filter_str:
@@ -85,10 +92,10 @@ def main(filter_str=None):
 
     for i, file_path in enumerate(files):
         # Rel path in bucket
-        # If it's a scan (in SOURCE_DIR), keep relative structure
-        # If it's a default image (in SOURCE_DIR.parent), put at root of bucket
-        if SOURCE_DIR in file_path.parents:
-            object_name = file_path.relative_to(SOURCE_DIR).as_posix()
+        # If it's a scan (in BASE_DIR), keep relative structure (e.g., volume1/pageX.png)
+        # If it's a default image or index, put at root of bucket
+        if BASE_DIR in file_path.parents:
+            object_name = file_path.relative_to(BASE_DIR).as_posix()
         else:
             object_name = file_path.name
         
