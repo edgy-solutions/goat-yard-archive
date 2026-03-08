@@ -36,7 +36,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ if eq .service "api" }}{{ $apiServiceName }}{{ else if eq .service "minio" }}{{ $.Release.Name }}-minio{{ else }}{{ $uiServiceName }}{{ end }}
+                name: {{ if eq .service "api" }}{{ $apiServiceName }}{{ else if eq .service "minio" }}{{ if .Values.minio.fullnameOverride }}{{ .Values.minio.fullnameOverride }}{{ else }}{{ $.Release.Name }}-minio{{ end }}{{ else }}{{ $uiServiceName }}{{ end }}
                 port:
                   number: {{ if eq .service "api" }}{{ $.Values.api.service.port }}{{ else if eq .service "minio" }}{{ $.Values.minio.service.port }}{{ else }}{{ $.Values.ui.service.port }}{{ end }}
           {{- end }}
