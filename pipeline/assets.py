@@ -400,7 +400,7 @@ def build_kjv_fast_lookup_global(context: AssetExecutionContext):
         AssetDep("build_kjv_fast_lookup_global", partition_mapping=AllPartitionMapping())
     ]
 )
-def upload_to_minio(context: AssetExecutionContext, build_kjv_fast_lookup_global):
+def upload_to_minio(context: AssetExecutionContext):
     """
     Scope: Per Volume
     setup_minio.py
