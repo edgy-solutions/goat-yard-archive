@@ -114,7 +114,7 @@ def main(filter_str=None):
     if filter_str:
         print(f"🔍 Filtering for Volume: '{filter_str}'")
         # Ensure we keep the global assets (gill_*.png and the kjv index)
-        files = [f for f in files if (f in root_images) or (f == kjv_index) or (f"volume{filter_str}" in f.parts)]
+        files = [f for f in files if (f in root_images) or (f.name == "kjv_fast_lookup.json") or (f"volume{filter_str}" in f.parts)]
 
     print(f"Found {len(files)} files to sync.")
 
