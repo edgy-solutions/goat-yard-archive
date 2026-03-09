@@ -129,8 +129,15 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
         # Free page object reference explicitly per PyMuPDF best practices on massive documents
         del page
     
-    doc.close()
-    print(f"\n✅ Extraction complete: {len(doc)} pages processed")
+    try:
+        # On massive PDFs, PyMuPDF sometimes aggressively garbage collects the C-pointer
+        # before this explicit close(), throwing a ValueError: document closed.
+        if not doc.is_closed:
+            doc.close()
+    except Exception as e:
+        print(f"Warning on document close (safely ignored): {e}")
+        
+    print(f"\n✅ Extraction complete: {page_num + 1} pages processed")
     print(f"   Output directory: {output_dir}")
 
 
