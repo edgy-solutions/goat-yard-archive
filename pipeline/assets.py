@@ -104,8 +104,8 @@ def extract_images(context: AssetExecutionContext):
         )
 
 
-@asset(partitions_def=volume_page_partitions)
-def get_md(context: AssetExecutionContext, extract_images):
+@asset(partitions_def=volume_page_partitions, deps=["extract_images"])
+def get_md(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     get_md.py --image "volume{x}/page{y}_image.png"
@@ -130,9 +130,10 @@ def get_md(context: AssetExecutionContext, extract_images):
 
 @asset(
     partitions_def=volume_page_partitions,
-    op_tags={"dagster/concurrency_key": "openrouter"}
+    op_tags={"dagster/concurrency_key": "openrouter"},
+    deps=["get_md"]
 )
-def read_images_baml(context: AssetExecutionContext, get_md):
+def read_images_baml(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     read_images_baml.py --pages {y}
@@ -157,8 +158,8 @@ def read_images_baml(context: AssetExecutionContext, get_md):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
-def reindex_ocr(context: AssetExecutionContext, read_images_baml):
+@asset(partitions_def=volume_page_partitions, deps=["read_images_baml"])
+def reindex_ocr(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     reindex_ocr.py --extracted-dir "$COMMENTARY_DATA_DIR/volume{x}" --page {y}
@@ -185,8 +186,8 @@ def reindex_ocr(context: AssetExecutionContext, read_images_baml):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
-def fixup_ocr(context: AssetExecutionContext, reindex_ocr):
+@asset(partitions_def=volume_page_partitions, deps=["reindex_ocr"])
+def fixup_ocr(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     fixup_ocr.py --extracted-dir "$COMMENTARY_DATA_DIR/volume{x}" 
@@ -219,9 +220,10 @@ def fixup_ocr(context: AssetExecutionContext, reindex_ocr):
 
 @asset(
     partitions_def=volume_page_partitions,
-    op_tags={"dagster/concurrency_key": "openrouter"}
+    op_tags={"dagster/concurrency_key": "openrouter"},
+    deps=["fixup_ocr"]
 )
-def normalize_markdown(context: AssetExecutionContext, fixup_ocr):
+def normalize_markdown(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     normalize_markdown.py --dir "$COMMENTARY_DATA_DIR/volume{x}/qwen_qwen3-vl-235b-a22b-thinking" 
@@ -251,8 +253,8 @@ def normalize_markdown(context: AssetExecutionContext, fixup_ocr):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
-def verify_existing(context: AssetExecutionContext, normalize_markdown):
+@asset(partitions_def=volume_page_partitions, deps=["normalize_markdown"])
+def verify_existing(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     verify_existing.py --page {y}
@@ -277,8 +279,8 @@ def verify_existing(context: AssetExecutionContext, normalize_markdown):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
-def align_verses(context: AssetExecutionContext, verify_existing):
+@asset(partitions_def=volume_page_partitions, deps=["verify_existing"])
+def align_verses(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     align_verses.py --dir "$COMMENTARY_DATA_DIR/volume{x}" --page {y}
@@ -305,8 +307,8 @@ def align_verses(context: AssetExecutionContext, verify_existing):
     run_cli_script(context, cmd)
 
 
-@asset(partitions_def=volume_page_partitions)
-def ingest(context: AssetExecutionContext, align_verses):
+@asset(partitions_def=volume_page_partitions, deps=["align_verses"])
+def ingest(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
     ingest.py --data-dir "$COMMENTARY_DATA_DIR/volume{x}" 
