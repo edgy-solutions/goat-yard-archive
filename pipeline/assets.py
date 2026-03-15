@@ -13,6 +13,7 @@ from dagster import (
     MultiPartitionMapping,
     DimensionPartitionMapping,
     IdentityPartitionMapping,
+    MaterializeResult,
 )
 
 # 1. Define Partitions
@@ -37,11 +38,12 @@ SCRIPTS_DIR = os.path.join(PIPELINE_DIR, "scripts")
 
 
 # 2. Helper function for running subprocess and piping logs to Dagster context
-def run_cli_script(context: AssetExecutionContext, cmd: List[str], cwd: str = None):
+def run_cli_script(context: AssetExecutionContext, cmd: List[str], cwd: str = None) -> str:
     """
     Runs a shell command via subprocess, piping output to the Dagster context logger.
+    Returns the full stdout as a string.
     """
-    cmd_str = " ".join(cmd)
+    cmd_str = " ".join([str(c) for c in cmd])
     context.log.info(f"Running command: {cmd_str}")
     
     process = subprocess.Popen(
@@ -52,14 +54,19 @@ def run_cli_script(context: AssetExecutionContext, cmd: List[str], cwd: str = No
         cwd=cwd
     )
     
+    lines = []
     # Stream output to Dagster log
     for line in process.stdout:
-        context.log.info(line.strip())
+        stripped = line.strip()
+        context.log.info(stripped)
+        lines.append(stripped)
         
     process.wait()
     
     if process.returncode != 0:
         raise Exception(f"Command failed with return code {process.returncode}")
+        
+    return "\n".join(lines)
 
 
 # 3. Asset Definitions
@@ -250,7 +257,14 @@ def normalize_markdown(context: AssetExecutionContext):
         "--model", "deepseek/deepseek-chat"
     ]
     
-    run_cli_script(context, cmd)
+    # Run the script and capture output
+    output = run_cli_script(context, cmd)
+    
+    metadata = {"Status": "✅ Success"}
+    if "Already normalized" in output or "Skipping" in output:
+        metadata["Status"] = "ℹ️ Skipped - Already normalized"
+        
+    return MaterializeResult(metadata=metadata)
 
 
 @asset(partitions_def=volume_page_partitions, deps=["normalize_markdown"])
@@ -304,7 +318,19 @@ def align_verses(context: AssetExecutionContext):
         "--page", page_name
     ]
     
-    run_cli_script(context, cmd)
+    # Run the script and capture output
+    output = run_cli_script(context, cmd)
+    
+    import re
+    metadata = {"Status": "✅ Success"}
+    
+    # Check for "No Verses Found:  1" (or similar)
+    no_verses_match = re.search(r"No Verses Found:\s+([1-9]\d*)", output)
+    if no_verses_match:
+        metadata["Status"] = "⚠️ Warning - No verses found"
+        metadata["Warning Details"] = f"{no_verses_match.group(1)} pages had 0 verses"
+        
+    return MaterializeResult(metadata=metadata)
 
 
 @asset(partitions_def=volume_page_partitions, deps=["align_verses"])
@@ -337,7 +363,25 @@ def ingest(context: AssetExecutionContext):
         "--volume", str(volume)
     ]
     
-    run_cli_script(context, cmd)
+    # Run the script and capture output
+    output = run_cli_script(context, cmd)
+    
+    import re
+    metadata = {"Status": "✅ Success"}
+    
+    # Parse chunk count: "[OK] Test complete: 5 chunks ingested for page1"
+    # or "[OK] Batch complete: 10 chunks total"
+    chunk_match = re.search(r"(\d+) chunks (?:ingested|total)", output)
+    if chunk_match:
+        chunk_count = int(chunk_match.group(1))
+        metadata["Chunks Ingested"] = chunk_count
+        if chunk_count == 0:
+            metadata["Status"] = "⚠️ Warning - 0 Chunks"
+            
+    if "Metadata not found" in output:
+        metadata["Status"] = "⚠️ Warning - No upstream data (metadata missing)"
+        
+    return MaterializeResult(metadata=metadata)
 
 
 @asset(
