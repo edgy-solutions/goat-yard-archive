@@ -113,6 +113,13 @@ def get_md(context: AssetExecutionContext, extract_images):
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
+    
     # get_md.py expects: python get_md.py [image_path] [optional_args]
     # No --image flag, it's a positional argument.
     image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -133,6 +140,13 @@ def read_images_baml(context: AssetExecutionContext, get_md):
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
+    
     directory = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "read_images_baml.py"), 
@@ -151,6 +165,13 @@ def reindex_ocr(context: AssetExecutionContext, read_images_baml):
     """
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
+    
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
     
     extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     page_name = f"page{page}_image{volume}"
@@ -174,6 +195,13 @@ def fixup_ocr(context: AssetExecutionContext, reindex_ocr):
     """
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
+    
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
     
     extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     markdown_dir = os.path.join(extracted_dir, "qwen_qwen3-vl-235b-a22b-thinking")
@@ -202,6 +230,13 @@ def normalize_markdown(context: AssetExecutionContext, fixup_ocr):
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
+    
     markdown_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", "qwen_qwen3-vl-235b-a22b-thinking")
     markdown_file = os.path.join(markdown_dir, f"page{page}_image{volume}.md")
     
@@ -225,6 +260,13 @@ def verify_existing(context: AssetExecutionContext, normalize_markdown):
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
+    
     page_name = f"page{page}_image{volume}"
     
     cmd = [
@@ -243,6 +285,13 @@ def align_verses(context: AssetExecutionContext, verify_existing):
     """
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
+    
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
     
     extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     page_name = f"page{page}_image{volume}"
@@ -266,6 +315,13 @@ def ingest(context: AssetExecutionContext, align_verses):
     """
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
+    
+    # --- GHOST PARTITION SHIELD ---
+    base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    if not os.path.exists(base_image_path):
+        context.log.info(f"Ghost partition detected for Vol {volume} Page {page}. Skipping.")
+        return
+    # ------------------------------
     
     data_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     alignment_dir = os.path.join(COMMENTARY_DATA_DIR, "artifacts", "alignment", f"volume{volume}")
