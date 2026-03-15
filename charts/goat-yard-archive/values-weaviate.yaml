@@ -1,15 +1,16 @@
 # Weaviate Transformers Inference Scaling
 # This file overrides the default Weaviate Helm chart values for the gya-test namespace.
 
-t2v-transformers:
-  enabled: true
-  image:
-    tag: sentence-transformers-all-mpnet-base-v2
-  replicas: 2
-  resources:
-    requests:
-      cpu: "1"
-      memory: "1Gi"
-    limits:
-      cpu: "2"
-      memory: "2Gi"
+modules:
+  text2vec-transformers:
+    enabled: true
+    image:
+      tag: sentence-transformers-all-mpnet-base-v2
+    replicas: 2
+    resources:
+      requests:
+        cpu: "1"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "2Gi"
