@@ -25,8 +25,8 @@ page_partitions = DynamicPartitionsDefinition(name="page_partitions")
 # Multi-partition combining both
 volume_page_partitions = MultiPartitionsDefinition(
     {
-        "volume": volume_partitions,
-        "page": page_partitions,
+        "1_volume": volume_partitions,
+        "2_page": page_partitions,
     }
 )
 
@@ -110,8 +110,8 @@ def get_md(context: AssetExecutionContext):
     Scope: Per Volume + Page
     get_md.py --image "volume{x}/page{y}_image.png"
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -138,8 +138,8 @@ def read_images_baml(context: AssetExecutionContext):
     Scope: Per Volume + Page
     read_images_baml.py --pages {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -164,8 +164,8 @@ def reindex_ocr(context: AssetExecutionContext):
     Scope: Per Volume + Page
     reindex_ocr.py --extracted-dir "$COMMENTARY_DATA_DIR/volume{x}" --page {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -194,8 +194,8 @@ def fixup_ocr(context: AssetExecutionContext):
                  --markdown-dir "$COMMENTARY_DATA_DIR/volume{x}/qwen_qwen3-vl-235b-a22b-thinking" 
                  --page {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -229,8 +229,8 @@ def normalize_markdown(context: AssetExecutionContext):
     normalize_markdown.py --dir "$COMMENTARY_DATA_DIR/volume{x}/qwen_qwen3-vl-235b-a22b-thinking" 
                           --force --backend dspy --model deepseek/deepseek-chat --page {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -259,8 +259,8 @@ def verify_existing(context: AssetExecutionContext):
     Scope: Per Volume + Page
     verify_existing.py --page {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -285,8 +285,8 @@ def align_verses(context: AssetExecutionContext):
     Scope: Per Volume + Page
     align_verses.py --dir "$COMMENTARY_DATA_DIR/volume{x}" --page {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -315,8 +315,8 @@ def ingest(context: AssetExecutionContext):
               --alignment-dir "$COMMENTARY_DATA_DIR/artifacts/alignment/volume{x}" 
               --page {y}
     """
-    volume = context.partition_key.keys_by_dimension["volume"]
-    page = context.partition_key.keys_by_dimension["page"]
+    volume = context.partition_key.keys_by_dimension["1_volume"]
+    page = context.partition_key.keys_by_dimension["2_page"]
     
     # --- GHOST PARTITION SHIELD ---
     base_image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
@@ -343,8 +343,8 @@ def ingest(context: AssetExecutionContext):
 @asset(
     partitions_def=volume_partitions,
     deps=[AssetDep("get_md", partition_mapping=MultiPartitionMapping({
-        "volume": DimensionPartitionMapping("volume", IdentityPartitionMapping()),
-        "page": DimensionPartitionMapping("page", AllPartitionMapping())
+        "1_volume": DimensionPartitionMapping("1_volume", IdentityPartitionMapping()),
+        "2_page": DimensionPartitionMapping("2_page", AllPartitionMapping())
     }))]
 )
 def verify_verse_continuity_validation(context: AssetExecutionContext):
@@ -402,8 +402,8 @@ def optimize_dspy_normalizer(context: AssetExecutionContext):
 @asset(
     partitions_def=volume_partitions,
     deps=[AssetDep("read_images_baml", partition_mapping=MultiPartitionMapping({
-        "volume": DimensionPartitionMapping("volume", IdentityPartitionMapping()),
-        "page": DimensionPartitionMapping("page", AllPartitionMapping())
+        "1_volume": DimensionPartitionMapping("1_volume", IdentityPartitionMapping()),
+        "2_page": DimensionPartitionMapping("2_page", AllPartitionMapping())
     }))]
 )
 def verify_markdown_headers_validation(context: AssetExecutionContext):
