@@ -4943,7 +4943,7 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
         start_verse: Expected starting verse for first image (for validation seeding)
     
     Returns:
-        Number of images processed
+        Tuple[int, int]: (images_processed, failed_count)
     """
     log_print(f"\n{'='*80}")
     log_print(f"BATCH PROCESSING MODE")
@@ -5055,6 +5055,7 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
     initial_book = None
     initial_chapter = None
     processed_count = 0
+    failed_count = 0
     
     for i in range(start_index, len(sorted_images)):
         img_path, page_num = sorted_images[i]
@@ -5208,6 +5209,7 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
             
             if continue_on_error:
                 log_print(f"WARNING: Continuing with next image (metadata chain broken)\n")
+                failed_count += 1
                 # Reset prev_metadata to prevent cascading errors
                 prev_metadata = None
                 continue
@@ -5218,14 +5220,16 @@ def batch_process_images(start_image_path, lang='eng', right_col_char_pos=None,
                 log_print(f"Successfully processed {processed_count} images before error")
                 log_print(f"To continue processing despite errors, use --continue-on-error flag")
                 log_print(f"{'='*80}\n")
-                return processed_count
+                
+                # Count current failure before aborting
+                failed_count += 1
+                return processed_count, failed_count
     
     log_print(f"\n{'='*80}")
-    log_print(f"BATCH PROCESSING COMPLETE")
-    log_print(f"Processed {processed_count} images")
+    log_print(f"Processed {processed_count} images ({failed_count} failures)")
     log_print(f"{'='*80}\n")
     
-    return processed_count
+    return processed_count, failed_count
 
 
 if __name__ == "__main__":
@@ -5331,10 +5335,11 @@ if __name__ == "__main__":
     if log_file_path:
         set_log_file(log_file_path)
     
+    has_failures = False
     try:
         # Batch processing mode
         if batch_mode:
-            batch_process_images(
+            processed, failed = batch_process_images(
                 image_path, 
                 lang=lang, 
                 right_col_char_pos=right_col_char_pos,
@@ -5350,6 +5355,8 @@ if __name__ == "__main__":
                 book_only=book_only,
                 use_legacy_validation=use_legacy_validation
             )
+            if failed > 0:
+                has_failures = True
         else:
             # Single image processing mode
             # Load previous metadata if provided
@@ -5359,6 +5366,16 @@ if __name__ == "__main__":
             
             # Process image (all steps 1-9 are done in process_image)
             metadata = process_image(image_path, output_path, lang, right_col_char_pos, validate_ollama, prev_metadata)
+            if not metadata:
+                has_failures = True
+    except Exception as e:
+        log_print(f"CRITICAL ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        has_failures = True
     finally:
         # Ensure log file is closed
         close_log_file()
+    
+    if has_failures:
+        sys.exit(1)

@@ -82,17 +82,21 @@ def audit_directory(base_dir, volume_name):
     else:
         print("MATCHED: All checked chapter-start pages have headers.")
     print("\n")
+    return len(missing_headers)
 
 if __name__ == "__main__":
     # Base paths
-    BASE_DIR = Path(os.getenv("COMMENTARY_DATA_DIR", os.getcwd()))
-    
+    missing_found = 0
     # Genesis (Vol 1)
     vol1_path = BASE_DIR / "volume1"
     if vol1_path.exists():
-        audit_directory(vol1_path, "Genesis (Vol 1)")
+        missing_found += audit_directory(vol1_path, "Genesis (Vol 1)")
     
     # Matthew (Vol 7)
     vol7_path = BASE_DIR / "volume7"
     if vol7_path.exists():
-        audit_directory(vol7_path, "Matthew (Vol 7)")
+        missing_found += audit_directory(vol7_path, "Matthew (Vol 7)")
+        
+    if missing_found > 0:
+        import sys
+        sys.exit(1)

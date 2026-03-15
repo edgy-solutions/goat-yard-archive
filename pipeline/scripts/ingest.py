@@ -12,6 +12,7 @@ This script processes aligned commentary pages and ingests them into Weaviate wi
 """
 
 import os
+import sys
 import json
 import logging
 import re
@@ -103,6 +104,8 @@ class GillIngestionEngine:
         
         # Cache for entity deduplication
         self.entity_cache: Dict[Tuple[str, str], str] = {}  # (name, category) -> UUID
+        
+        self.has_failures = False
         
         logging.info(f"Connected to Weaviate")
     
@@ -895,6 +898,7 @@ class GillIngestionEngine:
                 
             except Exception as e:
                 logging.error(f"Error ingesting {verse_ref}: {e}")
+                self.has_failures = True
         
         if cache_dirty and cache_file:
              try:
@@ -946,6 +950,7 @@ class GillIngestionEngine:
                 logging.error(f"Error processing {page_name}: {e}")
                 
         logging.info(f"✅ Ingestion complete: {processed_pages} pages, {total_chunks} chunks")
+        return total_chunks
 
     def clean_text(self, text: str) -> str:
         """
@@ -1139,3 +1144,7 @@ if __name__ == "__main__":
             qwen_dir = next(base_data.glob("qwen*"), base_data / "qwen_qwen3-vl-235b-a22b-thinking")
             chunks = engine.run_batch(args.data_dir, args.alignment_dir, qwen_dir.name, None, args.volume, args.recycle_entities, args.limit, args.entity_cache_dir)
             print(f"[OK] Batch complete: {chunks} chunks total")
+        
+        if engine.has_failures:
+            print("[ERROR] Ingestion finished with errors.")
+            sys.exit(1)

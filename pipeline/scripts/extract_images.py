@@ -61,6 +61,9 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
         volume (int): Volume number (used in output directory naming).
         output_dir (str): The directory where extracted images will be saved.
                          If None, uses "extracted_images_<volume>".
+    
+    Returns:
+        int: Total number of images that failed to process.
     """
     # Default output directory based on volume
     if output_dir is None:
@@ -77,6 +80,8 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"Created output directory: {output_dir}")
+
+    failed_images = 0
 
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -125,6 +130,7 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
                 
             except Exception as e:
                 print(f"Error processing image {img_index + 1} on page {page_num + 1}: {e}")
+                failed_images += 1
             
         # Free page object reference explicitly per PyMuPDF best practices on massive documents
         del page
@@ -137,8 +143,9 @@ def extract_images_from_pdf(pdf_path: str, volume: int, output_dir: str = None):
     except Exception as e:
         print(f"Warning on document close (safely ignored): {e}")
         
-    print(f"\n✅ Extraction complete: {page_num + 1} pages processed")
+    print(f"\n✅ Extraction complete: {page_num + 1} pages processed ({failed_images} failures)")
     print(f"   Output directory: {output_dir}")
+    return failed_images
 
 
 if __name__ == "__main__":
@@ -175,11 +182,15 @@ if __name__ == "__main__":
             pdf_path = find_volume_pdf(args.volume, args.docs_dir)
         
         # Extract images
-        extract_images_from_pdf(
+        failed = extract_images_from_pdf(
             pdf_path=pdf_path,
             volume=args.volume,
             output_dir=args.output_dir
         )
+        
+        if failed > 0:
+            print(f"Error: {failed} images failed to process.")
+            exit(1)
         
     except FileNotFoundError as e:
         print(f"Error: {e}")

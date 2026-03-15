@@ -695,7 +695,7 @@ def process_images_with_baml(api_key, directory_path=None, model_name="qwen/qwen
         logging.info("="*60)
         logging.info("SESSION ENDED - No images to process")
         logging.info("="*60)
-        return
+        return 0
     
     # Initialize metrics tracking
     metrics_file = output_dir / "metrics.jsonl"
@@ -816,8 +816,10 @@ def process_images_with_baml(api_key, directory_path=None, model_name="qwen/qwen
             logging.info(f"Average cost per image: ${total_cost/successful_images:.6f}")
     logging.info(f"Metrics saved to: {metrics_file}")
     logging.info(f"Log file: {log_path}")
-    logging.info("="*60)
     logging.info("SESSION COMPLETED")
+    logging.info("="*60)
+    
+    return failed_images
 
 
 # Load API key from environment variables
@@ -869,7 +871,11 @@ if __name__ == "__main__":
             print(f"Error: Invalid pages format '{args.pages}'. Use comma-separated numbers like 337,341,386,389")
             exit(1)
     
-    process_images_with_baml(
+    if not API_KEY:
+        print("Error: OPENROUTER_API_KEY environment variable not set")
+        sys.exit(1)
+        
+    failed = process_images_with_baml(
         api_key=API_KEY,
         directory_path=args.directory,
         model_name=args.model,
@@ -882,3 +888,6 @@ if __name__ == "__main__":
         max_workers=args.workers,
         skip_existing=not args.force and not args.no_skip
     )
+    
+    if failed > 0:
+        sys.exit(1)

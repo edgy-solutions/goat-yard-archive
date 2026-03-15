@@ -1031,6 +1031,8 @@ class VerseAligner:
         if stats['OTHER_ERROR'] > 0:
             logging.info(f"Critical Errors:  {stats['OTHER_ERROR']}")
         logging.info("="*40)
+        
+        return stats
 
 
 if __name__ == "__main__":
@@ -1044,8 +1046,17 @@ if __name__ == "__main__":
     
     aligner = VerseAligner(args.dir, args.out)
     
+    has_failures = False
     if args.page:
         # Always overwrite for explicit single page test
-        aligner.process_page(args.page, args.debug, overwrite=True)
+        status, _ = aligner.process_page(args.page, args.debug, overwrite=True)
+        if status in ["ERROR_MISSING_DATA", "NO_VERSES", "OTHER_ERROR"]:
+            has_failures = True
     else:
-        aligner.run(args.debug, args.overwrite)
+        stats = aligner.run(args.debug, args.overwrite)
+        if stats.get("OTHER_ERROR", 0) > 0 or stats.get("ERROR_MISSING_DATA", 0) > 0 or stats.get("NO_VERSES", 0) > 0:
+            has_failures = True
+            
+    if has_failures:
+        import sys
+        sys.exit(1)

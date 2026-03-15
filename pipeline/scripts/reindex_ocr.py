@@ -301,36 +301,41 @@ def save_reindexed(words: List[Dict], page_name: str, output_dir: Path):
     return output_path
 
 
-def process_page(page_name: str, extracted_dir: Path, overwrite: bool = False):
+def process_page(page_name: str, extracted_dir: Path, overwrite: bool = False) -> bool:
     """Process a single page."""
     output_path = extracted_dir / f"{page_name}_reindexed.json"
     if output_path.exists() and not overwrite:
         print(f"Skipping {page_name} (output exists)")
-        return
+        return True # Considered a successful skip
 
     print(f"\nProcessing {page_name}...")
     
-    # Load OCR
-    words = load_ocr(page_name, extracted_dir)
-    print(f"  Loaded {len(words)} words")
-    
-    if not words:
-        print("  WARNING: No words found in OCR. Skipping.")
-        return
-    
-    # Detect layout
-    layout = detect_layout(words)
-    print(f"  Layout: column_split={layout['column_split']:.0f}, header_y={layout['header_y']:.0f}")
-    
-    # Reindex in reading order
-    reindexed = reindex_ocr(words, layout)
-    print(f"  Reindexed {len(reindexed)} words")
-    
-    # Save
-    save_reindexed(reindexed, page_name, extracted_dir)
-    
-    # Show first few words to verify order
-    print(f"  First 10 words: {[w['text'] for w in reindexed[:10]]}")
+    try:
+        # Load OCR
+        words = load_ocr(page_name, extracted_dir)
+        print(f"  Loaded {len(words)} words")
+        
+        if not words:
+            print("  WARNING: No words found in OCR. Skipping.")
+            return False # Indicate failure due to no words
+        
+        # Detect layout
+        layout = detect_layout(words)
+        print(f"  Layout: column_split={layout['column_split']:.0f}, header_y={layout['header_y']:.0f}")
+        
+        # Reindex in reading order
+        reindexed = reindex_ocr(words, layout)
+        print(f"  Reindexed {len(reindexed)} words")
+        
+        # Save
+        save_reindexed(reindexed, page_name, extracted_dir)
+        
+        # Show first few words to verify order
+        print(f"  First 10 words: {[w['text'] for w in reindexed[:10]]}")
+        return True # Indicate success
+    except Exception as e:
+        print(f"  ERROR processing {page_name}: {e}")
+        return False # Indicate failure
 
 
 def main():
@@ -343,14 +348,26 @@ def main():
     
     extracted_dir = Path(args.extracted_dir)
     
+    failed_count = 0
     if args.page:
-        process_page(args.page, extracted_dir, args.overwrite)
+        if not process_page(args.page, extracted_dir, args.overwrite):
+            failed_count += 1
     else:
         # Process all pages with OCR files
         for ocr_file in extracted_dir.glob('*_ocr.json'):
+            # Skip already reindexed files if they show up in glob (though glob pattern should prevent this)
+            if ocr_file.name.endswith("_reindexed.json"):
+                continue
+                
             page_name = ocr_file.stem.replace('_ocr', '')
-            process_page(page_name, extracted_dir, args.overwrite)
+            if not process_page(page_name, extracted_dir, args.overwrite):
+                failed_count += 1
+                
+    if failed_count > 0:
+        import sys
+        sys.exit(1)
 
 
 if __name__ == '__main__':
     main()
+

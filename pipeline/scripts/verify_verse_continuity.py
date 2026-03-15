@@ -206,6 +206,8 @@ def audit_volume(volume_path, bible_index):
         
         if book_gaps == 0:
             print(f"  OK (Chapters {min_ch}-{max_ch} fully covered)")
+            
+    return total_gaps
 
 if __name__ == "__main__":
     import argparse
@@ -257,6 +259,11 @@ if __name__ == "__main__":
     if not index:
         exit(1)
         
+    grand_total_gaps = 0
     for d in valid_dirs:
         print(f"checking {d}")
-        audit_volume(d, index)
+        grand_total_gaps += audit_volume(d, index)
+        
+    if grand_total_gaps > 0:
+        import sys
+        sys.exit(1)

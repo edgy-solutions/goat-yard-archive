@@ -373,7 +373,7 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path, overwr
     output_path = extracted_dir / f"{page_name}_fixedup.json"
     if output_path.exists() and not overwrite:
         print(f"Skipping {page_name} (output exists)")
-        return
+        return True
 
     print(f"\nProcessing {page_name}...")
     
@@ -382,7 +382,7 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path, overwr
         ocr_words = load_reindexed_ocr(page_name, extracted_dir)
     except FileNotFoundError:
         print(f"  ERROR: Reindexed OCR not found. Run reindex_ocr.py first.")
-        return
+        return False
     print(f"  Loaded {len(ocr_words)} OCR words")
     
     # Load metadata for header detection
@@ -395,7 +395,7 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path, overwr
         markdown = load_markdown(page_name, markdown_dir)
     except FileNotFoundError:
         print(f"  ERROR: Markdown not found at {markdown_dir}")
-        return
+        return False
     
     # Pre-filter header words using metadata
     # Header words are in the top 3% of the page and match metadata patterns
@@ -444,6 +444,7 @@ def process_page(page_name: str, extracted_dir: Path, markdown_dir: Path, overwr
     
     # Save
     save_fixedup(result_words, page_name, extracted_dir)
+    return True
 
 
 def main():
@@ -460,12 +461,19 @@ def main():
     extracted_dir = Path(args.extracted_dir)
     markdown_dir = Path(args.markdown_dir)
     
+    failed_count = 0
     if args.page:
-        process_page(args.page, extracted_dir, markdown_dir, args.overwrite)
+        if not process_page(args.page, extracted_dir, markdown_dir, args.overwrite):
+            failed_count += 1
     else:
         for ocr_file in extracted_dir.glob('*_reindexed.json'):
             page_name = ocr_file.stem.replace('_reindexed', '')
-            process_page(page_name, extracted_dir, markdown_dir, args.overwrite)
+            if not process_page(page_name, extracted_dir, markdown_dir, args.overwrite):
+                failed_count += 1
+    
+    if failed_count > 0:
+        import sys
+        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -106,3 +106,7 @@ for summary in dir_summaries:
 print(f"{'-'*60}")
 print(f"{'GRAND TOTAL':<35} Passed: {grand_passed:<5} Failed: {grand_failed:<5}")
 print(f"Total Files: {grand_passed + grand_failed}")
+
+if grand_failed > 0:
+    import sys
+    sys.exit(1)
