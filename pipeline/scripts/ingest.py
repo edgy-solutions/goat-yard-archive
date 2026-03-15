@@ -13,6 +13,7 @@ This script processes aligned commentary pages and ingests them into Weaviate wi
 
 import os
 import sys
+import time
 import json
 import logging
 import re
@@ -875,30 +876,40 @@ class GillIngestionEngine:
                     page_entity_cache[verse_ref] = serialized_ents
                     cache_dirty = True
             
-            # Ingest
-            try:
-                self.chunks.data.insert({
-                    "content": vector_content,
-                    "verse_ref": verse_ref,
-                    "book": self.parse_verse_ref(verse_ref)[0] if verse_ref else None,
-                    "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if self.parse_verse_ref(verse_ref)[1] else 0,
-                    "volume": volume,
-                    "page_number": page_num,
-                    "lemma": lemma, # Store the extracted lemma for UI display
-                    "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
-                    "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
-                    "footnotes": footnotes,
-                    "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None
-                }, references={
-                    "mentions_entity": entity_uuids
-                } if entity_uuids else None)
-                
-                chunks_ingested += 1
-                logging.debug(f"Ingested {verse_ref}")
-                
-            except Exception as e:
-                logging.error(f"Error ingesting {verse_ref}: {e}")
-                self.has_failures = True
+            # Ingest with retry logic
+            MAX_RETRIES = 5
+            inserted_successfully = False
+            for attempt in range(MAX_RETRIES):
+                try:
+                    self.chunks.data.insert({
+                        "content": vector_content,
+                        "verse_ref": verse_ref,
+                        "book": self.parse_verse_ref(verse_ref)[0] if verse_ref else None,
+                        "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if self.parse_verse_ref(verse_ref)[1] else 0,
+                        "volume": volume,
+                        "page_number": page_num,
+                        "lemma": lemma, # Store the extracted lemma for UI display
+                        "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
+                        "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
+                        "footnotes": footnotes,
+                        "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None
+                    }, references={
+                        "mentions_entity": entity_uuids
+                    } if entity_uuids else None)
+                    
+                    chunks_ingested += 1
+                    logging.debug(f"Ingested {verse_ref}")
+                    inserted_successfully = True
+                    break # Success!
+                    
+                except Exception as e:
+                    if attempt == MAX_RETRIES - 1:
+                        logging.error(f"Error ingesting {verse_ref} after {MAX_RETRIES} attempts: {e}")
+                        self.has_failures = True
+                    else:
+                        delay = 2 ** attempt # 1s, 2s, 4s, 8s...
+                        logging.warning(f"Weaviate busy/timeout inserting {verse_ref}. Retrying in {delay}s... (Attempt {attempt+1}/{MAX_RETRIES}) (Error: {e})")
+                        time.sleep(delay)
         
         if cache_dirty and cache_file:
              try:
