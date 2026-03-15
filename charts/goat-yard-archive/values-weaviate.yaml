@@ -4,8 +4,7 @@
 modules:
   text2vec-transformers:
     enabled: true
-    image:
-      tag: sentence-transformers-all-mpnet-base-v2
+    tag: "sentence-transformers-all-mpnet-base-v2"
     replicas: 2
     resources:
       requests:
