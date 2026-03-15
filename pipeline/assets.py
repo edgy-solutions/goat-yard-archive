@@ -333,7 +333,11 @@ def align_verses(context: AssetExecutionContext):
     return MaterializeResult(metadata=metadata)
 
 
-@asset(partitions_def=volume_page_partitions, deps=["align_verses"])
+@asset(
+    partitions_def=volume_page_partitions,
+    deps=["align_verses"],
+    op_tags={"dagster/concurrency_key": "weaviate_ingest"}
+)
 def ingest(context: AssetExecutionContext):
     """
     Scope: Per Volume + Page
