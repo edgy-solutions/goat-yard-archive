@@ -83,11 +83,12 @@ def extract_images(context: AssetExecutionContext):
     
     discovered_pages = []
     if os.path.exists(volume_dir):
+        # Look for files like page100_image7.png
+        suffix = f"_image{volume}.png"
         for filename in os.listdir(volume_dir):
-            if filename.startswith("page") and filename.endswith("_image.png"):
-                # Extract the page identifier, e.g. "100" from "page100_image.png"
-                # Since downstream scripts use {y} as "100" (or similar depending on script args)
-                page_id = filename.split("_image")[0].replace("page", "")
+            if filename.startswith("page") and filename.endswith(suffix):
+                # Extract the page identifier, e.g. "100" from "page100_image7.png"
+                page_id = filename.replace("page", "").replace(suffix, "")
                 if page_id not in discovered_pages:
                     discovered_pages.append(page_id)
                     
@@ -112,8 +113,10 @@ def get_md(context: AssetExecutionContext, extract_images):
     volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
-    image_path = f"volume{volume}/page{page}_image.png"
-    cmd = ["python", os.path.join(SCRIPTS_DIR, "get_md.py"), "--image", image_path]
+    # get_md.py expects: python get_md.py [image_path] [optional_args]
+    # No --image flag, it's a positional argument.
+    image_path = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", f"page{page}_image{volume}.png")
+    cmd = ["python", os.path.join(SCRIPTS_DIR, "get_md.py"), image_path]
     
     run_cli_script(context, cmd)
 
@@ -127,9 +130,15 @@ def read_images_baml(context: AssetExecutionContext, get_md):
     Scope: Per Volume + Page
     read_images_baml.py --pages {y}
     """
+    volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
-    cmd = ["python", os.path.join(SCRIPTS_DIR, "read_images_baml.py"), "--pages", page]
+    directory = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "read_images_baml.py"), 
+        "--directory", directory,
+        "--pages", page
+    ]
     
     run_cli_script(context, cmd)
 
@@ -144,11 +153,12 @@ def reindex_ocr(context: AssetExecutionContext, read_images_baml):
     page = context.partition_key.keys_by_dimension["page"]
     
     extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
+    page_name = f"page{page}_image{volume}"
     
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "reindex_ocr.py"), 
         "--extracted-dir", extracted_dir, 
-        "--page", page
+        "--page", page_name
     ]
     
     run_cli_script(context, cmd)
@@ -167,12 +177,13 @@ def fixup_ocr(context: AssetExecutionContext, reindex_ocr):
     
     extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     markdown_dir = os.path.join(extracted_dir, "qwen_qwen3-vl-235b-a22b-thinking")
+    page_name = f"page{page}_image{volume}"
     
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "fixup_ocr.py"), 
         "--extracted-dir", extracted_dir,
         "--markdown-dir", markdown_dir,
-        "--page", page
+        "--page", page_name
     ]
     
     run_cli_script(context, cmd)
@@ -192,14 +203,14 @@ def normalize_markdown(context: AssetExecutionContext, fixup_ocr):
     page = context.partition_key.keys_by_dimension["page"]
     
     markdown_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}", "qwen_qwen3-vl-235b-a22b-thinking")
+    markdown_file = os.path.join(markdown_dir, f"page{page}_image{volume}.md")
     
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "normalize_markdown.py"),
-        "--dir", markdown_dir,
+        "--file", markdown_file,
         "--force",
         "--backend", "dspy",
-        "--model", "deepseek/deepseek-chat",
-        "--page", page
+        "--model", "deepseek/deepseek-chat"
     ]
     
     run_cli_script(context, cmd)
@@ -211,9 +222,15 @@ def verify_existing(context: AssetExecutionContext, normalize_markdown):
     Scope: Per Volume + Page
     verify_existing.py --page {y}
     """
+    volume = context.partition_key.keys_by_dimension["volume"]
     page = context.partition_key.keys_by_dimension["page"]
     
-    cmd = ["python", os.path.join(SCRIPTS_DIR, "verify_existing.py"), "--page", page]
+    page_name = f"page{page}_image{volume}"
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "verify_existing.py"), 
+        "--page", page_name
+    ]
     
     run_cli_script(context, cmd)
 
@@ -228,11 +245,12 @@ def align_verses(context: AssetExecutionContext, verify_existing):
     page = context.partition_key.keys_by_dimension["page"]
     
     extracted_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
-    
+    page_name = f"page{page}_image{volume}"
+    # align_verses expects positional arguments if none specified, but we'll use --page
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "align_verses.py"), 
         "--dir", extracted_dir, 
-        "--page", page
+        "--page", page_name
     ]
     
     run_cli_script(context, cmd)
@@ -251,12 +269,13 @@ def ingest(context: AssetExecutionContext, align_verses):
     
     data_dir = os.path.join(COMMENTARY_DATA_DIR, f"volume{volume}")
     alignment_dir = os.path.join(COMMENTARY_DATA_DIR, "artifacts", "alignment", f"volume{volume}")
+    page_name = f"page{page}_image{volume}"
     
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "ingest.py"),
         "--data-dir", data_dir,
         "--alignment-dir", alignment_dir,
-        "--page", page,
+        "--page", page_name,
         "--volume", str(volume)
     ]
     

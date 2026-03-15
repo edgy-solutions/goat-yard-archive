@@ -1,0 +1,7 @@
+concurrency:
+  pools:
+    openrouter:
+      limit: 5
+      granularity: 'op'  # Ensures the limit applies to the individual ops/tasks, not the run
+  runs:
+    max_concurrent_runs: 10

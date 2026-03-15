@@ -26,5 +26,4 @@ schedules/
 .dagster/
 dagster.db
 dagster.db-journal
-dagster.yaml
 .telemetry

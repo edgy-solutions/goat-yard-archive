@@ -22,7 +22,7 @@ grand_failed = 0
 dir_summaries = []
 
 # Scan directories
-dirs_to_scan = sorted([d for d in base_path.glob('extracted_images*') if d.is_dir()])
+dirs_to_scan = sorted([d for d in base_path.glob('extracted_images*') if d.is_dir()] + [d for d in base_path.glob('volume*') if d.is_dir()])
 logging.info(f"Found {len(dirs_to_scan)} directories to scan: {[d.name for d in dirs_to_scan]}")
 
 for img_dir in dirs_to_scan:

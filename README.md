@@ -117,17 +117,35 @@ The `scripts/ingest.py` and `normalize_markdown.py` scripts handle the transform
     *   The `CommentaryChunk` is then linked to these entities, creating a traversable graph (e.g., "Find all commentary mentioning *Gamaliel*").
 
 ### 3. Pipeline Orchestration (Dagster)
-As of the latest architecture updates, all python pipeline ingestion scripts (like `get_md.py`, `align_verses.py`) currently exist inside `pipeline/scripts/`.
 
-To safely chain their operations together, they are orchestrated via a native **Dagster** environment spanning across statically partitioned definitions (Volumes 1 through 9) and natively dynamic sub-partitions for pages mapping back to each discrete printed document slice. 
+The ingestion pipeline is orchestrated via **Dagster**, which manages complex dependencies and parallel execution across the commentary dataset.
 
-To prevent OpenRouter / LLM rate limits from crushing the multi-threading graph, the Dagster AI generation nodes are strictly governed by an `openrouter = 5` concurrent key limit bounded formally in `dagster.yaml`.
+#### Partitioning Strategy
+The pipeline uses a **Multi-Partition** approach to handle the scale of the 9-volume collection:
+- **Static Partitions (Volumes)**: Volumes 1 through 9 are defined statically. Each volume represents a distinct physical book of the commentary.
+- **Dynamic Partitions (Pages)**: Within each volume, page partitions are discovered dynamically during the `extract_images` step. This allows the pipeline to adapt to varying page counts across volumes without manual configuration.
 
-To execute and visualize the entire process, **you must ensure Dagster can securely find its configuration mapping on boot** by sourcing your local directory path:
+#### Concurrency & Rate Limiting
+To protect the local infrastructure and stay within **OpenRouter** API quotas, global concurrency limits are enforced:
+- **`openrouter` Pool**: High-cost LLM nodes (like `read_images_baml` and `normalize_markdown`) are tagged with the `openrouter` concurrency key.
+- **Global Limit**: The `dagster.yaml` configures a global limit of **5** concurrent tasks for this pool. This prevents Dagster from launching hundreds of simultaneous API calls, maintaining stability even when processing an entire volume.
+
+#### Operational Setup
+To run the pipeline locally, you must ensure Dagster can securely find its configuration mapping on boot by sourcing your local directory path as the `DAGSTER_HOME`:
+
 ```powershell
-$env:DAGSTER_HOME = $PWD  # For Windows PowerShell
+# Windows PowerShell
+$env:DAGSTER_HOME = $PWD
 uv run dagster dev
 ```
+
+```bash
+# Bash
+export DAGSTER_HOME=$(pwd)
+uv run dagster dev
+```
+
+Once running, you can access the Dagster UI at `http://localhost:3000` to visualize the asset graph, monitor partition status, and trigger backfills for specific volumes.
 
 *Note: In addition to ingestion, Dagster globally orchestrates the generation of `kjv_fast_lookup.json` (via `build_kjv_fast_lookup_global`), and subsequently targets the synchronization of only the active volume Frontend image assets cleanly into MinIO remote buckets (via `upload_to_minio`).*
 

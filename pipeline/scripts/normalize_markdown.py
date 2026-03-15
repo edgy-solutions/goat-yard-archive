@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Script to normalize OCR-extracted markdown from John Gill's Bible Commentary.
 
 Supports two backends:
@@ -1137,12 +1137,18 @@ def main():
             # Assume volume dir based on volume prefix if exists, otherwise volume1
             # Actually, standardizing directory path. Best to search if not sure, but let's try standard path first
             
-            # Extract volume from page name (e.g. vol1_page105_image1 -> volume1)
+            # Extract volume from page name (e.g. vol1_page105_image1 -> volume1 OR page105_image7 -> volume7)
             vol_dir = "volume1"
             import re
-            m = re.match(r'^(vol\d+)_', args.page)
-            if m:
-                vol_dir = m.group(1).replace('vol', 'volume')
+            # Check for volN_ prefix
+            m_prefix = re.match(r'^(vol\d+)_', args.page)
+            # Check for _imageN suffix
+            m_suffix = re.search(r'_image(\d+)', args.page)
+            
+            if m_suffix:
+                vol_dir = f"volume{m_suffix.group(1)}"
+            elif m_prefix:
+                vol_dir = m_prefix.group(1).replace('vol', 'volume')
             
             qwen_dir_name = "qwen_qwen3-vl-235b-a22b-thinking"
             input_path = base_dir / vol_dir / qwen_dir_name / f"{args.page}.md"
