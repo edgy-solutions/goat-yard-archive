@@ -83,8 +83,7 @@ elif [ "$ENV" == "test" ]; then
     # Deploy Weaviate
     helm upgrade --install weaviate weaviate/weaviate \
       --namespace "$NAMESPACE" \
-      --set modules.text2vec-transformers.enabled=true \
-      --set modules.text2vec-transformers.tag=sentence-transformers-all-mpnet-base-v2 \
+      -f "$CHART_DIR/values-weaviate.yaml" \
       --wait
 
     echo "----------------------------------------"
