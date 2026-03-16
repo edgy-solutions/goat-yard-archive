@@ -134,7 +134,7 @@ class EntityCategoryAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.enum("EntityCategory")
-        self._values: typing.Set[str] = set([  "Doctrine",  "Heresy",  "TypeOrSymbol",  "BiblicalFigure",  "HistoricalFigure",  "CitedAuthority",  "PeopleGroup",  "Location",  "TimePeriod",  "OriginalWord",  "ManuscriptOrVersion",  ])
+        self._values: typing.Set[str] = set([  "Doctrine",  "Heresy",  "TypeOrSymbol",  "BiblicalFigure",  "HistoricalFigure",  "CitedAuthority",  "PeopleGroup",  "Location",  "TimePeriod",  "OriginalWord",  "ManuscriptOrVersion",  "Unknown",  ])
         self._vals = EntityCategoryValues(self._bldr, self._values)
 
     def type(self) -> baml_py.FieldType:
@@ -204,6 +204,10 @@ class EntityCategoryValues:
     @property
     def ManuscriptOrVersion(self) -> type_builder.EnumValueViewer:
         return type_builder.EnumValueViewer(self.__bldr.value("ManuscriptOrVersion"))
+    
+    @property
+    def Unknown(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Unknown"))
     
     
 
@@ -545,3 +549,4 @@ class VerseChunkProperties:
     
     
 
+

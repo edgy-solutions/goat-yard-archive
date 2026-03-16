@@ -185,6 +185,12 @@ def setup_weaviate_schema():
                         data_type=DataType.TEXT_ARRAY,
                         description="Extracted footnotes related to this chunk",
                         skip_vectorization=True
+                    ),
+                    Property(
+                        name="needs_boundary_resolution",
+                        data_type=DataType.BOOL,
+                        description="Flagged true if the LLM encountered a pronoun it could not resolve due to a page boundary cold-start.",
+                        skip_vectorization=True
                     )
                 ],
                 references=[

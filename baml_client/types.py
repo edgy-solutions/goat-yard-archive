@@ -59,6 +59,7 @@ class EntityCategory(str, Enum):
     TimePeriod = "TimePeriod"
     OriginalWord = "OriginalWord"
     ManuscriptOrVersion = "ManuscriptOrVersion"
+    Unknown = "Unknown"
 
 # #########################################################################
 # Generated classes (7)

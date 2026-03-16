@@ -20,6 +20,8 @@ enum EntityCategory {
   // Scholarship
   OriginalWord        // Hebrew/Greek words defined (e.g., "Sheol", "Logos")
   ManuscriptOrVersion // e.g., Septuagint, Vulgate, Targum
+
+  Unknown             // Use ONLY for UNRESOLVED_PRONOUNs
 }
 
 // 2. The Entity Structure
@@ -51,7 +53,7 @@ class ExtractionResult {
 }
 
 // 3. The Extraction Function
-function ExtractGillKnowledge(commentary_text: string) -> ExtractionResult {
+function ExtractGillKnowledge(commentary_text: string, previous_entities: string?) -> ExtractionResult {
   client OpenRouterText
   
   prompt #"
@@ -103,11 +105,14 @@ function ExtractGillKnowledge(commentary_text: string) -> ExtractionResult {
     - Extract any direct bible verses Gill cites to support his argument.
     - Normalize them to the format: BOOK_CHAPTER_VERSE (e.g., MAT_03_16).
     
-    **IMPORTANT:**
-    - Only extract entities that are EXPLICITLY mentioned in the text
-    - Do NOT extract pronouns or generic references unless they can be clearly resolved
-    - **DESCRIPTION**: Generate a concise (5-10 words) description for each entity to give it semantic context.
+    **PRONOUN RESOLUTION:**
+    If the text relies on pronouns ('he', 'they', 'the king') rather than explicit names, review the `previous_entities` list provided below.
+    - If context clearly aligns the pronoun with a previous entity, extract that specific name.
+    - **IF AND ONLY IF** you cannot confidently resolve the pronoun using the provided context, return the exact string "UNRESOLVED_PRONOUN" as the `name` of a Theological Entity.
     
+    Previous Entities (Context Hint):
+    {{ previous_entities }}
+
     Commentary Text:
     {{ commentary_text }}
     

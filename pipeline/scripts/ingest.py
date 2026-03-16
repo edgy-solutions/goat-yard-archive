@@ -470,11 +470,6 @@ class GillIngestionEngine:
             logging.error(traceback.format_exc())
             return None
 
-    
-    class EntityStub:
-        def __init__(self, name, category, normalized_name=None, description=None):
-            self.name = name
-            self.category = category
     class EntityStub:
         def __init__(self, name, category, normalized_name=None, description=None, biblical_era=None, role=None):
             self.name = name
@@ -544,10 +539,10 @@ class GillIngestionEngine:
         return False
 
     
-    def extract_entities(self, commentary_text: str) -> Tuple[List[Any], List[str]]:
+    def extract_entities(self, commentary_text: str, previous_entities: str = None) -> Tuple[List[Any], List[str]]:
         """Use BAML to extract entities from commentary text."""
         try:
-            result = b.ExtractGillKnowledge(commentary_text)
+            result = b.ExtractGillKnowledge(commentary_text, previous_entities=previous_entities)
             # Handle new return structure (ExtractionResult)
             if hasattr(result, 'entities'):
                  return result.entities, getattr(result, 'cross_references', [])
@@ -671,6 +666,7 @@ class GillIngestionEngine:
         full_context_text = current_md + "\n" + next_md
         
         chunks_ingested = 0
+        recent_entities = []
         
         for i, alignment in enumerate(alignments):
             verse_ref = alignment.get("verse_ref")
@@ -839,8 +835,13 @@ class GillIngestionEngine:
                             entity_uuids.append(uuid)
                 else:
                     logging.info(f"⚪ Cache MISS for {verse_ref}")
-                    # LLM Extraction
-                    extracted_entities, cross_refs = self.extract_entities(commentary_text)
+                    # LLM Extraction with rolling context hint for pronoun resolution
+                    context_hint = ", ".join(recent_entities) if recent_entities else "None yet."
+                    extracted_data, cross_refs = self.extract_entities(commentary_text, previous_entities=context_hint)
+                    extracted_entities = extracted_data # ExtractGillKnowledge returns ExtractionResult
+                    
+                    # Detect if LLM flagged unresolved pronouns at page boundary
+                    needs_resolution = any(ent.name == "UNRESOLVED_PRONOUN" for ent in extracted_entities)
                     
                     # Store in Cache
                     serialized_ents = []
@@ -860,9 +861,11 @@ class GillIngestionEngine:
                         era = getattr(entity, 'biblical_era', None)
                         role = getattr(entity, 'role', None)
                         
-                        uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name, desc, era, role)
-                        if uuid:
-                            entity_uuids.append(uuid)
+                        # CRITICAL FIX: Do not create a graph node for the IOU flag!
+                        if entity.name != "UNRESOLVED_PRONOUN":
+                            uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name, desc, era, role)
+                            if uuid:
+                                entity_uuids.append(uuid)
                         
                         serialized_ents.append({
                             "name": entity.name, 
@@ -872,6 +875,13 @@ class GillIngestionEngine:
                             "biblical_era": era,
                             "role": role
                         })
+                        
+                        # Update rolling buffer for coreference resolution
+                        if entity.name != "UNRESOLVED_PRONOUN" and entity.name not in recent_entities:
+                            recent_entities.append(entity.name)
+                    
+                    # Trim buffer to last 10 explicit entities
+                    recent_entities = recent_entities[-10:]
                     
                     page_entity_cache[verse_ref] = serialized_ents
                     cache_dirty = True
@@ -892,7 +902,8 @@ class GillIngestionEngine:
                         "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
                         "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
                         "footnotes": footnotes,
-                        "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None
+                        "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None,
+                        "needs_boundary_resolution": needs_resolution if 'needs_resolution' in locals() else False
                     }, references={
                         "mentions_entity": entity_uuids
                     } if entity_uuids else None)

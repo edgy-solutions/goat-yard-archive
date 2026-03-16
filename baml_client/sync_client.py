@@ -91,18 +91,18 @@ class BamlSyncClient:
     def parse_stream(self):
       return self.__llm_stream_parser
     
-    def ExtractGillKnowledge(self, commentary_text: str,
+    def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.ExtractionResult:
         # Check if on_tick is provided
         if 'on_tick' in baml_options:
-            stream = self.stream.ExtractGillKnowledge(commentary_text=commentary_text,
+            stream = self.stream.ExtractGillKnowledge(commentary_text=commentary_text,previous_entities=previous_entities,
                 baml_options=baml_options)
             return stream.get_final_response()
         else:
             # Original non-streaming code
             result = self.__options.merge_options(baml_options).call_function_sync(function_name="ExtractGillKnowledge", args={
-                "commentary_text": commentary_text,
+                "commentary_text": commentary_text,"previous_entities": previous_entities,
             })
             return typing.cast(types.ExtractionResult, result.cast_to(types, types, stream_types, False, __runtime__))
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
@@ -198,11 +198,11 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractGillKnowledge(self, commentary_text: str,
+    def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.ExtractionResult, types.ExtractionResult]:
         ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ExtractGillKnowledge", args={
-            "commentary_text": commentary_text,
+            "commentary_text": commentary_text,"previous_entities": previous_entities,
         })
         return baml_py.BamlSyncStream[stream_types.ExtractionResult, types.ExtractionResult](
           result,
@@ -290,11 +290,11 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractGillKnowledge(self, commentary_text: str,
+    def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractGillKnowledge", args={
-            "commentary_text": commentary_text,
+            "commentary_text": commentary_text,"previous_entities": previous_entities,
         }, mode="request")
         return result
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
@@ -347,11 +347,11 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractGillKnowledge(self, commentary_text: str,
+    def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ExtractGillKnowledge", args={
-            "commentary_text": commentary_text,
+            "commentary_text": commentary_text,"previous_entities": previous_entities,
         }, mode="stream")
         return result
     def ExtractTextFromImage(self, image: baml_py.Image,book: typing.Optional[str] = None,chapter: typing.Optional[str] = None,verse: typing.Optional[str] = None,page_number: typing.Optional[str] = None,hebrew_text: typing.Optional[str] = None,greek_text: typing.Optional[str] = None,ocr_text: typing.Optional[str] = None,
@@ -398,4 +398,4 @@ class BamlHttpStreamRequestClient:
         return result
     
 
-b = BamlSyncClient(DoNotUseDirectlyCallManager({}))
+b = BamlSyncClient(DoNotUseDirectlyCallManager({}))
