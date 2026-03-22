@@ -322,10 +322,14 @@ async def search(request: Request, req: SearchRequest):
                     generation = None
 
                 try:
-                    # Fetch available books for refusal context (Cached)
-                    if not getattr(app.state, "available_books", None):
+                    import time
+                    # Fetch available books for refusal context (Cached with 5-minute TTL)
+                    now = time.time()
+                    cache_time = getattr(app.state, "available_books_time", 0)
+                    if not getattr(app.state, "available_books", None) or (now - cache_time > 300):
                          try:
                              app.state.available_books = search_engine.get_available_books()
+                             app.state.available_books_time = now
                          except Exception as e:
                              print(f"Error fetching books for cache: {e}")
                              app.state.available_books = ["Genesis", "Matthew"]
