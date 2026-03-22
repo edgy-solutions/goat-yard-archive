@@ -578,7 +578,7 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
             break
         page += 1
 
-    reports = []
+    reports_data = []
     
     for trace in traces:
         question = trace.input if isinstance(trace.input, str) else trace.input.get("query", "Unknown Query") if isinstance(trace.input, dict) else "Unknown Query"
@@ -604,54 +604,57 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
                 context=retrieval_context,
                 manifest=manifest
             )
-            reports.append(f"### Q: {question}\n**Category:** {analysis.category}\n**Fix:** {analysis.fix_action}")
+            reports_data.append({
+                "question": question,
+                "reasoning": analysis.reasoning,
+                "fix_action": analysis.fix_action
+            })
         except Exception as e:
-            reports.append(f"### Q: {question}\n**Category:** Error\n**Fix:** BAML LLM invocation failed: {e}")
+            reports_data.append({
+                "question": question,
+                "reasoning": f"🔴 BAML Inference Error: {e}",
+                "fix_action": "Check LLM API status or BAML parameters."
+            })
 
-    summary = "\n\n---\n\n".join(reports) if reports else "No RAG failures detected."
     target_channel = os.getenv("SLACK_DIAGNOSTICS_CHANNEL", "#gya-bot-testing")
 
-    # --- SLACK BLOCK KIT FORMATTING ---
-    if reports:
-        # Create an array of blocks for a clean UI
-        slack_blocks = [
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "content": "🕵️ GYA Nightly RAG Audit"}
-            },
-            {"type": "divider"}
-        ]
-        
-        # Add a block for every single report
-        for report_text in reports:
-            # Slack 'mrkdwn' parses asterisks as bold
-            slack_blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "content": report_text.replace("### ", "*").replace("\n**", "\n*")}
-            })
-            slack_blocks.append({"type": "divider"})
+    # --- SLACK BLOCK KIT FORMATTING (Enhanced Command Center) ---
+    slack_blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "content": "🕵️ GYA Nightly RAG Audit"}
+        },
+        {"type": "divider"}
+    ]
 
-        slack.get_client().chat_postMessage(
-            channel=target_channel,
-            blocks=slack_blocks,
-            text="Daily RAG Audit Report contains failures." # Fallback for mobile notifications
-        )
-    else:
-        slack.get_client().chat_postMessage(
-            channel=target_channel,
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "content": "✅ *All systems nominal.* No RAG failures detected today! 🎉"}
-                }
-            ],
-            text="Daily RAG Audit Report: Clean!"
-        )
+    for item in reports_data:
+        slack_blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "content": f"*Question:* _{item['question']}_\n*Diagnosis:* {item['reasoning']}\n*Required Fix:* `{item['fix_action']}`"
+            }
+        })
+        slack_blocks.append({"type": "divider"})
+
+    if not reports_data:
+        slack_blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "content": "✅ *All systems nominal.* No RAG failures detected today! 🎉"}
+        })
+
+    slack.get_client().chat_postMessage(
+        channel=target_channel,
+        blocks=slack_blocks,
+        text="Daily RAG Audit Report"
+    )
+
+    summary_md = "\n\n---\n\n".join([f"### Q: {r['question']}\n{r['reasoning']}\n**Fix:** {r['fix_action']}" for r in reports_data])
 
     return MaterializeResult(
         metadata={
             "failure_count": len(traces),
-            "diagnostic_summary": MetadataValue.md(summary),
+            "diagnostic_summary": MetadataValue.md(summary_md or "No failures discovered."),
             "slack_sent_to": target_channel
         }
     )

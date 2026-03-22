@@ -23,6 +23,14 @@ function AnalyzeRAGFailure(question: string, context: string, manifest: string) 
     AVAILABLE BOOKS: {{ manifest }}
 
     Analyze why the system gave a 'No Information' response or failed to answer correctly.
+
+    In your 'reasoning', use Slack emojis to categorize the severity:
+    - 🔴 for ManifestBlock (Critical Configuration Error)
+    - 🟡 for RetrievalMiss (Search/Embedding Tuning Needed)
+    - ⚪ for TrueSilence (Data not in Archive)
+    - 🔵 for LLMLaziness (Model Logic Issue)
+
+    Keep the 'fix_action' to a single, actionable bullet point.
     {{ ctx.output_format }}
   "#
 }
