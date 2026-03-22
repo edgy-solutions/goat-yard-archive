@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (9)
+# Generated classes (10)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -65,6 +65,9 @@ class RAGAnalysis(BaseModel):
     category: typing.Optional[types.FailureCategory] = None
     reasoning: typing.Optional[str] = None
     fix_action: typing.Optional[str] = None
+
+class ResolvedPronoun(BaseModel):
+    resolved_entity_names: typing.List[str]
 
 class VerseChunk(BaseModel):
     verse_ref: typing.Optional[str] = None

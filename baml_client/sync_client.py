@@ -175,6 +175,20 @@ class BamlSyncClient:
                 "user_query": user_query,"available_entities": available_entities,
             })
             return typing.cast(types.OptimizedQuery, result.cast_to(types, types, stream_types, False, __runtime__))
+    def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> types.ResolvedPronoun:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            stream = self.stream.ResolveBoundaryPronouns(unresolved_text=unresolved_text,previous_text=previous_text,previous_entities=previous_entities,
+                baml_options=baml_options)
+            return stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = self.__options.merge_options(baml_options).call_function_sync(function_name="ResolveBoundaryPronouns", args={
+                "unresolved_text": unresolved_text,"previous_text": previous_text,"previous_entities": previous_entities,
+            })
+            return typing.cast(types.ResolvedPronoun, result.cast_to(types, types, stream_types, False, __runtime__))
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
         baml_options: BamlCallOptions = {},
     ) -> types.MetadataCore:
@@ -298,6 +312,18 @@ class BamlStreamClient:
           lambda x: typing.cast(types.OptimizedQuery, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.ResolvedPronoun, types.ResolvedPronoun]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="ResolveBoundaryPronouns", args={
+            "unresolved_text": unresolved_text,"previous_text": previous_text,"previous_entities": previous_entities,
+        })
+        return baml_py.BamlSyncStream[stream_types.ResolvedPronoun, types.ResolvedPronoun](
+          result,
+          lambda x: typing.cast(stream_types.ResolvedPronoun, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ResolvedPronoun, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.MetadataCore, types.MetadataCore]:
@@ -384,6 +410,13 @@ class BamlHttpRequestClient:
             "user_query": user_query,"available_entities": available_entities,
         }, mode="request")
         return result
+    def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ResolveBoundaryPronouns", args={
+            "unresolved_text": unresolved_text,"previous_text": previous_text,"previous_entities": previous_entities,
+        }, mode="request")
+        return result
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -453,6 +486,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="OptimizeSearchQuery", args={
             "user_query": user_query,"available_entities": available_entities,
+        }, mode="stream")
+        return result
+    def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="ResolveBoundaryPronouns", args={
+            "unresolved_text": unresolved_text,"previous_text": previous_text,"previous_entities": previous_entities,
         }, mode="stream")
         return result
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,

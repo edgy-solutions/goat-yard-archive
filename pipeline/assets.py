@@ -659,3 +659,28 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
         }
     )
 
+
+@asset(
+    partitions_def=volume_partitions,
+    # The Magic Mapping: Map the 1D Volume partition to the 2D (Volume+Page) Ingest partition
+    deps=[AssetDep("ingest", partition_mapping=MultiPartitionMapping({
+        "1_volume": DimensionPartitionMapping("1_volume", IdentityPartitionMapping()),
+        "2_page": DimensionPartitionMapping("2_page", AllPartitionMapping())
+    }))]
+)
+def sweep_page_boundaries(context: AssetExecutionContext):
+    """
+    Scope: Per Volume
+    sweep_page_boundaries.py --volume {x}
+    Executes an LLM pass to resolve broken pronouns across page boundaries once the entire volume is ingested.
+    """
+    volume = context.partition_key
+    
+    cmd = [
+        "python", os.path.join(SCRIPTS_DIR, "sweep_page_boundaries.py"),
+        "--volume", str(volume)
+    ]
+    
+    run_cli_script(context, cmd)
+
+
