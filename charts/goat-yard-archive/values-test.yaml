@@ -11,6 +11,13 @@ api:
     # Point to MinIO in gya-test namespace
     # Service name is gya-minio due to fullnameOverride in values-frontend.yaml
     MINIO_HTTP_ENDPOINT: "http://gya-minio.gya-test.svc.cluster.local:9000"
+  
+  image:
+    tag: "latest"
+    
+ui:
+  image:
+    tag: "latest"
 
 # 2. Postgres Configuration
 postgres:
