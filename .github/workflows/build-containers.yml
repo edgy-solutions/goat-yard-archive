@@ -3,6 +3,9 @@ name: Build Containers
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*'
+      - '*.*.*'
   workflow_dispatch:
 
 permissions:
@@ -36,7 +39,9 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}/backend:latest
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:latest
+            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }}
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
@@ -45,4 +50,6 @@ jobs:
           file: frontend/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}/frontend:latest
+          tags: |
+            ghcr.io/${{ github.repository }}/frontend:latest
+            ghcr.io/${{ github.repository }}/frontend:${{ github.ref_name }}
