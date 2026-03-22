@@ -34,6 +34,9 @@ type_map = {
     "types.MetadataVerses": types.MetadataVerses,
     "stream_types.MetadataVerses": stream_types.MetadataVerses,
 
+    "types.RAGAnalysis": types.RAGAnalysis,
+    "stream_types.RAGAnalysis": stream_types.RAGAnalysis,
+
     "types.VerseChunk": types.VerseChunk,
     "stream_types.VerseChunk": stream_types.VerseChunk,
 
@@ -41,5 +44,7 @@ type_map = {
     "types.BiblicalEra": types.BiblicalEra,
 
     "types.EntityCategory": types.EntityCategory,
+
+    "types.FailureCategory": types.FailureCategory,
 
 }

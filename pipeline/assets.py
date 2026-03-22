@@ -14,6 +14,7 @@ from dagster import (
     DimensionPartitionMapping,
     IdentityPartitionMapping,
     MaterializeResult,
+    MetadataValue,
 )
 
 # 1. Define Partitions
@@ -541,3 +542,76 @@ def upload_to_minio(context: AssetExecutionContext):
     cwd = os.path.dirname(PIPELINE_DIR)
     
     run_cli_script(context, cmd, cwd=cwd)
+
+@asset(group_name="operations")
+def daily_rag_diagnostic(context: AssetExecutionContext):
+    """
+    Scope: Daily SRE
+    Audits failed full-stack traces using an LLM.
+    """
+    try:
+        from langfuse import Langfuse
+        from baml_client.sync_client import b as baml_client
+    except ImportError as e:
+        context.log.warning(f"Could not import Langfuse or BAML for diagnostic: {e}")
+        return MaterializeResult(metadata={"status": "skipped", "reason": "missing dependencies"})
+
+    langfuse = Langfuse()
+    
+    # 1. Fetch traces from last 24h that failed (score = 0)
+    traces = []
+    page = 1
+    while True:
+        traces_response = langfuse.get_traces(
+            tags=["v7_launch"],
+            score_name="retrieval_success",
+            score_value=0,
+            page=page
+        )
+        batch = getattr(traces_response, "data", [])
+        if not batch:
+            break
+        traces.extend(batch)
+        if len(batch) < 50 or page >= 10:  # standard default page size is 50, safety exit at 10 pages just in case
+            break
+        page += 1
+
+    reports = []
+    
+    for trace in traces:
+        question = trace.input if isinstance(trace.input, str) else trace.input.get("query", "Unknown Query") if isinstance(trace.input, dict) else "Unknown Query"
+        
+        # Discover weaviate retrieval output
+        retrieval_context = "No context found in trace"
+        try:
+            full_trace = langfuse.get_trace(trace.id)
+            observations = full_trace.observations if hasattr(full_trace, "observations") else []
+            
+            for obs in observations:
+                if obs.name == "weaviate_retrieval":
+                    retrieval_context = str(obs.output)
+                    break
+        except Exception as e:
+             retrieval_context = f"Error fetching observations: {e}"
+
+        manifest = trace.metadata.get("available_books", "Unknown") if trace.metadata else "Unknown"
+
+        try:
+            analysis = baml_client.AnalyzeRAGFailure(
+                question=question,
+                context=retrieval_context,
+                manifest=manifest
+            )
+            reports.append(f"### Q: {question}\n**Category:** {analysis.category}\n**Fix:** {analysis.fix_action}")
+        except Exception as e:
+            reports.append(f"### Q: {question}\n**Category:** Error\n**Fix:** BAML LLM invocation failed: {e}")
+
+    summary = "\n\n---\n\n".join(reports) if reports else "No RAG failures detected."
+
+    return MaterializeResult(
+        metadata={
+            "failure_count": len(traces),
+            "diagnostic_summary": MetadataValue.md(summary)
+        }
+    )
+

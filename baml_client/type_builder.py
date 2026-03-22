@@ -20,13 +20,13 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","VerseChunk",]
+          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","RAGAnalysis","VerseChunk",]
         ), enums=set(
-          ["BiblicalEra","EntityCategory",]
+          ["BiblicalEra","EntityCategory","FailureCategory",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 2
+    # Generated enums 3
     # #########################################################################
 
     @property
@@ -37,9 +37,13 @@ class TypeBuilder(type_builder.TypeBuilder):
     def EntityCategory(self) -> "EntityCategoryViewer":
         return EntityCategoryViewer(self)
 
+    @property
+    def FailureCategory(self) -> "FailureCategoryViewer":
+        return FailureCategoryViewer(self)
+
 
     # #########################################################################
-    # Generated classes 7
+    # Generated classes 8
     # #########################################################################
 
     @property
@@ -67,13 +71,17 @@ class TypeBuilder(type_builder.TypeBuilder):
         return MetadataVersesViewer(self)
 
     @property
+    def RAGAnalysis(self) -> "RAGAnalysisViewer":
+        return RAGAnalysisViewer(self)
+
+    @property
     def VerseChunk(self) -> "VerseChunkViewer":
         return VerseChunkViewer(self)
 
 
 
 # #########################################################################
-# Generated enums 2
+# Generated enums 3
 # #########################################################################
 
 class BiblicalEraAst:
@@ -212,9 +220,59 @@ class EntityCategoryValues:
     
 
 
+class FailureCategoryAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("FailureCategory")
+        self._values: typing.Set[str] = set([  "ManifestBlock",  "RetrievalMiss",  "TrueSilence",  "LLMLaziness",  ])
+        self._vals = FailureCategoryValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "FailureCategoryValues":
+        return self._vals
+
+
+class FailureCategoryViewer(FailureCategoryAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class FailureCategoryValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def ManifestBlock(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ManifestBlock"))
+    
+    @property
+    def RetrievalMiss(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("RetrievalMiss"))
+    
+    @property
+    def TrueSilence(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("TrueSilence"))
+    
+    @property
+    def LLMLaziness(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("LLMLaziness"))
+    
+    
+
+
 
 # #########################################################################
-# Generated classes 7
+# Generated classes 8
 # #########################################################################
 
 class ExtractedTextAst:
@@ -499,6 +557,53 @@ class MetadataVersesProperties:
     @property
     def no_verse_markers(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("no_verse_markers"))
+    
+    
+
+
+class RAGAnalysisAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("RAGAnalysis")
+        self._properties: typing.Set[str] = set([  "category",  "reasoning",  "fix_action",  ])
+        self._props = RAGAnalysisProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "RAGAnalysisProperties":
+        return self._props
+
+
+class RAGAnalysisViewer(RAGAnalysisAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class RAGAnalysisProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def category(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("category"))
+    
+    @property
+    def reasoning(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("reasoning"))
+    
+    @property
+    def fix_action(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("fix_action"))
     
     
 

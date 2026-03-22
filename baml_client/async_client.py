@@ -79,6 +79,21 @@ class BamlAsyncClient:
     def parse_stream(self):
       return self.__llm_stream_parser
     
+    async def AnalyzeRAGFailure(self, question: str,context: str,manifest: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.RAGAnalysis:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.AnalyzeRAGFailure(question=question,context=context,manifest=manifest,
+                baml_options=baml_options)
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(function_name="AnalyzeRAGFailure", args={
+                "question": question,"context": context,"manifest": manifest,
+            })
+            return typing.cast(types.RAGAnalysis, result.cast_to(types, types, stream_types, False, __runtime__))
     async def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.ExtractionResult:
@@ -193,6 +208,18 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def AnalyzeRAGFailure(self, question: str,context: str,manifest: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.RAGAnalysis, types.RAGAnalysis]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="AnalyzeRAGFailure", args={
+            "question": question,"context": context,"manifest": manifest,
+        })
+        return baml_py.BamlStream[stream_types.RAGAnalysis, types.RAGAnalysis](
+          result,
+          lambda x: typing.cast(stream_types.RAGAnalysis, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.RAGAnalysis, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlStream[stream_types.ExtractionResult, types.ExtractionResult]:
@@ -285,6 +312,13 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    async def AnalyzeRAGFailure(self, question: str,context: str,manifest: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="AnalyzeRAGFailure", args={
+            "question": question,"context": context,"manifest": manifest,
+        }, mode="request")
+        return result
     async def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -342,6 +376,13 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    async def AnalyzeRAGFailure(self, question: str,context: str,manifest: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="AnalyzeRAGFailure", args={
+            "question": question,"context": context,"manifest": manifest,
+        }, mode="stream")
+        return result
     async def ExtractGillKnowledge(self, commentary_text: str,previous_entities: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:

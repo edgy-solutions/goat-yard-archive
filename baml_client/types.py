@@ -37,7 +37,7 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (2)
+# Generated enums (3)
 # #########################################################################
 
 class BiblicalEra(str, Enum):
@@ -61,8 +61,14 @@ class EntityCategory(str, Enum):
     ManuscriptOrVersion = "ManuscriptOrVersion"
     Unknown = "Unknown"
 
+class FailureCategory(str, Enum):
+    ManifestBlock = "ManifestBlock"
+    RetrievalMiss = "RetrievalMiss"
+    TrueSilence = "TrueSilence"
+    LLMLaziness = "LLMLaziness"
+
 # #########################################################################
-# Generated classes (7)
+# Generated classes (8)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -95,6 +101,11 @@ class MetadataCore(BaseModel):
 class MetadataVerses(BaseModel):
     verse: typing.Optional[str] = None
     no_verse_markers: typing.Optional[bool] = None
+
+class RAGAnalysis(BaseModel):
+    category: FailureCategory
+    reasoning: str
+    fix_action: str
 
 class VerseChunk(BaseModel):
     verse_ref: str

@@ -411,6 +411,18 @@ async def search(request: Request, req: SearchRequest):
                         lf_client.flush()
                 # ---------------------
                 
+            # Update trace metadata and score
+            if lf_client and generation:
+                try:
+                    meta_books = locals().get("available_books_str", "Unknown")
+                    lf_client.trace(id=generation.trace_id, metadata={"available_books": meta_books, "volume_context": "all"}, tags=["production", "v7_launch"])
+                    if "I regret that" in answer:
+                        lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
+                    else:
+                        lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=1)
+                except Exception as ex:
+                    print(f"Failed to update Langfuse trace metadata/score: {ex}")
+
             # Check if bot returned a manual verification failure
             verified = True
             if "Verification Failed:" in answer:
