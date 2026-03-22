@@ -44,6 +44,8 @@ pipeline = [
     "rapidfuzz",
     "minio",
     "pytesseract",
+    "dagster-slack",
+    "langfuse",
 ]
 
 [tool.dagster]
