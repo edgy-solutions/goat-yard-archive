@@ -903,7 +903,8 @@ class GillIngestionEngine:
                         "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
                         "footnotes": footnotes,
                         "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None,
-                        "needs_boundary_resolution": needs_resolution if 'needs_resolution' in locals() else False
+                        "needs_boundary_resolution": needs_resolution if 'needs_resolution' in locals() else False,
+                        "entities": [ent['name'] for ent in serialized_ents if ent['name'] != "UNRESOLVED_PRONOUN"]
                     }, references={
                         "mentions_entity": entity_uuids
                     } if entity_uuids else None)

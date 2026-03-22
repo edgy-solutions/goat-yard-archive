@@ -20,7 +20,7 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","RAGAnalysis","VerseChunk",]
+          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","OptimizedQuery","RAGAnalysis","VerseChunk",]
         ), enums=set(
           ["BiblicalEra","EntityCategory","FailureCategory",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
@@ -43,7 +43,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 8
+    # Generated classes 9
     # #########################################################################
 
     @property
@@ -69,6 +69,10 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def MetadataVerses(self) -> "MetadataVersesViewer":
         return MetadataVersesViewer(self)
+
+    @property
+    def OptimizedQuery(self) -> "OptimizedQueryViewer":
+        return OptimizedQueryViewer(self)
 
     @property
     def RAGAnalysis(self) -> "RAGAnalysisViewer":
@@ -272,7 +276,7 @@ class FailureCategoryValues:
 
 
 # #########################################################################
-# Generated classes 8
+# Generated classes 9
 # #########################################################################
 
 class ExtractedTextAst:
@@ -557,6 +561,49 @@ class MetadataVersesProperties:
     @property
     def no_verse_markers(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("no_verse_markers"))
+    
+    
+
+
+class OptimizedQueryAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("OptimizedQuery")
+        self._properties: typing.Set[str] = set([  "expanded_search_terms",  "official_entities",  ])
+        self._props = OptimizedQueryProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "OptimizedQueryProperties":
+        return self._props
+
+
+class OptimizedQueryViewer(OptimizedQueryAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class OptimizedQueryProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def expanded_search_terms(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("expanded_search_terms"))
+    
+    @property
+    def official_entities(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("official_entities"))
     
     
 

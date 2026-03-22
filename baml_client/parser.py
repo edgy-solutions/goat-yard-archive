@@ -54,6 +54,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="NormalizeGillMarkdown", llm_response=llm_response, mode="request")
         return typing.cast(str, result)
 
+    def OptimizeSearchQuery(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.OptimizedQuery:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="OptimizeSearchQuery", llm_response=llm_response, mode="request")
+        return typing.cast(types.OptimizedQuery, result)
+
     def ValidateMetadataCore(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.MetadataCore:
@@ -109,6 +115,12 @@ class LlmStreamParser:
     ) -> str:
         result = self.__options.merge_options(baml_options).parse_response(function_name="NormalizeGillMarkdown", llm_response=llm_response, mode="stream")
         return typing.cast(str, result)
+
+    def OptimizeSearchQuery(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.OptimizedQuery:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="OptimizeSearchQuery", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.OptimizedQuery, result)
 
     def ValidateMetadataCore(
         self, llm_response: str, baml_options: BamlCallOptions = {},

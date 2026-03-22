@@ -68,7 +68,7 @@ class FailureCategory(str, Enum):
     LLMLaziness = "LLMLaziness"
 
 # #########################################################################
-# Generated classes (8)
+# Generated classes (9)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -101,6 +101,10 @@ class MetadataCore(BaseModel):
 class MetadataVerses(BaseModel):
     verse: typing.Optional[str] = None
     no_verse_markers: typing.Optional[bool] = None
+
+class OptimizedQuery(BaseModel):
+    expanded_search_terms: str
+    official_entities: typing.List[str]
 
 class RAGAnalysis(BaseModel):
     category: FailureCategory

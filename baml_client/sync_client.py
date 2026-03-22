@@ -161,6 +161,20 @@ class BamlSyncClient:
                 "raw_markdown": raw_markdown,
             })
             return typing.cast(str, result.cast_to(types, types, stream_types, False, __runtime__))
+    def OptimizeSearchQuery(self, user_query: str,available_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> types.OptimizedQuery:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            stream = self.stream.OptimizeSearchQuery(user_query=user_query,available_entities=available_entities,
+                baml_options=baml_options)
+            return stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = self.__options.merge_options(baml_options).call_function_sync(function_name="OptimizeSearchQuery", args={
+                "user_query": user_query,"available_entities": available_entities,
+            })
+            return typing.cast(types.OptimizedQuery, result.cast_to(types, types, stream_types, False, __runtime__))
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
         baml_options: BamlCallOptions = {},
     ) -> types.MetadataCore:
@@ -272,6 +286,18 @@ class BamlStreamClient:
           lambda x: typing.cast(str, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def OptimizeSearchQuery(self, user_query: str,available_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.OptimizedQuery, types.OptimizedQuery]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="OptimizeSearchQuery", args={
+            "user_query": user_query,"available_entities": available_entities,
+        })
+        return baml_py.BamlSyncStream[stream_types.OptimizedQuery, types.OptimizedQuery](
+          result,
+          lambda x: typing.cast(stream_types.OptimizedQuery, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.OptimizedQuery, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.MetadataCore, types.MetadataCore]:
@@ -351,6 +377,13 @@ class BamlHttpRequestClient:
             "raw_markdown": raw_markdown,
         }, mode="request")
         return result
+    def OptimizeSearchQuery(self, user_query: str,available_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="OptimizeSearchQuery", args={
+            "user_query": user_query,"available_entities": available_entities,
+        }, mode="request")
+        return result
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -413,6 +446,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="NormalizeGillMarkdown", args={
             "raw_markdown": raw_markdown,
+        }, mode="stream")
+        return result
+    def OptimizeSearchQuery(self, user_query: str,available_entities: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="OptimizeSearchQuery", args={
+            "user_query": user_query,"available_entities": available_entities,
         }, mode="stream")
         return result
     def ValidateMetadataCore(self, image: baml_py.Image,ocr_metadata: types.MetadataCore,

@@ -16,6 +16,7 @@ from typing import List, Optional, Any
 # Import our modules
 from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot
+from baml_client import b
 from .database import init_db
 from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
@@ -195,6 +196,7 @@ def shutdown():
 # Models
 class SearchRequest(BaseModel):
     query: str
+    volume_limit: Optional[int] = None
 
 class EvidenceItem(BaseModel):
     chunk_id: str
@@ -232,10 +234,30 @@ async def search(request: Request, req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
-    # 1. Retrieve Evidence
-    # (Optional: wrap this in a span)
-    # with langfuse_context.observe(name="retrieve_evidence") as span:
-    raw_results = search_engine.search_gill(req.query, limit=5)
+    # 1. Optimize and Expand Query (Enterprise Search Upgrade)
+    available_entity_names = search_engine.get_top_entities(limit=50)
+    
+    try:
+        optimized_query = await b.OptimizeSearchQuery(
+            user_query=req.query,
+            available_entities=available_entity_names
+        )
+        search_text = optimized_query.expanded_search_terms
+        mapped_entities = optimized_query.official_entities
+        print(f"BAML Optimized Query: {search_text}")
+        print(f"BAML Mapped Entities: {mapped_entities}")
+    except Exception as e:
+        print(f"BAML Optimization failed, falling back to raw query: {e}")
+        search_text = req.query
+        mapped_entities = None
+
+    # 2. Retrieve Evidence
+    raw_results = search_engine.search_gill(
+        query=search_text, 
+        entities=mapped_entities, 
+        limit=5,
+        volume_filter=req.volume_limit
+    )
     if raw_results:
         import logging
         logging.error(f"DEBUG MAIN: First result lemma: '{raw_results[0].get('lemma')}'")
@@ -306,6 +328,7 @@ async def search(request: Request, req: SearchRequest):
                     # Create context manager for generation
                     gen_ctx = lf_client.start_as_current_observation(
                         name="bot_forward",
+                        metadata={"weaviate_filters": weaviate_filters},
                         as_type="generation"
                     )
                     # We manually enter the context
@@ -423,44 +446,30 @@ async def search(request: Request, req: SearchRequest):
                 except Exception as ex:
                     print(f"Failed to update Langfuse trace metadata/score: {ex}")
 
-            # Check if bot returned a manual verification failure
-            verified = True
-            if "Verification Failed:" in answer:
-                 verified = False
-                 
         except Exception as e:
             if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
                   answer = f"Generated answer could not be verified against sources.\nError: {e}"
                   verified = False
-                  # Log exception to trace
-                  # langfuse_context.get_current_trace().score(name="verification", value=0, comment=str(e))
             else:
                   answer = f"Error generating answer: {e}"
                   verified = False
-    
-    # Format Evidence
-    evidence_list = []
-    for r in raw_results:
-        evidence_list.append(EvidenceItem(
-            chunk_id=r["chunk_id"],
-            content=r["content"],
-            verse_ref=r.get("verse_ref"),
-            citation=r["citation"],
-            vol=int(r["vol"]) if r["vol"] else 0,
-            page=int(r["page"]) if r["page"] else 0,
-            scan=r["scan"],
-            footnotes=r.get("footnotes", []),
-            entities=r.get("entities", []),
-            sentence_data=r.get("sentence_data", []), # Pass it through
-            score=r["score"]
-        ))
 
-    if evidence_list:
-        print(f"DEBUG: First Evidence Item Entities: {evidence_list[0].entities}")
+    # ---------------------
+    
+    # 3. Final Verification and Response Formatting
+    # Ensure verified flag is set correctly based on final answer
+    if "Verification Failed:" in answer:
+        verified = False
+        
+    if evidence_objects:
+        print(f"DEBUG: First Evidence Item Entities: {evidence_objects[0].entities}")
+    
+    # Extract citations for the response
+    final_citations = [ev.citation for ev in evidence_objects]
 
     return SearchResponse(
         answer=answer,
-        citations=citations,
+        citations=final_citations,
         evidence=evidence_objects,
         verified=verified
     )

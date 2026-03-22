@@ -34,6 +34,9 @@ type_map = {
     "types.MetadataVerses": types.MetadataVerses,
     "stream_types.MetadataVerses": stream_types.MetadataVerses,
 
+    "types.OptimizedQuery": types.OptimizedQuery,
+    "stream_types.OptimizedQuery": stream_types.OptimizedQuery,
+
     "types.RAGAnalysis": types.RAGAnalysis,
     "stream_types.RAGAnalysis": stream_types.RAGAnalysis,
 
