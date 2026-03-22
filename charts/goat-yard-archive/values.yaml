@@ -47,7 +47,7 @@ api:
   image:
     # Update this to your GitHub repository path:
     # ghcr.io/<USERNAME>/<REPO_NAME>/backend
-    repository: ghcr.io/cnogradi/goat-yard-archive/backend
+    repository: ghcr.io/edgy-solutions/goat-yard-archive/backend
     pullPolicy: Always
     tag: "latest"
   service:
@@ -85,7 +85,7 @@ ui:
   image:
     # Update this to your GitHub repository path:
     # ghcr.io/<USERNAME>/<REPO_NAME>/frontend
-    repository: ghcr.io/cnogradi/goat-yard-archive/frontend
+    repository: ghcr.io/edgy-solutions/goat-yard-archive/frontend
     pullPolicy: Always
     tag: "latest"
   service:
