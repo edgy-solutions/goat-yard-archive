@@ -217,6 +217,8 @@ class SearchResponse(BaseModel):
     citations: List[str]
     evidence: List[EvidenceItem]
     verified: bool
+    expanded_query: Optional[str] = None
+    mapped_entities: Optional[List[str]] = []
 
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
@@ -440,7 +442,16 @@ async def search(request: Request, req: SearchRequest):
             if lf_client and generation:
                 try:
                     meta_books = locals().get("available_books_str", "Unknown")
-                    lf_client.trace(id=generation.trace_id, metadata={"available_books": meta_books, "volume_context": "all"}, tags=["production", "v7_launch"])
+                    lf_client.trace(
+                        id=generation.trace_id, 
+                        metadata={
+                            "available_books": meta_books, 
+                            "volume_context": "all",
+                            "baml_expanded_query": search_text,
+                            "baml_mapped_entities": mapped_entities
+                        }, 
+                        tags=["production", "v7_launch"]
+                    )
                     if "I regret that" in answer:
                         lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
                     else:
@@ -473,7 +484,9 @@ async def search(request: Request, req: SearchRequest):
         answer=answer,
         citations=final_citations,
         evidence=evidence_objects,
-        verified=verified
+        verified=verified,
+        expanded_query=search_text,
+        mapped_entities=mapped_entities
     )
 
 @app.get("/api/books")
