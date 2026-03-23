@@ -7,7 +7,6 @@ import weaviate
 import weaviate.classes as wvc
 from typing import List, Dict, Any, Optional
 from .bible_mapping import BIBLE_BOOK_MAP
-from langfuse.decorators import observe
 
 class GillSearchEngine:
     def __init__(self):
@@ -98,7 +97,6 @@ class GillSearchEngine:
         
         return verified_entities
 
-    @observe(name="weaviate_retrieval")
     def search_gill(self, query: str, entities: List[str] = None, limit: int = 5, volume_filter: int = None) -> List[Dict[str, Any]]:
         """
         Perform Hybrid Search + Graph Boost.

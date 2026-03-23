@@ -5,7 +5,7 @@ import dspy
 import litellm
 import json
 import warnings
-from langfuse import observe, Langfuse
+from langfuse import Langfuse
 # from langfuse.decorators import langfuse_context (Not found in installed version)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -223,7 +223,6 @@ class SearchResponse(BaseModel):
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
-@observe(name="search_endpoint")
 async def search(request: Request, req: SearchRequest):
     # Set User ID in Langfuse Trace
     # if hasattr(request.state, "user_id") and request.state.user_id:
