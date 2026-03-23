@@ -814,6 +814,7 @@ class GillIngestionEngine:
             
             # Extract Entities
             entity_uuids = []
+            serialized_ents = []
             
             if recycle_entities and verse_ref in verse_entity_map:
                 entity_uuids = verse_entity_map[verse_ref]
@@ -833,6 +834,7 @@ class GillIngestionEngine:
                         )
                         if uuid:
                             entity_uuids.append(uuid)
+                    serialized_ents = raw_ents
                 else:
                     logging.info(f"⚪ Cache MISS for {verse_ref}")
                     # LLM Extraction with rolling context hint for pronoun resolution
@@ -844,7 +846,6 @@ class GillIngestionEngine:
                     needs_resolution = any(ent.name == "UNRESOLVED_PRONOUN" for ent in extracted_entities)
                     
                     # Store in Cache
-                    serialized_ents = []
                     for entity in extracted_entities:
                         # REGEX GUARD: Check for "Fake People" (actually citations)
                         if self.is_citation_mistake(entity.name):
