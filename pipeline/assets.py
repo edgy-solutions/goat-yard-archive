@@ -13,6 +13,7 @@ from dagster import (
     MultiPartitionMapping,
     DimensionPartitionMapping,
     IdentityPartitionMapping,
+    MultiToSingleDimensionPartitionMapping,
     MaterializeResult,
     MetadataValue,
 )
@@ -392,10 +393,12 @@ def ingest(context: AssetExecutionContext):
 
 @asset(
     partitions_def=volume_partitions,
-    deps=[AssetDep("get_md", partition_mapping=MultiPartitionMapping({
-        "1_volume": DimensionPartitionMapping("1_volume", IdentityPartitionMapping()),
-        "2_page": DimensionPartitionMapping("2_page", AllPartitionMapping())
-    }))]
+    deps=[
+        AssetDep(
+            "get_md", 
+            partition_mapping=MultiToSingleDimensionPartitionMapping(partition_dimension_name="1_volume")
+        )
+    ]
 )
 def verify_verse_continuity_validation(context: AssetExecutionContext):
     """
@@ -451,10 +454,12 @@ def optimize_dspy_normalizer(context: AssetExecutionContext):
 
 @asset(
     partitions_def=volume_partitions,
-    deps=[AssetDep("read_images_baml", partition_mapping=MultiPartitionMapping({
-        "1_volume": DimensionPartitionMapping("1_volume", IdentityPartitionMapping()),
-        "2_page": DimensionPartitionMapping("2_page", AllPartitionMapping())
-    }))]
+    deps=[
+        AssetDep(
+            "read_images_baml", 
+            partition_mapping=MultiToSingleDimensionPartitionMapping(partition_dimension_name="1_volume")
+        )
+    ]
 )
 def verify_markdown_headers_validation(context: AssetExecutionContext):
     """
@@ -662,11 +667,12 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
 
 @asset(
     partitions_def=volume_partitions,
-    # The Magic Mapping: Map the 1D Volume partition to the 2D (Volume+Page) Ingest partition
-    deps=[AssetDep("ingest", partition_mapping=MultiPartitionMapping({
-        "1_volume": DimensionPartitionMapping("1_volume", IdentityPartitionMapping()),
-        "2_page": DimensionPartitionMapping("2_page", AllPartitionMapping())
-    }))]
+    deps=[
+        AssetDep(
+            "ingest", 
+            partition_mapping=MultiToSingleDimensionPartitionMapping(partition_dimension_name="1_volume")
+        )
+    ]
 )
 def sweep_page_boundaries(context: AssetExecutionContext):
     """
