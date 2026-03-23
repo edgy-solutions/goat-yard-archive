@@ -16,7 +16,7 @@ from typing import List, Optional, Any
 # Import our modules
 from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot
-from baml_client import b
+from baml_client.async_client import b
 from .database import init_db
 from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
