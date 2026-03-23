@@ -247,7 +247,9 @@ async def search(request: Request, req: SearchRequest):
         print(f"BAML Optimized Query: {search_text}")
         print(f"BAML Mapped Entities: {mapped_entities}")
     except Exception as e:
-        print(f"BAML Optimization failed, falling back to raw query: {e}")
+        import traceback
+        error_msg = traceback.format_exc()
+        print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
         search_text = req.query
         mapped_entities = None
 
