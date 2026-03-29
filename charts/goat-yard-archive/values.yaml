@@ -4,6 +4,27 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+vectorizer:
+  # Choose either "transformers" (CPU) or "ollama" (GPU)
+  # When set to ollama, this chart will deploy the Ollama pod.
+  active: "ollama" 
+  
+  ollama:
+    image: "ollama/ollama"
+    tag: "latest"
+    model: "qwen3-embedding"
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+        memory: "16Gi"
+      requests:
+        memory: "8Gi"
+        cpu: "2000m"
+
+  transformers:
+    # Transformers deployment is handled natively by the Weaviate Helm chart.
+    # To configure transformers, pass values-transformers-cpu.yaml during the Weaviate helm install.
+
 ingress:
   enabled: false
   className: "" # e.g. "nginx" or "traefik". Leave empty for default class.

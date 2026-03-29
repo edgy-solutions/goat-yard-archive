@@ -1,0 +1,21 @@
+# Weaviate CPU Configuration (Transformers)
+# This file overrides the default Weaviate Helm chart values.
+
+# 1. Enable the built-in CPU Transformers inference pod
+modules:
+  text2vec-transformers:
+    enabled: true
+    tag: "sentence-transformers-all-mpnet-base-v2"
+    replicas: 2
+    resources:
+      requests:
+        cpu: "1"
+        memory: "1Gi"
+      limits:
+        cpu: "2"
+        memory: "2Gi"
+
+# 2. Add the environment variables needed for Transformers
+env:
+  ENABLE_MODULES: "text2vec-transformers,text2vec-cohere,text2vec-huggingface,text2vec-openai"
+  DEFAULT_VECTORIZER_MODULE: "text2vec-transformers"

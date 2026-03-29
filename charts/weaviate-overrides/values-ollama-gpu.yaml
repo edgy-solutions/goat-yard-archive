@@ -1,0 +1,16 @@
+# Weaviate GPU Configuration (Ollama)
+# This file overrides the default Weaviate Helm chart values.
+
+# 1. Disable the built-in CPU Transformers inference pod
+modules:
+  text2vec-transformers:
+    enabled: false
+
+# 2. Add the environment variables needed for Ollama
+# These inject into the Weaviate StatefulSet automatically in the official chart
+env:
+  ENABLE_MODULES: "text2vec-ollama,text2vec-cohere,text2vec-huggingface,text2vec-openai"
+  DEFAULT_VECTORIZER_MODULE: "text2vec-ollama"
+  # Point to the Ollama service created by the goat-yard-archive chart
+  # Assuming the goat-yard-archive release is in the same namespace.
+  OLLAMA_API_ENDPOINT: "http://ollama:11434"
