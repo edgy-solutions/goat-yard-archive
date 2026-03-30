@@ -25,9 +25,8 @@ import requests
 import weaviate
 import weaviate.classes as wvc
 
-def get_ollama_embedding(text: str, model_name: str = "qwen3-embedding") -> list[float]:
+def get_ollama_embedding(text: str, url: str = "http://localhost:11434/api/embeddings", model_name: str = "qwen3-embedding") -> list[float]:
     """Fetches an embedding vector from the local Ollama instance."""
-    url = "http://localhost:11434/api/embeddings"
     payload = {
         "model": model_name,
         "prompt": text
@@ -36,7 +35,7 @@ def get_ollama_embedding(text: str, model_name: str = "qwen3-embedding") -> list
     response.raise_for_status()
     vec = response.json().get("embedding", [])
     if not vec:
-        raise ValueError("Ollama returned empty embedding.")
+        raise ValueError(f"Ollama model '{model_name}' returned empty embedding.")
     return vec
 
 from dotenv import load_dotenv
@@ -72,7 +71,7 @@ except LookupError:
 class GillIngestionEngine:
     """Orchestrates the ingestion of Gill Commentary into Weaviate."""
     
-    def __init__(self, weaviate_host: str = "localhost", weaviate_port: int = 80):
+    def __init__(self, weaviate_host: str = "localhost", weaviate_port: int = 80, ollama_url: str = "http://localhost:11434/api/embeddings", ollama_model: str = "qwen3-embedding"):
         """Initialize the ingestion engine."""
         # Connect to Weaviate with env var support
         weaviate_url = os.getenv("WEAVIATE_URL")
@@ -114,6 +113,9 @@ class GillIngestionEngine:
                 grpc_port=50051,
                 headers=headers
             )
+            
+        self.ollama_url = ollama_url
+        self.ollama_model = ollama_model
             
         # Get collection references
         self.entities = self.client.collections.get("TheologicalEntity")
@@ -469,7 +471,7 @@ class GillIngestionEngine:
             
             # Conditionally use Client-Side Vectorization
             use_client_vectorization = os.getenv("USE_CLIENT_SIDE_VECTORIZATION", "true").lower() == "true"
-            entity_vector = get_ollama_embedding(vector_text, model_name="qwen3-embedding") if use_client_vectorization else None
+            entity_vector = get_ollama_embedding(vector_text, url=self.ollama_url, model_name=self.ollama_model) if use_client_vectorization else None
 
             # Prepare insert arguments
             insert_kwargs = {
@@ -930,7 +932,7 @@ class GillIngestionEngine:
             for attempt in range(MAX_RETRIES):
                 try:
                     # Conditionally use Client-Side Vectorization
-                    chunk_vector = get_ollama_embedding(vector_content, model_name="qwen3-embedding") if use_client_vectorization else None
+                    chunk_vector = get_ollama_embedding(vector_content, url=self.ollama_url, model_name=self.ollama_model) if use_client_vectorization else None
                     
                     insert_kwargs = {
                         "properties": {
@@ -1181,6 +1183,8 @@ if __name__ == "__main__":
     parser.add_argument("--recycle-entities", action="store_true", help="Reuse existing entities from DB (skips LLM)")
     parser.add_argument("--limit", type=int, help="Limit number of pages to process (for testing)")
     parser.add_argument("--entity-cache-dir", default=str(DEFAULT_ENTITY_DIR), help="Directory to cache entity extraction results")
+    parser.add_argument("--ollama-url", default="http://localhost:11434/api/embeddings", help="Ollama embeddings API URL")
+    parser.add_argument("--ollama-model", default="qwen3-embedding", help="Ollama model name for embeddings")
     
     args = parser.parse_args()
     
@@ -1198,7 +1202,7 @@ if __name__ == "__main__":
             
     print(f"Starting Ingestion Engine (Target Volume: {args.volume or 'Unknown'})")
     
-    with GillIngestionEngine(args.weaviate_host, args.weaviate_port) as engine:
+    with GillIngestionEngine(args.weaviate_host, args.weaviate_port, args.ollama_url, args.ollama_model) as engine:
         if args.visualize:
             engine.visualize_connections()
         elif args.page:
