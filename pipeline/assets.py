@@ -367,7 +367,9 @@ def ingest(context: AssetExecutionContext):
         "--data-dir", data_dir,
         "--alignment-dir", alignment_dir,
         "--page", page_name,
-        "--volume", str(volume)
+        "--volume", str(volume),
+        "--ollama-url", os.getenv("OLLAMA_URL", "http://localhost:11434/api/embeddings"),
+        "--ollama-model", os.getenv("OLLAMA_MODEL", "qwen3-embedding")
     ]
     
     # Run the script and capture output
