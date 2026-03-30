@@ -486,11 +486,19 @@ class GillIngestionEngine:
             if entity_vector:
                 insert_kwargs["vector"] = entity_vector
 
-            self.entities.data.insert(**insert_kwargs)
+            try:
+                self.entities.data.insert(**insert_kwargs)
+                logging.info(f"✨ Created Entity: {safe_name} ({safe_category}) -> {entity_uuid}")
+            except weaviate.exceptions.UnexpectedStatusCodeError as e:
+                if e.status_code == 422:
+                    # If 422 (already exists), update/replace it instead
+                    self.entities.data.replace(**insert_kwargs)
+                    logging.info(f"🔄 Updated Entity: {safe_name} ({safe_category}) -> {entity_uuid}")
+                else:
+                    raise
             
             uuid_str = str(entity_uuid)
             self.entity_cache[cache_key] = uuid_str
-            logging.info(f"✨ Created Entity: {safe_name} ({safe_category}) -> {uuid_str}")
             return uuid_str
         except Exception as e:
             logging.error(f"Error creating entity {name}: {e}")
@@ -947,10 +955,18 @@ class GillIngestionEngine:
                     if chunk_vector:
                         insert_kwargs["vector"] = chunk_vector
                         
-                    self.chunks.data.insert(**insert_kwargs)
+                    try:
+                        self.chunks.data.insert(**insert_kwargs)
+                        logging.debug(f"Ingested {verse_ref}")
+                    except weaviate.exceptions.UnexpectedStatusCodeError as e:
+                        if e.status_code == 422:
+                            # If 422 (already exists), update/replace it instead
+                            self.chunks.data.replace(**insert_kwargs)
+                            logging.debug(f"🔄 Updated {verse_ref}")
+                        else:
+                            raise
                     
                     chunks_ingested += 1
-                    logging.debug(f"Ingested {verse_ref}")
                     inserted_successfully = True
                     break # Success!
                     
