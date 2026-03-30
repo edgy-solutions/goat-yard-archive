@@ -125,6 +125,19 @@ The pipeline uses a **Multi-Partition** approach to handle the scale of the 9-vo
 - **Static Partitions (Volumes)**: Volumes 1 through 9 are defined statically. Each volume represents a distinct physical book of the commentary.
 - **Dynamic Partitions (Pages)**: Within each volume, page partitions are discovered dynamically during the `extract_images` step. This allows the pipeline to adapt to varying page counts across volumes without manual configuration.
 
+#### Vectorization Architecture
+The system supports two distinct vectorization backends for generating embeddings:
+
+1.  **Client-Side GPU (Ollama) - Default**:
+    *   Ingestion (`ingest.py`) generates embeddings locally via a `qwen3-embedding` model running in an Ollama pod.
+    *   This offloads compute from Weaviate and leverages local GPU resources.
+    *   **Toggle**: Set `USE_CLIENT_SIDE_VECTORIZATION=true` (default).
+
+2.  **Server-Side CPU (Transformers) - Fallback**:
+    *   Weaviate generates embeddings internally using its `text2vec-transformers` module.
+    *   Useful if GPU resources are unavailable.
+    *   **Toggle**: Set `USE_CLIENT_SIDE_VECTORIZATION=false`.
+
 #### Concurrency & Rate Limiting
 To protect the local infrastructure and stay within **OpenRouter** API quotas, global concurrency limits are enforced:
 - **`openrouter` Pool**: High-cost LLM nodes (like `read_images_baml` and `normalize_markdown`) are tagged with the `openrouter` concurrency key.

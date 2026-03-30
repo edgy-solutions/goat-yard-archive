@@ -48,6 +48,9 @@ The pipeline transforms raw PDFs of John Gill's Commentary into a vector databas
 ### Step 7: Final DB Ingestion
 - **Action**: Pushes data to `Weaviate` locally.
 - **Subprocess**: `uv run ingest.py --data-dir volumeX/ --alignment-dir artifacts/alignment/volumeX/`
+- **Vectorization Toggle**: By default, the script uses **Client-Side Vectorization** via a local Ollama instance. 
+    - To use local GPU embeddings (default): `USE_CLIENT_SIDE_VECTORIZATION=true` (must have Ollama running on port 11434).
+    - To fallback to Weaviate CPU Transformers: `USE_CLIENT_SIDE_VECTORIZATION=false`.
 - **Output**: Populates `TheologicalEntity` vertices (BAML extraction) and `CommentaryChunk` edges inside the Database.
 - **Disambiguation Note**: Relies on a "Lookup-Before-Create" pattern or BAML's `biblical_era`/`role` metadata to prevent merging ambiguous entities (e.g., `JOSEPH_OT` vs `JOSEPH_NT`).
 

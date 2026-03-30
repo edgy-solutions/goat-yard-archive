@@ -21,8 +21,24 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 import nltk
 from rapidfuzz import fuzz, process as fuzz_process
+import requests
 import weaviate
 import weaviate.classes as wvc
+
+def get_ollama_embedding(text: str, model_name: str = "qwen3-embedding") -> list[float]:
+    """Fetches an embedding vector from the local Ollama instance."""
+    url = "http://localhost:11434/api/embeddings"
+    payload = {
+        "model": model_name,
+        "prompt": text
+    }
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
+    vec = response.json().get("embedding", [])
+    if not vec:
+        raise ValueError("Ollama returned empty embedding.")
+    return vec
+
 from dotenv import load_dotenv
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -440,7 +456,6 @@ class GillIngestionEngine:
             # We seed the UUID with the SMART deduplication ID we calculated
             entity_uuid = weaviate.util.generate_uuid5({"dedup_id": dedup_id, "category": safe_category})
 
-            # Check if it already exists (Collision or Pre-existing)
             exists = self.entities.query.fetch_object_by_id(entity_uuid)
             if exists:
                 uuid_str = str(entity_uuid)
@@ -448,8 +463,17 @@ class GillIngestionEngine:
                 # logging.info(f"🔄 Entity Exists (UUID Check): {safe_name} -> {uuid_str}")
                 return uuid_str
 
-            self.entities.data.insert(
-                properties={
+            vector_text = safe_name
+            if safe_desc:
+                vector_text += f" - {safe_desc}"
+            
+            # Conditionally use Client-Side Vectorization
+            use_client_vectorization = os.getenv("USE_CLIENT_SIDE_VECTORIZATION", "true").lower() == "true"
+            entity_vector = get_ollama_embedding(vector_text, model_name="qwen3-embedding") if use_client_vectorization else None
+
+            # Prepare insert arguments
+            insert_kwargs = {
+                "properties": {
                     "name": safe_name,
                     "category": safe_category,
                     "normalized_name": safe_norm,
@@ -457,8 +481,12 @@ class GillIngestionEngine:
                     "biblical_era": safe_era,
                     "role": safe_role
                 },
-                uuid=entity_uuid
-            )
+                "uuid": entity_uuid
+            }
+            if entity_vector:
+                insert_kwargs["vector"] = entity_vector
+
+            self.entities.data.insert(**insert_kwargs)
             
             uuid_str = str(entity_uuid)
             self.entity_cache[cache_key] = uuid_str
@@ -889,26 +917,37 @@ class GillIngestionEngine:
             
             # Ingest with retry logic
             MAX_RETRIES = 5
+            use_client_vectorization = os.getenv("USE_CLIENT_SIDE_VECTORIZATION", "true").lower() == "true"
             inserted_successfully = False
             for attempt in range(MAX_RETRIES):
                 try:
-                    self.chunks.data.insert({
-                        "content": vector_content,
-                        "verse_ref": verse_ref,
-                        "book": self.parse_verse_ref(verse_ref)[0] if verse_ref else None,
-                        "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if self.parse_verse_ref(verse_ref)[1] else 0,
-                        "volume": volume,
-                        "page_number": page_num,
-                        "lemma": lemma, # Store the extracted lemma for UI display
-                        "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
-                        "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
-                        "footnotes": footnotes,
-                        "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None,
-                        "needs_boundary_resolution": needs_resolution if 'needs_resolution' in locals() else False,
-                        "entities": [ent['name'] for ent in serialized_ents if ent['name'] != "UNRESOLVED_PRONOUN"]
-                    }, references={
-                        "mentions_entity": entity_uuids
-                    } if entity_uuids else None)
+                    # Conditionally use Client-Side Vectorization
+                    chunk_vector = get_ollama_embedding(vector_content, model_name="qwen3-embedding") if use_client_vectorization else None
+                    
+                    insert_kwargs = {
+                        "properties": {
+                            "content": vector_content,
+                            "verse_ref": verse_ref,
+                            "book": self.parse_verse_ref(verse_ref)[0] if verse_ref else None,
+                            "chapter": int(self.parse_verse_ref(verse_ref)[1].split(':')[0]) if self.parse_verse_ref(verse_ref)[1] else 0,
+                            "volume": volume,
+                            "page_number": page_num,
+                            "lemma": lemma, # Store the extracted lemma for UI display
+                            "scan_json": json.dumps(scan_data_to_store) if scan_data_to_store else None,
+                            "sentence_data": json.dumps(sentence_data), # Serialized JSON blob
+                            "footnotes": footnotes,
+                            "scripture_refs": cross_refs if 'cross_refs' in locals() and cross_refs else None,
+                            "needs_boundary_resolution": needs_resolution if 'needs_resolution' in locals() else False,
+                            "entities": [ent['name'] for ent in serialized_ents if ent['name'] != "UNRESOLVED_PRONOUN"]
+                        },
+                        "uuid": weaviate.util.generate_uuid5({"verse_ref": verse_ref}) # Explicit UUID ensures idempotent retries
+                    }
+                    if entity_uuids:
+                        insert_kwargs["references"] = {"mentions_entity": entity_uuids}
+                    if chunk_vector:
+                        insert_kwargs["vector"] = chunk_vector
+                        
+                    self.chunks.data.insert(**insert_kwargs)
                     
                     chunks_ingested += 1
                     logging.debug(f"Ingested {verse_ref}")
