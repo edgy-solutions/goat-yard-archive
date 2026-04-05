@@ -45,8 +45,18 @@ if [ "$ENV" == "prod" ]; then
     # Ensure namespace exists
     kubectl create namespace gya-backend --dry-run=client -o yaml | kubectl apply -f -
     
-    helm upgrade --install gya-backend "$CHART_DIR" \
+    # Secrets handling: Provide a generic secrets.yaml or environment-specific secrets-prod.yaml
+    SECRET_ARGS=""
+    if [ -f "$CHART_DIR/secrets.yaml" ]; then
+        SECRET_ARGS="$SECRET_ARGS -f $CHART_DIR/secrets.yaml"
+    fi
+    if [ -f "$CHART_DIR/secrets-prod.yaml" ]; then
+        SECRET_ARGS="$SECRET_ARGS -f $CHART_DIR/secrets-prod.yaml"
+    fi
+
+    eval helm upgrade --install gya-backend "$CHART_DIR" \
       -f "$CHART_DIR/values-backend.yaml" \
+      $SECRET_ARGS \
       --namespace gya-backend \
       $FORCE_FLAG \
       --wait
@@ -57,8 +67,9 @@ if [ "$ENV" == "prod" ]; then
     # Ensure namespace exists
     kubectl create namespace gya-frontend --dry-run=client -o yaml | kubectl apply -f -
     
-    helm upgrade --install gya-frontend "$CHART_DIR" \
+    eval helm upgrade --install gya-frontend "$CHART_DIR" \
       -f "$CHART_DIR/values-frontend.yaml" \
+      $SECRET_ARGS \
       --namespace gya-frontend \
       $FORCE_FLAG \
       --wait
