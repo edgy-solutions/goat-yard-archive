@@ -1,0 +1,38 @@
+{{- if .Values.litellm.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  labels:
+    app: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      containers:
+        - name: litellm
+          image: ghcr.io/berriai/litellm:main-latest
+          ports:
+            - containerPort: 4000
+          env:
+            - name: LANGFUSE_PUBLIC_KEY
+              value: {{ .Values.litellm.langfuse.publicKey | quote }}
+            - name: LANGFUSE_SECRET_KEY
+              value: {{ .Values.litellm.langfuse.secretKey | quote }}
+            - name: LANGFUSE_HOST
+              value: {{ .Values.litellm.langfuse.host | quote }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: config-volume
+          configMap:
+            name: litellm-config
+{{- end }}

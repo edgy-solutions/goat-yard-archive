@@ -3,6 +3,7 @@ import os
 import re
 import json
 import logging
+import litellm
 import weaviate
 import weaviate.classes as wvc
 from typing import List, Dict, Any, Optional
@@ -61,6 +62,26 @@ class GillSearchEngine:
     def close(self):
         self.client.close()
 
+    def _get_embedding(self, text: str) -> List[float]:
+        import litellm
+        # We point to the LiteLLM Proxy we just set up
+        api_base = os.getenv("LITELLM_PROXY_URL", "http://localhost:4000")
+        
+        try:
+            response = litellm.embedding(
+                model="qwen3-embedding",
+                input=[text],
+                api_base=api_base,
+                metadata={
+                    "generation_name": "gill-search-query",
+                    "environment": os.getenv("APP_ENV", "development")
+                }
+            )
+            return response.data[0]['embedding']
+        except Exception as e:
+            logging.error(f"LiteLLM Gateway Failure: {e}")
+            raise Exception("Theology Vector Engine is currently offline")
+
     def extract_potential_entities(self, query: str) -> List[str]:
         """
         Identify potential entities in the query.
@@ -114,6 +135,8 @@ class GillSearchEngine:
             enhanced_query = f"{query} {entity_string}"
             print(f"Enhanced query for boost: {enhanced_query}")
 
+        query_vector = self._get_embedding(enhanced_query)
+
         weaviate_filters = None
         if volume_filter:
             weaviate_filters = wvc.query.Filter.by_property("volume").equal(volume_filter)
@@ -144,6 +167,7 @@ class GillSearchEngine:
                  # Fallback if map fails
                  response = self.chunks.query.hybrid(
                     query=enhanced_query,
+                    vector=query_vector,
                     alpha=0.5, # Step 2: Golden Ratio
                     query_properties=["content", "verse_ref", "entities^3"], # Step 3B: Entity Boost
                     filters=weaviate_filters,
@@ -156,6 +180,7 @@ class GillSearchEngine:
             # 3. Retrieval (Hybrid) - Step 2 & 3
             response = self.chunks.query.hybrid(
                 query=enhanced_query,
+                vector=query_vector,
                 alpha=0.5, # Step 2: Golden Ratio
                 query_properties=["content", "verse_ref", "entities^3"], # Step 3B: Entity Boost
                 filters=weaviate_filters,

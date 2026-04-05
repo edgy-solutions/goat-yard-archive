@@ -1,0 +1,18 @@
+{{- if .Values.litellm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+data:
+  config.yaml: |
+    model_list:
+{{- range .Values.litellm.ollamaNodes }}
+      - model_name: qwen3-embedding
+        litellm_params:
+          model: ollama/qwen3-embedding
+          api_base: {{ . | quote }}
+{{- end }}
+    litellm_settings:
+      success_callback: ["langfuse"]
+      failure_callback: ["langfuse"]
+{{- end }}

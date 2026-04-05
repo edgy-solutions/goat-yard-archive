@@ -151,3 +151,13 @@ minio:
     name: minio # FORCE service name to be 'minio' (or 'release-minio' depending on chart logic)
   # Force name to be predictable
   fullnameOverride: "gya-minio"
+
+litellm:
+  enabled: true
+  ollamaNodes:
+    - "http://192.168.1.99:11434"
+    - "http://192.168.1.188:11434"
+  langfuse:
+    publicKey: ""
+    secretKey: ""
+    host: "https://cloud.langfuse.com"
