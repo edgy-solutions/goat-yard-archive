@@ -40,6 +40,7 @@ api:
     WEAVIATE_GRPC_HOST: "weaviate-grpc.gya-backend.svc.cluster.local"
     WEAVIATE_PORT: "80"
     WEAVIATE_GRPC_PORT: "50051"
+    APP_ENV: "production"
     MINIO_HTTP_ENDPOINT: "http://gya-frontend-minio.gya-frontend.svc.cluster.local:9000"
     
     # EXTERNAL APIS (Now mapped to ConfigMap and Secret via envFrom)

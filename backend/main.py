@@ -441,6 +441,7 @@ async def search(request: Request, req: SearchRequest):
             if lf_client and generation:
                 try:
                     meta_books = locals().get("available_books_str", "Unknown")
+                    env_tag = os.getenv("APP_ENV", "production")
                     lf_client.trace(
                         id=generation.trace_id, 
                         metadata={
@@ -449,7 +450,7 @@ async def search(request: Request, req: SearchRequest):
                             "baml_expanded_query": search_text,
                             "baml_mapped_entities": mapped_entities
                         }, 
-                        tags=["production", "v7_launch"]
+                        tags=[env_tag, "v7_launch"]
                     )
                     if "I regret that" in answer:
                         lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
