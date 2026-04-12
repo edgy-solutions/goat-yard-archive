@@ -9,6 +9,7 @@ from langfuse import Langfuse
 # from langfuse.decorators import langfuse_context (Not found in installed version)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
@@ -81,7 +82,70 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         }
     )
 
-app = FastAPI(title="Gill Commentary API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("--- STARTUP EVENT FIRED ---")
+    global search_engine, bot, lm_auth, lm_anon
+    
+    # 0. Langfuse / Litellm Setup
+    try:
+        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+            print("Initializing Langfuse integration for TitleLLM/DSPy...")
+            # Disable auto-callbacks as they cause AttributeError with current versions
+            litellm.success_callback = [] 
+            litellm.failure_callback = []
+        else:
+            print("Langfuse keys not found. Tracing disabled.")
+    except Exception as e:
+        print(f"Failed to init Langfuse: {e}")
+
+    # 1. Search Engine
+    try:
+        init_db()
+        search_engine = GillSearchEngine()
+        print("Search Engine initialized.")
+    except Exception as e:
+        print(f"Failed to init Search Engine/DB: {e}")
+
+    # 2. DSPy Bot (Dual Key Logic)
+    try:
+        key_main = os.getenv("OPENROUTER_API_KEY")
+        key_anon_check = os.getenv("OPENROUTER_API_KEY_ANON") or key_main # Fallback to main if no anon key
+
+        if key_main:
+            # Initialize Auth LM with usage flag
+            lm_auth = dspy.LM(
+                model="openai/deepseek/deepseek-chat",
+                api_key=key_main,
+                api_base="https://openrouter.ai/api/v1",
+                extra_body={"usage": {"include": True}}
+            )
+            
+            # Initialize Anon LM (might be same key)
+            lm_anon = dspy.LM(
+                model="openai/deepseek/deepseek-chat",
+                api_key=key_anon_check,
+                api_base="https://openrouter.ai/api/v1",
+                extra_body={"usage": {"include": True}}
+            )
+            
+            # Default helper configuration (just for consistency, context managers override this)
+            dspy.settings.configure(lm=lm_anon) 
+            
+            bot = GroundedGillBot()
+            print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon_check}")
+        else:
+            print("Warning: OPENROUTER_API_KEY not found. Bot disabled.")
+            
+    except Exception as e:
+        print(f"Failed to init Bot: {e}")
+
+    yield
+
+    if search_engine:
+        search_engine.close()
+
+app = FastAPI(title="Gill Commentary API", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
 app.include_router(webhook_router)
@@ -126,72 +190,7 @@ bot = None
 lm_auth = None
 lm_anon = None
 
-@app.on_event("startup")
-def startup():
-    print("--- STARTUP EVENT FIRED ---")
-    global search_engine, bot, lm_auth, lm_anon
-    
-    # 0. Langfuse / Litellm Setup
-    try:
-        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
-            print("Initializing Langfuse integration for TitleLLM/DSPy...")
-            print("Initializing Langfuse integration for TitleLLM/DSPy...")
-            # Disable auto-callbacks as they cause AttributeError with current versions
-            litellm.success_callback = [] 
-            litellm.failure_callback = []
-        else:
-            print("Langfuse keys not found. Tracing disabled.")
-    except Exception as e:
-        print(f"Failed to init Langfuse: {e}")
 
-    # 1. Search Engine
-    try:
-        init_db()
-        search_engine = GillSearchEngine()
-        print("Search Engine initialized.")
-    except Exception as e:
-        print(f"Failed to init Search Engine/DB: {e}")
-
-    # 2. DSPy Bot (Dual Key Logic)
-    try:
-        key_main = os.getenv("OPENROUTER_API_KEY")
-        key_anon_check = os.getenv("OPENROUTER_API_KEY_ANON") or key_main # Fallback to main if no anon key
-
-        if key_main:
-            # Initialize Auth LM with usage flag
-            lm_auth = dspy.LM(
-                model="openai/deepseek/deepseek-chat",
-                api_key=key_main,
-                api_base="https://openrouter.ai/api/v1",
-                extra_body={"usage": {"include": True}}
-            )
-            
-            # Initialize Anon LM (might be same key)
-            lm_anon = dspy.LM(
-                model="openai/deepseek/deepseek-chat",
-                api_key=key_anon_check,
-                api_base="https://openrouter.ai/api/v1",
-                extra_body={"usage": {"include": True}}
-            )
-            
-            # Default helper configuration (just for consistency, context managers override this)
-            dspy.settings.configure(lm=lm_anon) 
-            
-            # Note: We disabled litellm.success_callback = ["langfuse"] because it clashes with 
-            # the installed Langfuse/LiteLLM versions. We use manual tracing in the search endpoint instead.
-            
-            bot = GroundedGillBot()
-            print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon_check}")
-        else:
-            print("Warning: OPENROUTER_API_KEY not found. Bot disabled.")
-            
-    except Exception as e:
-        print(f"Failed to init Bot: {e}")
-
-@app.on_event("shutdown")
-def shutdown():
-    if search_engine:
-        search_engine.close()
 
 # Models
 class SearchRequest(BaseModel):
@@ -316,10 +315,11 @@ async def search(request: Request, req: SearchRequest):
                 # But typically `Langfuse()` is lightweight.
                 
                 lf_client = None
-                try:
-                    lf_client = Langfuse()
-                except:
-                    lf_client = None
+                if os.getenv("LANGFUSE_PUBLIC_KEY"):
+                    try:
+                        lf_client = Langfuse()
+                    except:
+                        lf_client = None
 
                 generation = None
                 
