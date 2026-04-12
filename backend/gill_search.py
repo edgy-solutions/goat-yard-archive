@@ -70,6 +70,7 @@ class GillSearchEngine:
         try:
             response = litellm.embedding(
                 model="openai/qwen3-embedding",
+                api_key="anything",
                 input=[text],
                 api_base=api_base,
                 metadata={
