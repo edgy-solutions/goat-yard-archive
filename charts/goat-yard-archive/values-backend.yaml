@@ -24,5 +24,8 @@ ui:
 minio:
   enabled: false
 
+litellm:
+  enabled: false
+
 ingress:
   enabled: false
