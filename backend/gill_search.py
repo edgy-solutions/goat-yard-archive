@@ -290,11 +290,10 @@ class GillSearchEngine:
             # Fallback if aggregation fails or not supported on this version yet
             return ["Genesis", "Matthew"]
 
-    def get_top_entities(self, limit: int = 20) -> List[str]:
-        """Fetch a list of common entities for query routing."""
+    def get_relevant_entities(self, query: str, limit: int = 50) -> List[str]:
+        """Fetch a list of relevant entities for query routing using BM25."""
         try:
-            # Simple fetch of top entities by name
-            response = self.entities.query.fetch_objects(limit=limit)
+            response = self.entities.query.bm25(query=query, limit=limit)
             return [obj.properties.get("name") for obj in response.objects if obj.properties.get("name")]
         except Exception as e:
             print(f"Error fetching entities: {e}")

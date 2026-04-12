@@ -235,7 +235,7 @@ async def search(request: Request, req: SearchRequest):
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
-    available_entity_names = search_engine.get_top_entities(limit=50)
+    available_entity_names = search_engine.get_relevant_entities(query=req.query, limit=50)
     
     try:
         optimized_query = await b.OptimizeSearchQuery(
