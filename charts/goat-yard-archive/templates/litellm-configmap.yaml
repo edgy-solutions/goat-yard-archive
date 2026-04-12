@@ -9,7 +9,7 @@ data:
 {{- range .Values.litellm.ollamaNodes }}
       - model_name: qwen3-embedding
         litellm_params:
-          model: ollama/qwen3-embedding
+          model: ollama/qwen3-embedding:latest
           api_base: {{ . | quote }}
 {{- end }}
     litellm_settings:
