@@ -94,7 +94,7 @@ elif [ "$ENV" == "test" ]; then
     # Deploy Weaviate
     helm upgrade --install weaviate weaviate/weaviate \
       --namespace "$NAMESPACE" \
-      -f "$CHART_DIR/values-weaviate.yaml" \
+      -f "./charts/weaviate-overrides/values-ollama-gpu.yaml" \
       --wait
 
     echo "----------------------------------------"
