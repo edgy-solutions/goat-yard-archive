@@ -5,9 +5,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 vectorizer:
-  # Choose either "transformers" (CPU) or "ollama" (GPU)
+  # Choose either "transformers" (CPU), "ollama" (Local GPU pod), or "external"
   # When set to ollama, this chart will deploy the Ollama pod.
-  active: "ollama" 
+  active: "external" 
   
   ollama:
     image: "ollama/ollama"
@@ -156,7 +156,7 @@ minio:
 litellm:
   enabled: true
   ollamaNodes:
-    - "http://192.168.1.99:11434"
+    - "http://192.168.1.179:11434"
     - "http://192.168.1.188:11434"
   langfuse:
     publicKey: ""

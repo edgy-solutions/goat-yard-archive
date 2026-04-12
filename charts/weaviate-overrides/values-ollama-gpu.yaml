@@ -14,4 +14,4 @@ env:
   ENABLE_MODULES: "text2vec-ollama,text2vec-cohere,text2vec-huggingface,text2vec-openai"
   # Point to the Ollama service created by the goat-yard-archive chart
   # Assuming the goat-yard-archive release is in the same namespace.
-  OLLAMA_API_ENDPOINT: "http://ollama:11434"
+  OLLAMA_API_ENDPOINT: "http://192.168.1.188:11434"
