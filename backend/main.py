@@ -366,6 +366,7 @@ async def search(request: Request, req: SearchRequest):
                     pred = bot(question=req.query, context_chunks=raw_results, available_books=available_books_str)
                     answer = pred.answer
                     citations = pred.citations
+                    verified = True
                     
                     if generation:
                         generation.update(output=answer)
