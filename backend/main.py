@@ -442,8 +442,7 @@ async def search(request: Request, req: SearchRequest):
                 try:
                     meta_books = locals().get("available_books_str", "Unknown")
                     env_tag = os.getenv("APP_ENV", "production")
-                    lf_client.trace(
-                        id=generation.trace_id, 
+                    lf_client.update_current_trace(
                         metadata={
                             "available_books": meta_books, 
                             "volume_context": "all",
@@ -453,9 +452,9 @@ async def search(request: Request, req: SearchRequest):
                         tags=[env_tag, "v7_launch"]
                     )
                     if "I regret that" in answer:
-                        lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
+                        lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
                     else:
-                        lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=1)
+                        lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=1)
                 except Exception as ex:
                     print(f"Failed to update Langfuse trace metadata/score: {ex}")
 
