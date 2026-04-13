@@ -331,7 +331,7 @@ async def search(request: Request, req: SearchRequest):
                     # Create context manager for generation
                     gen_ctx = lf_client.start_as_current_observation(
                         name="bot_forward",
-                        metadata={"weaviate_filters": weaviate_filters},
+                        metadata={"volume_limit": req.volume_limit},
                         as_type="generation"
                     )
                     # We manually enter the context
