@@ -64,24 +64,30 @@ class GillSearchEngine:
 
     def _get_embedding(self, text: str) -> List[float]:
         import litellm
+        from langfuse import Langfuse
+        
+        langfuse = Langfuse()
         # We point to the LiteLLM Proxy we just set up
         api_base = os.getenv("LITELLM_PROXY_URL", "http://localhost:4000")
         
-        try:
-            response = litellm.embedding(
-                model="openai/qwen3-embedding",
-                api_key="anything",
-                input=[text],
-                api_base=api_base,
-                metadata={
-                    "generation_name": "gill-search-query",
-                    "environment": os.getenv("APP_ENV", "development")
-                }
-            )
-            return response.data[0]['embedding']
-        except Exception as e:
-            logging.error(f"LiteLLM Gateway Failure: {e}")
-            raise Exception("Theology Vector Engine is currently offline")
+        # We create a span to "house" the embedding operation
+        with langfuse.span(name="embedding-generation") as span:
+            try:
+                response = litellm.embedding(
+                    model="openai/qwen3-embedding",
+                    api_key="anything",
+                    input=[text],
+                    api_base=api_base,
+                    metadata={
+                        "generation_name": "gill-search-query",
+                        "environment": os.getenv("APP_ENV", "development")
+                    }
+                )
+                return response.data[0]['embedding']
+            except Exception as e:
+                span.update(level="ERROR", status_message=str(e))
+                logging.error(f"LiteLLM Gateway Failure: {e}")
+                raise Exception("Theology Vector Engine is currently offline")
 
     def extract_potential_entities(self, query: str) -> List[str]:
         """
