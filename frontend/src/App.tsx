@@ -70,6 +70,30 @@ function App() {
     const [visiblePage, setVisiblePage] = useState<number | null>(null);
     const [isMatrixOpen, setIsMatrixOpen] = useState(false);
 
+    const [history, setHistory] = useState<{query: string, created_at: string}[]>([]);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+    const fetchHistory = async () => {
+        try {
+            const token = await getToken();
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            const res = await fetch('/api/history', { headers });
+            if (res.ok) {
+                const data = await res.json();
+                setHistory(data);
+            }
+        } catch (err) {
+            console.error("Failed to fetch history:", err);
+        }
+    };
+
+    useEffect(() => {
+        fetchHistory();
+    }, []);
+
     // Handle Deep Linking (e.g. ?view=privacy)
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -239,6 +263,7 @@ function App() {
             }, 500);
         } finally {
             setLoading(false);
+            fetchHistory();
         }
     };
 
@@ -693,6 +718,43 @@ function App() {
                             <Footer variant="main" onOpenPrivacy={() => setView('privacy')} onOpenTerms={() => setView('terms')} />
                         </div>
                     </div>
+
+                    {/* History Drawer Handle */}
+                    {history.length > 0 && (
+                      <div className="flex justify-center -mt-6 relative z-10 pointer-events-auto">
+                        <button 
+                          onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+                          className="bg-white border border-t-0 border-[#E5E0D8] rounded-b-lg px-6 py-1.5 text-[10px] text-[#A1887F] hover:text-[#5D4037] hover:bg-[#FAF9F5] transition-all font-ui tracking-widest shadow-sm flex items-center gap-2"
+                        >
+                          {isHistoryOpen ? '▲ Close Ledger' : '▼ Previous Inquiries'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* History Drawer Content */}
+                    {isHistoryOpen && history.length > 0 && (
+                      <div className="bg-white border-t border-[#E5E0D8] p-4 max-h-[30vh] overflow-y-auto custom-scrollbar pointer-events-auto shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-2">
+                        <div className="max-w-3xl mx-auto">
+                          <h4 className="text-[10px] font-bold text-[#8D6E63] uppercase font-ui tracking-wider mb-3">Recent Searches</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {history.map((item, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => {
+                                  setQuery(item.query);
+                                  setIsHistoryOpen(false);
+                                  // We use a timeout to let the state update before triggering search
+                                  setTimeout(() => handleSearch(), 50); 
+                                }}
+                                className="bg-[#FAF9F5] border border-[#E5E0D8] text-[#5D4037] px-3 py-1.5 rounded-full text-xs font-serif hover:bg-[#EDE0D4] hover:border-[#D7CCC8] transition-colors shadow-sm text-left"
+                              >
+                                "{item.query}"
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                 </div>
             </div>
 
