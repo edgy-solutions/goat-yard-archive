@@ -28,6 +28,7 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
   const [error, setError] = useState<string | null>(null);
   const [grouping, setGrouping] = useState<'book' | 'topic'>('topic');
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [summaries, setSummaries] = useState<Record<string, { text: string, loading: boolean, cached: boolean }>>({});
 
   useEffect(() => {
     if (isOpen && query) {
@@ -49,10 +50,34 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
       setData(result);
       // Initialize all sections as collapsed
       setExpandedSections({});
+      // Reset summaries
+      setSummaries({});
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGenerateSummary = async (groupKey: string, chunkIds: string[]) => {
+    setSummaries(prev => ({ ...prev, [groupKey]: { text: '', loading: true, cached: false } }));
+    try {
+      const response = await fetch('/api/summarize_group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, group_name: groupKey, chunk_ids: chunkIds }),
+      });
+      if (!response.ok) throw new Error('Failed to generate summary');
+      const result = await response.json();
+      setSummaries(prev => ({
+        ...prev,
+        [groupKey]: { text: result.summary, loading: false, cached: result.cached }
+      }));
+    } catch (err: any) {
+      setSummaries(prev => ({
+        ...prev,
+        [groupKey]: { text: `Error: ${err.message}`, loading: false, cached: false }
+      }));
     }
   };
 
@@ -163,9 +188,27 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
             
             {expandedSections[key] && (
               <div className="p-3 border-t border-[#E5E0D8] bg-[#FDFBF7]">
-                <button className="w-full mb-3 py-1.5 text-xs font-ui font-bold uppercase tracking-wider bg-[#EDE0D4] text-[#5D4037] rounded hover:bg-[#D7CCC8] transition-colors">
-                  Generate Summary
-                </button>
+                {!summaries[key] ? (
+                  <button 
+                    onClick={() => handleGenerateSummary(key, groupedData[key].map(item => item.chunk_id))}
+                    className="w-full mb-3 py-1.5 text-xs font-ui font-bold uppercase tracking-wider bg-[#EDE0D4] text-[#5D4037] rounded hover:bg-[#D7CCC8] transition-colors"
+                  >
+                    Generate Summary
+                  </button>
+                ) : summaries[key].loading ? (
+                  <div className="flex items-center justify-center py-4 mb-3 space-x-2 text-[#8D6E63] animate-pulse">
+                    <span className="text-xs font-medium uppercase tracking-widest font-ui">Consulting Dr. Gill...</span>
+                  </div>
+                ) : summaries[key].text ? (
+                  <div className="bg-[#EDE0D4]/30 p-3 rounded text-[#3E2723] text-sm font-serif mb-3 relative">
+                    {summaries[key].cached && (
+                      <span className="absolute -top-2 -right-2 bg-[#E6D5B8] text-[#5D4037] text-[9px] font-ui font-bold uppercase px-2 py-0.5 rounded-full border border-[#D7CCC8] shadow-sm">
+                        ⚡ Instantly loaded from cache
+                      </span>
+                    )}
+                    {summaries[key].text}
+                  </div>
+                ) : null}
                 <ul className="space-y-1.5">
                   {groupedData[key].map(item => (
                     <li key={item.chunk_id}>
