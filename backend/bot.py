@@ -220,6 +220,23 @@ class GroundedGillBot(dspy.Module):
         # If we get here, pass
         return dspy.Prediction(answer=pred.answer, citations=citations_list)
 
+class GroupSummarySignature(dspy.Signature):
+    """Summarize Dr. John Gill's theological views on a specific topic based ONLY on the provided excerpts."""
+    context_chunks = dspy.InputField(desc="Excerpts from Dr. Gill's commentary.")
+    query = dspy.InputField(desc="The user's original search query.")
+    group_context = dspy.InputField(desc="The specific category or biblical book these excerpts belong to.")
+    summary = dspy.OutputField(desc="A single, cohesive paragraph (3-5 sentences) summarizing Gill's view on the query within this specific group context. Use an 18th-century academic tone.")
+
+class GroupSummarizerBot(dspy.Module):
+    def __init__(self):
+        super().__init__()
+        self.generate_summary = dspy.Predict(GroupSummarySignature)
+        
+    def forward(self, query: str, context_chunks: List[str], group_context: str):
+        formatted_context = "\n\n".join(context_chunks)
+        pred = self.generate_summary(context_chunks=formatted_context, query=query, group_context=group_context)
+        return pred
+
 if __name__ == "__main__":
     # Test
     import os

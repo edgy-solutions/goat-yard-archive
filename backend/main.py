@@ -5,6 +5,7 @@ import dspy
 import litellm
 import json
 import warnings
+import hashlib
 from langfuse import Langfuse
 # from langfuse.decorators import langfuse_context (Not found in installed version)
 from fastapi import FastAPI, HTTPException, Request
@@ -16,7 +17,7 @@ from typing import List, Optional, Any
 
 # Import our modules
 from .gill_search import GillSearchEngine
-from .bot import GroundedGillBot
+from .bot import GroundedGillBot, GroupSummarizerBot
 from baml_client.async_client import b
 from .database import init_db
 from .webhooks import router as webhook_router
@@ -99,7 +100,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Failed to init Langfuse: {e}")
 
-    # 1. Search Engine
+    # Initialize Engine & Bot
     try:
         init_db()
         search_engine = GillSearchEngine()
@@ -133,6 +134,7 @@ async def lifespan(app: FastAPI):
             dspy.settings.configure(lm=lm_anon) 
             
             bot = GroundedGillBot()
+            group_summarizer_bot = GroupSummarizerBot()
             print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon_check}")
         else:
             print("Warning: OPENROUTER_API_KEY not found. Bot disabled.")
@@ -187,6 +189,7 @@ app.add_middleware(
 # Initialize Engine & Bot
 search_engine = None
 bot = None
+group_summarizer_bot = None
 lm_auth = None
 lm_anon = None
 
@@ -223,6 +226,15 @@ class MatrixSearchResponse(BaseModel):
     search_term: str
     total_hits: int
     matrix_data: List[Any]
+
+class GroupSummaryRequest(BaseModel):
+    query: str
+    group_name: str
+    chunk_ids: List[str]
+
+class GroupSummaryResponse(BaseModel):
+    summary: str
+    cached: bool
 
 @app.post("/api/search/matrix", response_model=MatrixSearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
@@ -261,6 +273,75 @@ async def search_matrix(request: Request, req: SearchRequest):
         total_hits=len(matrix_results),
         matrix_data=matrix_results
     )
+
+@app.post("/api/summarize_group", response_model=GroupSummaryResponse)
+@limiter.limit("100/day", key_func=auth_limit_key)
+@limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
+async def summarize_group(request: Request, req: GroupSummaryRequest):
+    if not search_engine or not group_summarizer_bot:
+        raise HTTPException(status_code=500, detail="Search Engine or Bot not initialized")
+        
+    sorted_ids = sorted(req.chunk_ids)
+    group_hash = hashlib.md5("".join(sorted_ids).encode('utf-8')).hexdigest()
+
+    # Cache Check
+    import weaviate.classes as wvc
+    cache_collection = search_engine.client.collections.get("GroupSummary")
+    cache_response = cache_collection.query.fetch_objects(
+        filters=wvc.query.Filter.by_property("group_hash").equal(group_hash),
+        limit=1
+    )
+    
+    if cache_response.objects:
+        return GroupSummaryResponse(
+            summary=cache_response.objects[0].properties["summary_text"],
+            cached=True
+        )
+
+    # Cache Miss - Fetch Raw Data
+    target_ids = req.chunk_ids[:15]
+    
+    chunks_collection = search_engine.client.collections.get("CommentaryChunk")
+    
+    context_chunks = []
+    for chunk_id in target_ids:
+        try:
+            import uuid
+            uid = uuid.UUID(chunk_id)
+            obj = chunks_collection.query.fetch_object_by_id(uid)
+            if obj:
+                content = obj.properties.get("content", "")
+                verse_ref = obj.properties.get("verse_ref", "")
+                context_chunks.append(f"SOURCE: {verse_ref}\n{content}")
+        except Exception as e:
+            print(f"Failed to fetch chunk {chunk_id}: {e}")
+            continue
+
+    if not context_chunks:
+        return GroupSummaryResponse(summary="No context could be retrieved for these excerpts.", cached=False)
+
+    # Generation
+    try:
+        target_lm = lm_auth if (hasattr(request.state, "user_id") and request.state.user_id) else lm_anon
+        with dspy.context(lm=target_lm):
+            pred = group_summarizer_bot(
+                query=req.query,
+                context_chunks=context_chunks,
+                group_context=req.group_name
+            )
+            generated_summary = pred.summary
+            
+            # Cache Saving
+            cache_collection.data.insert({
+                "group_hash": group_hash,
+                "summary_text": generated_summary,
+                "group_name": req.group_name
+            })
+            
+            return GroupSummaryResponse(summary=generated_summary, cached=False)
+    except Exception as e:
+        print(f"Error generating group summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate summary")
 
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
