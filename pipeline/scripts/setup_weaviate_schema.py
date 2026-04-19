@@ -209,6 +209,30 @@ def setup_weaviate_schema():
             )
             print("✓ Created CommentaryChunk collection")
             
+        # 3. GroupSummary
+        if not client.collections.exists("GroupSummary"):
+            client.collections.create(
+                name="GroupSummary",
+                description="JIT Summary Cache for Matrix Endpoint",
+                vectorizer_config=Configure.Vectorizer.none(),
+                properties=[
+                    Property(
+                        name="group_hash", 
+                        data_type=DataType.TEXT,
+                        tokenization=Tokenization.FIELD
+                    ),
+                    Property(
+                        name="summary_text", 
+                        data_type=DataType.TEXT
+                    ),
+                    Property(
+                        name="group_name", 
+                        data_type=DataType.TEXT
+                    )
+                ]
+            )
+            print("✓ Created GroupSummary collection")
+            
         print("\n✅ Weaviate schema setup complete!")
         print(f"Collections: {client.collections.list_all()}")
         
