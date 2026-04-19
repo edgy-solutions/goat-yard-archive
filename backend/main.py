@@ -622,5 +622,59 @@ async def get_books():
     raw_books = search_engine.get_available_books()
     return {"books": format_book_ranges(raw_books)}
 
+@app.get("/api/chunk/{chunk_id}", response_model=EvidenceItem)
+async def get_chunk(chunk_id: str):
+    """Fetch a single chunk by ID."""
+    if not search_engine:
+        raise HTTPException(status_code=500, detail="Search Engine not initialized")
+    
+    chunks_collection = search_engine.client.collections.get("CommentaryChunk")
+    try:
+        import uuid
+        uid = uuid.UUID(chunk_id)
+        obj = chunks_collection.query.fetch_object_by_id(uid)
+        if not obj:
+            raise HTTPException(status_code=404, detail="Chunk not found")
+            
+        vol_val = obj.properties.get('volume')
+        page_val = obj.properties.get('page_number')
+        try:
+            if vol_val is not None: vol_val = int(vol_val)
+            if page_val is not None: page_val = int(page_val)
+        except:
+            pass
+
+        scan_box = None
+        if obj.properties.get("scan_json"):
+            try:
+                scan_box = json.loads(obj.properties["scan_json"])
+            except:
+                pass
+
+        s_data = []
+        if obj.properties.get("sentence_data"):
+            try:
+                s_data = json.loads(obj.properties["sentence_data"])
+            except:
+                pass
+
+        return EvidenceItem(
+            chunk_id=str(obj.uuid),
+            sentence_data=s_data,
+            content=obj.properties.get("content", ""),
+            verse_ref=obj.properties.get("verse_ref"),
+            citation=f"[Vol {vol_val}, p. {page_val}]",
+            vol=vol_val or 0,
+            page=page_val or 0,
+            scan=scan_box,
+            footnotes=obj.properties.get("footnotes", []),
+            entities=obj.properties.get("entities", []),
+            lemma=obj.properties.get("lemma"),
+            score=1.0
+        )
+    except Exception as e:
+        print(f"Error fetching chunk {chunk_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

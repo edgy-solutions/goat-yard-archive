@@ -20,9 +20,10 @@ interface TopicMatrixSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   query: string;
+  onCitationClick: (chunkId: string) => void;
 }
 
-export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, onClose, query }) => {
+export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, onClose, query, onCitationClick }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<MatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -214,6 +215,7 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
                     <li key={item.chunk_id}>
                       <button 
                         onClick={() => {
+                          onCitationClick(item.chunk_id);
                           if (window.innerWidth < 768) {
                             onClose();
                           }

@@ -114,6 +114,31 @@ function App() {
     // Default to MOCK if backend down/empty
     const [error, setError] = useState<string | null>(null);
 
+    const fetchSingleChunk = async (chunkId: string) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await fetch(`/api/chunk/${chunkId}`);
+            if (!res.ok) throw new Error("Failed to fetch chunk");
+            const data: EvidenceItem = await res.json();
+            
+            // Set the response state so the UI displays the chunk correctly
+            setResponse({
+                answer: `Showing excerpt from ${data.citation || data.verse_ref || 'Commentary'}`,
+                citations: [data.citation || data.verse_ref || ''],
+                evidence: [data],
+                verified: true
+            });
+            setActiveEvidence(data);
+            setLastSearchedQuery("");
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message || "Failed to fetch specific chunk");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleSearch = async () => {
         if (!query) return;
         setLoading(true);
@@ -736,6 +761,7 @@ function App() {
                 isOpen={isMatrixOpen} 
                 onClose={() => setIsMatrixOpen(false)} 
                 query={lastSearchedQuery || query} 
+                onCitationClick={fetchSingleChunk}
             />
         </div>
     );
