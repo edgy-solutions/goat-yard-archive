@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, DateTime
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 import datetime
@@ -17,6 +17,13 @@ class User(Base):
     # Clerk User ID (e.g., "user_2qX...")
     id = Column(String, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class SearchHistory(Base):
+    __tablename__ = "search_history"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, index=True) # E.g., Clerk ID or Anonymous IP
+    query_text = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 def init_db():

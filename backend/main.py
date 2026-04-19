@@ -19,11 +19,22 @@ from typing import List, Optional, Any
 from .gill_search import GillSearchEngine
 from .bot import GroundedGillBot, GroupSummarizerBot
 from baml_client.async_client import b
-from .database import init_db
+from .database import init_db, SearchHistory, get_db
+from sqlalchemy.orm import Session
+from fastapi import Depends
 from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
+
+def log_search(db: Session, user_id: str, query_text: str):
+    try:
+        history_item = SearchHistory(user_id=user_id, query_text=query_text)
+        db.add(history_item)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Failed to log search history: {e}")
 
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -200,6 +211,10 @@ class SearchRequest(BaseModel):
     query: str
     volume_limit: Optional[int] = None
 
+class HistoryItem(BaseModel):
+    query: str
+    created_at: str
+
 class EvidenceItem(BaseModel):
     chunk_id: str
     content: str
@@ -346,7 +361,7 @@ async def summarize_group(request: Request, req: GroupSummaryRequest):
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
-async def search(request: Request, req: SearchRequest):
+async def search(request: Request, req: SearchRequest, db: Session = Depends(get_db)):
     # Set User ID in Langfuse Trace
     # if hasattr(request.state, "user_id") and request.state.user_id:
     #     langfuse_context.update_current_trace(user_id=request.state.user_id)
@@ -354,6 +369,10 @@ async def search(request: Request, req: SearchRequest):
     #     # Try finding anon IP
     #     ip = get_real_remote_address(request)
     #     langfuse_context.update_current_trace(user_id=f"anon-{ip}")
+
+    # Log search history
+    user_id = getattr(request.state, "user_id", None) or get_real_remote_address(request)
+    log_search(db, user_id, req.query)
 
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
@@ -612,6 +631,24 @@ async def search(request: Request, req: SearchRequest):
         expanded_query=search_text,
         mapped_entities=mapped_entities
     )
+
+@app.get("/api/history", response_model=List[HistoryItem])
+async def get_history(request: Request, db: Session = Depends(get_db)):
+    user_id = getattr(request.state, "user_id", None) or get_real_remote_address(request)
+    
+    # Fetch the last 10 unique queries, ordered by created_at DESC
+    history = db.query(SearchHistory).filter(SearchHistory.user_id == user_id).order_by(SearchHistory.created_at.desc()).all()
+    
+    unique_queries = []
+    seen = set()
+    for item in history:
+        if item.query_text not in seen:
+            seen.add(item.query_text)
+            unique_queries.append(HistoryItem(query=item.query_text, created_at=item.created_at.isoformat()))
+        if len(unique_queries) >= 10:
+            break
+            
+    return unique_queries
 
 @app.get("/api/books")
 async def get_books():
