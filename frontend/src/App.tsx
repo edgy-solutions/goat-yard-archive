@@ -15,6 +15,7 @@ import Footer from './components/Footer';
 import AnalyticsManager from './components/AnalyticsManager';
 import HighlightedContent from './components/HighlightedContent';
 import ReactMarkdown from 'react-markdown';
+import { TopicMatrixSidebar } from './components/TopicMatrixSidebar';
 
 // Palette removed as requested (reverting to single yellow highlight on selection)
 
@@ -67,6 +68,7 @@ function App() {
     // Track the specifically selected citation sentence (e.g. S01)
     const [focusedSentenceId, setFocusedSentenceId] = useState<string | null>(null);
     const [visiblePage, setVisiblePage] = useState<number | null>(null);
+    const [isMatrixOpen, setIsMatrixOpen] = useState(false);
 
     // Handle Deep Linking (e.g. ?view=privacy)
     useEffect(() => {
@@ -639,6 +641,13 @@ function App() {
                                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                             />
                             <button
+                                onClick={() => setIsMatrixOpen(true)}
+                                className="mr-2 text-[#8D6E63] hover:text-[#5D4037] px-3 py-2 rounded-full font-ui text-sm transition-colors"
+                                title="Open Search Matrix"
+                            >
+                                📊 Matrix
+                            </button>
+                            <button
                                 onClick={handleSearch}
                                 disabled={loading}
                                 className="bg-[#2C241B] text-[#E6D5B8] px-6 py-2 rounded-full font-medium text-sm hover:bg-[#3E3226] disabled:opacity-50 transition-colors font-ui tracking-wide shadow-sm"
@@ -723,6 +732,11 @@ function App() {
                 </div>
             </div>
 
+            <TopicMatrixSidebar 
+                isOpen={isMatrixOpen} 
+                onClose={() => setIsMatrixOpen(false)} 
+                query={lastSearchedQuery || query} 
+            />
         </div>
     );
 }
