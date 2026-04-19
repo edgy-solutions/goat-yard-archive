@@ -277,6 +277,114 @@ class GillSearchEngine:
             
         return results
 
+    def matrix_search(self, query: str, entities: List[str] = None, limit: int = 500, volume_filter: int = None) -> List[Dict[str, Any]]:
+        """
+        Fast, lightweight hybrid search returning only metadata.
+        """
+        enhanced_query = query
+        if entities:
+            entity_string = " ".join(entities)
+            enhanced_query = f"{query} {entity_string}"
+
+        query_vector = self._get_embedding(enhanced_query)
+
+        weaviate_filters = None
+        if volume_filter:
+            weaviate_filters = wvc.query.Filter.by_property("volume").equal(volume_filter)
+
+        # Verse Reference Detection (Exact Lookup)
+        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', query, re.IGNORECASE)
+        
+        if ref_match:
+            raw_book = ref_match.group(2).lower()
+            raw_book = re.sub(r'\s+', ' ', raw_book)
+            verse_part = ref_match.group(3)
+            
+            if raw_book in BIBLE_BOOK_MAP:
+                canonical_ref = f"{BIBLE_BOOK_MAP[raw_book]} {verse_part}"
+                ref_filter = wvc.query.Filter.by_property("verse_ref").equal(canonical_ref)
+                
+                if weaviate_filters:
+                    ref_filter = ref_filter & weaviate_filters
+                
+                response = self.chunks.query.fetch_objects(
+                    filters=ref_filter,
+                    limit=limit,
+                    return_properties=["verse_ref", "page_number", "volume", "book"],
+                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
+                )
+            else:
+                 response = self.chunks.query.hybrid(
+                    query=enhanced_query,
+                    vector=query_vector,
+                    alpha=0.5,
+                    query_properties=["content", "verse_ref", "entities^3"],
+                    filters=weaviate_filters,
+                    limit=limit,
+                    return_properties=["verse_ref", "page_number", "volume", "book"],
+                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")],
+                    return_metadata=wvc.query.MetadataQuery(score=True)
+                )
+        else:
+            response = self.chunks.query.hybrid(
+                query=enhanced_query,
+                vector=query_vector,
+                alpha=0.5,
+                query_properties=["content", "verse_ref", "entities^3"],
+                filters=weaviate_filters,
+                limit=limit,
+                return_properties=["verse_ref", "page_number", "volume", "book"],
+                return_references=[wvc.query.QueryReference(link_on="mentions_entity")],
+                return_metadata=wvc.query.MetadataQuery(score=True)
+            )
+        
+        if ref_match and 'canonical_ref' in locals():
+            target_ref = canonical_ref
+        elif ref_match:
+             target_ref = None
+        else:
+             target_ref = None
+
+        results = []
+        for obj in response.objects:
+            extracted_ref = obj.properties.get("verse_ref")
+            
+            if target_ref:
+                if extracted_ref != target_ref:
+                     continue
+
+            vol_val = obj.properties.get("volume")
+            page_val = obj.properties.get("page_number")
+            book_val = obj.properties.get("book")
+            
+            try:
+                if vol_val is not None: vol_val = int(vol_val)
+                if page_val is not None: page_val = int(page_val)
+            except:
+                pass
+                
+            entity_names = []
+            if obj.references and "mentions_entity" in obj.references:
+                ref_val = obj.references["mentions_entity"]
+                if hasattr(ref_val, 'objects'):
+                    for ref_obj in ref_val.objects:
+                       name = ref_obj.properties.get("name")
+                       if name:
+                           entity_names.append(name)
+            
+            entity_names = list(set(entity_names))
+            
+            results.append({
+                "chunk_id": str(obj.uuid),
+                "verse_ref": extracted_ref,
+                "citation": f"[Vol {vol_val}, p. {page_val}]",
+                "book": book_val,
+                "entities": entity_names,
+                "score": obj.metadata.score if (obj.metadata and obj.metadata.score is not None) else 1.0
+            })
+            
+        return results
+
     def get_available_books(self) -> List[str]:
         """Fetch distinct books from the database."""
         try:

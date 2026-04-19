@@ -219,6 +219,49 @@ class SearchResponse(BaseModel):
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
 
+class MatrixSearchResponse(BaseModel):
+    search_term: str
+    total_hits: int
+    matrix_data: List[Any]
+
+@app.post("/api/search/matrix", response_model=MatrixSearchResponse)
+@limiter.limit("100/day", key_func=auth_limit_key)
+@limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
+async def search_matrix(request: Request, req: SearchRequest):
+    if not search_engine:
+        raise HTTPException(status_code=500, detail="Search Engine not initialized")
+    
+    available_entity_names = search_engine.get_relevant_entities(query=req.query, limit=50)
+    
+    try:
+        optimized_query = await b.OptimizeSearchQuery(
+            user_query=req.query,
+            available_entities=available_entity_names
+        )
+        search_text = optimized_query.expanded_search_terms
+        mapped_entities = optimized_query.official_entities
+        print(f"BAML Optimized Query: {search_text}")
+        print(f"BAML Mapped Entities: {mapped_entities}")
+    except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
+        search_text = req.query
+        mapped_entities = None
+
+    matrix_results = search_engine.matrix_search(
+        query=search_text, 
+        entities=mapped_entities, 
+        limit=500,
+        volume_filter=req.volume_limit
+    )
+    
+    return MatrixSearchResponse(
+        search_term=search_text,
+        total_hits=len(matrix_results),
+        matrix_data=matrix_results
+    )
+
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
