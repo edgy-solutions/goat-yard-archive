@@ -1,62 +1,60 @@
 import os
-import svix
-import json
 from fastapi import APIRouter, Request, HTTPException, Depends
+from svix.webhooks import Webhook, WebhookVerificationError
 from sqlalchemy.orm import Session
 from .database import get_db, User
 
 router = APIRouter()
 
-CLERK_WEBHOOK_SECRET = os.getenv("CLERK_WEBHOOK_SECRET")
-
-@router.post("/webhooks/clerk")
+@router.post("/api/webhooks/clerk")
 async def clerk_webhook(request: Request, db: Session = Depends(get_db)):
-    if not CLERK_WEBHOOK_SECRET:
-        raise HTTPException(status_code=500, detail="Webhook Secret not configured")
+    webhook_secret = os.getenv("CLERK_WEBHOOK_SECRET")
+    if not webhook_secret:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
 
-    # 1. Get Headers
+    # Get the headers
     headers = request.headers
     svix_id = headers.get("svix-id")
     svix_timestamp = headers.get("svix-timestamp")
     svix_signature = headers.get("svix-signature")
 
     if not svix_id or not svix_timestamp or not svix_signature:
-        raise HTTPException(status_code=400, detail="Missing svix headers")
+        raise HTTPException(status_code=400, detail="Missing Svix headers")
 
-    # 2. Get Body
+    # Get the raw body
     payload = await request.body()
-    
-    # 3. Verify Signature
-    wh = svix.Webhook(CLERK_WEBHOOK_SECRET)
+
+    # Verify the webhook signature
     try:
-        msg = wh.verify(payload, headers)
-    except svix.exceptions.WebhookVerificationError:
+        wh = Webhook(webhook_secret)
+        evt = wh.verify(payload, headers)
+    except WebhookVerificationError as e:
+        print(f"Webhook verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # 4. Handle Events
-    event_type = msg.get("type")
-    data = msg.get("data", {})
+    # Handle the event
+    event_type = evt.get("type")
+    data = evt.get("data", {})
 
     if event_type == "user.created":
         user_id = data.get("id")
+
+        # Safely extract email
+        email = None
         email_addresses = data.get("email_addresses", [])
-        primary_email = None
         if email_addresses:
-            primary_email = email_addresses[0].get("email_address")
-        
+            email = email_addresses[0].get("email_address")
+
         if user_id:
-            # Upsert
-            existing = db.query(User).filter(User.id == user_id).first()
-            if not existing:
-                new_user = User(id=user_id, email=primary_email)
-                db.add(new_user)
-                try:
+            try:
+                # Check if user already exists (idempotency)
+                existing_user = db.query(User).filter(User.id == user_id).first()
+                if not existing_user:
+                    new_user = User(id=user_id, email=email)
+                    db.add(new_user)
                     db.commit()
-                    print(f"✅ Synced Check User: {user_id}")
-                except Exception as e:
-                    db.rollback()
-                    print(f"❌ Failed to insert user: {e}")
-            else:
-                print(f"User {user_id} already exists.")
+            except Exception as e:
+                db.rollback()
+                print(f"Failed to insert user: {e}")
 
     return {"status": "ok"}
