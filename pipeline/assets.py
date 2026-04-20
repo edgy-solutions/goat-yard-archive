@@ -255,7 +255,6 @@ def normalize_markdown(context: AssetExecutionContext):
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "normalize_markdown.py"),
         "--file", markdown_file,
-        "--force",
         "--backend", "dspy",
         "--model", "deepseek/deepseek-chat"
     ]

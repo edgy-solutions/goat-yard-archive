@@ -543,6 +543,26 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
                 'removed_text': first_content_line[:100],
                 'note': 'Beginning of source not found in output (possible spillover removal)'
             })
+            
+    # Check if end of source was preserved (detect truncation)
+    last_content_line = ''
+    for line in reversed(source_lines):
+        line_normalized = normalize_text(line)
+        # Skip short lines and likely footnote markers at the end
+        if len(line_normalized) > 40:
+            last_content_line = line_normalized
+            break
+            
+    if last_content_line and len(last_content_line) > 40:
+        # Check if this content appears in output
+        # Use a smaller chunk to allow for some variation
+        check_chunk = last_content_line[-60:] if len(last_content_line) > 60 else last_content_line
+        if check_chunk not in output_normalized:
+            unauthorized_changes.append({
+                'type': 'content_removed',
+                'removed_text': last_content_line[-100:],
+                'note': 'End of source not found in output (possible LLM truncation)'
+            })
     
     # Determine if verification passed
     # Continue with cheat checks...
