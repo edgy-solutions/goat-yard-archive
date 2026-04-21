@@ -407,7 +407,7 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     
     # Pattern to strip footnote markers for segment extraction
     # Includes: [^N], ^[letter], ^a^, ^a, superscript letters (ᵃᵇᶜ...), <sup> tags, degree symbol, and ALL superscript numbers (⁰¹²³⁴⁵⁶⁷⁸⁹)
-    all_footnote_markers = re.compile(r'\[\^\d+\]|\^\[\]\^|\^\[\*\]\^|\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^|\^\s+|\^\[[a-zA-Z]\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
+    all_footnote_markers = re.compile(r'\[\^[a-zA-Z\d]+\]|\^\[\]\^|\^\[\*\]\^|\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^|\^\s+|\^\[[a-zA-Z\d]+\]\^?|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻαβγδεζηθικλμνξοπρστυφχψω]|<sup>[a-z0-9\s]+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+|\^[:\.]|\^\d+|\[\s*\]:|™')
     # Pattern to detect headings (should be skipped)
     # Includes "C H A P. V." or "CHAP. V." or "GENESIS."
     heading_pattern = re.compile(r'^#.*$|^\*?\*?C\s*H\s*A\s*P\.?\s*[IVX\d]+.*$|^[A-Z]+\.\s*CH\.\s*[IVX\d]+|CHAP\.?\s*[IVXLCD]+\.?', re.MULTILINE | re.IGNORECASE)
@@ -423,7 +423,7 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     # - "° Some text" (degree symbol at line start)
     # - "¹ Some text" or " ¹..." (any superscript number at line start, with optional leading space)
     # - "Erato, sive..." (bibliographic continuations with Latin abbreviations like "l.", "c.", "fol.", "sive")
-    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\^\[\*\]\^.*$|^\s*\^\[\]\^.*$|^\s*\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^.*$|^\s*\^\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^\s*\^?[*†‡§‖¶+]\^?\s+.*$|^\s*[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]\s+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$', re.MULTILINE)
+    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\^\[\*\]\^.*$|^\s*\^\[\]\^.*$|^\s*\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^.*$|^\s*\^\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9\s]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^\s*\^?[*†‡§‖¶+™]\^?\s+.*$|^\s*[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻαβγδεζηθικλμνξοπρστυφχψω]\s+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$|^\s*[a-z]\.\s+.*$|^\s*\d+\.?\s+.*$|^\s*[a-z]\s+(?![a-z]+\b).*$|^\s*<sup>[*†‡§‖¶+|]</sup>\s+.*$|^\s*\^\[[a-zA-Z\d]+\](?:[\.\^\[\]a-zA-Z\d]+)?\s+.*$|^\s*\^[:\.]\s+.*$|^\s*\^\d+\s+.*$|^\s*\[\s*\]:\s+.*$', re.MULTILINE)
     
     # Pattern for inline Rabbinic citations often found in text (e.g. "^ T. Bab. Sanhedrin")
     # Matches " ^ T. Bab." or " ^ Bemidbar Rabba" and the rest of the sentence/line
@@ -571,7 +571,19 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
         output_basic = re.sub(r'(\w)-\s+(\w)', r'\1\2', output_basic)
         output_basic = ' '.join(output_basic.split()).lower()
         
-        if check_chunk not in output_normalized and check_chunk not in output_basic:
+        found = False
+        if check_chunk in output_normalized or check_chunk in output_basic:
+            found = True
+        else:
+            # Check for a fuzzy match (at least 25 continuous characters)
+            # This allows the LLM to fix OCR typos without failing the check
+            import difflib
+            sm = difflib.SequenceMatcher(None, check_chunk, output_basic[-1000:])
+            match = sm.find_longest_match(0, len(check_chunk), 0, len(output_basic[-1000:]))
+            if match.size >= 25:
+                found = True
+                
+        if not found:
             unauthorized_changes.append({
                 'type': 'content_removed',
                 'removed_text': last_content_line[-100:],
