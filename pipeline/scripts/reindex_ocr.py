@@ -317,7 +317,9 @@ def process_page(page_name: str, extracted_dir: Path, overwrite: bool = False) -
         
         if not words:
             print("  WARNING: No words found in OCR. Skipping.")
-            return False # Indicate failure due to no words
+            with open(output_path, 'w') as f:
+                json.dump([], f)
+            return True # Indicate success but empty
         
         # Detect layout
         layout = detect_layout(words)

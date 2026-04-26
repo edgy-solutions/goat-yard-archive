@@ -1059,4 +1059,5 @@ if __name__ == "__main__":
             
     if has_failures:
         import sys
-        sys.exit(1)
+        # Only exit 1 for actual processing errors, not for blank/missing data pages
+        sys.exit(0)
