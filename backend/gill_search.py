@@ -7,7 +7,7 @@ import litellm
 import weaviate
 import weaviate.classes as wvc
 from typing import List, Dict, Any, Optional
-from langfuse.decorators import observe
+from langfuse import observe
 from .bible_mapping import BIBLE_BOOK_MAP
 
 class GillSearchEngine:
