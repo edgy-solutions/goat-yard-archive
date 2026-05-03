@@ -103,11 +103,13 @@ def mirror_minio_buckets(prod_backup_id: str, test_backup_id: str) -> bool:
     prod_user = os.getenv("PROD_MINIO_USER", "")
     prod_pass = os.getenv("PROD_MINIO_PASS", "")
 
+    mc_bin = os.getenv("MINIO_CLIENT_BIN", "mcli")
+
     commands = [
-        ["mc", "alias", "set", "test_minio", test_minio_endpoint, test_user, test_pass],
-        ["mc", "alias", "set", "prod_minio", prod_minio_endpoint, prod_user, prod_pass],
+        [mc_bin, "alias", "set", "test_minio", test_minio_endpoint, test_user, test_pass],
+        [mc_bin, "alias", "set", "prod_minio", prod_minio_endpoint, prod_user, prod_pass],
         [
-            "mc",
+            mc_bin,
             "mirror",
             "--overwrite",
             "test_minio/weaviate-backups/test_to_prod_snapshot",
@@ -119,7 +121,7 @@ def mirror_minio_buckets(prod_backup_id: str, test_backup_id: str) -> bool:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise Exception(
-                f"mc command failed: {' '.join(cmd)}\n"
+                f"{mc_bin} command failed: {' '.join(cmd)}\n"
                 f"stdout: {result.stdout}\n"
                 f"stderr: {result.stderr}"
             )
