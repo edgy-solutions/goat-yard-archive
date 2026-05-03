@@ -86,7 +86,7 @@ minio:
     port: 9000
     name: minio # FORCE service name to be 'minio' (or 'release-minio' depending on chart logic)
   # Force name to be predictable
-  fullnameOverride: "gya-minio"
+  fullnameOverride: "gya-frontend-minio"
 
 ui:
   enabled: true
