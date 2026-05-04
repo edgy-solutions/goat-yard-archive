@@ -59,12 +59,13 @@ def backup_prod_weaviate() -> str:
     prod_url = os.getenv("PROD_WEAVIATE_URL", "http://localhost:8080")
     backup_endpoint = f"{prod_url}/v1/backups/s3"
 
+    snapshot_id = f"prod_safety_snapshot_{int(time.time())}"
     payload = {
-        "id": "prod_safety_snapshot",
+        "id": snapshot_id,
         "include": ["CommentaryChunk", "TheologicalEntity", "GroupSummary"],
     }
 
-    snapshot_id = trigger_and_wait_weaviate_backup(backup_endpoint, payload, "backup")
+    trigger_and_wait_weaviate_backup(backup_endpoint, payload, "backup")
     return snapshot_id
 
 
@@ -77,12 +78,13 @@ def backup_test_weaviate() -> str:
     test_url = os.getenv("TEST_WEAVIATE_URL", "http://localhost:8081")
     backup_endpoint = f"{test_url}/v1/backups/s3"
 
+    snapshot_id = f"test_to_prod_snapshot_{int(time.time())}"
     payload = {
-        "id": "test_to_prod_snapshot",
+        "id": snapshot_id,
         "include": ["CommentaryChunk", "TheologicalEntity"],
     }
 
-    snapshot_id = trigger_and_wait_weaviate_backup(backup_endpoint, payload, "backup")
+    trigger_and_wait_weaviate_backup(backup_endpoint, payload, "backup")
     return snapshot_id
 
 
@@ -112,8 +114,8 @@ def mirror_minio_buckets(prod_backup_id: str, test_backup_id: str) -> bool:
             mc_bin,
             "mirror",
             "--overwrite",
-            "test_minio/weaviate-backups/test_to_prod_snapshot",
-            "prod_minio/weaviate-backups/test_to_prod_snapshot",
+            f"test_minio/weaviate-backups/{test_backup_id}",
+            f"prod_minio/weaviate-backups/{test_backup_id}",
         ],
     ]
 
@@ -130,7 +132,7 @@ def mirror_minio_buckets(prod_backup_id: str, test_backup_id: str) -> bool:
 
 
 @op
-def restore_prod_weaviate(mirror_success: bool) -> str:
+def restore_prod_weaviate(mirror_success: bool, test_backup_id: str) -> str:
     """
     Restores the test snapshot into the Production Weaviate instance.
     """
@@ -138,9 +140,23 @@ def restore_prod_weaviate(mirror_success: bool) -> str:
         raise Exception("Mirror operation did not succeed, aborting restore.")
 
     prod_url = os.getenv("PROD_WEAVIATE_URL", "http://localhost:8080")
-    restore_endpoint = f"{prod_url}/v1/backups/s3/test_to_prod_snapshot/restore"
 
-    payload: Dict[str, object] = {}
+    # --- NEW: Drop the existing classes so Weaviate allows the restore ---
+    classes_to_drop = ["CommentaryChunk", "TheologicalEntity", "GroupSummary"]
+    for class_name in classes_to_drop:
+        delete_url = f"{prod_url}/v1/schema/{class_name}"
+        res = requests.delete(delete_url)
+        # 200 means deleted successfully. 400/404 means it didn't exist anyway.
+        if res.status_code not in (200, 400, 404):
+            raise Exception(f"Failed to drop {class_name} in Prod: {res.text}")
+    # ---------------------------------------------------------------------
+
+    restore_endpoint = f"{prod_url}/v1/backups/s3/{test_backup_id}/restore"
+    
+    # We explicitly tell it which classes to restore just to be safe
+    payload: Dict[str, object] = {
+        "include": ["CommentaryChunk", "TheologicalEntity", "GroupSummary"]
+    }
 
     snapshot_id = trigger_and_wait_weaviate_backup(
         restore_endpoint, payload, "restore"
@@ -160,4 +176,4 @@ def promote_test_vectors_to_prod():
     prod_backup_id = backup_prod_weaviate()
     test_backup_id = backup_test_weaviate()
     mirror_success = mirror_minio_buckets(prod_backup_id, test_backup_id)
-    restore_prod_weaviate(mirror_success)
+    restore_prod_weaviate(mirror_success, test_backup_id)
