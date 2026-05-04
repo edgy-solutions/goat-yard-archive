@@ -41,7 +41,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/backend:latest
-            ghcr.io/${{ github.repository }}/backend:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/backend:${{ github.sha }}
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
@@ -52,4 +52,4 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository }}/frontend:latest
-            ghcr.io/${{ github.repository }}/frontend:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}/frontend:${{ github.sha }}
