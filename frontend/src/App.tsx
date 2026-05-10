@@ -431,6 +431,7 @@ function App() {
                 onClose={() => setIsMatrixOpen(false)}
                 query={lastSearchedQuery || query}
                 onCitationClick={fetchSingleChunk}
+                getToken={getToken}
             />
 
             {/* Left Pane: Chat & Context */}

@@ -21,9 +21,10 @@ interface TopicMatrixSidebarProps {
   onClose: () => void;
   query: string;
   onCitationClick: (chunkId: string) => void;
+  getToken?: () => Promise<string | null>;
 }
 
-export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, onClose, query, onCitationClick }) => {
+export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, onClose, query, onCitationClick, getToken }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<MatrixResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +42,16 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
     setLoading(true);
     setError(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (getToken) {
+        const token = await getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      }
       const response = await fetch('/api/search/matrix', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ query, limit: 500 }),
       });
       if (!response.ok) throw new Error('Failed to fetch matrix data');
@@ -63,9 +71,16 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
   const handleGenerateSummary = async (groupKey: string, chunkIds: string[]) => {
     setSummaries(prev => ({ ...prev, [groupKey]: { text: '', loading: true, cached: false } }));
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (getToken) {
+        const token = await getToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      }
       const response = await fetch('/api/summarize_group', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ query, group_name: groupKey, chunk_ids: chunkIds }),
       });
       if (!response.ok) throw new Error('Failed to generate summary');
