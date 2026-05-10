@@ -5,6 +5,7 @@ import dspy
 import litellm
 import json
 import warnings
+import asyncio
 from langfuse import Langfuse
 # from langfuse.decorators import langfuse_context (Not found in installed version)
 from fastapi import FastAPI, HTTPException, Request
@@ -31,6 +32,14 @@ from slowapi.errors import RateLimitExceeded
 
 # Filter Pydantic Warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
+# Global Langfuse client for feedback endpoint
+langfuse_client = None
+try:
+    if os.getenv("LANGFUSE_PUBLIC_KEY"):
+        langfuse_client = Langfuse()
+except Exception:
+    pass
 
 # Rate Limit Keys
 def auth_limit_key(request: Request):
@@ -103,6 +112,7 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         search_engine = GillSearchEngine()
+        await search_engine.connect()
         print("Search Engine initialized.")
     except Exception as e:
         print(f"Failed to init Search Engine/DB: {e}")
@@ -143,7 +153,7 @@ async def lifespan(app: FastAPI):
     yield
 
     if search_engine:
-        search_engine.close()
+        await search_engine.close()
 
 app = FastAPI(title="Gill Commentary API", lifespan=lifespan)
 app.state.limiter = limiter
@@ -163,7 +173,7 @@ async def auth_middleware(request: Request, call_next):
         if CLERK_ISSUER:
             try:
                 # Optimized: In prod, cache JWKs. PyJWKClient does caching.
-                jwks_client = PyJWKClient(f"{CLERK_ISSUER}/.well-known/jwks.json")
+                jwks_client = PyJWKClient(f"{CLERK_ISSUER}/.well-known/jwks.json", cache_keys=True)
                 signing_key = jwks_client.get_signing_key_from_jwt(token)
                 data = jwt.decode(token, signing_key.key, algorithms=["RS256"], issuer=CLERK_ISSUER, options={"verify_aud": False})
                 request.state.user_id = data.get("sub")
@@ -218,7 +228,13 @@ class SearchResponse(BaseModel):
     verified: bool
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
+    trace_id: Optional[str] = None
 
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    score: int
+    issue_type: str = ""
+    comment: str = ""
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
@@ -235,7 +251,7 @@ async def search(request: Request, req: SearchRequest):
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
-    available_entity_names = search_engine.get_relevant_entities(query=req.query, limit=50)
+    available_entity_names = await search_engine.get_relevant_entities(query=req.query, limit=50)
     
     try:
         optimized_query = await b.OptimizeSearchQuery(
@@ -254,7 +270,7 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities = None
 
     # 2. Retrieve Evidence
-    raw_results = search_engine.search_gill(
+    raw_results = await search_engine.search_gill(
         query=search_text, 
         entities=mapped_entities, 
         limit=5,
@@ -354,7 +370,7 @@ async def search(request: Request, req: SearchRequest):
                     cache_time = getattr(app.state, "available_books_time", 0)
                     if not getattr(app.state, "available_books", None) or (now - cache_time > 300):
                          try:
-                             app.state.available_books = search_engine.get_available_books()
+                             app.state.available_books = await search_engine.get_available_books()
                              app.state.available_books_time = now
                          except Exception as e:
                              print(f"Error fetching books for cache: {e}")
@@ -363,13 +379,16 @@ async def search(request: Request, req: SearchRequest):
                     books = app.state.available_books
                     available_books_str = ", ".join(books) if books else "Unknown"
 
-                    pred = bot(question=req.query, context_chunks=raw_results, available_books=available_books_str)
+                    pred = await asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str)
                     answer = pred.answer
                     citations = pred.citations
                     verified = True
                     
                     if generation:
                         generation.update(output=answer)
+                    
+                    # Capture trace_id for feedback loop
+                    trace_id = generation.trace_id if generation else None
                         
                 except Exception as e:
                     if generation:
@@ -486,7 +505,8 @@ async def search(request: Request, req: SearchRequest):
         evidence=evidence_objects,
         verified=verified,
         expanded_query=search_text,
-        mapped_entities=mapped_entities
+        mapped_entities=mapped_entities,
+        trace_id=trace_id if 'trace_id' in locals() else None
     )
 
 @app.get("/api/books")
@@ -495,8 +515,28 @@ async def get_books():
     if not search_engine:
         # Fallback if engine down
         return {"books": ["Genesis", "Matthew"]}
-    raw_books = search_engine.get_available_books()
+    raw_books = await search_engine.get_available_books()
     return {"books": format_book_ranges(raw_books)}
+
+@app.post("/api/feedback")
+async def feedback(req: FeedbackRequest):
+    """Receive user feedback and score the Langfuse trace."""
+    if not langfuse_client:
+        raise HTTPException(status_code=503, detail="Feedback system not configured")
+    
+    full_comment = f"{req.issue_type}: {req.comment}" if req.issue_type else req.comment
+    
+    try:
+        langfuse_client.create_score(
+            trace_id=req.trace_id,
+            name="retrieval_success",
+            value=req.score,
+            comment=full_comment
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"Failed to submit feedback score: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to record feedback: {e}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

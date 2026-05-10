@@ -27,7 +27,7 @@ def get_current_user_id(credentials: HTTPAuthorizationCredentials = Security(sec
     try:
         # Fetch JWKS
         jwks_url = f"{CLERK_ISSUER}/.well-known/jwks.json"
-        jwks_client = PyJWKClient(jwks_url)
+        jwks_client = PyJWKClient(jwks_url, cache_keys=True)
         signing_key = jwks_client.get_signing_key_from_jwt(token)
         
         data = jwt.decode(
