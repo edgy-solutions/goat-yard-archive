@@ -71,8 +71,9 @@ class GillSearchEngine:
     @observe(as_type="span", name="embedding-generation")
     async def _get_embedding(self, text: str) -> List[float]:
         import litellm
+        import time
         
-        # We point to the LiteLLM Proxy we just set up
+        t0 = time.perf_counter()
         api_base = os.getenv("LITELLM_PROXY_URL", "http://localhost:4000")
         
         try:
@@ -86,6 +87,8 @@ class GillSearchEngine:
                     "environment": os.getenv("APP_ENV", "development")
                 }
             )
+            t1 = time.perf_counter()
+            print(f"[TIMING] Embedding via LiteLLM: {t1-t0:.3f}s")
             return response.data[0]['embedding']
         except Exception as e:
             logging.error(f"LiteLLM Gateway Failure: {e}")
@@ -151,8 +154,10 @@ class GillSearchEngine:
             weaviate_filters = wvc.query.Filter.by_property("volume").equal(volume_filter)
         
         # 2b. Verse Reference Detection (Exact Lookup)
-        # Regex for "Book Chapter:Verse" (e.g. Matthew 7:27, Genesis 1:1)
         ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', query, re.IGNORECASE)
+        
+        import time
+        t_weaviate_start = time.perf_counter()
         
         if ref_match:
             raw_book = ref_match.group(2).lower()
@@ -173,12 +178,11 @@ class GillSearchEngine:
                     return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
             else:
-                 # Fallback if map fails
                  response = await self.chunks.query.hybrid(
                     query=enhanced_query,
                     vector=query_vector,
-                    alpha=0.5, # Step 2: Golden Ratio
-                    query_properties=["content", "verse_ref", "entities^3"], # Step 3B: Entity Boost
+                    alpha=0.5,
+                    query_properties=["content", "verse_ref", "entities^3"],
                     filters=weaviate_filters,
                     limit=limit,
                     return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
@@ -186,18 +190,20 @@ class GillSearchEngine:
                     return_metadata=wvc.query.MetadataQuery(score=True, explain_score=True)
                 )
         else:
-            # 3. Retrieval (Hybrid) - Step 2 & 3
             response = await self.chunks.query.hybrid(
                 query=enhanced_query,
                 vector=query_vector,
-                alpha=0.5, # Step 2: Golden Ratio
-                query_properties=["content", "verse_ref", "entities^3"], # Step 3B: Entity Boost
+                alpha=0.5,
+                query_properties=["content", "verse_ref", "entities^3"],
                 filters=weaviate_filters,
                 limit=limit,
                 return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
                 return_references=[wvc.query.QueryReference(link_on="mentions_entity")],
                 return_metadata=wvc.query.MetadataQuery(score=True, explain_score=True)
             )
+        
+        t_weaviate_end = time.perf_counter()
+        print(f"[TIMING] Weaviate query: {t_weaviate_end-t_weaviate_start:.3f}s")
         
         if ref_match and 'canonical_ref' in locals():
             # If we successfully identified a canonical reference (e.g. MATTHEW 7:27),
