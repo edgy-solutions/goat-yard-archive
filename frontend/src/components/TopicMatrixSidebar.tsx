@@ -108,8 +108,6 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
     return grouped;
   };
 
-  if (!isOpen) return null;
-
   const groupedData = getGroupedData();
   const sortedKeys = Object.keys(groupedData).sort((a, b) => {
     if (a === 'Uncategorized') return 1;
@@ -120,18 +118,25 @@ export const TopicMatrixSidebar: React.FC<TopicMatrixSidebarProps> = ({ isOpen, 
   return (
     <>
       {/* Mobile Backdrop */}
-      <div className="fixed inset-0 bg-black/20 z-[90] md:hidden" onClick={onClose} />
+      {isOpen && <div className="fixed inset-0 bg-black/20 z-[90] md:hidden" onClick={onClose} />}
 
-      <div className="fixed z-[100] bg-white shadow-2xl flex flex-col transition-transform duration-300 ease-in-out md:inset-y-0 md:right-0 md:w-96 md:border-l md:border-[#E5E0D8] md:animate-in md:slide-in-from-right inset-x-0 bottom-0 h-[75vh] rounded-t-2xl md:rounded-none md:h-full animate-in slide-in-from-bottom">
+      {/* Desktop: inline flex panel that grows/shrinks; Mobile: fixed bottom sheet */}
+      <div className={`z-[100] bg-white shadow-2xl flex flex-col transition-all duration-300 ease-in-out overflow-hidden
+        md:static md:h-full md:border-r md:border-[#E5E0D8] md:shadow-none
+        ${isOpen ? 'md:w-96 md:opacity-100' : 'md:w-0 md:opacity-0'}
+        fixed inset-x-0 bottom-0 h-[75vh] rounded-t-2xl border-t border-[#E5E0D8]
+        ${isOpen ? 'translate-y-0' : 'translate-y-full'}
+        md:translate-y-0 md:rounded-none md:border-t-0
+      `}>
         {/* Header */}
-      <div className="p-4 border-b border-[#E5E0D8] bg-[#FAF9F5] flex justify-between items-center">
+      <div className="p-4 border-b border-[#E5E0D8] bg-[#FAF9F5] flex justify-between items-center shrink-0">
         <div>
           <h2 className="font-serif font-bold text-[#5D4037] text-lg">Search Matrix</h2>
           <p className="text-xs text-[#8D6E63] font-ui uppercase tracking-wider mt-1">
             {data ? `"${data.search_term}" (${data.total_hits} hits)` : (query ? `"${query}"` : 'No search')}
           </p>
         </div>
-        <button 
+        <button
           onClick={onClose}
           className="text-[#8D6E63] hover:text-[#5D4037] p-2 rounded-full hover:bg-[#E5E0D8] transition-colors"
         >

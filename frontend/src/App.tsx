@@ -425,8 +425,16 @@ function App() {
                 </div>
             )}
 
+            {/* Topic Matrix Sidebar — inline left panel on desktop */}
+            <TopicMatrixSidebar
+                isOpen={isMatrixOpen}
+                onClose={() => setIsMatrixOpen(false)}
+                query={lastSearchedQuery || query}
+                onCitationClick={fetchSingleChunk}
+            />
+
             {/* Left Pane: Chat & Context */}
-            <div className={`w-full md:w-1/2 flex flex-col border-r border-[#E5E0D8] z-10 bg-cream relative
+            <div className={`flex-1 flex flex-col border-r border-[#E5E0D8] z-10 bg-cream relative
                 ${showMobileGallery ? 'hidden md:flex' : 'flex'}
             `}>
 
@@ -691,11 +699,35 @@ function App() {
                                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                             />
                             <button
-                                onClick={() => setIsMatrixOpen(true)}
-                                className="mr-2 text-[#8D6E63] hover:text-[#5D4037] px-3 py-2 rounded-full font-ui text-sm transition-colors"
-                                title="Open Search Matrix"
+                                onClick={() => setIsMatrixOpen(!isMatrixOpen)}
+                                className={`flex items-center gap-2.5 px-4 py-2 rounded-full transition-all duration-300 group/toggle mr-2
+                                    ${isMatrixOpen
+                                        ? 'bg-[#eae4d8] text-[#2c241b]'
+                                        : 'hover:bg-[#f4efe6] text-[#8c7e71] hover:text-[#4a3f35]'
+                                    }
+                                `}
+                                title="Toggle Search Matrix"
                             >
-                                📊 Matrix
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="18"
+                                    height="18"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    className={`transition-transform duration-300 ${isMatrixOpen ? 'scale-105' : 'group-hover/toggle:scale-105'}`}
+                                >
+                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                                    <line x1="6" y1="8" x2="6" y2="14" stroke="currentColor" strokeWidth="1" className="opacity-40" />
+                                    <line x1="18" y1="8" x2="18" y2="14" stroke="currentColor" strokeWidth="1" className="opacity-40" />
+                                </svg>
+                                <span className="font-serif italic text-[15px] tracking-wide pt-[1px]">
+                                    Matrix
+                                </span>
                             </button>
                             <button
                                 onClick={handleSearch}
@@ -759,7 +791,7 @@ function App() {
             </div>
 
             {/* Right Pane: Scan Verification */}
-            <div className={`w-full md:w-1/2 bg-[#1A1410] relative border-l border-[#2C241B] flex flex-col
+            <div className={`flex-1 bg-[#1A1410] relative border-l border-[#2C241B] flex flex-col
                 ${showMobileGallery ? 'flex fixed inset-0 z-50 md:static md:flex' : 'hidden md:flex'}
             `}>
 
@@ -818,13 +850,6 @@ function App() {
                     </div>
                 </div>
             </div>
-
-            <TopicMatrixSidebar 
-                isOpen={isMatrixOpen} 
-                onClose={() => setIsMatrixOpen(false)} 
-                query={lastSearchedQuery || query} 
-                onCitationClick={fetchSingleChunk}
-            />
         </div>
     );
 }
