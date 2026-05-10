@@ -188,7 +188,12 @@ print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
 # CORS (Allow Frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # For dev
+    allow_origins=[
+        "https://goatyardarchive.org",
+        "https://www.goatyardarchive.org",
+        "http://localhost:5173",
+        "http://test.chart-example.local"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -379,7 +384,10 @@ async def search(request: Request, req: SearchRequest):
                     books = app.state.available_books
                     available_books_str = ", ".join(books) if books else "Unknown"
 
-                    pred = await asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str)
+                    pred = await asyncio.wait_for(
+                        asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str),
+                        timeout=60.0
+                    )
                     answer = pred.answer
                     citations = pred.citations
                     verified = True
@@ -390,6 +398,11 @@ async def search(request: Request, req: SearchRequest):
                     # Capture trace_id for feedback loop
                     trace_id = generation.trace_id if generation else None
                         
+                except asyncio.TimeoutError:
+                    if generation:
+                        generation.update(level="ERROR", status_message="LLM generation timed out after 60 seconds")
+                    answer = "The learned Doctor's quill moves slowly, and the ink has dried before a response could be penned. Please try again."
+                    verified = False
                 except Exception as e:
                     if generation:
                          generation.update(level="ERROR", status_message=str(e))
@@ -537,6 +550,10 @@ async def feedback(req: FeedbackRequest):
     except Exception as e:
         print(f"Failed to submit feedback score: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to record feedback: {e}")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "goat-yard-archive"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
