@@ -120,13 +120,24 @@ async def run_load_test(url: str, total_requests: int, concurrency: int, token: 
     semaphore = asyncio.Semaphore(concurrency)
     summary = Summary(total=total_requests)
 
-    async with httpx.AsyncClient(http2=True) as client:
-        # Quick health check first
-        try:
-            health = await client.get(f"{url}/health", timeout=5.0)
-            print(f"Health check: {health.status_code} {health.json()}")
-        except Exception as e:
-            print(f"Health check failed: {e}")
+    async with httpx.AsyncClient() as client:
+        # Quick health check - try /health first (direct backend), then /api/books (ingress routed)
+        health_ok = False
+        for path in ["/health", "/api/books"]:
+            try:
+                health = await client.get(f"{url}{path}", timeout=5.0)
+                if health.status_code == 200:
+                    try:
+                        data = health.json()
+                        print(f"Health check via {path}: {health.status_code} {data}")
+                        health_ok = True
+                        break
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        if not health_ok:
+            print("Health check failed: could not reach backend via /health or /api/books")
             sys.exit(1)
 
         print(f"\nFiring {total_requests} requests with concurrency={concurrency}...")
