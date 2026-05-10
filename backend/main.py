@@ -465,7 +465,6 @@ async def search(request: Request, req: SearchRequest):
                         gen_ctx.__exit__(None, None, None)
                     
                     if lf_client:
-                        import asyncio
                         await asyncio.sleep(0.5) 
                         lf_client.flush()
                 # ---------------------
