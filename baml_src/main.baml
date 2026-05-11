@@ -74,6 +74,17 @@ client<llm> OpenRouterText {
   }
 }
 
+// Define the LiteLLM proxy client (routes to local Ollama/gemma4 via cluster DNS)
+client<llm> LocalRouter {
+  provider openai
+  options {
+    base_url env.LITELLM_PROXY_URL
+    api_key "anything"
+    model "local-router"
+    temperature 0.0
+  }
+}
+
 // Define the validation function (LEGACY / MONOLITHIC)
 function ValidateOCRMetadata(
   image: image,

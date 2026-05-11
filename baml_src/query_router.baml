@@ -7,7 +7,7 @@ class OptimizedQuery {
 }
 
 function OptimizeSearchQuery(user_query: string, available_entities: string[]) -> OptimizedQuery {
-  client OpenRouterText
+  client LocalRouter
   prompt #"
     You are a theological search translator for the John Gill Archive (18th-century Calvinist/Baptist theology).
     The user asked: {{ user_query }}
