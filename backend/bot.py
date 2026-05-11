@@ -32,6 +32,9 @@ class GillSignature(dspy.Signature):
     question = dspy.InputField(desc="The theological inquiry proposed.")
     available_books = dspy.InputField(desc="String listing the books currently available in the library.")
     
+    reasoning = dspy.OutputField(
+        desc="Before answering, carefully scan the context. Quote short, exact fragments from the text that relate to the question. If you find relevant quotes, use them to build the answer. If you find absolutely none, state that."
+    )
     answer = dspy.OutputField(desc="A detailed answer in the voice of a contemporary disciple, citing specific Sentence IDs (e.g., [GEN_46_06_S03]) for every claim.")
     citations = dspy.OutputField(desc="A list of Sentence IDs used, e.g. ['[GEN_46_06_S01]', '[MAT_04_09_S03]']")
 
