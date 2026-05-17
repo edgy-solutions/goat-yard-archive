@@ -32,8 +32,12 @@ class GillSignature(dspy.Signature):
     question = dspy.InputField(desc="The theological inquiry proposed.")
     available_books = dspy.InputField(desc="String listing the books currently available in the library.")
     
-    answer = dspy.OutputField(desc="A detailed answer in the voice of a contemporary disciple, citing specific Sentence IDs (e.g., [GEN_46_06_S03]) for every claim.")
-    citations = dspy.OutputField(desc="A list of Sentence IDs used, e.g. ['[GEN_46_06_S01]', '[MAT_04_09_S03]']")
+    answer = dspy.OutputField(
+        desc="A detailed answer in the voice of a contemporary disciple, citing specific Sentence IDs exactly as they appear in the text (e.g., [GENESIS_46_06_S03]) for every claim."
+    )
+    citations = dspy.OutputField(
+        desc="A list of Sentence IDs used, exactly matching the text, e.g. ['[GENESIS_46_06_S01]', '[MATTHEW_04_09_S03]']"
+    )
 
 class GroundedGillBot(dspy.Module):
     def __init__(self):
