@@ -140,14 +140,18 @@ class GillSearchEngine:
         detected_entities = entities if entities is not None else await self.extract_potential_entities(query)
         print(f"Detected entities: {detected_entities}")
         
-        # 2. Build the Enhanced Query for BM25 Boosting (Step 3A)
+        # 2. Build the Enhanced Query for BM25 Boosting (Step 3A).
+        # Entity names are appended ONLY to the BM25/keyword side of the hybrid —
+        # they are NOT included in the embedding input, because repeating entity
+        # tokens dilutes the dense vector's semantic signal.
         enhanced_query = query
         if detected_entities:
             entity_string = " ".join(detected_entities)
             enhanced_query = f"{query} {entity_string}"
             print(f"Enhanced query for boost: {enhanced_query}")
 
-        query_vector = await self._get_embedding(enhanced_query)
+        # Embedding uses the clean (BAML-expanded) query, not the entity-padded one.
+        query_vector = await self._get_embedding(query)
 
         weaviate_filters = None
         if volume_filter:
@@ -181,7 +185,7 @@ class GillSearchEngine:
                  response = await self.chunks.query.hybrid(
                     query=enhanced_query,
                     vector=query_vector,
-                    alpha=0.5,
+                    alpha=0.35,
                     query_properties=["content", "verse_ref", "entities^3"],
                     filters=weaviate_filters,
                     limit=limit,
@@ -193,7 +197,7 @@ class GillSearchEngine:
             response = await self.chunks.query.hybrid(
                 query=enhanced_query,
                 vector=query_vector,
-                alpha=0.5,
+                alpha=0.35,
                 query_properties=["content", "verse_ref", "entities^3"],
                 filters=weaviate_filters,
                 limit=limit,
@@ -304,14 +308,81 @@ class GillSearchEngine:
             # Fallback if aggregation fails or not supported on this version yet
             return ["Genesis", "Matthew"]
 
+    # Common English stopwords / interrogatives that should never trigger a substring
+    # entity lookup (otherwise "how" matches "Howe", "are" matches "Aaron", etc.).
+    _ENTITY_LOOKUP_STOPWORDS = {
+        "how", "many", "what", "when", "where", "which", "who", "whom", "why",
+        "the", "and", "are", "was", "were", "for", "with", "that", "this",
+        "from", "did", "does", "have", "has", "had", "been", "into", "out",
+        "over", "than", "then", "there", "their", "they", "them", "those",
+        "these", "your", "yours", "you", "his", "her", "him", "she", "all",
+        "any", "one", "two", "but", "not", "can", "will", "should", "could",
+        "would", "about", "say", "said", "tell", "told", "make", "made",
+        "mean", "means", "meaning", "give", "given", "gives", "name", "names",
+        "named", "between", "within", "without", "before", "after", "such",
+        "some", "much", "more", "most", "less", "least", "very", "still",
+        "only", "also", "ever", "even", "just", "really", "actually",
+    }
+
     async def get_relevant_entities(self, query: str, limit: int = 50) -> List[str]:
-        """Fetch a list of relevant entities for query routing using BM25."""
+        """
+        Fetch a list of relevant entities for query routing.
+
+        Combines BM25 ranking with substring matching so the entity manifest
+        includes ALL entities whose name contains a significant query token
+        (e.g. "simons" surfaces every entity matching *Simon*, not just whichever
+        variant BM25 happens to rank first; "shepherd" surfaces "great shepherd
+        of the sheep"). This is the upstream fix for failure modes where BAML's
+        entity mapping was starved by a narrow manifest.
+        """
+        bm25_names: List[str] = []
         try:
             response = await self.entities.query.bm25(query=query, limit=limit)
-            return [obj.properties.get("name") for obj in response.objects if obj.properties.get("name")]
+            bm25_names = [
+                obj.properties.get("name")
+                for obj in response.objects
+                if obj.properties.get("name")
+            ]
         except Exception as e:
-            print(f"Error fetching entities: {e}")
+            print(f"Error fetching entities (BM25): {e}")
+
+        # Substring pre-pass — surface entities containing any significant query token.
+        seen = set(bm25_names)
+        substring_names: List[str] = []
+
+        candidates = set()
+        for tok in re.findall(r"[A-Za-z]{4,}", query):
+            t_lower = tok.lower()
+            if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
+                continue
+            candidates.add(t_lower)
+            # Naive plural handling: also try the singular form.
+            if t_lower.endswith("s") and len(t_lower) > 4:
+                candidates.add(t_lower[:-1])
+
+        for cand in candidates:
+            # Try lowercase, capitalized, and uppercase forms to be robust to
+            # however the `name` property is tokenized/stored.
+            patterns = {f"*{cand}*", f"*{cand.capitalize()}*", f"*{cand.upper()}*"}
+            for pattern in patterns:
+                try:
+                    response = await self.entities.query.fetch_objects(
+                        filters=wvc.query.Filter.by_property("name").like(pattern),
+                        limit=25,
+                    )
+                except Exception as e:
+                    print(f"Substring entity lookup failed for '{pattern}': {e}")
+                    continue
+                for obj in response.objects:
+                    name = obj.properties.get("name")
+                    if name and name not in seen:
+                        seen.add(name)
+                        substring_names.append(name)
+
+        combined = bm25_names + substring_names
+        if not combined:
             return ["Jesus Christ", "Apostle Paul", "Old Testament saints"]
+        return combined
 
 if __name__ == "__main__":
     # Test

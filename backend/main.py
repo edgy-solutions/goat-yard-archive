@@ -278,9 +278,9 @@ async def search(request: Request, req: SearchRequest):
     # 2. Retrieve Evidence
     t5 = time.perf_counter()
     raw_results = await search_engine.search_gill(
-        query=search_text, 
-        entities=mapped_entities, 
-        limit=5,
+        query=search_text,
+        entities=mapped_entities,
+        limit=12,
         volume_filter=req.volume_limit
     )
     t6 = time.perf_counter()
