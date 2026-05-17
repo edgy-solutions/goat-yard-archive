@@ -26,6 +26,12 @@ data:
   {{- end }}
   
   # External Integrations (Non-Sensitive)
+  {{- if .Values.api.env.APP_ENV }}
+  APP_ENV: {{ .Values.api.env.APP_ENV | quote }}
+  {{- end }}
+  {{- if .Values.api.env.LITELLM_PROXY_URL }}
+  LITELLM_PROXY_URL: {{ .Values.api.env.LITELLM_PROXY_URL | quote }}
+  {{- end }}
   {{- if .Values.api.env.LANGFUSE_BASE_URL }}
   LANGFUSE_BASE_URL: {{ .Values.api.env.LANGFUSE_BASE_URL | quote }}
   {{- end }}

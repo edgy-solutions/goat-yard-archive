@@ -1,0 +1,28 @@
+{{- if .Values.litellm.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+data:
+  config.yaml: |
+    model_list:
+      # --- EMBEDDING MODELS ---
+{{- range .Values.litellm.ollamaNodes }}
+      - model_name: qwen3-embedding
+        litellm_params:
+          model: ollama/qwen3-embedding:latest
+          api_base: {{ . | quote }}
+          keep_alive: -1
+{{- end }}
+      # --- BAML ROUTER MODELS (Gemma 4 Edge) ---
+{{- range .Values.litellm.ollamaNodes }}
+      - model_name: local-router
+        litellm_params:
+          model: ollama/gemma4:e4b
+          api_base: {{ . | quote }}
+          keep_alive: -1
+{{- end }}
+    litellm_settings:
+      success_callback: ["langfuse"]
+      failure_callback: ["langfuse"]
+{{- end }}

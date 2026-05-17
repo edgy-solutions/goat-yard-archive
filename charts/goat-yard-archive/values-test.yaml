@@ -4,6 +4,7 @@
 # 1. API Configuration
 api:
   env:
+    APP_ENV: "development"
     # Point to Weaviate in gya-test namespace
     WEAVIATE_URL: "http://weaviate.gya-test.svc.cluster.local"
     # GRPC Host (internal service name, no scheme)

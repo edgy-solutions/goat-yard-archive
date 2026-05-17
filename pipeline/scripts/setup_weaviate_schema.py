@@ -56,7 +56,7 @@ def setup_weaviate_schema():
                 name="TheologicalEntity",
                 description="Entities extracted from Gill's Commentary",
                 # Ensure the vectorizer is set (matches your Chunk config)
-                vectorizer_config=Configure.Vectorizer.text2vec_transformers(),
+                vectorizer_config=Configure.Vectorizer.none(),
                 properties=[
                     Property(
                         name="name", 
@@ -108,7 +108,7 @@ def setup_weaviate_schema():
                 name="CommentaryChunk",
                 description="Commentary content for a specific verse",
                 # Configure Vectorizer (assuming using text2vec-transformers or openai)
-                vectorizer_config=Configure.Vectorizer.text2vec_transformers(),
+                vectorizer_config=Configure.Vectorizer.none(),
                 properties=[
                     Property(
                         name="content", 

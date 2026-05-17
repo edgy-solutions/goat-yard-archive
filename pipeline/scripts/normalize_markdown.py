@@ -142,7 +142,8 @@ class DSPyBackend(NormalizerBackend):
             self._lm = dspy.LM(
                 model=f"openrouter/{model}",
                 api_key=api_key,
-                temperature=temperature
+                temperature=temperature,
+                max_tokens=8000
             )
         else:
             # Local Ollama configuration
@@ -151,7 +152,8 @@ class DSPyBackend(NormalizerBackend):
             self._lm = dspy.LM(
                 model=model,
                 api_base=api_base,
-                temperature=temperature
+                temperature=temperature,
+                max_tokens=8000
             )
         
         dspy.configure(lm=self._lm)
@@ -405,7 +407,7 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     
     # Pattern to strip footnote markers for segment extraction
     # Includes: [^N], ^[letter], ^a^, ^a, superscript letters (ᵃᵇᶜ...), <sup> tags, degree symbol, and ALL superscript numbers (⁰¹²³⁴⁵⁶⁷⁸⁹)
-    all_footnote_markers = re.compile(r'\[\^\d+\]|\^\[\]\^|\^\[\*\]\^|\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^|\^\s+|\^\[[a-zA-Z]\]|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]|<sup>[a-z]</sup>|<sup>\d+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+')
+    all_footnote_markers = re.compile(r'\[\^[a-zA-Z\d]+\]|\^\[\]\^|\^\[\*\]\^|\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^|\^\s+|\^\[[a-zA-Z\d]+\]\^?|\^[a-z]\^|\^[A-Z]\^|\^[a-z]|\^[A-Z]|[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻαβγδεζηθικλμνξοπρστυφχψω]|<sup>[a-z0-9\s]+</sup>|°|[⁰¹²³⁴⁵⁶⁷⁸⁹]+|\^[:\.]|\^\d+|\[\s*\]:|™')
     # Pattern to detect headings (should be skipped)
     # Includes "C H A P. V." or "CHAP. V." or "GENESIS."
     heading_pattern = re.compile(r'^#.*$|^\*?\*?C\s*H\s*A\s*P\.?\s*[IVX\d]+.*$|^[A-Z]+\.\s*CH\.\s*[IVX\d]+|CHAP\.?\s*[IVXLCD]+\.?', re.MULTILINE | re.IGNORECASE)
@@ -421,7 +423,7 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
     # - "° Some text" (degree symbol at line start)
     # - "¹ Some text" or " ¹..." (any superscript number at line start, with optional leading space)
     # - "Erato, sive..." (bibliographic continuations with Latin abbreviations like "l.", "c.", "fol.", "sive")
-    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\^\[\*\]\^.*$|^\s*\^\[\]\^.*$|^\s*\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^.*$|^\s*\^\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$', re.MULTILINE)
+    footnote_def_line_pattern = re.compile(r'^\s*\^[a-z]\^\s+.*$|^\s*\^[a-z]\s+.*$|^\s*\^\[[a-zA-Z]\]:.*$|^\s*\^\[[a-zA-Z]\]\s+.*$|^\s*\^\[\*\]\^.*$|^\s*\^\[\]\^.*$|^\s*\^\[[⁰¹²³⁴⁵⁶⁷⁸⁹]+\]\^.*$|^\s*\^\s+.*$|^\s*\[\^[a-z0-9]+\]:.*$|^\s*\[[a-z]\]:.*$|^[a-z]\s+(?:[^a-z\s]|vide?\b|ib(?:id)?\b|id\b|op\b|loc\b|cit\b|supra\b|infra\b|see\b|cf\b).*$|^\s*<sup>[a-z0-9\s]+</sup>.*$|^\s*[°⁰¹²³⁴⁵⁶⁷⁸⁹]+.*$|^\s*\^?[*†‡§‖¶+™]\^?\s+.*$|^\s*[ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻαβγδεζηθικλμνξοπρστυφχψω]\s+.*$|^[A-Z][a-z]+,\s+(sive|l\.|c\.|fol\.|p\.).*$|^\s*[a-z]\.\s+.*$|^\s*\d+\.?\s+.*$|^\s*[a-z]\s+(?![a-z]+\b).*$|^\s*<sup>[*†‡§‖¶+|]</sup>\s+.*$|^\s*\^\[[a-zA-Z\d]+\](?:[\.\^\[\]a-zA-Z\d]+)?\s+.*$|^\s*\^[:\.]\s+.*$|^\s*\^\d+\s+.*$|^\s*\[\s*\]:\s+.*$', re.MULTILINE)
     
     # Pattern for inline Rabbinic citations often found in text (e.g. "^ T. Bab. Sanhedrin")
     # Matches " ^ T. Bab." or " ^ Bemidbar Rabba" and the rest of the sentence/line
@@ -542,6 +544,50 @@ def verify_normalization(source: str, output: str) -> VerificationResult:
                 'type': 'content_removed',
                 'removed_text': first_content_line[:100],
                 'note': 'Beginning of source not found in output (possible spillover removal)'
+            })
+            
+    # Check if end of source was preserved (detect truncation)
+    last_content_line = ''
+    for line in reversed(source_lines):
+        line_normalized = normalize_text(line)
+        # Skip short lines and likely footnote markers at the end
+        if len(line_normalized) > 40:
+            last_content_line = line_normalized
+            break
+            
+    if last_content_line and len(last_content_line) > 40:
+        # Check if this content appears in output
+        # Use a smaller chunk to allow for some variation
+        check_chunk = last_content_line[-60:] if len(last_content_line) > 60 else last_content_line
+        
+        # Check against an output version that DOES NOT strip footnotes,
+        # because the LLM might have formatted the last line as a footnote (e.g., [^1]: ...)
+        # which would cause output_normalized to completely strip it.
+        output_basic = re.sub(r'\s+([.,;:!?)])', r'\1', output)
+        output_basic = re.sub(r'([(])\s+', r'\1', output_basic)
+        output_basic = re.sub(r'["“”\'‘’*]', '', output_basic)
+        output_basic = re.sub(r'(\w)-(\w)', r'\1\2', output_basic)
+        output_basic = re.sub(r'(\w)-\s*\n\s*(\w)', r'\1\2', output_basic)
+        output_basic = re.sub(r'(\w)-\s+(\w)', r'\1\2', output_basic)
+        output_basic = ' '.join(output_basic.split()).lower()
+        
+        found = False
+        if check_chunk in output_normalized or check_chunk in output_basic:
+            found = True
+        else:
+            # Check for a fuzzy match (at least 25 continuous characters)
+            # This allows the LLM to fix OCR typos without failing the check
+            import difflib
+            sm = difflib.SequenceMatcher(None, check_chunk, output_basic[-1000:])
+            match = sm.find_longest_match(0, len(check_chunk), 0, len(output_basic[-1000:]))
+            if match.size >= 25:
+                found = True
+                
+        if not found:
+            unauthorized_changes.append({
+                'type': 'content_removed',
+                'removed_text': last_content_line[-100:],
+                'note': 'End of source not found in output (possible LLM truncation)'
             })
     
     # Determine if verification passed

@@ -5,10 +5,12 @@ import dspy
 import litellm
 import json
 import warnings
+import asyncio
 from langfuse import Langfuse
 # from langfuse.decorators import langfuse_context (Not found in installed version)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Any
@@ -30,6 +32,14 @@ from slowapi.errors import RateLimitExceeded
 
 # Filter Pydantic Warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
+# Global Langfuse client for feedback endpoint
+langfuse_client = None
+try:
+    if os.getenv("LANGFUSE_PUBLIC_KEY"):
+        langfuse_client = Langfuse()
+except Exception:
+    pass
 
 # Rate Limit Keys
 def auth_limit_key(request: Request):
@@ -81,60 +91,14 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         }
     )
 
-app = FastAPI(title="Gill Commentary API")
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
-app.include_router(webhook_router)
-app.include_router(bible_router)
-
-# Auth Middleware
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    # Attempt to extract User ID from header (Basic parse, full verify in Auth module if desired)
-    auth_header = request.headers.get("Authorization")
-    request.state.user_id = None
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-        from .auth import PyJWKClient, jwt, CLERK_ISSUER
-        if CLERK_ISSUER:
-            try:
-                # Optimized: In prod, cache JWKs. PyJWKClient does caching.
-                jwks_client = PyJWKClient(f"{CLERK_ISSUER}/.well-known/jwks.json")
-                signing_key = jwks_client.get_signing_key_from_jwt(token)
-                data = jwt.decode(token, signing_key.key, algorithms=["RS256"], issuer=CLERK_ISSUER, options={"verify_aud": False})
-                request.state.user_id = data.get("sub")
-            except:
-                pass 
-    
-    response = await call_next(request)
-    return response
-
-print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
-
-# CORS (Allow Frontend)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # For dev
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Initialize Engine & Bot
-search_engine = None
-bot = None
-lm_auth = None
-lm_anon = None
-
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print("--- STARTUP EVENT FIRED ---")
     global search_engine, bot, lm_auth, lm_anon
     
     # 0. Langfuse / Litellm Setup
     try:
         if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
-            print("Initializing Langfuse integration for TitleLLM/DSPy...")
             print("Initializing Langfuse integration for TitleLLM/DSPy...")
             # Disable auto-callbacks as they cause AttributeError with current versions
             litellm.success_callback = [] 
@@ -148,6 +112,7 @@ def startup():
     try:
         init_db()
         search_engine = GillSearchEngine()
+        await search_engine.connect()
         print("Search Engine initialized.")
     except Exception as e:
         print(f"Failed to init Search Engine/DB: {e}")
@@ -177,9 +142,6 @@ def startup():
             # Default helper configuration (just for consistency, context managers override this)
             dspy.settings.configure(lm=lm_anon) 
             
-            # Note: We disabled litellm.success_callback = ["langfuse"] because it clashes with 
-            # the installed Langfuse/LiteLLM versions. We use manual tracing in the search endpoint instead.
-            
             bot = GroundedGillBot()
             print(f"DSPy Bot initialized. Dual Keys Active: {key_main != key_anon_check}")
         else:
@@ -188,10 +150,62 @@ def startup():
     except Exception as e:
         print(f"Failed to init Bot: {e}")
 
-@app.on_event("shutdown")
-def shutdown():
+    yield
+
     if search_engine:
-        search_engine.close()
+        await search_engine.close()
+
+app = FastAPI(title="Gill Commentary API", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
+app.include_router(webhook_router)
+app.include_router(bible_router)
+
+# Auth Middleware
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # Attempt to extract User ID from header (Basic parse, full verify in Auth module if desired)
+    auth_header = request.headers.get("Authorization")
+    request.state.user_id = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        from .auth import PyJWKClient, jwt, CLERK_ISSUER
+        if CLERK_ISSUER:
+            try:
+                # Optimized: In prod, cache JWKs. PyJWKClient does caching.
+                jwks_client = PyJWKClient(f"{CLERK_ISSUER}/.well-known/jwks.json", cache_keys=True)
+                signing_key = jwks_client.get_signing_key_from_jwt(token)
+                data = jwt.decode(token, signing_key.key, algorithms=["RS256"], issuer=CLERK_ISSUER, options={"verify_aud": False})
+                request.state.user_id = data.get("sub")
+            except:
+                pass 
+    
+    response = await call_next(request)
+    return response
+
+print(f"--- LOADING BACKEND/MAIN.PY FROM: {__file__} ---")
+
+# CORS (Allow Frontend)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://goatyardarchive.org",
+        "https://www.goatyardarchive.org",
+        "http://localhost:5173",
+        "http://test.chart-example.local"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize Engine & Bot
+search_engine = None
+bot = None
+lm_auth = None
+lm_anon = None
+
+
 
 # Models
 class SearchRequest(BaseModel):
@@ -219,30 +233,37 @@ class SearchResponse(BaseModel):
     verified: bool
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
+    trace_id: Optional[str] = None
 
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    score: int
+    issue_type: str = ""
+    comment: str = ""
 @app.post("/api/search", response_model=SearchResponse)
 @limiter.limit("100/day", key_func=auth_limit_key)
 @limiter.limit(lambda: os.getenv("RATE_LIMIT", "10/day"), key_func=anon_limit_key)
 async def search(request: Request, req: SearchRequest):
-    # Set User ID in Langfuse Trace
-    # if hasattr(request.state, "user_id") and request.state.user_id:
-    #     langfuse_context.update_current_trace(user_id=request.state.user_id)
-    # else:
-    #     # Try finding anon IP
-    #     ip = get_real_remote_address(request)
-    #     langfuse_context.update_current_trace(user_id=f"anon-{ip}")
-
+    import time
+    t0 = time.perf_counter()
+    
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
     
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
-    available_entity_names = search_engine.get_top_entities(limit=50)
+    t1 = time.perf_counter()
+    available_entity_names = await search_engine.get_relevant_entities(query=req.query, limit=50)
+    t2 = time.perf_counter()
+    print(f"[TIMING] get_relevant_entities: {t2-t1:.3f}s")
     
     try:
+        t3 = time.perf_counter()
         optimized_query = await b.OptimizeSearchQuery(
             user_query=req.query,
             available_entities=available_entity_names
         )
+        t4 = time.perf_counter()
+        print(f"[TIMING] BAML OptimizeSearchQuery: {t4-t3:.3f}s")
         search_text = optimized_query.expanded_search_terms
         mapped_entities = optimized_query.official_entities
         print(f"BAML Optimized Query: {search_text}")
@@ -255,17 +276,20 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities = None
 
     # 2. Retrieve Evidence
-    raw_results = search_engine.search_gill(
+    t5 = time.perf_counter()
+    raw_results = await search_engine.search_gill(
         query=search_text, 
         entities=mapped_entities, 
         limit=5,
         volume_filter=req.volume_limit
     )
+    t6 = time.perf_counter()
+    print(f"[TIMING] search_gill (embed+weaviate): {t6-t5:.3f}s")
+    
     if raw_results:
         import logging
         logging.error(f"DEBUG MAIN: First result lemma: '{raw_results[0].get('lemma')}'")
         logging.error(f"DEBUG MAIN: First result keys: {raw_results[0].keys()}")
-    # span.update(metadata={"hit_count": len(raw_results)})
     
     if not raw_results:
         return SearchResponse(
@@ -275,12 +299,11 @@ async def search(request: Request, req: SearchRequest):
             verified=True
         )
 
-    # 2. Generate Answer (if Bot available)
+    # 3. Generate Answer (if Bot available)
     answer = "LLM Generation disabled (No Key)."
     citations = []
     verified = False
     
-    # MANUAL MAPPING TO ENSURE LEMMA IS NOT LOST
     evidence_objects = []
     for r in raw_results:
         ev = EvidenceItem(
@@ -294,67 +317,48 @@ async def search(request: Request, req: SearchRequest):
             footnotes=r.get("footnotes", []),
             entities=r.get("entities", []),
             sentence_data=r.get("sentence_data", []),
-            lemma=r.get("lemma"), # EXPLICIT
+            lemma=r.get("lemma"),
             score=r["score"]
         )
         evidence_objects.append(ev)
 
     if bot:
         try:
-            # Select LM based on auth status
-            # Use lm_auth if user is signed in, otherwise lm_anon
             target_lm = lm_auth if (hasattr(request.state, "user_id") and request.state.user_id) else lm_anon
             
-            # Use specific LM context for this request
             with dspy.context(lm=target_lm):
-                trace_name = "dspy_generation"
                 user_id = request.state.user_id if request.state.user_id else f"anon-{get_real_remote_address(request)}"
                 
-                # Manual trace management for better control
-                # We use the raw client instance `lf` created safely above inside `search` (Wait, I need to instantiate it here or outside)
-                # Actually, best practice is to instantiate a fresh client per request if relying on env vars, to pick up latest config or context?
-                # But typically `Langfuse()` is lightweight.
-                
                 lf_client = None
-                try:
-                    lf_client = Langfuse()
-                except:
-                    lf_client = None
+                if os.getenv("LANGFUSE_PUBLIC_KEY"):
+                    try:
+                        lf_client = Langfuse()
+                    except:
+                        lf_client = None
 
                 generation = None
                 
-                # Context managed generation
-                # We check if client is available. If so, we use it.
-                # If not, we just run the bot.
-                
                 if lf_client:
-                    # Create context manager for generation
                     gen_ctx = lf_client.start_as_current_observation(
                         name="bot_forward",
-                        metadata={"weaviate_filters": weaviate_filters},
+                        metadata={"volume_limit": req.volume_limit},
                         as_type="generation"
                     )
-                    # We manually enter the context
                     generation = gen_ctx.__enter__()
-                    # Update generation with input/metadata immediately
                     if generation:
                         generation.update(input=req.query)
-                        # We cannot set user_id on a generation typically, it belongs to the trace.
-                        # But we can try setting it on the context via `lf_client.update_current_trace(user_id=...)`
-                        # However, for now let's skip setting user_id on generation explicitly as it inherits from trace.
                         lf_client.update_current_trace(user_id=user_id)
                 else:
                     gen_ctx = None
                     generation = None
 
                 try:
-                    import time
                     # Fetch available books for refusal context (Cached with 5-minute TTL)
                     now = time.time()
                     cache_time = getattr(app.state, "available_books_time", 0)
                     if not getattr(app.state, "available_books", None) or (now - cache_time > 300):
                          try:
-                             app.state.available_books = search_engine.get_available_books()
+                             app.state.available_books = await search_engine.get_available_books()
                              app.state.available_books_time = now
                          except Exception as e:
                              print(f"Error fetching books for cache: {e}")
@@ -363,29 +367,41 @@ async def search(request: Request, req: SearchRequest):
                     books = app.state.available_books
                     available_books_str = ", ".join(books) if books else "Unknown"
 
-                    pred = bot(question=req.query, context_chunks=raw_results, available_books=available_books_str)
+                    t7 = time.perf_counter()
+                    pred = await asyncio.wait_for(
+                        asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str),
+                        timeout=60.0
+                    )
+                    t8 = time.perf_counter()
+                    print(f"[TIMING] LLM generation (bot): {t8-t7:.3f}s")
+                    
                     answer = pred.answer
                     citations = pred.citations
+                    verified = True
                     
                     if generation:
                         generation.update(output=answer)
+                    
+                    trace_id = generation.trace_id if generation else None
                         
+                except asyncio.TimeoutError:
+                    if generation:
+                        generation.update(level="ERROR", status_message="LLM generation timed out after 60 seconds")
+                    answer = "The learned Doctor's quill moves slowly, and the ink has dried before a response could be penned. Please try again."
+                    verified = False
                 except Exception as e:
                     if generation:
                          generation.update(level="ERROR", status_message=str(e))
                     raise e
                     
                 finally:
-                    # --- DEBUG LOGGING & USAGE TRACKING ---
                     if hasattr(target_lm, "history") and target_lm.history:
                         last_run = target_lm.history[-1]
                         
-                        # Console Debug First
                         print("\n" + "="*50)
                         print(" [DSPy INTERACTION LOG] ")
                         print("="*50)
                         
-                        # ... Log Prompt ...
                         if "messages" in last_run:
                             print("\n--- PROMPT / MESSAGES ---")
                             for m in last_run["messages"]:
@@ -393,7 +409,6 @@ async def search(request: Request, req: SearchRequest):
                         else:
                             print(last_run.get("prompt", "No prompt"))
                         
-                        # ... Log Response ...
                         print("\n--- RESPONSE ---")
                         try:
                             resp_obj = last_run.get("response")
@@ -404,13 +419,11 @@ async def search(request: Request, req: SearchRequest):
                         except:
                             print("Could not parse response object")
                         
-                        # Usage
                         usage = last_run.get("usage")
                         print("\n--- USAGE ---")
                         print(f"Usage: {usage}")
                         print("="*50 + "\n")
 
-                        # Update Langfuse Generation Usage
                         if generation and usage:
                             cost_details = last_run.get("cost_details", {})
                             lf_usage = {
@@ -432,29 +445,26 @@ async def search(request: Request, req: SearchRequest):
                         gen_ctx.__exit__(None, None, None)
                     
                     if lf_client:
-                        import asyncio
                         await asyncio.sleep(0.5) 
                         lf_client.flush()
-                # ---------------------
                 
-            # Update trace metadata and score
             if lf_client and generation:
                 try:
                     meta_books = locals().get("available_books_str", "Unknown")
-                    lf_client.trace(
-                        id=generation.trace_id, 
+                    env_tag = os.getenv("APP_ENV", "production")
+                    lf_client.update_current_trace(
                         metadata={
                             "available_books": meta_books, 
                             "volume_context": "all",
                             "baml_expanded_query": search_text,
                             "baml_mapped_entities": mapped_entities
                         }, 
-                        tags=["production", "v7_launch"]
+                        tags=[env_tag, "v7_launch"]
                     )
                     if "I regret that" in answer:
-                        lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
+                        lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
                     else:
-                        lf_client.score(trace_id=generation.trace_id, name="retrieval_success", value=1)
+                        lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=1)
                 except Exception as ex:
                     print(f"Failed to update Langfuse trace metadata/score: {ex}")
 
@@ -466,17 +476,15 @@ async def search(request: Request, req: SearchRequest):
                   answer = f"Error generating answer: {e}"
                   verified = False
 
-    # ---------------------
+    tf = time.perf_counter()
+    print(f"[TIMING] Total request: {tf-t0:.3f}s")
     
-    # 3. Final Verification and Response Formatting
-    # Ensure verified flag is set correctly based on final answer
     if "Verification Failed:" in answer:
         verified = False
         
     if evidence_objects:
         print(f"DEBUG: First Evidence Item Entities: {evidence_objects[0].entities}")
     
-    # Extract citations for the response
     final_citations = [ev.citation for ev in evidence_objects]
 
     return SearchResponse(
@@ -485,7 +493,8 @@ async def search(request: Request, req: SearchRequest):
         evidence=evidence_objects,
         verified=verified,
         expanded_query=search_text,
-        mapped_entities=mapped_entities
+        mapped_entities=mapped_entities,
+        trace_id=trace_id if 'trace_id' in locals() else None
     )
 
 @app.get("/api/books")
@@ -494,8 +503,32 @@ async def get_books():
     if not search_engine:
         # Fallback if engine down
         return {"books": ["Genesis", "Matthew"]}
-    raw_books = search_engine.get_available_books()
+    raw_books = await search_engine.get_available_books()
     return {"books": format_book_ranges(raw_books)}
+
+@app.post("/api/feedback")
+async def feedback(req: FeedbackRequest):
+    """Receive user feedback and score the Langfuse trace."""
+    if not langfuse_client:
+        raise HTTPException(status_code=503, detail="Feedback system not configured")
+    
+    full_comment = f"{req.issue_type}: {req.comment}" if req.issue_type else req.comment
+    
+    try:
+        langfuse_client.create_score(
+            trace_id=req.trace_id,
+            name="retrieval_success",
+            value=req.score,
+            comment=full_comment
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"Failed to submit feedback score: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to record feedback: {e}")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "goat-yard-archive"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

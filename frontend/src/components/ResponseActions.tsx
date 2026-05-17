@@ -4,15 +4,34 @@ import { toast } from 'sonner';
 
 interface ResponseActionsProps {
     responseId: string;
+    traceId?: string | null;
     onReport: () => void;
 }
 
-const ResponseActions: React.FC<ResponseActionsProps> = ({ responseId, onReport }) => {
+const ResponseActions: React.FC<ResponseActionsProps> = ({ responseId, traceId, onReport }) => {
     const posthog = usePostHog();
 
-    const handlePositive = () => {
+    const handlePositive = async () => {
         posthog.capture('feedback_positive', { responseId });
         toast.success("Thanks for the feedback!");
+
+        // Also send to backend feedback endpoint
+        if (traceId) {
+            try {
+                await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        trace_id: traceId,
+                        score: 1,
+                        issue_type: 'positive_feedback',
+                        comment: ''
+                    })
+                });
+            } catch (e) {
+                console.error('Failed to send positive feedback to backend:', e);
+            }
+        }
     };
 
     return (

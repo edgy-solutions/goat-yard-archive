@@ -7,7 +7,7 @@ class OptimizedQuery {
 }
 
 function OptimizeSearchQuery(user_query: string, available_entities: string[]) -> OptimizedQuery {
-  client OpenRouterText
+  client LocalRouter
   prompt #"
     You are a theological search translator for the John Gill Archive (18th-century Calvinist/Baptist theology).
     The user asked: {{ user_query }}
@@ -18,7 +18,9 @@ function OptimizeSearchQuery(user_query: string, available_entities: string[]) -
     
     2. **ENTITY MAPPING**: Map their concepts to these official database entities if applicable:
     {{ available_entities }}
-    
+  
     {{ ctx.output_format }}
+
+    CRITICAL: You must output ONLY the raw JSON object. Do not include any markdown formatting (` ```json `), do not include any preamble, and do not include any explanations. Start immediately with { and end with }.
   "#
 }

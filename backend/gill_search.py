@@ -3,9 +3,11 @@ import os
 import re
 import json
 import logging
+import litellm
 import weaviate
 import weaviate.classes as wvc
 from typing import List, Dict, Any, Optional
+from langfuse import observe
 from .bible_mapping import BIBLE_BOOK_MAP
 
 class GillSearchEngine:
@@ -41,7 +43,7 @@ class GillSearchEngine:
              
              print(f"Connecting to Weaviate at HTTP:{http_host}:{http_port} / gRPC:{grpc_host}:{grpc_port}")
 
-             self.client = weaviate.connect_to_custom(
+             self.client = weaviate.use_async_with_custom(
                 http_host=http_host,
                 http_port=http_port,
                 http_secure=weaviate_url.startswith("https"),
@@ -53,15 +55,46 @@ class GillSearchEngine:
             )
         else:
             print("Connecting to Weaviate Local")
-            self.client = weaviate.connect_to_local(headers=headers)
+            self.client = weaviate.use_async_with_local(headers=headers)
             
+        self.chunks = None
+        self.entities = None
+        
+    async def connect(self):
+        await self.client.connect()
         self.chunks = self.client.collections.get("CommentaryChunk")
         self.entities = self.client.collections.get("TheologicalEntity")
         
-    def close(self):
-        self.client.close()
+    async def close(self):
+        await self.client.close()
 
-    def extract_potential_entities(self, query: str) -> List[str]:
+    @observe(as_type="span", name="embedding-generation")
+    async def _get_embedding(self, text: str) -> List[float]:
+        import litellm
+        import time
+        
+        t0 = time.perf_counter()
+        api_base = os.getenv("LITELLM_PROXY_URL", "http://localhost:4000")
+        
+        try:
+            response = await litellm.aembedding(
+                model="openai/qwen3-embedding",
+                api_key="anything",
+                input=[text],
+                api_base=api_base,
+                metadata={
+                    "generation_name": "gill-search-query",
+                    "environment": os.getenv("APP_ENV", "development")
+                }
+            )
+            t1 = time.perf_counter()
+            print(f"[TIMING] Embedding via LiteLLM: {t1-t0:.3f}s")
+            return response.data[0]['embedding']
+        except Exception as e:
+            logging.error(f"LiteLLM Gateway Failure: {e}")
+            raise Exception("Theology Vector Engine is currently offline")
+
+    async def extract_potential_entities(self, query: str) -> List[str]:
         """
         Identify potential entities in the query.
         Look for words that match entities in the DB, handling case sensitivity.
@@ -83,7 +116,7 @@ class GillSearchEngine:
                 try:
                     # We accept partial match or exact match? Exact is safer for "Name" lookup.
                     # Using LIKE or EQUAL
-                    response = self.entities.query.fetch_objects(
+                    response = await self.entities.query.fetch_objects(
                         filters=wvc.query.Filter.by_property("name").equal(cand),
                         limit=1
                     )
@@ -97,14 +130,14 @@ class GillSearchEngine:
         
         return verified_entities
 
-    def search_gill(self, query: str, entities: List[str] = None, limit: int = 5, volume_filter: int = None) -> List[Dict[str, Any]]:
+    async def search_gill(self, query: str, entities: List[str] = None, limit: int = 5, volume_filter: int = None) -> List[Dict[str, Any]]:
         """
         Perform Hybrid Search + Graph Boost.
         """
         print(f"Searching for: {query}")
         
         # 1. Entity Extraction (Fallback if not provided)
-        detected_entities = entities if entities is not None else self.extract_potential_entities(query)
+        detected_entities = entities if entities is not None else await self.extract_potential_entities(query)
         print(f"Detected entities: {detected_entities}")
         
         # 2. Build the Enhanced Query for BM25 Boosting (Step 3A)
@@ -114,13 +147,17 @@ class GillSearchEngine:
             enhanced_query = f"{query} {entity_string}"
             print(f"Enhanced query for boost: {enhanced_query}")
 
+        query_vector = await self._get_embedding(enhanced_query)
+
         weaviate_filters = None
         if volume_filter:
             weaviate_filters = wvc.query.Filter.by_property("volume").equal(volume_filter)
         
         # 2b. Verse Reference Detection (Exact Lookup)
-        # Regex for "Book Chapter:Verse" (e.g. Matthew 7:27, Genesis 1:1)
         ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', query, re.IGNORECASE)
+        
+        import time
+        t_weaviate_start = time.perf_counter()
         
         if ref_match:
             raw_book = ref_match.group(2).lower()
@@ -134,18 +171,18 @@ class GillSearchEngine:
                 ref_filter = wvc.query.Filter.by_property("verse_ref").equal(canonical_ref)
                 
                 print(f"Executing Direct Lookup for {canonical_ref}")
-                response = self.chunks.query.fetch_objects(
+                response = await self.chunks.query.fetch_objects(
                     filters=ref_filter,
                     limit=limit,
                     return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
                     return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
                 )
             else:
-                 # Fallback if map fails
-                 response = self.chunks.query.hybrid(
+                 response = await self.chunks.query.hybrid(
                     query=enhanced_query,
-                    alpha=0.5, # Step 2: Golden Ratio
-                    query_properties=["content", "verse_ref", "entities^3"], # Step 3B: Entity Boost
+                    vector=query_vector,
+                    alpha=0.5,
+                    query_properties=["content", "verse_ref", "entities^3"],
                     filters=weaviate_filters,
                     limit=limit,
                     return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
@@ -153,17 +190,20 @@ class GillSearchEngine:
                     return_metadata=wvc.query.MetadataQuery(score=True, explain_score=True)
                 )
         else:
-            # 3. Retrieval (Hybrid) - Step 2 & 3
-            response = self.chunks.query.hybrid(
+            response = await self.chunks.query.hybrid(
                 query=enhanced_query,
-                alpha=0.5, # Step 2: Golden Ratio
-                query_properties=["content", "verse_ref", "entities^3"], # Step 3B: Entity Boost
+                vector=query_vector,
+                alpha=0.5,
+                query_properties=["content", "verse_ref", "entities^3"],
                 filters=weaviate_filters,
                 limit=limit,
                 return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
                 return_references=[wvc.query.QueryReference(link_on="mentions_entity")],
                 return_metadata=wvc.query.MetadataQuery(score=True, explain_score=True)
             )
+        
+        t_weaviate_end = time.perf_counter()
+        print(f"[TIMING] Weaviate query: {t_weaviate_end-t_weaviate_start:.3f}s")
         
         if ref_match and 'canonical_ref' in locals():
             # If we successfully identified a canonical reference (e.g. MATTHEW 7:27),
@@ -245,12 +285,12 @@ class GillSearchEngine:
             
         return results
 
-    def get_available_books(self) -> List[str]:
+    async def get_available_books(self) -> List[str]:
         """Fetch distinct books from the database."""
         try:
             # Aggregate distinct 'book' values
             # Using Weaviate v4 syntax
-            response = self.chunks.aggregate.over_all(group_by="book")
+            response = await self.chunks.aggregate.over_all(group_by="book")
             books = []
             if response.groups:
                 for grp in response.groups:
@@ -264,11 +304,10 @@ class GillSearchEngine:
             # Fallback if aggregation fails or not supported on this version yet
             return ["Genesis", "Matthew"]
 
-    def get_top_entities(self, limit: int = 20) -> List[str]:
-        """Fetch a list of common entities for query routing."""
+    async def get_relevant_entities(self, query: str, limit: int = 50) -> List[str]:
+        """Fetch a list of relevant entities for query routing using BM25."""
         try:
-            # Simple fetch of top entities by name
-            response = self.entities.query.fetch_objects(limit=limit)
+            response = await self.entities.query.bm25(query=query, limit=limit)
             return [obj.properties.get("name") for obj in response.objects if obj.properties.get("name")]
         except Exception as e:
             print(f"Error fetching entities: {e}")
@@ -276,11 +315,17 @@ class GillSearchEngine:
 
 if __name__ == "__main__":
     # Test
+    import asyncio
     from dotenv import load_dotenv
     load_dotenv()
-    engine = GillSearchEngine()
-    results = engine.search_gill("What does he say about Cain?")
-    for r in results:
-        print(f"\n{r['verse_ref']} {r['citation']}")
-        print(r['content'][:100] + "...")
-    engine.close()
+    
+    async def test():
+        engine = GillSearchEngine()
+        await engine.connect()
+        results = await engine.search_gill("What does he say about Cain?")
+        for r in results:
+            print(f"\n{r['verse_ref']} {r['citation']}")
+            print(r['content'][:100] + "...")
+        await engine.close()
+    
+    asyncio.run(test())

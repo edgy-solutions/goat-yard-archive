@@ -52,6 +52,7 @@ interface SearchResponse {
     citations: string[];
     evidence: EvidenceItem[];
     verified: boolean;
+    trace_id?: string;
 }
 
 function App() {
@@ -60,6 +61,7 @@ function App() {
     // Force HMR refresh
     const [response, setResponse] = useState<SearchResponse | null>(null);
     const [activeEvidence, setActiveEvidence] = useState<EvidenceItem | null>(null);
+    const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
     const { getToken } = useAuth();
     // User hook removed as logic moved to AnalyticsManager
     const posthog = usePostHog();
@@ -89,7 +91,7 @@ function App() {
         setReportModalOpen(true);
     };
 
-    const handleReportSubmit = (issueType: string, description: string) => {
+    const handleReportSubmit = async (issueType: string, description: string) => {
         posthog.capture('user_feedback_submitted', {
             issue_type: issueType,
             description: description,
@@ -97,6 +99,27 @@ function App() {
             retrieved_chunk_ids: reportContext?.evidenceIds,
             $set: { has_reported_issue: true }
         });
+
+        // Also send to backend feedback endpoint
+        try {
+            const token = await getToken();
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            await fetch('/api/feedback', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    trace_id: currentTraceId,
+                    score: 0,
+                    issue_type: issueType,
+                    comment: description
+                })
+            });
+        } catch (e) {
+            console.error('Failed to send feedback to backend:', e);
+        }
+
         toast.success("Report submitted. Thank you for helping improve the library.");
     };
 
@@ -168,6 +191,7 @@ function App() {
 
             const data = await res.json();
             setResponse(data);
+            setCurrentTraceId(data.trace_id || null);
 
             // Only show evidence if there are actual citations or if the answer DOESN'T indicate failure
             // If citations are empty, it usually means "I regret..." or "No info found"
@@ -533,6 +557,7 @@ function App() {
                                     <div className="mt-4 flex justify-end">
                                         <ResponseActions
                                             responseId={lastSearchedQuery}
+                                            traceId={currentTraceId}
                                             onReport={handleReportOpen}
                                         />
                                     </div>

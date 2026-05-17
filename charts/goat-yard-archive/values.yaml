@@ -5,9 +5,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 vectorizer:
-  # Choose either "transformers" (CPU) or "ollama" (GPU)
+  # Choose either "transformers" (CPU), "ollama" (Local GPU pod), or "external"
   # When set to ollama, this chart will deploy the Ollama pod.
-  active: "ollama" 
+  active: "external" 
   
   ollama:
     image: "ollama/ollama"
@@ -83,6 +83,8 @@ api:
     WEAVIATE_GRPC_HOST: "weaviate.gya-backend.svc.cluster.local"
     WEAVIATE_PORT: "80"
     WEAVIATE_GRPC_PORT: "50051"
+    APP_ENV: "production"
+    LITELLM_PROXY_URL: "http://litellm-service:4000"
   auth:
     clerkIssuer: "https://<your-app>.clerk.accounts.dev"
     clerkWebhookSecret: ""
@@ -151,3 +153,13 @@ minio:
     name: minio # FORCE service name to be 'minio' (or 'release-minio' depending on chart logic)
   # Force name to be predictable
   fullnameOverride: "gya-minio"
+
+litellm:
+  enabled: true
+  ollamaNodes:
+    - "http://192.168.1.179:11434"
+    - "http://192.168.1.188:11434"
+  langfuse:
+    publicKey: ""
+    secretKey: ""
+    host: "https://cloud.langfuse.com"

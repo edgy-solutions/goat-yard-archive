@@ -166,7 +166,13 @@ class GillIngestionEngine:
         if len(parts) >= 2 and "page" in parts[0]:
             try:
                 page_num = int(parts[0].replace("page", ""))
-                return (volume_override if volume_override else 1), page_num
+                extracted_vol = 1
+                if "image" in parts[1]:
+                    try:
+                        extracted_vol = int(parts[1].replace("image", "").replace(".png", ""))
+                    except:
+                        pass
+                return (volume_override if volume_override else extracted_vol), page_num
             except:
                 pass
 

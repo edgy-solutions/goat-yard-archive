@@ -255,7 +255,6 @@ def normalize_markdown(context: AssetExecutionContext):
     cmd = [
         "python", os.path.join(SCRIPTS_DIR, "normalize_markdown.py"),
         "--file", markdown_file,
-        "--force",
         "--backend", "dspy",
         "--model", "deepseek/deepseek-chat"
     ]
@@ -568,11 +567,12 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
     langfuse = Langfuse()
     
     # 1. Fetch traces from last 24h that failed (score = 0)
+    env_tag = os.getenv("APP_ENV", "production")
     traces = []
     page = 1
     while True:
         traces_response = langfuse.get_traces(
-            tags=["v7_launch"],
+            tags=[env_tag, "v7_launch"],
             score_name="retrieval_success",
             score_value=0,
             page=page

@@ -9,8 +9,8 @@ import io
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add pipeline/scripts directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "pipeline" / "scripts"))
 
 from get_md import (
     get_greek_verse,
