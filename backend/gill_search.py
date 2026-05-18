@@ -176,44 +176,20 @@ class GillSearchEngine:
         if volume_filter:
             weaviate_filters = wvc.query.Filter.by_property("volume").equal(volume_filter)
         
-        # 2b. Verse Reference Detection (Exact Lookup)
-        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', query, re.IGNORECASE)
-        
+        # 2b. Verse Reference Detection (Exact Lookup).
+        # Run the regex on the ORIGINAL user query, not the BAML expansion.
+        # BAML often adds synonyms like "Leviticus 16" to broaden BM25 recall, and
+        # those should be treated as search hints (keyword material), not as a
+        # navigation signal that switches us to direct verse lookup. The user
+        # knows when they're typing a verse reference.
+        ref_source = original_query if original_query and original_query.strip() else query
+        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', ref_source, re.IGNORECASE)
+
         import time
         t_weaviate_start = time.perf_counter()
-        
-        if ref_match:
-            raw_book = ref_match.group(2).lower()
-            raw_book = re.sub(r'\s+', ' ', raw_book)
-            verse_part = ref_match.group(3)
-            
-            if raw_book in BIBLE_BOOK_MAP:
-                canonical_ref = f"{BIBLE_BOOK_MAP[raw_book]} {verse_part}"
-                print(f"Detected verse reference: {canonical_ref}")
-                
-                ref_filter = wvc.query.Filter.by_property("verse_ref").equal(canonical_ref)
-                
-                print(f"Executing Direct Lookup for {canonical_ref}")
-                response = await self.chunks.query.fetch_objects(
-                    filters=ref_filter,
-                    limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
-                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
-                )
-            else:
-                 response = await self.chunks.query.hybrid(
-                    query=enhanced_query,
-                    vector=query_vector,
-                    alpha=0.35,
-                    query_properties=["content", "verse_ref", "entities^3"],
-                    filters=weaviate_filters,
-                    limit=limit,
-                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
-                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")],
-                    return_metadata=wvc.query.MetadataQuery(score=True, explain_score=True)
-                )
-        else:
-            response = await self.chunks.query.hybrid(
+
+        async def _do_hybrid():
+            return await self.chunks.query.hybrid(
                 query=enhanced_query,
                 vector=query_vector,
                 alpha=0.35,
@@ -224,21 +200,52 @@ class GillSearchEngine:
                 return_references=[wvc.query.QueryReference(link_on="mentions_entity")],
                 return_metadata=wvc.query.MetadataQuery(score=True, explain_score=True)
             )
-        
+
+        response = None
+        used_hybrid_fallback = False
+        if ref_match:
+            raw_book = ref_match.group(2).lower()
+            raw_book = re.sub(r'\s+', ' ', raw_book)
+            verse_part = ref_match.group(3)
+
+            if raw_book in BIBLE_BOOK_MAP:
+                canonical_ref = f"{BIBLE_BOOK_MAP[raw_book]} {verse_part}"
+                print(f"Detected verse reference: {canonical_ref}")
+
+                ref_filter = wvc.query.Filter.by_property("verse_ref").equal(canonical_ref)
+
+                print(f"Executing Direct Lookup for {canonical_ref}")
+                response = await self.chunks.query.fetch_objects(
+                    filters=ref_filter,
+                    limit=limit,
+                    return_properties=["content", "verse_ref", "page_number", "volume", "scan_json", "footnotes", "sentence_data", "lemma"],
+                    return_references=[wvc.query.QueryReference(link_on="mentions_entity")]
+                )
+
+                # Safety net: if exact verse-ref lookup found nothing (often because
+                # the user gave a chapter-only ref like "Leviticus 16" but chunks are
+                # stored per-verse as "LEVITICUS 16:9"), fall through to hybrid so the
+                # user still gets relevant content instead of an empty response.
+                if not response.objects:
+                    print(f"Direct lookup empty for {canonical_ref}; falling back to hybrid.")
+                    response = await _do_hybrid()
+                    used_hybrid_fallback = True
+            else:
+                response = await _do_hybrid()
+        else:
+            response = await _do_hybrid()
+
         t_weaviate_end = time.perf_counter()
         print(f"[TIMING] Weaviate query: {t_weaviate_end-t_weaviate_start:.3f}s")
-        
-        if ref_match and 'canonical_ref' in locals():
-            # If we successfully identified a canonical reference (e.g. MATTHEW 7:27),
-            # we should strictly police the results to ensure we don't return "27:7" for "7:27".
+
+        # Post-filter target: only enforce strict verse-ref equality when we
+        # actually ran the direct-lookup path (not when we fell back to hybrid,
+        # since hybrid returns related per-verse chunks like "LEVITICUS 16:9"
+        # that we WANT to keep for a chapter-only query like "Leviticus 16").
+        if ref_match and 'canonical_ref' in locals() and not used_hybrid_fallback:
             target_ref = canonical_ref
-        elif ref_match:
-             # If we matched regex but failed map, we might rely on the raw string, 
-             # but "mat 7:27" != "MATTHEW 7:27", so strict equality fails.
-             # In fallback mode, we should probably disable strict post-filtering or handle it better.
-             target_ref = None # Disable strict filter if we couldn't map it canonical
         else:
-             target_ref = None
+            target_ref = None
 
         results = []
         for obj in response.objects:
