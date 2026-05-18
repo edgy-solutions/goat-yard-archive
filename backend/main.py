@@ -281,7 +281,8 @@ async def search(request: Request, req: SearchRequest):
         query=search_text,
         entities=mapped_entities,
         limit=12,
-        volume_filter=req.volume_limit
+        volume_filter=req.volume_limit,
+        original_query=req.query,
     )
     t6 = time.perf_counter()
     print(f"[TIMING] search_gill (embed+weaviate): {t6-t5:.3f}s")

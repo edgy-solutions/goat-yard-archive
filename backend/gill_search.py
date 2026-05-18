@@ -130,24 +130,43 @@ class GillSearchEngine:
         
         return verified_entities
 
-    async def search_gill(self, query: str, entities: List[str] = None, limit: int = 5, volume_filter: int = None) -> List[Dict[str, Any]]:
+    async def search_gill(
+        self,
+        query: str,
+        entities: List[str] = None,
+        limit: int = 5,
+        volume_filter: int = None,
+        original_query: str = None,
+    ) -> List[Dict[str, Any]]:
         """
         Perform Hybrid Search + Graph Boost.
+
+        `query` is the BAML-expanded search text (used for the embedding and as
+        the basis of the BM25 string). `original_query` is the user's literal
+        words; when provided it is prepended to the BM25 side as a floor so that
+        rare keywords (e.g. "scapegoat", "Logos") survive even if BAML's synonym
+        expansion replaced them. `original_query` is intentionally NOT added to
+        the embedding input — dense vectors handle paraphrase well and we don't
+        want to dilute the BAML expansion's semantic signal.
         """
         print(f"Searching for: {query}")
-        
+
         # 1. Entity Extraction (Fallback if not provided)
         detected_entities = entities if entities is not None else await self.extract_potential_entities(query)
         print(f"Detected entities: {detected_entities}")
-        
+
         # 2. Build the Enhanced Query for BM25 Boosting (Step 3A).
-        # Entity names are appended ONLY to the BM25/keyword side of the hybrid —
-        # they are NOT included in the embedding input, because repeating entity
-        # tokens dilutes the dense vector's semantic signal.
-        enhanced_query = query
+        # Original user query + BAML expansion + entity names — all only on the
+        # keyword/BM25 side of the hybrid. The embedding sees only the clean
+        # BAML expansion below.
+        bm25_parts = []
+        if original_query and original_query.strip() and original_query.strip() != query.strip():
+            bm25_parts.append(original_query.strip())
+        bm25_parts.append(query)
         if detected_entities:
-            entity_string = " ".join(detected_entities)
-            enhanced_query = f"{query} {entity_string}"
+            bm25_parts.append(" ".join(detected_entities))
+        enhanced_query = " ".join(bm25_parts)
+        if len(bm25_parts) > 1:
             print(f"Enhanced query for boost: {enhanced_query}")
 
         # Embedding uses the clean (BAML-expanded) query, not the entity-padded one.
