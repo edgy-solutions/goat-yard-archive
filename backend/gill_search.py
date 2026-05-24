@@ -141,13 +141,12 @@ class GillSearchEngine:
         """
         Perform Hybrid Search + Graph Boost.
 
-        `query` is the BAML-expanded search text (used for the embedding and as
-        the basis of the BM25 string). `original_query` is the user's literal
-        words; when provided it is prepended to the BM25 side as a floor so that
-        rare keywords (e.g. "scapegoat", "Logos") survive even if BAML's synonym
-        expansion replaced them. `original_query` is intentionally NOT added to
-        the embedding input — dense vectors handle paraphrase well and we don't
-        want to dilute the BAML expansion's semantic signal.
+        `query` is the BAML-expanded search text. `original_query` is the user's
+        literal words. Both contribute to BOTH the BM25 side and the dense vector
+        side of the hybrid so that rare keywords (e.g. "scapegoat", "Logos") survive
+        even when BAML's synonym expansion replaced them with broader paraphrases.
+        Entity names are added ONLY to the BM25 side — repeating entity tokens in
+        the embedding input dilutes the dense vector's semantic signal.
         """
         print(f"Searching for: {query}")
 
@@ -155,13 +154,18 @@ class GillSearchEngine:
         detected_entities = entities if entities is not None else await self.extract_potential_entities(query)
         print(f"Detected entities: {detected_entities}")
 
-        # 2. Build the Enhanced Query for BM25 Boosting (Step 3A).
-        # Original user query + BAML expansion + entity names — all only on the
-        # keyword/BM25 side of the hybrid. The embedding sees only the clean
-        # BAML expansion below.
+        # 2. Build search inputs.
+        # BM25 string: original_query + BAML expansion + entity names. Entity names
+        # belong here because they boost via the `entities^3` query property.
+        # Embedding input: original_query + BAML expansion (NO entity names). The
+        # user's literal words give the dense vector a rare-keyword anchor; BAML's
+        # expansion gives it paraphrase coverage.
+        original_clean = original_query.strip() if original_query else ""
+        include_original = bool(original_clean) and original_clean != query.strip()
+
         bm25_parts = []
-        if original_query and original_query.strip() and original_query.strip() != query.strip():
-            bm25_parts.append(original_query.strip())
+        if include_original:
+            bm25_parts.append(original_clean)
         bm25_parts.append(query)
         if detected_entities:
             bm25_parts.append(" ".join(detected_entities))
@@ -169,8 +173,12 @@ class GillSearchEngine:
         if len(bm25_parts) > 1:
             print(f"Enhanced query for boost: {enhanced_query}")
 
-        # Embedding uses the clean (BAML-expanded) query, not the entity-padded one.
-        query_vector = await self._get_embedding(query)
+        embed_parts = []
+        if include_original:
+            embed_parts.append(original_clean)
+        embed_parts.append(query)
+        embedding_input = " ".join(embed_parts)
+        query_vector = await self._get_embedding(embedding_input)
 
         weaviate_filters = None
         if volume_filter:
