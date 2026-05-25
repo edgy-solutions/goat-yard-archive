@@ -12,6 +12,7 @@ batch_logs/
 .env
 *.log
 *.out
+.mcp.json
 frontend/node_modules/
 frontend/public/scans/
 frontend/dist/
