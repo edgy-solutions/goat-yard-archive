@@ -1,0 +1,95 @@
+name: Reference Eval
+
+# Runs the answer-quality eval against a configurable endpoint and compares
+# the result to the committed baseline. See ADR-0004 and evals/README.md.
+#
+# The home-hosted production system isn't reachable from GitHub-hosted
+# runners by default. So this workflow uses workflow_dispatch (manual
+# trigger) and lets the operator pass in the endpoint. Once the system has
+# a publicly-reachable staging endpoint (or a tunnel set up), this can be
+# converted to `pull_request` to gate merges.
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: '/api/search endpoint to evaluate'
+        required: true
+        default: 'https://goatyardarchive.org/api/search'
+      baseline:
+        description: 'Baseline file to compare against (in evals/baselines/, or "none")'
+        required: false
+        default: 'latest.json'
+      regression_threshold:
+        description: 'Pass-rate drop (in percentage points) that triggers a hard fail'
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install eval dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx python-dotenv
+
+      - name: Resolve baseline path
+        id: baseline
+        run: |
+          if [ "${{ github.event.inputs.baseline }}" = "none" ]; then
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "Skipping baseline comparison (input was 'none')."
+          else
+            BASELINE="evals/baselines/${{ github.event.inputs.baseline }}"
+            if [ -f "$BASELINE" ]; then
+              echo "path=$BASELINE" >> "$GITHUB_OUTPUT"
+              echo "Will compare against $BASELINE"
+            else
+              echo "::warning::Baseline $BASELINE not found; proceeding without comparison."
+              echo "path=" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Run eval
+        env:
+          EVAL_ENDPOINT: ${{ github.event.inputs.endpoint }}
+        run: |
+          BASELINE_FLAG=""
+          if [ -n "${{ steps.baseline.outputs.path }}" ]; then
+            BASELINE_FLAG="--baseline ${{ steps.baseline.outputs.path }}"
+          fi
+          python evals/run_eval.py \
+            --output-dir evals/output/ci-${{ github.run_id }} \
+            --regression-threshold ${{ github.event.inputs.regression_threshold }} \
+            $BASELINE_FLAG
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: evals/output/ci-${{ github.run_id }}/
+          retention-days: 30
+
+      - name: Post summary to GitHub job summary
+        if: always()
+        run: |
+          REPORT="evals/output/ci-${{ github.run_id }}/report.md"
+          if [ -f "$REPORT" ]; then
+            cat "$REPORT" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No report generated." >> $GITHUB_STEP_SUMMARY
+          fi

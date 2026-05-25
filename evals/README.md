@@ -94,6 +94,74 @@ Reference baseline from 2026-05-24 (recorded in
 See the script's `--help` and [ADR-0004](../docs/adr/0004-reference-eval-set-and-ci-gates.md).
 Questions live in [`gill_reference_set.jsonl`](gill_reference_set.jsonl).
 
+### Run
+
+```sh
+# Default: against the test cluster
+python evals/run_eval.py
+
+# Custom endpoint (production, local, etc.)
+python evals/run_eval.py --endpoint https://goatyardarchive.org/api/search
+
+# Compare against a baseline (for regression detection)
+python evals/run_eval.py --baseline evals/baselines/latest.json
+
+# Subset of questions for fast iteration
+python evals/run_eval.py --ids scapegoat_001 logos_001
+```
+
+### Reference set conventions
+
+Each entry in `gill_reference_set.jsonl` has these fields:
+
+- `id` — stable identifier (e.g. `scapegoat_001`).
+- `question` — what the user types.
+- `expected_behavior` — `"answer"` or `"refuse"`.
+- `must_cite` — Sentence IDs at least 50% of which must appear in the answer.
+- `should_cite` — bonus precision targets (any subset is fine).
+- `must_not_cite` — distractors; any presence is a hard fail.
+- `reference_summary` — what a correct answer would say (for human review).
+- `expert_notes` — context, calibration notes, known edge cases.
+- `category` — bucket for the by-category report (`doctrine`, `typology`,
+  `refusal_data_absent`, etc.).
+- `difficulty` — `easy` / `medium` / `hard`.
+- `_provenance` (optional) — `developer_seed` (synthetic) or
+  `real_user_query_2026` (pulled from production traces).
+- `_needs_curator_review` (optional) — true when `must_cite` is empty and
+  a Reformed expert should add ground truth.
+- `_corpus_dependency` (optional) — names a Bible book/range that must be
+  ingested before `expected_behavior` can flip from `"refuse"` to `"answer"`.
+  Used as a forward-marker for future corpus expansion.
+- `_flip_when` (optional) — plain-English condition that should trigger a
+  re-baseline of this question (paired with `_corpus_dependency`).
+
+### Available books vs eval coverage
+
+The eval set deliberately includes questions whose answers require books
+not yet in the corpus (Deuteronomy, Psalms, Hebrews, etc.). These are
+marked `expected_behavior: "refuse"` with a `_corpus_dependency` note.
+They serve as canaries: when the relevant book is ingested, flipping
+`expected_behavior` to `"answer"` re-activates the test.
+
+### Pass/fail rules
+
+- `must_cite` recall ≥ 50% (and at least one if any are required).
+- `must_not_cite` violations → hard fail.
+- For `expected_behavior: "refuse"`: the system must actually refuse
+  (heuristic match against the "I regret..." marker).
+
+### Baselines
+
+Frozen summaries in [`baselines/`](baselines/) are the regression yardstick.
+See [`baselines/README.md`](baselines/README.md) for update procedure.
+
+### CI integration
+
+[`.github/workflows/eval.yml`](../.github/workflows/eval.yml) runs this on
+`workflow_dispatch` against an operator-provided endpoint. The home-hosted
+production endpoint isn't reachable from GitHub-hosted runners by default,
+so the workflow is manual until a public staging endpoint is set up.
+
 ---
 
 ## Output directory

@@ -1,0 +1,77 @@
+{
+  "endpoint": "http://test.chart-example.local/api/search",
+  "timestamp": "2026-05-25T03:06:11Z",
+  "total": 22,
+  "passed": 20,
+  "pass_pct": 90.9090909090909,
+  "refusal_correct": 22,
+  "must_not_cite_violations": 0,
+  "errors": 0,
+  "by_category": {
+    "typology_partial_match": {
+      "pass": 2,
+      "total": 3,
+      "pct": 66.66666666666667
+    },
+    "definition": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    },
+    "person": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    },
+    "enumeration": {
+      "pass": 0,
+      "total": 1,
+      "pct": 0.0
+    },
+    "refusal_data_absent": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    },
+    "person_disambiguation": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    },
+    "doctrine": {
+      "pass": 2,
+      "total": 2,
+      "pct": 100.0
+    },
+    "doctrine_open": {
+      "pass": 4,
+      "total": 4,
+      "pct": 100.0
+    },
+    "doctrine_gill_specific": {
+      "pass": 2,
+      "total": 2,
+      "pct": 100.0
+    },
+    "typology": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    },
+    "exegesis_specific": {
+      "pass": 3,
+      "total": 3,
+      "pct": 100.0
+    },
+    "biblical_fact": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    },
+    "refusal_anachronism": {
+      "pass": 1,
+      "total": 1,
+      "pct": 100.0
+    }
+  }
+}
