@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import ScanGallery from './components/ScanGallery';
-import { MOCK_CITATION } from './mock_data';
 import Header from './components/Header';
 import { useAuth } from '@clerk/clerk-react';
 import { usePostHog } from 'posthog-js/react';
@@ -132,14 +131,18 @@ function App() {
         return images[Math.floor(Math.random() * images.length)];
     });
 
-    // Default to MOCK if backend down/empty
+    // Error state. `errorKind` lets the UI render different messaging for
+    // backend-down vs rate-limit vs bad-request vs generic.
     const [error, setError] = useState<string | null>(null);
+    const [errorKind, setErrorKind] = useState<
+        null | 'rate_limit' | 'backend_unavailable' | 'bad_request' | 'other'
+    >(null);
 
     const handleSearch = async () => {
         if (!query) return;
         setLoading(true);
         setError(null);
-        setResponse(null);
+        setErrorKind(null);
         setResponse(null);
         setActiveEvidence(null);
         setFocusedSentenceId(null);
@@ -153,6 +156,12 @@ function App() {
             is_paid_user: false // TODO: Check actual status if available
         });
 
+        // Per-request timeout so users aren't stuck on a hung backend forever.
+        // 90s is generous (the backend itself caps LLM generation at 60s + the
+        // BAML+retrieval pipeline can add 10-20s on a cold cache).
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 90_000);
+
         try {
             const token = await getToken();
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -164,6 +173,7 @@ function App() {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ query }),
+                signal: controller.signal,
             });
 
             if (!res.ok) {
@@ -180,12 +190,22 @@ function App() {
                     if (errText) errorMsg += ` ${errText}`;
                 }
 
-                // Throw with specific flag if 429
+                // Classify based on status code so the UI can render the right
+                // tone (rate-limit explanation vs unavailable banner vs generic).
                 if (res.status === 429) {
-                    const err = new Error(errorMsg);
-                    (err as any).isRateLimit = true;
-                    throw err;
+                    setErrorKind('rate_limit');
+                    throw new Error(errorMsg);
                 }
+                if (res.status >= 500) {
+                    // 5xx from origin OR Cloudflare's 502 when home is unreachable.
+                    setErrorKind('backend_unavailable');
+                    throw new Error(errorMsg);
+                }
+                if (res.status >= 400) {
+                    setErrorKind('bad_request');
+                    throw new Error(errorMsg);
+                }
+                setErrorKind('other');
                 throw new Error(errorMsg);
             }
 
@@ -202,39 +222,26 @@ function App() {
             }
         } catch (err) {
             console.error("Search failed:", err);
-            const message = err instanceof Error ? err.message : "Unknown error";
-            setError(message);
 
-            // Skip mock fallback for Rate Limits
-            if ((err as any).isRateLimit) {
-                setLoading(false);
-                return;
+            // Disambiguate transport-layer failures (origin unreachable, DNS
+            // failure, TLS error, timeout) from response-layer failures
+            // (errors with a parsed status code, handled above).
+            if (err instanceof DOMException && err.name === 'AbortError') {
+                setErrorKind('backend_unavailable');
+                setError("The request timed out. The commentary index may be temporarily unavailable.");
+            } else if (err instanceof TypeError) {
+                // `fetch` throws TypeError for network errors (origin unreachable,
+                // CORS, DNS failure). Cloudflare 502/503 are returned via the
+                // status-code path above; this branch is for true network errors.
+                setErrorKind('backend_unavailable');
+                setError("Unable to reach the commentary index.");
+            } else {
+                // errorKind was already set above for status-code paths.
+                const message = err instanceof Error ? err.message : "Unknown error";
+                setError(message);
             }
-
-            console.log("Falling back to mock data...");
-            // MOCK FALLBACK for other errors
-            setTimeout(() => {
-                const mockEv: EvidenceItem = {
-                    chunk_id: "mock1",
-                    content: MOCK_CITATION.text || "Mock content not found",
-                    citation: "[Vol 1, p. 287]",
-                    vol: 1,
-                    page: 287,
-                    scan: MOCK_CITATION.scan_json as any || [],
-                    score: 1.0,
-                    footnotes: ["Mock footnote 1"],
-                    entities: ["Mock Entity"]
-                };
-
-                setResponse({
-                    answer: "Backend unavailable. (Mock Answer) Gill discusses this in his Exposition of the Old and New Testaments...",
-                    citations: ["[Vol 1, p. 123]"],
-                    evidence: [mockEv],
-                    verified: false
-                });
-                setActiveEvidence(mockEv);
-            }, 500);
         } finally {
+            window.clearTimeout(timeoutId);
             setLoading(false);
         }
     };
@@ -445,15 +452,44 @@ function App() {
                     )}
 
                     {/* Error Banner */}
-                    {error && (
+                    {error && errorKind === 'rate_limit' && (
+                        <div className="bg-amber-50/50 border-l-4 border-amber-700/50 text-amber-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm">
+                            <span className="italic font-serif text-[#5D4037]">{error}</span>
+                        </div>
+                    )}
+
+                    {error && errorKind === 'backend_unavailable' && (
+                        <div className="bg-stone-50/70 border-l-4 border-stone-600/60 text-stone-800 p-5 rounded-r shadow-sm backdrop-blur-sm">
+                            <h3 className="font-serif text-lg text-[#3E2723] mb-2">The commentary index is temporarily unavailable.</h3>
+                            <p className="text-sm leading-relaxed text-stone-700">
+                                We're briefly unable to reach the search index. This is usually a short interruption; the site itself is otherwise working normally. Please try your inquiry again in a few minutes.
+                            </p>
+                            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-ui">
+                                <button
+                                    onClick={() => { setQuery(lastSearchedQuery); handleSearch(); }}
+                                    className="px-3 py-1.5 bg-stone-800 text-stone-50 rounded hover:bg-stone-700 transition-colors"
+                                >
+                                    Retry
+                                </button>
+                                <a
+                                    href="https://github.com/cnogradi/goat-yard-archive"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="underline text-stone-600 hover:text-stone-800"
+                                >
+                                    Project on GitHub
+                                </a>
+                            </div>
+                            <details className="mt-3 text-xs text-stone-500">
+                                <summary className="cursor-pointer hover:text-stone-700">Technical detail</summary>
+                                <code className="block mt-1 font-mono text-[10px] break-all">{error}</code>
+                            </details>
+                        </div>
+                    )}
+
+                    {error && (errorKind === 'bad_request' || errorKind === 'other') && (
                         <div className="bg-red-50/50 border-l-4 border-red-800/50 text-red-900 p-4 rounded-r shadow-sm text-sm backdrop-blur-sm">
-                            {(error.includes("My dear friend") || error.includes("Scriptures"))
-                                ? <span className="italic font-serif text-[#5D4037]">{error}</span>
-                                : <><strong>Connection Error:</strong> {error}</>
-                            }
-                            {!error.includes("My dear friend") && (
-                                <div className="text-xs mt-1 text-red-700 font-ui uppercase tracking-wide">Offline Mode: Using Mock Data</div>
-                            )}
+                            <strong>Error:</strong> {error}
                         </div>
                     )}
 
