@@ -34,10 +34,22 @@ import weaviate
 import weaviate.classes as wvc
 from dotenv import load_dotenv
 
+# Ensure non-ASCII entity names (Hebrew, Greek) don't crash the script on Windows.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 
 def compute_search_key(name: str) -> str:
-    """Must match pipeline.scripts.ingest.IngestPipeline.compute_search_key."""
-    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    """
+    Must match pipeline.scripts.ingest.IngestPipeline.compute_search_key.
+
+    Unicode-aware: keeps Hebrew/Greek/Arabic letters and digits; strips
+    spaces, punctuation, hyphens, and combining marks (niqqud, accents).
+    """
+    return "".join(c for c in (name or "").lower() if c.isalnum())
 
 
 def compute_display_normalized_name(name: str) -> str:
@@ -228,6 +240,20 @@ def auto_merge_groups(
 
     for (sk, era), records in groups.items():
         if len(records) < 2:
+            continue
+        if not sk:
+            # Empty search_key — entities with no canonicalizable characters.
+            # NEVER auto-merge these; they're a collision class by accident, not
+            # by identity. Flag for review so they're visible.
+            flagged_for_review.append({
+                "search_key": sk,
+                "biblical_era": era,
+                "reason": "empty_search_key",
+                "entities": [
+                    {"uuid": r["uuid"], "name": r["name"], "role": r["role"], "category": r["category"]}
+                    for r in records
+                ],
+            })
             continue
         if not roles_compatible(records):
             flagged_for_review.append({

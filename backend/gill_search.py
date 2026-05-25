@@ -389,9 +389,9 @@ class GillSearchEngine:
             t_lower = tok.lower()
             if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
                 continue
-            # Canonicalize: lowercase + alphanumeric-only, matching the search_key
-            # computation in ingest.py.compute_search_key.
-            t_key = re.sub(r"[^a-z0-9]", "", t_lower)
+            # Canonicalize: lowercase + alphanumeric-only (Unicode-aware), matching
+            # the search_key computation in ingest.py.compute_search_key.
+            t_key = "".join(c for c in t_lower if c.isalnum())
             if not t_key:
                 continue
             candidates.add(t_key)

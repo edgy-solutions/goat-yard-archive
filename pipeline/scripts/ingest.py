@@ -407,19 +407,27 @@ class GillIngestionEngine:
     @staticmethod
     def compute_search_key(name: str) -> str:
         """
-        Canonical lookup key: lowercased + alphanumeric-only form of an entity name.
+        Canonical lookup key: lowercased, with everything that isn't a Unicode
+        letter or digit stripped. Spaces, hyphens, punctuation, and combining
+        marks (e.g. Hebrew niqqud, Greek accents) are removed.
 
         Examples:
-          'scape-goat'   -> 'scapegoat'
-          'Scape-goat'   -> 'scapegoat'
-          'Day of Atonement' -> 'dayofatonement'
-          'Aben Ezra'    -> 'abenezra'
+          'scape-goat'           -> 'scapegoat'
+          'Scape-goat'           -> 'scapegoat'
+          'Day of Atonement'     -> 'dayofatonement'
+          'Aben Ezra'            -> 'abenezra'
+          'דְּבָרֵי סוֹפְרִים'      -> 'דבריסופרים'   (niqqud stripped as combining marks)
+          'λόγος'                -> 'λόγος'        (Greek letters kept)
+
+        Using str.isalnum() rather than a regex like [a-z0-9] so that non-Latin
+        scripts (Hebrew, Greek, Arabic) produce meaningful keys instead of empty
+        strings. Empty-string keys are a fragmentation hazard — see ADR-0005.
 
         This is the value used by get_relevant_entities for substring matching
         AND by get_or_create_entity for deduplication. Code computes it; the LLM
-        never produces it. See ADR-0005.
+        never produces it.
         """
-        return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+        return "".join(c for c in (name or "").lower() if c.isalnum())
 
     @staticmethod
     def compute_display_normalized_name(name: str) -> str:
