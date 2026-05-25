@@ -1,0 +1,2 @@
+# Per-run output artifacts. Re-runnable from source; not worth versioning.
+output/
