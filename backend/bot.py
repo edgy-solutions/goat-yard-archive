@@ -1,7 +1,7 @@
 
 import dspy
 import re
-from typing import List
+from typing import List, Dict
 
 # Define Signature
 # Load KJV Data (Global Cache)
@@ -14,6 +14,193 @@ except ImportError:
     # Fallback/Safeguard during testing or if circle import issues
     KJV_DATA = {}
     print("Warning: Could not import BIBLE_MAP from bible_api")
+
+
+# ---------------------------------------------------------------------------
+# Verbatim quote verification (see ADR-0006).
+#
+# Verbatim mode (ADR-0006 companion to the GillSignature contract) promises
+# the user that anything inside double-quotes in the answer appears verbatim
+# in Gill's source. These helpers check that promise post-generation. The
+# model has a tendency — even when instructed otherwise — to silently
+# modernize spelling, drop archaic markers, or stitch fragments together;
+# without verification, those slips produce fake-Gill in disguise.
+# ---------------------------------------------------------------------------
+
+# Matches `"quoted text" [SENTENCE_ID]` — Sentence ID immediately after the
+# closing quote mark per the GillSignature output contract. The Sentence ID
+# pattern (BOOK_CH_VS_Snn) allows alphanumerics and underscores in the BOOK.
+QUOTE_WITH_CITE_RE = re.compile(
+    r'["“”]([^"“”]+)["“”]\s*\[([A-Z0-9_]+_S\d+)\]'
+)
+
+# Tokens we strip during normalization (whitespace differences, markdown
+# italics, footnote refs, curly quotes, leading/trailing punctuation).
+_ITALICS_RE = re.compile(r"\*([^*]+)\*")
+_FOOTNOTE_REF_RE = re.compile(r"\[\^[A-Za-z0-9_]+\]")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_for_quote_match(text: str) -> str:
+    """Make the quoted text and the source text comparable.
+
+    Normalizations applied:
+    - Lowercase (Gill's capitalization is meaningful for display but not for
+      verbatim-detection).
+    - Strip `*italics*` and `_italics_` markdown markers.
+    - Strip `[^1]` footnote refs (model often drops them when quoting).
+    - Normalize curly quotes -> straight quotes.
+    - Collapse all whitespace runs to a single space.
+    - Strip leading/trailing whitespace and most punctuation (mid-sentence
+      quotes typically don't carry their terminal punctuation).
+    """
+    if not text:
+        return ""
+    s = text
+    s = _ITALICS_RE.sub(r"\1", s)
+    s = s.replace("_", " ")
+    s = _FOOTNOTE_REF_RE.sub("", s)
+    s = s.replace("“", '"').replace("”", '"')
+    s = s.replace("‘", "'").replace("’", "'")
+    s = s.lower()
+    s = _WHITESPACE_RE.sub(" ", s).strip()
+    s = s.strip("\"'.,;:!? ")
+    return s
+
+
+def _build_chunks_by_sid(context_chunks: List[dict]) -> Dict[str, str]:
+    """Build {sentence_id_in_brackets: source_text} from the retrieved chunks.
+
+    The "source text" for each Sentence ID is the FULL CHUNK content the SID
+    belongs to — concatenation of all sentence_data texts plus the chunk's KJV
+    scripture (if available). This is intentionally broader than just that
+    one sentence's text because:
+
+    - The model legitimately stitches quotes across consecutive sentences of
+      the same chunk (sentence-level granularity is finer than typical
+      readable-quote granularity).
+    - The model legitimately quotes the KJV scripture that Gill himself
+      cites in the same chunk.
+
+    Strict per-sentence verification produced too many false positives; per-
+    chunk verification keeps the architectural promise (quoted text appears
+    in Gill's verbatim source for the cited verse) while avoiding the
+    cross-sentence-boundary false positives.
+    """
+    out: Dict[str, str] = {}
+    for chunk in context_chunks:
+        # Build the chunk's full searchable text once.
+        parts = []
+        # Scripture (Gill quotes the verse he's commenting on at the top).
+        verse_ref = chunk.get("verse_ref", "")
+        try:
+            scripture = KJV_DATA.get(verse_ref) if verse_ref else None
+            if scripture:
+                parts.append(scripture)
+        except Exception:
+            pass
+        # All sentence-granularity texts in the chunk.
+        sentence_ids: List[str] = []
+        for sent in (chunk.get("sentence_data") or []):
+            sid = sent.get("sentence_id")
+            text = sent.get("text") or ""
+            if sid:
+                sentence_ids.append(f"[{sid}]")
+            if text:
+                parts.append(text)
+        # Fallback to the chunk's combined `content` if sentence_data is missing.
+        if not sentence_ids and chunk.get("content"):
+            parts.append(chunk["content"])
+        combined = " ".join(parts)
+        for sid_bracketed in sentence_ids:
+            out[sid_bracketed] = combined
+    return out
+
+
+def _verify_quotes(answer: str, chunks_by_sid: Dict[str, str]) -> List[dict]:
+    """Return a list of failed-quote dicts. Empty list = all quotes verified.
+
+    Each failure dict has: quote, sentence_id, reason. Reasons:
+    - 'cited_sid_not_in_context': the Sentence ID after the quote isn't in any
+      retrieved chunk (the existing citation validator already catches this,
+      but harmless to repeat here for defense-in-depth).
+    - 'quote_not_verbatim': the normalized quoted text isn't a substring of
+      the normalized source. Strong signal the model paraphrased while
+      putting quote marks around the paraphrase.
+
+    Handles model conventions:
+    - Ellipsis (`...` or `…`) inside a quote: split and verify each part
+      independently against the source. The model uses ellipsis to elide
+      middle phrasing while attributing the rest to Gill.
+    - Bracketed insertions like `[work]` or parenthetical clarifications:
+      try a fallback match with the bracketed/parenthesized content stripped.
+    """
+    failures: List[dict] = []
+    for match in QUOTE_WITH_CITE_RE.finditer(answer or ""):
+        quote_raw = match.group(1)
+        sid = f"[{match.group(2)}]"
+        source = chunks_by_sid.get(sid)
+        if source is None:
+            failures.append({
+                "quote": quote_raw[:120],
+                "sentence_id": sid,
+                "reason": "cited_sid_not_in_context",
+            })
+            continue
+        ns = _normalize_for_quote_match(source)
+        if _quote_in_source(quote_raw, ns):
+            continue
+        failures.append({
+            "quote": quote_raw[:120],
+            "sentence_id": sid,
+            "reason": "quote_not_verbatim",
+        })
+    return failures
+
+
+_ELLIPSIS_RE = re.compile(r"\.{3,}|…")
+_BRACKETED_RE = re.compile(r"\[[^\]]*\]")
+_PARENTHESIZED_RE = re.compile(r"\([^)]*\)")
+
+
+def _quote_in_source(quote_raw: str, normalized_source: str) -> bool:
+    """Check if `quote_raw` is verbatim in `normalized_source` under several
+    matching strategies: direct, ellipsis-split, and bracket-stripped.
+    """
+    def _check(q: str) -> bool:
+        nq = _normalize_for_quote_match(q)
+        return bool(nq) and nq in normalized_source
+
+    # Strategy 1: direct match (handles the simple, clean case).
+    if _check(quote_raw):
+        return True
+
+    # Strategy 2: ellipsis-split. The model uses "...text continues..." to
+    # elide; require every segment to appear, in order, in the source.
+    parts = [p for p in _ELLIPSIS_RE.split(quote_raw) if p.strip()]
+    if len(parts) > 1:
+        cursor = 0
+        all_in_order = True
+        for part in parts:
+            nq = _normalize_for_quote_match(part)
+            if not nq:
+                continue
+            idx = normalized_source.find(nq, cursor)
+            if idx < 0:
+                all_in_order = False
+                break
+            cursor = idx + len(nq)
+        if all_in_order:
+            return True
+
+    # Strategy 3: strip bracketed/parenthesized insertions (e.g. "[work]",
+    # "(Christ and His righteousness)") and try again. Model uses these to
+    # clarify referents but they aren't in Gill's text.
+    stripped = _PARENTHESIZED_RE.sub("", _BRACKETED_RE.sub("", quote_raw)).strip()
+    if stripped and stripped != quote_raw and _check(stripped):
+        return True
+
+    return False
 
 class GillSignature(dspy.Signature):
     """You are a present-day research assistant helping a user explore Dr. John Gill's
@@ -267,7 +454,31 @@ class GroundedGillBot(dspy.Module):
                  answer=f"Verification Failed: Cited sources not found in context. Missing: {missing_cits}",
                  citations=[]
              )
-            
+
+        # ---------------------------------------------------------
+        # Verbatim quote verification (ADR-0006).
+        # ---------------------------------------------------------
+        # The GillSignature contract promises the user that every double-quoted
+        # span in the answer appears verbatim in Gill's source. Verify by
+        # substring-matching each "quote" [SID] pair against the source text
+        # for that Sentence ID (after light normalization for italics, footnote
+        # refs, curly quotes, and whitespace).
+        chunks_by_sid = _build_chunks_by_sid(context_chunks)
+        quote_failures = _verify_quotes(pred.answer, chunks_by_sid)
+        if quote_failures:
+            print(f"DEBUG: Quote verification failures: {quote_failures}")
+            first = quote_failures[0]
+            return dspy.Prediction(
+                answer=(
+                    "Verification Failed: a quoted passage did not match Gill's text verbatim. "
+                    f"Sentence ID {first['sentence_id']} — quote: \"{first['quote']}...\" "
+                    f"(reason: {first['reason']}). "
+                    f"Total unverified quotes: {len(quote_failures)}. "
+                    "Please retry the query."
+                ),
+                citations=[]
+            )
+
         # If we get here, pass
         return dspy.Prediction(answer=pred.answer, citations=citations_list)
 
