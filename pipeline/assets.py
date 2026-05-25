@@ -498,18 +498,51 @@ def verify_markdown_headers_validation(context: AssetExecutionContext):
 
 
 @asset(deps=[AssetDep("ingest", partition_mapping=AllPartitionMapping())])
-def scan_duplicate_entities_global(context: AssetExecutionContext):
+def entity_normalization_global(context: AssetExecutionContext):
     """
     Scope: Global
-    deduplicate_entities.py scan
-    Continuously hits Weaviate to warn the pipeline UI if fragmented entities (same name/era) start occurring inside the graph unexpectedly.
+    Backfill search_key + categories on existing entities, then auto-merge fragments.
+
+    Implements ADR-0005 Phase 3. Replaces the old scan_duplicate_entities_global
+    (which only WARNED about fragmentation); this asset actively fixes it
+    according to the conservative auto-merge rules in
+    backfill_entity_search_keys.py.
+
+    Idempotent: re-runs only touch entities that need backfilling or auto-merging.
+    Surfaces flagged-for-review groups (incompatible roles) as Dagster metadata
+    so they're visible without grepping logs.
     """
     cmd = [
-        "python", os.path.join(SCRIPTS_DIR, "deduplicate_entities.py"),
-        "scan"
+        "python", os.path.join(SCRIPTS_DIR, "backfill_entity_search_keys.py"),
     ]
-    
-    run_cli_script(context, cmd)
+    output = run_cli_script(context, cmd)
+
+    import re
+    metadata = {"Status": "Success"}
+
+    m = re.search(r"populated search_key on\s*:\s*(\d+)", output)
+    if m:
+        metadata["search_key Populated"] = int(m.group(1))
+    m = re.search(r"seeded categories on\s*:\s*(\d+)", output)
+    if m:
+        metadata["categories Seeded"] = int(m.group(1))
+    m = re.search(r"groups auto-merged\s*:\s*(\d+)", output)
+    if m:
+        metadata["Groups Auto-Merged"] = int(m.group(1))
+    m = re.search(r"fragment entities removed\s*:\s*(\d+)", output)
+    if m:
+        metadata["Fragments Removed"] = int(m.group(1))
+    m = re.search(r"chunk references repointed\s*:\s*(\d+)", output)
+    if m:
+        metadata["Chunk Refs Repointed"] = int(m.group(1))
+    m = re.search(r"groups flagged for review\s*:\s*(\d+)", output)
+    if m:
+        flagged = int(m.group(1))
+        metadata["Flagged For Review"] = flagged
+        if flagged > 0:
+            metadata["Status"] = f"Success - {flagged} group(s) need manual review"
+
+    return MaterializeResult(metadata=metadata)
 
 
 @asset

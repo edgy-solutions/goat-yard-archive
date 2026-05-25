@@ -404,107 +404,156 @@ class GillIngestionEngine:
             return verse_ref.split(":")[1].lstrip("0")
         return ""
     
-    def get_or_create_entity(self, name: str, category: str, normalized_name: Optional[str] = None, description: Optional[str] = None, biblical_era: Optional[str] = None, role: Optional[str] = None) -> str:
-        """Get existing entity UUID or create new entity."""
-        
-        # Smart Disambiguation ID Logic (Always Disambiguate Strategy)
-        # 1. Start with Base ID
-        base_id = str(normalized_name).upper().replace(" ", "_") if normalized_name else str(name).upper().replace(" ", "_")
-        components = [base_id]
-        
-        # 2. Append Era if relevant (Skip "NotApplicable" concepts)
-        if biblical_era and biblical_era != "NotApplicable":
-             components.append(str(biblical_era).upper())
-             
-        # 3. Append Role if available
-        if role:
-             # Sanitize: Alphanumeric only, uppercase
-             safe_role = re.sub(r'[^a-zA-Z0-9]', '_', str(role).upper())
-             # Filter stopwords (OF, THE, A, AN) and empty strings
-             role_parts = [w for w in safe_role.split("_") if w and w not in ["OF", "THE", "A", "AN"]]
-             # Take up to 3 significant words to keep ID from getting massive
-             short_role = "_".join(role_parts[:3])
-             if short_role:
-                 components.append(short_role)
-        
-        dedup_id = "_".join(components)
-        
-        # Use this deduced ID as the cache key instead of (name, category)
-        cache_key = (dedup_id, category)
+    @staticmethod
+    def compute_search_key(name: str) -> str:
+        """
+        Canonical lookup key: lowercased + alphanumeric-only form of an entity name.
+
+        Examples:
+          'scape-goat'   -> 'scapegoat'
+          'Scape-goat'   -> 'scapegoat'
+          'Day of Atonement' -> 'dayofatonement'
+          'Aben Ezra'    -> 'abenezra'
+
+        This is the value used by get_relevant_entities for substring matching
+        AND by get_or_create_entity for deduplication. Code computes it; the LLM
+        never produces it. See ADR-0005.
+        """
+        return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+    @staticmethod
+    def compute_display_normalized_name(name: str) -> str:
+        """
+        Human-readable display form of an entity name. Distinct from search_key.
+
+        We DON'T try to be clever (e.g. 'Christ' -> 'Jesus Christ') because that
+        kind of canonicalization is what we just removed from BAML for being
+        unreliable. The display form is just a cleaned version of the raw name:
+        stripped, hyphens preserved, whitespace collapsed.
+        """
+        return re.sub(r"\s+", " ", (name or "").strip())
+
+    def get_or_create_entity(
+        self,
+        name: str,
+        category: str,
+        normalized_name: Optional[str] = None,  # kept for backwards-compat; ignored if provided
+        description: Optional[str] = None,
+        biblical_era: Optional[str] = None,
+        role: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Get-or-create an entity, deduplicating by (search_key, biblical_era).
+
+        Same biblical reality (regardless of casing, hyphenation, or category-
+        perception) collapses to one graph node. Categories accumulate on that
+        node rather than forking it. See ADR-0005 Phase 2.
+
+        Note: the `normalized_name` parameter is accepted for backwards
+        compatibility but is ignored; code computes both `search_key` and the
+        display `normalized_name` deterministically from `name`.
+        """
+        safe_name = str(name)
+        safe_category = str(category)
+        safe_desc = str(description) if description else None
+        safe_era = str(biblical_era) if biblical_era else "NotApplicable"
+        safe_role = str(role) if role else None
+        search_key = self.compute_search_key(safe_name)
+        display_normalized_name = self.compute_display_normalized_name(safe_name)
+
+        if not search_key:
+            logging.warning(f"Skipping entity with empty search_key: name={safe_name!r}")
+            return None
+
+        # Cache lookup key — same biblical reality is one entry regardless of category.
+        cache_key = (search_key, safe_era)
         if cache_key in self.entity_cache:
-            return self.entity_cache[cache_key]
-        
+            cached_uuid = self.entity_cache[cache_key]
+            # Even on cache hit, ensure this category is present on the entity.
+            self._ensure_category_on_entity(cached_uuid, safe_category)
+            return cached_uuid
+
+        # Deterministic UUID derived from (search_key, era). Removes the previous
+        # primitives' dependence on the LLM-supplied role and category.
+        import weaviate.util
+        entity_uuid = weaviate.util.generate_uuid5({
+            "search_key": search_key,
+            "biblical_era": safe_era,
+        })
+
+        # Probe Weaviate by UUID — fastest path when the entity already exists
+        # at this exact (search_key, era).
         try:
-            results = self.entities.query.fetch_objects(
-                filters=(
-                    wvc.query.Filter.by_property("name").equal(name) &
-                    wvc.query.Filter.by_property("category").equal(category)
-                ),
-                limit=1
-            )
-            
-            if results.objects:
-                uuid = str(results.objects[0].uuid)
-                self.entity_cache[cache_key] = uuid
-                return uuid
+            existing = self.entities.query.fetch_object_by_id(entity_uuid)
         except Exception as e:
-            logging.warning(f"Error searching for entity: {e}")
-        
+            logging.warning(f"Error probing entity by UUID: {e}")
+            existing = None
+
+        # Fallback probe: legacy entities (pre-Phase-1) may have been written
+        # with a different UUID scheme but happen to share the same (search_key, era).
+        # If the backfill has run and populated search_key on those legacy rows,
+        # we can find them. If not, the worst case is we briefly create a new
+        # entity and the backfill merges it later.
+        if not existing:
+            try:
+                results = self.entities.query.fetch_objects(
+                    filters=(
+                        wvc.query.Filter.by_property("search_key").equal(search_key) &
+                        wvc.query.Filter.by_property("biblical_era").equal(safe_era)
+                    ),
+                    limit=1,
+                )
+                if results.objects:
+                    legacy_uuid = str(results.objects[0].uuid)
+                    self.entity_cache[cache_key] = legacy_uuid
+                    self._ensure_category_on_entity(legacy_uuid, safe_category)
+                    return legacy_uuid
+            except Exception as e:
+                logging.warning(f"Error searching legacy entity: {e}")
+
+        if existing:
+            # Already at the canonical UUID — just make sure this category is present.
+            self.entity_cache[cache_key] = str(entity_uuid)
+            self._ensure_category_on_entity(str(entity_uuid), safe_category)
+            return str(entity_uuid)
+
+        # Create new
         try:
-            # Explicitly cast to string to avoid serialization issues
-            safe_name = str(name)
-            safe_category = str(category)
-            safe_norm = str(normalized_name) if normalized_name else None
-            safe_desc = str(description) if description else None
-            safe_era = str(biblical_era) if biblical_era else None
-            safe_role = str(role) if role else None
-            
-            # Deterministic UUID based on our smart unique ID
-            import weaviate.util
-            # We seed the UUID with the SMART deduplication ID we calculated
-            entity_uuid = weaviate.util.generate_uuid5({"dedup_id": dedup_id, "category": safe_category})
-
-            exists = self.entities.query.fetch_object_by_id(entity_uuid)
-            if exists:
-                uuid_str = str(entity_uuid)
-                self.entity_cache[cache_key] = uuid_str
-                # logging.info(f"🔄 Entity Exists (UUID Check): {safe_name} -> {uuid_str}")
-                return uuid_str
-
             vector_text = safe_name
             if safe_desc:
                 vector_text += f" - {safe_desc}"
-            
-            # Conditionally use Client-Side Vectorization
             use_client_vectorization = os.getenv("USE_CLIENT_SIDE_VECTORIZATION", "true").lower() == "true"
-            entity_vector = get_ollama_embedding(vector_text, url=self.ollama_url, model_name=self.ollama_model) if use_client_vectorization else None
+            entity_vector = (
+                get_ollama_embedding(vector_text, url=self.ollama_url, model_name=self.ollama_model)
+                if use_client_vectorization else None
+            )
 
-            # Prepare insert arguments
             insert_kwargs = {
                 "properties": {
                     "name": safe_name,
-                    "category": safe_category,
-                    "normalized_name": safe_norm,
+                    "search_key": search_key,
+                    "category": safe_category,           # kept for backwards-compat
+                    "categories": [safe_category],       # the new accumulating field
+                    "normalized_name": display_normalized_name,
                     "description": safe_desc,
                     "biblical_era": safe_era,
-                    "role": safe_role
+                    "role": safe_role,
                 },
-                "uuid": entity_uuid
+                "uuid": entity_uuid,
             }
             if entity_vector:
                 insert_kwargs["vector"] = entity_vector
 
             try:
                 self.entities.data.insert(**insert_kwargs)
-                logging.info(f"✨ Created Entity: {safe_name} ({safe_category}) -> {entity_uuid}")
+                logging.info(f"Created Entity: {safe_name} ({safe_category}) -> {entity_uuid}")
             except weaviate.exceptions.UnexpectedStatusCodeError as e:
                 if e.status_code == 422:
-                    # If 422 (already exists), update/replace it instead
                     self.entities.data.replace(**insert_kwargs)
-                    logging.info(f"🔄 Updated Entity: {safe_name} ({safe_category}) -> {entity_uuid}")
+                    logging.info(f"Replaced Entity: {safe_name} ({safe_category}) -> {entity_uuid}")
                 else:
                     raise
-            
+
             uuid_str = str(entity_uuid)
             self.entity_cache[cache_key] = uuid_str
             return uuid_str
@@ -513,6 +562,26 @@ class GillIngestionEngine:
             import traceback
             logging.error(traceback.format_exc())
             return None
+
+    def _ensure_category_on_entity(self, entity_uuid: str, category: str) -> None:
+        """If `category` is not already in the entity's `categories` array, append it."""
+        try:
+            obj = self.entities.query.fetch_object_by_id(entity_uuid)
+            if not obj:
+                return
+            existing = obj.properties.get("categories") or []
+            if not isinstance(existing, list):
+                existing = []
+            if category in existing:
+                return
+            new_categories = existing + [category]
+            self.entities.data.update(
+                uuid=entity_uuid,
+                properties={"categories": new_categories},
+            )
+            logging.debug(f"Appended category '{category}' to entity {entity_uuid} (now {new_categories})")
+        except Exception as e:
+            logging.warning(f"Failed to ensure category on entity {entity_uuid}: {e}")
 
     class EntityStub:
         def __init__(self, name, category, normalized_name=None, description=None, biblical_era=None, role=None):
@@ -537,20 +606,21 @@ class GillIngestionEngine:
         """Save extracted entities to local JSON cache file."""
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
+            # normalized_name is no longer in the BAML schema (see ADR-0005);
+            # we omit it from the cache too. Code computes search_key downstream.
             data = [
                 {
-                    "name": e.name, 
-                    "category": e.category, 
-                    "normalized_name": e.normalized_name,
+                    "name": e.name,
+                    "category": e.category,
                     "description": getattr(e, 'description', None),
                     "biblical_era": getattr(e, 'biblical_era', None),
                     "role": getattr(e, 'role', None)
-                } 
+                }
                 for e in entities
             ]
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-            logging.info(f"💾 Saved {len(data)} entities to cache: {cache_file.name}")
+            logging.info(f"Saved {len(data)} entities to cache: {cache_file.name}")
         except Exception as e:
             logging.error(f"Error saving entity cache {cache_file}: {e}")
 
@@ -908,7 +978,9 @@ class GillIngestionEngine:
                         
                         # CRITICAL FIX: Do not create a graph node for the IOU flag!
                         if entity.name != "UNRESOLVED_PRONOUN":
-                            uuid = self.get_or_create_entity(entity.name, entity.category, entity.normalized_name, desc, era, role)
+                            # `normalized_name` is no longer extracted by BAML — passed as None;
+                            # get_or_create_entity computes search_key + display normalized_name from `name`.
+                            uuid = self.get_or_create_entity(entity.name, entity.category, None, desc, era, role)
                             if uuid:
                                 entity_uuids.append(uuid)
                         

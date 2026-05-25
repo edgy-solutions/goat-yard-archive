@@ -369,7 +369,7 @@ class GillEntityAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("GillEntity")
-        self._properties: typing.Set[str] = set([  "name",  "category",  "biblical_era",  "role",  "normalized_name",  "description",  ])
+        self._properties: typing.Set[str] = set([  "name",  "category",  "biblical_era",  "role",  "description",  ])
         self._props = GillEntityProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -412,10 +412,6 @@ class GillEntityProperties:
     @property
     def role(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("role"))
-    
-    @property
-    def normalized_name(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("normalized_name"))
     
     @property
     def description(self) -> type_builder.ClassPropertyViewer:

@@ -38,7 +38,6 @@ class GillEntity(BaseModel):
     category: typing.Optional[types.EntityCategory] = None
     biblical_era: typing.Optional[types.BiblicalEra] = None
     role: typing.Optional[str] = None
-    normalized_name: typing.Optional[str] = None
     description: typing.Optional[str] = None
 
 class Metadata(BaseModel):

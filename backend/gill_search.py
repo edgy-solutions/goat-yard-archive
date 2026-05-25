@@ -362,12 +362,11 @@ class GillSearchEngine:
         """
         Fetch a list of relevant entities for query routing.
 
-        Combines BM25 ranking with substring matching so the entity manifest
-        includes ALL entities whose name contains a significant query token
-        (e.g. "simons" surfaces every entity matching *Simon*, not just whichever
-        variant BM25 happens to rank first; "shepherd" surfaces "great shepherd
-        of the sheep"). This is the upstream fix for failure modes where BAML's
-        entity mapping was starved by a narrow manifest.
+        Combines BM25 ranking with substring matching against the deterministic
+        `search_key` property (see ADR-0005 Phase 4). The user's tokens are
+        canonicalized the same way (`re.sub(r'[^a-z0-9]', '', token.lower())`)
+        so 'scapegoat' matches 'scape-goat' / 'Scape-goat' / etc. without needing
+        casing or punctuation variants.
         """
         bm25_names: List[str] = []
         try:
@@ -380,7 +379,8 @@ class GillSearchEngine:
         except Exception as e:
             print(f"Error fetching entities (BM25): {e}")
 
-        # Substring pre-pass — surface entities containing any significant query token.
+        # Substring pre-pass against the canonical search_key — surface entities
+        # whose canonical key contains any significant canonicalized query token.
         seen = set(bm25_names)
         substring_names: List[str] = []
 
@@ -389,29 +389,31 @@ class GillSearchEngine:
             t_lower = tok.lower()
             if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
                 continue
-            candidates.add(t_lower)
+            # Canonicalize: lowercase + alphanumeric-only, matching the search_key
+            # computation in ingest.py.compute_search_key.
+            t_key = re.sub(r"[^a-z0-9]", "", t_lower)
+            if not t_key:
+                continue
+            candidates.add(t_key)
             # Naive plural handling: also try the singular form.
-            if t_lower.endswith("s") and len(t_lower) > 4:
-                candidates.add(t_lower[:-1])
+            if t_key.endswith("s") and len(t_key) > 4:
+                candidates.add(t_key[:-1])
 
         for cand in candidates:
-            # Try lowercase, capitalized, and uppercase forms to be robust to
-            # however the `name` property is tokenized/stored.
-            patterns = {f"*{cand}*", f"*{cand.capitalize()}*", f"*{cand.upper()}*"}
-            for pattern in patterns:
-                try:
-                    response = await self.entities.query.fetch_objects(
-                        filters=wvc.query.Filter.by_property("name").like(pattern),
-                        limit=25,
-                    )
-                except Exception as e:
-                    print(f"Substring entity lookup failed for '{pattern}': {e}")
-                    continue
-                for obj in response.objects:
-                    name = obj.properties.get("name")
-                    if name and name not in seen:
-                        seen.add(name)
-                        substring_names.append(name)
+            pattern = f"*{cand}*"
+            try:
+                response = await self.entities.query.fetch_objects(
+                    filters=wvc.query.Filter.by_property("search_key").like(pattern),
+                    limit=25,
+                )
+            except Exception as e:
+                print(f"Substring entity lookup failed for '{pattern}': {e}")
+                continue
+            for obj in response.objects:
+                name = obj.properties.get("name")
+                if name and name not in seen:
+                    seen.add(name)
+                    substring_names.append(name)
 
         combined = bm25_names + substring_names
         if not combined:

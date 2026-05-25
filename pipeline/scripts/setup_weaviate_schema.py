@@ -59,11 +59,23 @@ def setup_weaviate_schema():
                 vectorizer_config=Configure.Vectorizer.none(),
                 properties=[
                     Property(
-                        name="name", 
+                        name="name",
                         data_type=DataType.TEXT,
-                        description="Entity name as it appears",
+                        description="Entity name as it appears in the source text",
                         vectorize_property_name=False
                         # Default tokenization (word) is good here
+                    ),
+                    Property(
+                        name="search_key",
+                        data_type=DataType.TEXT,
+                        description=(
+                            "Deterministic canonical key for matching: "
+                            "lowercased + alphanumeric-only form of name. "
+                            "Used by get_relevant_entities for substring lookup. "
+                            "Populated by code, never by the LLM. See ADR-0005."
+                        ),
+                        skip_vectorization=True,
+                        tokenization=Tokenization.FIELD
                     ),
                     Property(
                         name="description",
@@ -72,16 +84,35 @@ def setup_weaviate_schema():
                         # We WANT to vectorize this
                     ),
                     Property(
-                        name="category", 
+                        name="category",
                         data_type=DataType.TEXT,
-                        description="Entity Category (e.g., BiblicalFigure)",
+                        description=(
+                            "Primary entity category (e.g. BiblicalFigure). "
+                            "Kept for backward compatibility — new code prefers `categories`."
+                        ),
                         skip_vectorization=True,
                         tokenization=Tokenization.FIELD
                     ),
                     Property(
-                        name="normalized_name", 
-                        data_type=DataType.TEXT, 
-                        description="Normalized form for deduplication",
+                        name="categories",
+                        data_type=DataType.TEXT_ARRAY,
+                        description=(
+                            "All category labels the LLM has assigned to this entity "
+                            "across pages (e.g. ['TypeOrSymbol', 'OriginalWord']). "
+                            "Same biblical reality can be perceived multiple ways; "
+                            "accumulate rather than fork. See ADR-0005."
+                        ),
+                        skip_vectorization=True,
+                        tokenization=Tokenization.FIELD
+                    ),
+                    Property(
+                        name="normalized_name",
+                        data_type=DataType.TEXT,
+                        description=(
+                            "Human-readable display form, computed deterministically "
+                            "by code from `name` (title-case, hyphen-strip). "
+                            "Distinct from `search_key`. See ADR-0005."
+                        ),
                         skip_vectorization=True,
                         tokenization=Tokenization.FIELD
                     ),
@@ -100,7 +131,7 @@ def setup_weaviate_schema():
                     )
                 ]
             )
-            print("✓ Created TheologicalEntity collection")
+            print("Created TheologicalEntity collection")
 
         # 2. CommentaryChunk
         if not client.collections.exists("CommentaryChunk"):

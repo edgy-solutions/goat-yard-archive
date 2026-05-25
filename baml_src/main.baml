@@ -70,7 +70,7 @@ client<llm> OpenRouterText {
   options {
     base_url "https://openrouter.ai/api/v1"
     api_key env.OPENROUTER_API_KEY
-    model "x-ai/grok-4.1-fast"
+    model "x-ai/grok-4.20"
   }
 }
 

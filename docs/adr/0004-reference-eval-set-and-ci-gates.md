@@ -60,6 +60,23 @@ Build a small, expert-curated reference eval set and integrate it into CI.
 - **Soft warn** on other regressions; require human review.
 - Eval scores persisted as CI artifact for historical tracking.
 
+### Companion eval: entity-extraction cross-page consistency
+
+The answer-quality eval above measures the full retrieval-to-synthesis pipeline. A complementary eval at the **entity-extraction layer** is described in [ADR-0005 Phase 5](0005-entity-index-audit-and-automated-deduplication.md). That benchmark (prototype at `c:\tmp\entity_model_compare.py`):
+
+- Runs the BAML entity-extraction prompt against multiple models on a fixed ~10-page sample.
+- Measures per-model latency, throughput, within-page quality (fill rates, fragmentation), and cross-page drift (same entity extracted with different names, categories, eras across pages).
+- Surfaces drift counts as the key metric — production failure modes (e.g. `scape-goat` vs `Scape-goat`, `Azazel` flipping categories) are cross-page consistency failures, not within-page quality failures.
+
+These two evals together give the full quality signal:
+
+| Eval | What it measures | When it should run |
+|---|---|---|
+| Answer-quality (this ADR) | End-to-end retrieval + synthesis correctness | Every PR touching `backend/`, `baml_src/`, `pipeline/` |
+| Entity-extraction benchmark ([ADR-0005](0005-entity-index-audit-and-automated-deduplication.md)) | Per-model extraction quality + cross-page consistency | On-demand for model upgrades; periodic for drift detection |
+
+A shared `evals/` directory holds both. The infrastructure (page sampling, LLM-as-judge utilities) is reusable between them.
+
 ## Alternatives Considered
 
 1. **Continue manual log review.** Doesn't scale; no historical tracking; subject to confirmation bias.
