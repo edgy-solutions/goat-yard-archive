@@ -103,39 +103,67 @@ still produce verbatim answers without verification failures.
 
 ---
 
-## 4. Outage fallback — Tier 1 static maintenance page
+## 4. Outage fallback — Tier 1 in-app graceful degradation
 
-**ADR:** [ADR-0007](docs/adr/0007-availability-and-outage-fallback.md)
-**Effort:** ~2 hours
+**ADR:** [ADR-0007](docs/adr/0007-availability-and-outage-fallback.md) (revised 2026-05-25 — see ADR for the rationale shift from separate-maintenance-page to in-app degradation)
+**Effort:** ~4-6 hours (slightly more upfront than the original Worker-based design, in exchange for simpler architecture + better UX)
 **Why for launch:** Home ISP outages will happen. A Puritan Board thread
 landing on a 5xx error during a 24-hour outage costs more than the
-outage itself. A dignified maintenance page is not a credibility hit;
-silent failure is.
+outage itself. Graceful in-app degradation feels like a transient app
+error ("we're briefly unable to reach the commentary index") rather
+than "this site is broken" — meaningfully better for the audience.
 
 ### Tasks
-- [ ] Create `frontend-fallback/index.html` matching the live site's
-      visual style. Brief outage message, Gill-flavored tone, link to
-      GitHub repo. Pure static HTML/CSS — no JavaScript that depends on
-      a backend.
-- [ ] Deploy to Cloudflare Pages as `gya-fallback.pages.dev` (or chosen
-      subdomain).
-- [ ] Add a Cloudflare Worker (or Page Rule) on goatyardarchive.org
-      that healthchecks `/health` and rewrites to the fallback when
-      origin is unreachable. Cache health state ~30s, require 2+
-      consecutive failures before flipping (avoid oscillation).
-- [ ] Set up a Cloudflare alert: 5xx rate from origin > 20% over 5 min
-      → existing Slack channel.
-- [ ] Pre-launch smoke test:
-      - [ ] Stop backend pod, confirm fallback serves within 60s.
-      - [ ] Confirm `/api/search` during outage returns either the
-            fallback page OR a graceful JSON error based on `Accept`
-            header (not raw 502).
-      - [ ] Restart backend pod, confirm return to live within 60s.
+
+**Cloudflare Pages setup (frontend hosting):**
+- [ ] Connect this GitHub repo to a new Cloudflare Pages project.
+- [ ] Build command: `cd frontend && npm install && npm run build`;
+      output dir: `frontend/dist`.
+- [ ] Set build-time env vars on Pages: `VITE_CLERK_PUBLISHABLE_KEY`,
+      `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST`, `VITE_API_BASE`
+      (e.g. `https://goatyardarchive.org/api`).
+- [ ] Verify the deploy serves successfully at the Pages default URL.
+
+**DNS / routing:**
+- [ ] On the goatyardarchive.org zone:
+      - `/api/*` → home origin (existing routing)
+      - everything else → Cloudflare Pages
+- [ ] Verify with curl: `/api/health` hits home, `/index.html` hits Pages.
+
+**Frontend resilience changes (in `frontend/`):**
+- [ ] Add a fetch wrapper that catches network errors / 5xx / timeouts
+      and exposes them as a typed error to React.
+- [ ] Create a `<BackendUnavailable />` component matching the site's
+      tone (one or two sentences, GitHub link, contact info).
+- [ ] Wire all API-dependent surfaces to render `<BackendUnavailable />`
+      on errors rather than empty / spinner-stuck states.
+- [ ] Cache `/api/books` in localStorage with a TTL so the app's chrome
+      renders during cold-start outages.
+
+**Runtime config migration:**
+- [ ] Read `VITE_*` env vars in `src/config.ts` via `import.meta.env`.
+- [ ] Remove the server-side `__RUNTIME_CONFIG__` injection from
+      `index.html` (no longer needed once SPA is on Pages).
+
+**Observability:**
+- [ ] Cloudflare alert: 5xx rate from origin > 20% over 5 min →
+      existing Slack channel.
+- [ ] Optional: PostHog event for `BackendUnavailable` renders per
+      session.
+
+**Pre-launch smoke test:**
+- [ ] Stop backend pod, reload the site — SPA should load from Pages
+      and immediately render `<BackendUnavailable />` on the search page.
+- [ ] Confirm `/api/search` returns 502 (Cloudflare default), which the
+      SPA's fetch wrapper catches and renders the unavailable state for.
+- [ ] Restart backend pod; verify the SPA returns to normal on retry
+      without a full page reload.
 
 ### Done when
-Stopping the home backend pod produces a maintenance page within 60
-seconds, and restarting brings the site back within 60 seconds, with no
-manual Cloudflare action required.
+Stopping the home backend pod still shows users a working site (chrome,
+navigation, branding) with a clear inline "temporarily unavailable"
+message; restarting brings normal operation back without manual
+Cloudflare action.
 
 ---
 
