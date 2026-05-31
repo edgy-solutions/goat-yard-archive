@@ -32,6 +32,17 @@ spec:
             - name: http
               containerPort: 8000
               protocol: TCP
+          # Startup probe owns the boot window. Backend cold start is heavy:
+          # dspy + litellm + baml_client imports plus Weaviate gRPC connect
+          # can take 60-180s. Until this passes (up to 5 min), the kubelet
+          # does NOT run liveness, so we can't get killed mid-startup.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 2
           livenessProbe:
             httpGet:
               path: /health
