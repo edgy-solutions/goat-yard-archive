@@ -245,6 +245,60 @@ def _iter_via_rest(test_url: str, class_name: str) -> Iterable[_RestObj]:
         after = objs[-1]["id"]
 
 
+def _list_uuids_via_rest(test_url: str, class_name: str) -> list[str]:
+    """List every UUID in a class via REST cursor pagination, no vector. The
+    payload-without-vectors is small and reliable; we use it to build the
+    work-list for per-object fetches."""
+    uuids: list[str] = []
+    after: str | None = None
+    while True:
+        params = {"class": class_name, "limit": 200}
+        if after is not None:
+            params["after"] = after
+        r = requests.get(f"{test_url}/v1/objects", params=params, timeout=60)
+        r.raise_for_status()
+        objs = r.json().get("objects") or []
+        if not objs:
+            return uuids
+        uuids.extend(o["id"] for o in objs)
+        after = objs[-1]["id"]
+
+
+def _fetch_object_via_rest(test_url: str, class_name: str, uuid: str) -> dict:
+    """Fetch one object with its vector. Per-object isolation means a single
+    bad object only loses one row instead of killing the whole stream."""
+    r = requests.get(
+        f"{test_url}/v1/objects/{class_name}/{uuid}",
+        params={"include": "vector"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _fetch_refs_via_rest(test_url: str, class_name: str, uuid: str) -> list[str]:
+    """Fetch a single object's mentions_entity refs. Returns the target UUIDs.
+    Empty list if the object has no refs or the call fails."""
+    try:
+        r = requests.get(
+            f"{test_url}/v1/objects/{class_name}/{uuid}",
+            timeout=30,
+        )
+        r.raise_for_status()
+    except Exception:
+        return []
+    body = r.json()
+    refs = (body.get("properties") or {}).get("mentions_entity") or []
+    out = []
+    for ref in refs:
+        beacon = ref.get("beacon", "") if isinstance(ref, dict) else ""
+        # beacons look like weaviate://localhost/TheologicalEntity/<uuid>
+        tail = beacon.rsplit("/", 1)[-1] if beacon else ""
+        if tail:
+            out.append(tail)
+    return out
+
+
 def _existing_prod_uuids(prod_client, name: str) -> set[str]:
     col = prod_client.collections.get(name)
     log.info(f"querying existing prod.{name} UUIDs for resume...")
@@ -266,19 +320,57 @@ def _copy_objects(
     test_url: str,
 ) -> int:
     dst = dst_client.collections.get(name)
-    skip_uuids: set[str] = _existing_prod_uuids(dst_client, name) if resume else set()
     total = 0
-    skipped = 0
+    bad = 0
     t0 = time.time()
-    # cache_size=10 chosen because vectors are 4096-dim float (16KB each).
-    # Larger pages with include_vector trip a server-side deadline on test.
+
     if read_via_rest:
-        log.info(f"  {name}: reading via REST (gRPC bypass)")
-        source = _iter_via_rest(test_url, name)
-    else:
-        source = src_client.collections.get(name).iterator(
-            include_vector=True, cache_size=10
+        # Per-object REST: list all test UUIDs first (cheap, no vectors),
+        # diff against prod's set, then GET each missing object individually
+        # so one bad object only loses one row.
+        skip_uuids: set[str] = (
+            _existing_prod_uuids(dst_client, name) if resume else set()
         )
+        log.info(f"  {name}: listing test UUIDs...")
+        test_uuids = _list_uuids_via_rest(test_url, name)
+        log.info(f"  {name}: test={len(test_uuids)} prod={len(skip_uuids)}")
+        todo = [u for u in test_uuids if u not in skip_uuids]
+        log.info(f"  {name}: {len(todo)} to copy")
+        with dst.batch.fixed_size(batch_size=batch_size) as batch:
+            for i, uuid in enumerate(todo, 1):
+                try:
+                    obj = _fetch_object_via_rest(test_url, name, uuid)
+                except Exception as e:
+                    log.warning(f"  {name}: skip {uuid}: {e}")
+                    bad += 1
+                    continue
+                batch.add_object(
+                    uuid=uuid,
+                    properties=obj.get("properties") or {},
+                    vector=obj.get("vector"),
+                )
+                total += 1
+                if i % 200 == 0:
+                    log.info(
+                        f"  {name}: {total}/{len(todo)} copied ({bad} unreadable) "
+                        f"@ {total / max(time.time() - t0, 0.001):.0f}/s"
+                    )
+        failed = dst.batch.failed_objects
+        if failed:
+            log.error(f"{name}: {len(failed)} batch failures; sample: {failed[0]}")
+        log.info(
+            f"{name}: done — {total} copied, {bad} unreadable "
+            f"in {time.time() - t0:.1f}s"
+        )
+        return total
+
+    # Default: gRPC iterator with cache_size=10 (vectors are 16KB each;
+    # larger pages trip a server-side deadline on test).
+    skip_uuids = _existing_prod_uuids(dst_client, name) if resume else set()
+    skipped = 0
+    source = src_client.collections.get(name).iterator(
+        include_vector=True, cache_size=10
+    )
     with dst.batch.fixed_size(batch_size=batch_size) as batch:
         for obj in source:
             if str(obj.uuid) in skip_uuids:
@@ -301,6 +393,51 @@ def _copy_objects(
     log.info(
         f"{name}: done — {total} copied, {skipped} skipped in {time.time() - t0:.1f}s"
     )
+    return total
+
+
+def _copy_refs_via_rest(test_url: str, dst_client, batch_size: int) -> int:
+    """Write mentions_entity edges chunk-by-chunk via REST, mirroring the
+    per-object copy. Avoids the gRPC iterator that died mid-copy earlier.
+    """
+    dst = dst_client.collections.get("CommentaryChunk")
+    log.info("  refs: listing CommentaryChunk UUIDs from test...")
+    chunk_uuids = _list_uuids_via_rest(test_url, "CommentaryChunk")
+    log.info(f"  refs: {len(chunk_uuids)} chunks to scan")
+
+    total = 0
+    chunks_with_refs = 0
+    bad = 0
+    t0 = time.time()
+    with dst.batch.fixed_size(batch_size=batch_size) as batch:
+        for i, chunk_uuid in enumerate(chunk_uuids, 1):
+            targets = _fetch_refs_via_rest(test_url, "CommentaryChunk", chunk_uuid)
+            if not targets:
+                if i % 500 == 0:
+                    log.info(
+                        f"  refs: scanned {i}/{len(chunk_uuids)} "
+                        f"({chunks_with_refs} w/refs, {total} edges, {bad} bad)"
+                    )
+                continue
+            chunks_with_refs += 1
+            for target_uuid in targets:
+                batch.add_reference(
+                    from_uuid=chunk_uuid,
+                    from_collection="CommentaryChunk",
+                    from_property="mentions_entity",
+                    to=target_uuid,
+                )
+                total += 1
+            if i % 500 == 0:
+                log.info(
+                    f"  refs: scanned {i}/{len(chunk_uuids)} "
+                    f"({chunks_with_refs} w/refs, {total} edges)"
+                )
+    failed = dst.batch.failed_references
+    if failed:
+        log.error(f"refs: {len(failed)} edge failures; sample: {failed[0]}")
+    log.info(f"refs: done — {total} edges across {chunks_with_refs} chunks "
+             f"in {time.time() - t0:.1f}s")
     return total
 
 
@@ -419,7 +556,10 @@ def main() -> int:
         _copy_objects(test, prod, "CommentaryChunk", batch_size, resume, read_via_rest, test_url)
 
         log.info("=== copying mentions_entity references ===")
-        _copy_refs(test, prod, batch_size)
+        if read_via_rest:
+            _copy_refs_via_rest(test_url, prod, batch_size)
+        else:
+            _copy_refs(test, prod, batch_size)
 
         log.info("prod classes (after): %s", [c for c in prod.collections.list_all().keys()])
         return 0
