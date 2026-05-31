@@ -547,11 +547,15 @@ function App() {
                                         {response.answer.split('\n').map((line, i) => {
                                             // Allow `-` inside the citation pattern so range citations like
                                             // `[MATTHEW_24_45_S02-S04]` are matched (then expanded below).
-                                            const parts = line.split(/(\[[A-Z0-9_, -]+\])/g);
+                                            // Allow lowercase letters because the model occasionally produces
+                                            // non-canonical IDs (e.g. `[GENESIS_1_End_S00]`); matching them
+                                            // here at least suppresses the raw bracket text from the UI even
+                                            // when the ID won't resolve to a real chunk.
+                                            const parts = line.split(/(\[[A-Za-z0-9_, -]+\])/g);
                                             return (
                                                 <div key={i} className="mb-4">
                                                     {parts.map((part, partIdx) => {
-                                                        if (part.match(/^\[[A-Z0-9_, -]+\]$/)) {
+                                                        if (part.match(/^\[[A-Za-z0-9_, -]+\]$/)) {
                                                             const rawContent = part.replace(/^\[+|\]+$/g, '');
                                                             const ids = rawContent
                                                                 .split(',')
