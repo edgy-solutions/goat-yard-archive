@@ -135,23 +135,36 @@ def mirror_minio_buckets(prod_backup_id: str, test_backup_id: str) -> bool:
 
     mc_bin = os.getenv("MINIO_CLIENT_BIN", "mcli")
 
+    # Each entry is (cmd, log_cmd) where log_cmd is what we'll put in error
+    # messages — credentials are scrubbed so failures don't leak secrets into
+    # Dagster logs.
     commands = [
-        [mc_bin, "alias", "set", "test_minio", test_minio_endpoint, test_user, test_pass],
-        [mc_bin, "alias", "set", "prod_minio", prod_minio_endpoint, prod_user, prod_pass],
-        [
-            mc_bin,
-            "mirror",
-            "--overwrite",
-            f"test_minio/weaviate-backups/{test_backup_id}",
-            f"prod_minio/weaviate-backups/{test_backup_id}",
-        ],
+        (
+            [mc_bin, "alias", "set", "test_minio", test_minio_endpoint, test_user, test_pass],
+            [mc_bin, "alias", "set", "test_minio", test_minio_endpoint, "***", "***"],
+        ),
+        (
+            [mc_bin, "alias", "set", "prod_minio", prod_minio_endpoint, prod_user, prod_pass],
+            [mc_bin, "alias", "set", "prod_minio", prod_minio_endpoint, "***", "***"],
+        ),
+        (
+            [
+                mc_bin,
+                "mirror",
+                "--overwrite",
+                f"test_minio/weaviate-backups/{test_backup_id}",
+                f"prod_minio/weaviate-backups/{test_backup_id}",
+            ],
+            None,
+        ),
     ]
 
-    for cmd in commands:
+    for cmd, log_cmd in commands:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
+            shown = " ".join(log_cmd) if log_cmd is not None else " ".join(cmd)
             raise Exception(
-                f"{mc_bin} command failed: {' '.join(cmd)}\n"
+                f"{mc_bin} command failed: {shown}\n"
                 f"stdout: {result.stdout}\n"
                 f"stderr: {result.stderr}"
             )
