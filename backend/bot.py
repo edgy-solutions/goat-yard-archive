@@ -287,6 +287,13 @@ def _repair_quotes_in_answer(answer: str, chunks_by_sid: Dict[str, str]) -> Tupl
             repair_source = "llm" if repaired else None
 
         if repaired:
+            # Flatten any internal whitespace runs (including newlines from
+            # the source chunk text) to a single space. Without this, splicing
+            # a repaired span containing a "\n" into the answer produces a
+            # stray paragraph break — the frontend splits on "\n" and renders
+            # each segment as its own div with margin-bottom, which displays
+            # as an orphaned period after a blank line.
+            repaired = _WHITESPACE_RE.sub(" ", repaired).strip()
             repairs.append({
                 "quote": quote_raw[:120],
                 "repaired": repaired[:120],
