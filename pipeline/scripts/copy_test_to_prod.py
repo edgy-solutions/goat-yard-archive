@@ -245,19 +245,39 @@ def _iter_via_rest(test_url: str, class_name: str) -> Iterable[_RestObj]:
         after = objs[-1]["id"]
 
 
-def _list_uuids_via_rest(test_url: str, class_name: str) -> list[str]:
+def _list_uuids_via_rest(base_url: str, class_name: str) -> list[str]:
     """List every UUID in a class via REST cursor pagination, no vector. The
     payload-without-vectors is small and reliable; we use it to build the
-    work-list for per-object fetches."""
+    work-list for per-object fetches and to find prod's existing set without
+    going through gRPC."""
     uuids: list[str] = []
     after: str | None = None
     while True:
         params = {"class": class_name, "limit": 200}
         if after is not None:
             params["after"] = after
-        r = requests.get(f"{test_url}/v1/objects", params=params, timeout=60)
-        r.raise_for_status()
-        objs = r.json().get("objects") or []
+        # Three retries: prod can hiccup briefly while it digests the previous
+        # batch of HNSW inserts. Backoff: 2s, 4s, 8s.
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    f"{base_url}/v1/objects", params=params, timeout=60
+                )
+                r.raise_for_status()
+                objs = r.json().get("objects") or []
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                wait = 2 * (2 ** attempt)
+                log.warning(
+                    f"  list_uuids({class_name}) page after={after} "
+                    f"attempt {attempt + 1} failed: {e}; retry in {wait}s"
+                )
+                time.sleep(wait)
+        if last_err is not None:
+            raise last_err
         if not objs:
             return uuids
         uuids.extend(o["id"] for o in objs)
@@ -299,13 +319,17 @@ def _fetch_refs_via_rest(test_url: str, class_name: str, uuid: str) -> list[str]
     return out
 
 
-def _existing_prod_uuids(prod_client, name: str) -> set[str]:
-    col = prod_client.collections.get(name)
+def _existing_prod_uuids(prod_client, name: str, prod_url: str | None = None) -> set[str]:
+    """Return the UUIDs already present in prod's class. Uses REST when
+    prod_url is given, to bypass gRPC streams that drop ("Stream removed")
+    while prod is busy rebuilding HNSW from earlier batch inserts."""
     log.info(f"querying existing prod.{name} UUIDs for resume...")
-    seen: set[str] = set()
     t0 = time.time()
-    for obj in col.iterator(include_vector=False, cache_size=200):
-        seen.add(str(obj.uuid))
+    if prod_url is not None:
+        seen = set(_list_uuids_via_rest(prod_url, name))
+    else:
+        col = prod_client.collections.get(name)
+        seen = {str(obj.uuid) for obj in col.iterator(include_vector=False, cache_size=200)}
     log.info(f"  prod.{name}: {len(seen)} existing in {time.time() - t0:.1f}s")
     return seen
 
@@ -318,6 +342,7 @@ def _copy_objects(
     resume: bool,
     read_via_rest: bool,
     test_url: str,
+    prod_url: str | None = None,
 ) -> int:
     dst = dst_client.collections.get(name)
     total = 0
@@ -329,7 +354,9 @@ def _copy_objects(
         # diff against prod's set, then GET each missing object individually
         # so one bad object only loses one row.
         skip_uuids: set[str] = (
-            _existing_prod_uuids(dst_client, name) if resume else set()
+            _existing_prod_uuids(dst_client, name, prod_url=prod_url)
+            if resume
+            else set()
         )
         log.info(f"  {name}: listing test UUIDs...")
         test_uuids = _list_uuids_via_rest(test_url, name)
@@ -532,6 +559,7 @@ def main() -> int:
     dry_run = os.getenv("DRY_RUN", "0") == "1"
     read_via_rest = os.getenv("READ_VIA_REST", "0") == "1"
     test_url = os.environ["TEST_WEAVIATE_URL"]
+    prod_url = os.environ.get("PROD_WEAVIATE_URL")
 
     test = _connect("TEST")
     prod = None if dry_run else _connect("PROD")
@@ -550,10 +578,16 @@ def main() -> int:
             _create_schema(prod)
 
         log.info("=== copying TheologicalEntity ===")
-        _copy_objects(test, prod, "TheologicalEntity", batch_size, resume, read_via_rest, test_url)
+        _copy_objects(
+            test, prod, "TheologicalEntity", batch_size, resume, read_via_rest,
+            test_url, prod_url,
+        )
 
         log.info("=== copying CommentaryChunk (objects only) ===")
-        _copy_objects(test, prod, "CommentaryChunk", batch_size, resume, read_via_rest, test_url)
+        _copy_objects(
+            test, prod, "CommentaryChunk", batch_size, resume, read_via_rest,
+            test_url, prod_url,
+        )
 
         log.info("=== copying mentions_entity references ===")
         if read_via_rest:
