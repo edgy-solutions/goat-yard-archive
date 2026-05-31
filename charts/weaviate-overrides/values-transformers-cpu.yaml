@@ -1,5 +1,16 @@
 # Weaviate CPU Configuration (Transformers)
 # This file overrides the default Weaviate Helm chart values.
+#
+# Prerequisite for backups (one-time, per cluster):
+#   kubectl -n gya-backend create secret generic weaviate-backup-s3-creds \
+#     --from-literal=AWS_ACCESS_KEY_ID=<minio-root-user> \
+#     --from-literal=AWS_SECRET_ACCESS_KEY=<minio-root-password>
+# The values must match gya-frontend-minio's rootUser/rootPassword so Weaviate
+# can sign S3 requests against it.
+#
+# Deploy:
+#   helm upgrade --install weaviate weaviate/weaviate \
+#     -n gya-backend -f charts/weaviate-overrides/values-transformers-cpu.yaml
 
 default_vectorizer_module: "text2vec-transformers"
 
@@ -17,6 +28,19 @@ modules:
         cpu: "2"
         memory: "2Gi"
 
-# 2. Add the environment variables needed for Transformers
+# 2. Add the environment variables needed for Transformers + S3 backup module
 env:
-  ENABLE_MODULES: "text2vec-transformers,text2vec-cohere,text2vec-huggingface,text2vec-openai"
+  ENABLE_MODULES: "text2vec-transformers,text2vec-cohere,text2vec-huggingface,text2vec-openai,backup-s3"
+
+# 3. S3 backup config. Points at the frontend-namespace MinIO; AWS_*
+# credentials come from the weaviate-backup-s3-creds Secret (see header).
+backups:
+  s3:
+    enabled: true
+    envconfig:
+      BACKUP_S3_BUCKET: weaviate-backups
+      BACKUP_S3_ENDPOINT: gya-frontend-minio.gya-frontend.svc.cluster.local:9000
+      BACKUP_S3_USE_SSL: "false"
+    envSecrets:
+      AWS_ACCESS_KEY_ID: weaviate-backup-s3-creds
+      AWS_SECRET_ACCESS_KEY: weaviate-backup-s3-creds
