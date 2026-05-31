@@ -378,8 +378,14 @@ async def search(request: Request, req: SearchRequest):
                     
                     answer = pred.answer
                     citations = pred.citations
-                    verified = True
-                    
+                    # Soft-fail on quote-verification failures: keep the answer,
+                    # flag verified=False so the frontend can render a subtle
+                    # indicator. See ADR-0006 telemetry note.
+                    quote_failures = getattr(pred, "quote_failures", None) or []
+                    verified = not quote_failures
+                    if quote_failures and generation:
+                        generation.update(metadata={"quote_verification_failures": len(quote_failures)})
+
                     if generation:
                         generation.update(output=answer)
                     

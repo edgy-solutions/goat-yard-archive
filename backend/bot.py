@@ -34,25 +34,36 @@ QUOTE_WITH_CITE_RE = re.compile(
     r'["“”]([^"“”]+)["“”]\s*\[([A-Z0-9_]+_S\d+)\]'
 )
 
-# Tokens we strip during normalization (whitespace differences, markdown
-# italics, footnote refs, curly quotes, leading/trailing punctuation).
+# Tokens we strip during normalization.
 _ITALICS_RE = re.compile(r"\*([^*]+)\*")
 _FOOTNOTE_REF_RE = re.compile(r"\[\^[A-Za-z0-9_]+\]")
 _WHITESPACE_RE = re.compile(r"\s+")
+# Anything that isn't a Unicode letter or digit is treated as a word boundary.
+# Hyphens, punctuation, curly quotes, brackets, etc. all collapse to spaces so
+# that "scape-goat" and "scapegoat" normalize the same way, and ":" vs ";" vs ","
+# stop being a verification failure.
+_NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
 
 
 def _normalize_for_quote_match(text: str) -> str:
     """Make the quoted text and the source text comparable.
 
-    Normalizations applied:
-    - Lowercase (Gill's capitalization is meaningful for display but not for
-      verbatim-detection).
-    - Strip `*italics*` and `_italics_` markdown markers.
-    - Strip `[^1]` footnote refs (model often drops them when quoting).
-    - Normalize curly quotes -> straight quotes.
-    - Collapse all whitespace runs to a single space.
-    - Strip leading/trailing whitespace and most punctuation (mid-sentence
-      quotes typically don't carry their terminal punctuation).
+    The goal is to verify that the model isn't paraphrasing while putting
+    quote marks around its paraphrase. Differences that are NOT paraphrase —
+    punctuation, hyphenation, italics, footnote refs, curly vs straight
+    quotes — should not cause verification failures.
+
+    Normalization steps:
+    - Strip markdown italics markers (`*x*` -> `x`) and underscores.
+    - Strip `[^N]` footnote refs entirely.
+    - Lowercase (Gill's capitalization is meaningful for display, not for
+      identifying which sentence the model is quoting from).
+    - Replace ALL punctuation (and hyphens) with whitespace. This deliberately
+      collapses `:`/`;`/`,`, `scape-goat`/`scapegoat`, and any KJV vs Gill
+      punctuation variations. The model regularly switches between these
+      without changing the words; word content is what we verify.
+    - Collapse whitespace runs to a single space and strip leading/trailing
+      whitespace.
     """
     if not text:
         return ""
@@ -60,11 +71,9 @@ def _normalize_for_quote_match(text: str) -> str:
     s = _ITALICS_RE.sub(r"\1", s)
     s = s.replace("_", " ")
     s = _FOOTNOTE_REF_RE.sub("", s)
-    s = s.replace("“", '"').replace("”", '"')
-    s = s.replace("‘", "'").replace("’", "'")
     s = s.lower()
+    s = _NON_WORD_RE.sub(" ", s)
     s = _WHITESPACE_RE.sub(" ", s).strip()
-    s = s.strip("\"'.,;:!? ")
     return s
 
 
@@ -460,27 +469,28 @@ class GroundedGillBot(dspy.Module):
         # ---------------------------------------------------------
         # The GillSignature contract promises the user that every double-quoted
         # span in the answer appears verbatim in Gill's source. Verify by
-        # substring-matching each "quote" [SID] pair against the source text
-        # for that Sentence ID (after light normalization for italics, footnote
-        # refs, curly quotes, and whitespace).
+        # substring-matching each "quote" [SID] pair against the source for
+        # that chunk (after normalization: lowercase, punctuation stripped,
+        # whitespace collapsed). The model legitimately rewrites punctuation
+        # and hyphenation when quoting; we still catch word-level paraphrase.
+        #
+        # Soft-fail: when quotes don't verify, set quote_failures on the
+        # Prediction so main.py can surface verified=False, but DON'T replace
+        # the answer text. Hard-replacing produced a bad sample-question UX
+        # ("Verification Failed:..." instead of a real Gill answer) and
+        # discouraged users from trusting the system. The frontend can
+        # render a subtle "some quoted passages may differ slightly" badge
+        # for verified=False without disrupting the answer.
         chunks_by_sid = _build_chunks_by_sid(context_chunks)
         quote_failures = _verify_quotes(pred.answer, chunks_by_sid)
         if quote_failures:
-            print(f"DEBUG: Quote verification failures: {quote_failures}")
-            first = quote_failures[0]
-            return dspy.Prediction(
-                answer=(
-                    "Verification Failed: a quoted passage did not match Gill's text verbatim. "
-                    f"Sentence ID {first['sentence_id']} — quote: \"{first['quote']}...\" "
-                    f"(reason: {first['reason']}). "
-                    f"Total unverified quotes: {len(quote_failures)}. "
-                    "Please retry the query."
-                ),
-                citations=[]
-            )
+            print(f"DEBUG: Quote verification failures (soft-failing, verified=False): {quote_failures}")
 
-        # If we get here, pass
-        return dspy.Prediction(answer=pred.answer, citations=citations_list)
+        return dspy.Prediction(
+            answer=pred.answer,
+            citations=citations_list,
+            quote_failures=quote_failures,
+        )
 
 if __name__ == "__main__":
     # Test
