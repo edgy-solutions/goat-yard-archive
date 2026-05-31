@@ -4,6 +4,7 @@ import uvicorn
 import dspy
 import litellm
 import json
+import logging
 import warnings
 import asyncio
 from langfuse import Langfuse
@@ -32,6 +33,17 @@ from slowapi.errors import RateLimitExceeded
 
 # Filter Pydantic Warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
+# slowapi logs every rate-limit-key returning None at ERROR level with the
+# message "Skipping limit: ..." — but returning None is the *documented* way
+# to skip a limit (e.g. for anonymous users hitting an auth-gated limit).
+# Suppress just that message so real errors stay visible in the log.
+class _SuppressSlowapiSkippingLimit(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return "Skipping limit" not in msg
+
+logging.getLogger("slowapi").addFilter(_SuppressSlowapiSkippingLimit())
 
 # Global Langfuse client for feedback endpoint
 langfuse_client = None
@@ -286,11 +298,6 @@ async def search(request: Request, req: SearchRequest):
     )
     t6 = time.perf_counter()
     print(f"[TIMING] search_gill (embed+weaviate): {t6-t5:.3f}s")
-    
-    if raw_results:
-        import logging
-        logging.error(f"DEBUG MAIN: First result lemma: '{raw_results[0].get('lemma')}'")
-        logging.error(f"DEBUG MAIN: First result keys: {raw_results[0].keys()}")
     
     if not raw_results:
         return SearchResponse(
