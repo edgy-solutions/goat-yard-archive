@@ -369,9 +369,14 @@ async def search(request: Request, req: SearchRequest):
                     available_books_str = ", ".join(books) if books else "Unknown"
 
                     t7 = time.perf_counter()
+                    # 90s matches the frontend's per-request timeout. The bot's
+                    # LLM-generation step plus the optional LLM-repair fallback
+                    # (when difflib can't repair an unverified quote) can push
+                    # the total well past 60s on cold cache or with multiple
+                    # repairs needed.
                     pred = await asyncio.wait_for(
                         asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str),
-                        timeout=60.0
+                        timeout=90.0
                     )
                     t8 = time.perf_counter()
                     print(f"[TIMING] LLM generation (bot): {t8-t7:.3f}s")
