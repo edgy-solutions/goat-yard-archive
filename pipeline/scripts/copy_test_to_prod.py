@@ -27,14 +27,20 @@ Required env:
 Optional:
   COPY_BATCH_SIZE  (default 200)
   SKIP_SCHEMA_RESET  (set to 1 to skip step 2-3; resume after partial run)
+  RESUME            (set to 1 to skip schema reset AND skip objects already on prod)
   DRY_RUN          (set to 1: read-only, counts test objects + refs, does not touch prod)
+  READ_VIA_REST    (set to 1 to read from test via REST instead of gRPC iterator;
+                    use when gRPC fails with "Exception deserializing response" on a
+                    specific object whose content trips the protobuf serializer)
 """
 
 import logging
 import os
 import sys
 import time
+from typing import Iterable
 
+import requests
 import weaviate
 from weaviate.classes.config import (
     Configure,
@@ -197,27 +203,104 @@ def _vector_of(obj) -> list:
     return v
 
 
-def _copy_objects(src_client, dst_client, name: str, batch_size: int) -> int:
-    src = src_client.collections.get(name)
+class _RestObj:
+    """Duck-typed shim that mimics the parts of weaviate-client's Object that
+    _copy_objects touches, so REST iteration can plug into the same code."""
+
+    __slots__ = ("uuid", "properties", "vector")
+
+    def __init__(self, uuid: str, properties: dict, vector: list | None) -> None:
+        self.uuid = uuid
+        self.properties = properties
+        self.vector = vector
+
+
+def _iter_via_rest(test_url: str, class_name: str) -> Iterable[_RestObj]:
+    """Stream objects from test via the REST /v1/objects cursor API. Bypasses
+    the gRPC path entirely, which is needed when a specific object's content
+    trips the gRPC protobuf serializer (StatusCode.INTERNAL / "Exception
+    deserializing response").
+    """
+    after: str | None = None
+    while True:
+        params = {
+            "class": class_name,
+            "limit": 25,
+            "include": "vector",
+        }
+        if after is not None:
+            params["after"] = after
+        r = requests.get(f"{test_url}/v1/objects", params=params, timeout=60)
+        r.raise_for_status()
+        body = r.json()
+        objs = body.get("objects") or []
+        if not objs:
+            return
+        for o in objs:
+            yield _RestObj(
+                uuid=o["id"],
+                properties=o.get("properties") or {},
+                vector=o.get("vector"),
+            )
+        after = objs[-1]["id"]
+
+
+def _existing_prod_uuids(prod_client, name: str) -> set[str]:
+    col = prod_client.collections.get(name)
+    log.info(f"querying existing prod.{name} UUIDs for resume...")
+    seen: set[str] = set()
+    t0 = time.time()
+    for obj in col.iterator(include_vector=False, cache_size=200):
+        seen.add(str(obj.uuid))
+    log.info(f"  prod.{name}: {len(seen)} existing in {time.time() - t0:.1f}s")
+    return seen
+
+
+def _copy_objects(
+    src_client,
+    dst_client,
+    name: str,
+    batch_size: int,
+    resume: bool,
+    read_via_rest: bool,
+    test_url: str,
+) -> int:
     dst = dst_client.collections.get(name)
+    skip_uuids: set[str] = _existing_prod_uuids(dst_client, name) if resume else set()
     total = 0
+    skipped = 0
     t0 = time.time()
     # cache_size=10 chosen because vectors are 4096-dim float (16KB each).
     # Larger pages with include_vector trip a server-side deadline on test.
+    if read_via_rest:
+        log.info(f"  {name}: reading via REST (gRPC bypass)")
+        source = _iter_via_rest(test_url, name)
+    else:
+        source = src_client.collections.get(name).iterator(
+            include_vector=True, cache_size=10
+        )
     with dst.batch.fixed_size(batch_size=batch_size) as batch:
-        for obj in src.iterator(include_vector=True, cache_size=10):
+        for obj in source:
+            if str(obj.uuid) in skip_uuids:
+                skipped += 1
+                continue
             batch.add_object(
                 uuid=obj.uuid,
                 properties=obj.properties,
                 vector=_vector_of(obj),
             )
             total += 1
-            if total % 1000 == 0:
-                log.info(f"  {name}: {total} copied ({total / (time.time() - t0):.0f}/s)")
+            if (total + skipped) % 1000 == 0:
+                log.info(
+                    f"  {name}: {total} copied / {skipped} skipped "
+                    f"({total / max(time.time() - t0, 0.001):.0f}/s)"
+                )
     failed = dst.batch.failed_objects
     if failed:
         log.error(f"{name}: {len(failed)} object failures; sample: {failed[0]}")
-    log.info(f"{name}: done — {total} objects in {time.time() - t0:.1f}s")
+    log.info(
+        f"{name}: done — {total} copied, {skipped} skipped in {time.time() - t0:.1f}s"
+    )
     return total
 
 
@@ -307,8 +390,11 @@ def _dry_run(test: weaviate.WeaviateClient) -> None:
 
 def main() -> int:
     batch_size = int(os.getenv("COPY_BATCH_SIZE", "200"))
-    skip_schema = os.getenv("SKIP_SCHEMA_RESET", "0") == "1"
+    resume = os.getenv("RESUME", "0") == "1"
+    skip_schema = resume or os.getenv("SKIP_SCHEMA_RESET", "0") == "1"
     dry_run = os.getenv("DRY_RUN", "0") == "1"
+    read_via_rest = os.getenv("READ_VIA_REST", "0") == "1"
+    test_url = os.environ["TEST_WEAVIATE_URL"]
 
     test = _connect("TEST")
     prod = None if dry_run else _connect("PROD")
@@ -322,15 +408,15 @@ def main() -> int:
         log.info("prod classes (before): %s", [c for c in prod.collections.list_all().keys()])
 
         if skip_schema:
-            log.info("SKIP_SCHEMA_RESET=1: leaving prod schema as-is")
+            log.info("schema reset skipped (RESUME or SKIP_SCHEMA_RESET set)")
         else:
             _create_schema(prod)
 
         log.info("=== copying TheologicalEntity ===")
-        _copy_objects(test, prod, "TheologicalEntity", batch_size)
+        _copy_objects(test, prod, "TheologicalEntity", batch_size, resume, read_via_rest, test_url)
 
         log.info("=== copying CommentaryChunk (objects only) ===")
-        _copy_objects(test, prod, "CommentaryChunk", batch_size)
+        _copy_objects(test, prod, "CommentaryChunk", batch_size, resume, read_via_rest, test_url)
 
         log.info("=== copying mentions_entity references ===")
         _copy_refs(test, prod, batch_size)
