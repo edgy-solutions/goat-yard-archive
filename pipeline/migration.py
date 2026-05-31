@@ -1,10 +1,29 @@
 import os
 import subprocess
 import time
-from typing import Dict
+from typing import Dict, List
 
 import requests
 from dagster import In, Nothing, Out, op, job
+
+# Classes the migration knows about. The backup/restore ops filter this list
+# down to whatever each Weaviate side actually contains, so a class added or
+# dropped on one side doesn't break the promotion.
+KNOWN_CLASSES = ["CommentaryChunk", "TheologicalEntity", "GroupSummary"]
+
+
+def existing_classes(weaviate_url: str, candidates: List[str]) -> List[str]:
+    """Query a Weaviate instance for its schema and return only classes from
+    `candidates` that actually exist. Avoids the 422 'Unprocessable Entity'
+    response Weaviate returns when a backup/restore include lists a class the
+    instance doesn't have.
+    """
+    schema_url = f"{weaviate_url}/v1/schema"
+    response = requests.get(schema_url)
+    response.raise_for_status()
+    schema = response.json() or {}
+    present = {cls.get("class") for cls in schema.get("classes") or []}
+    return [c for c in candidates if c in present]
 
 
 def trigger_and_wait_weaviate_backup(url: str, payload: dict, action: str) -> str:
@@ -54,15 +73,16 @@ def trigger_and_wait_weaviate_backup(url: str, payload: dict, action: str) -> st
 def backup_prod_weaviate() -> str:
     """
     Creates a safety-net backup of the Production Weaviate instance.
-    Includes CommentaryChunk, TheologicalEntity, and GroupSummary.
+    Includes whichever of KNOWN_CLASSES are actually present in Prod.
     """
     prod_url = os.getenv("PROD_WEAVIATE_URL", "http://localhost:8080")
     backup_endpoint = f"{prod_url}/v1/backups/s3"
 
+    include = existing_classes(prod_url, KNOWN_CLASSES)
     snapshot_id = f"prod_safety_snapshot_{int(time.time())}"
     payload = {
         "id": snapshot_id,
-        "include": ["CommentaryChunk", "TheologicalEntity", "GroupSummary"],
+        "include": include,
     }
 
     trigger_and_wait_weaviate_backup(backup_endpoint, payload, "backup")
@@ -73,15 +93,16 @@ def backup_prod_weaviate() -> str:
 def backup_test_weaviate() -> str:
     """
     Creates a backup of the Test Weaviate instance for promotion to Prod.
-    Includes CommentaryChunk and TheologicalEntity (excludes GroupSummary).
+    Includes whichever of KNOWN_CLASSES are actually present in Test.
     """
     test_url = os.getenv("TEST_WEAVIATE_URL", "http://localhost:8081")
     backup_endpoint = f"{test_url}/v1/backups/s3"
 
+    include = existing_classes(test_url, KNOWN_CLASSES)
     snapshot_id = f"test_to_prod_snapshot_{int(time.time())}"
     payload = {
         "id": snapshot_id,
-        "include": ["CommentaryChunk", "TheologicalEntity"],
+        "include": include,
     }
 
     trigger_and_wait_weaviate_backup(backup_endpoint, payload, "backup")
@@ -140,22 +161,23 @@ def restore_prod_weaviate(mirror_success: bool, test_backup_id: str) -> str:
         raise Exception("Mirror operation did not succeed, aborting restore.")
 
     prod_url = os.getenv("PROD_WEAVIATE_URL", "http://localhost:8080")
+    test_url = os.getenv("TEST_WEAVIATE_URL", "http://localhost:8081")
 
-    # --- NEW: Drop the existing classes so Weaviate allows the restore ---
-    classes_to_drop = ["CommentaryChunk", "TheologicalEntity", "GroupSummary"]
+    # Drop only the classes that actually exist in Prod, so the restore can
+    # recreate them. Skipping missing classes avoids 404s on a fresh side.
+    classes_to_drop = existing_classes(prod_url, KNOWN_CLASSES)
     for class_name in classes_to_drop:
         delete_url = f"{prod_url}/v1/schema/{class_name}"
         res = requests.delete(delete_url)
         # 200 means deleted successfully. 400/404 means it didn't exist anyway.
         if res.status_code not in (200, 400, 404):
             raise Exception(f"Failed to drop {class_name} in Prod: {res.text}")
-    # ---------------------------------------------------------------------
 
+    # Restore whatever Test actually has — that's the set of classes we just
+    # mirrored from Test's bucket.
     restore_endpoint = f"{prod_url}/v1/backups/s3/{test_backup_id}/restore"
-    
-    # We explicitly tell it which classes to restore just to be safe
     payload: Dict[str, object] = {
-        "include": ["CommentaryChunk", "TheologicalEntity", "GroupSummary"]
+        "include": existing_classes(test_url, KNOWN_CLASSES)
     }
 
     snapshot_id = trigger_and_wait_weaviate_backup(
