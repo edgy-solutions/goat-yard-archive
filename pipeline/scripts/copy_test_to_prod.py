@@ -448,9 +448,10 @@ def _copy_refs_via_rest(test_url: str, dst_client, batch_size: int) -> int:
                 continue
             chunks_with_refs += 1
             for target_uuid in targets:
+                # _BatchCollection.add_reference: from_collection is implicit
+                # (it's the collection we opened the batch on).
                 batch.add_reference(
                     from_uuid=chunk_uuid,
-                    from_collection="CommentaryChunk",
                     from_property="mentions_entity",
                     to=target_uuid,
                 )
@@ -486,7 +487,6 @@ def _copy_refs(src_client, dst_client, batch_size: int) -> int:
             for ref in refs.objects:
                 batch.add_reference(
                     from_uuid=obj.uuid,
-                    from_collection="CommentaryChunk",
                     from_property="mentions_entity",
                     to=ref.uuid,
                 )
