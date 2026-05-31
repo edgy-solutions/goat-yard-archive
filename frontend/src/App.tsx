@@ -54,6 +54,27 @@ interface SearchResponse {
     trace_id?: string;
 }
 
+// The model occasionally produces range-style sentence citations like
+// `[MATTHEW_24_45_S02-S04]` to indicate a quote spanning sentences S02
+// through S04 of the same verse. Expand to individual sentence IDs so each
+// can be rendered as its own citation button (matching the comma-separated
+// list path) and matched against retrieved evidence.
+function expandSentenceIdRange(id: string): string[] {
+    // Pattern: anything ending in `_Saa-Sbb` where aa and bb are zero-padded digits.
+    const m = id.match(/^(.+_S)(\d+)-S(\d+)$/);
+    if (!m) return [id];
+    const [, prefix, startStr, endStr] = m;
+    const start = parseInt(startStr, 10);
+    const end = parseInt(endStr, 10);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [id];
+    const padTo = startStr.length;
+    const result: string[] = [];
+    for (let n = start; n <= end; n++) {
+        result.push(`${prefix}${String(n).padStart(padTo, '0')}`);
+    }
+    return result;
+}
+
 function App() {
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
@@ -524,13 +545,19 @@ function App() {
                                     </div>
                                     <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
                                         {response.answer.split('\n').map((line, i) => {
-                                            const parts = line.split(/(\[[A-Z0-9_, ]+\])/g);
+                                            // Allow `-` inside the citation pattern so range citations like
+                                            // `[MATTHEW_24_45_S02-S04]` are matched (then expanded below).
+                                            const parts = line.split(/(\[[A-Z0-9_, -]+\])/g);
                                             return (
                                                 <div key={i} className="mb-4">
                                                     {parts.map((part, partIdx) => {
-                                                        if (part.match(/^\[[A-Z0-9_, ]+\]$/)) {
+                                                        if (part.match(/^\[[A-Z0-9_, -]+\]$/)) {
                                                             const rawContent = part.replace(/^\[+|\]+$/g, '');
-                                                            const ids = rawContent.split(',').map(s => s.trim()).filter(Boolean);
+                                                            const ids = rawContent
+                                                                .split(',')
+                                                                .map(s => s.trim())
+                                                                .filter(Boolean)
+                                                                .flatMap(expandSentenceIdRange);
                                                             const hasMatch = ids.some(id => response.evidence.find(ev =>
                                                                 ev.sentence_data?.some(s => s.sentence_id === id)
                                                             ));
