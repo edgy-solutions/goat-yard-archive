@@ -60,6 +60,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="OptimizeSearchQuery", llm_response=llm_response, mode="request")
         return typing.cast(types.OptimizedQuery, result)
 
+    def RepairQuote(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.RepairedQuote:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="RepairQuote", llm_response=llm_response, mode="request")
+        return typing.cast(types.RepairedQuote, result)
+
     def ResolveBoundaryPronouns(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.ResolvedPronoun:
@@ -127,6 +133,12 @@ class LlmStreamParser:
     ) -> stream_types.OptimizedQuery:
         result = self.__options.merge_options(baml_options).parse_response(function_name="OptimizeSearchQuery", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.OptimizedQuery, result)
+
+    def RepairQuote(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.RepairedQuote:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="RepairQuote", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.RepairedQuote, result)
 
     def ResolveBoundaryPronouns(
         self, llm_response: str, baml_options: BamlCallOptions = {},

@@ -1,7 +1,7 @@
 
 import dspy
 import re
-from typing import List, Dict
+from typing import List, Dict, Optional, Tuple
 
 # Define Signature
 # Load KJV Data (Global Cache)
@@ -170,6 +170,142 @@ def _verify_quotes(answer: str, chunks_by_sid: Dict[str, str]) -> List[dict]:
 _ELLIPSIS_RE = re.compile(r"\.{3,}|…")
 _BRACKETED_RE = re.compile(r"\[[^\]]*\]")
 _PARENTHESIZED_RE = re.compile(r"\([^)]*\)")
+
+
+def _try_repair_quote_difflib(quote_raw: str, source_text: str, min_coverage: float = 0.5) -> Optional[str]:
+    """Fast deterministic quote repair using difflib's longest-common-subsequence.
+
+    Returns the verbatim source span the model was paraphrasing, if confidence is
+    high enough. None if the alignment isn't clear and we should leave the case
+    for the LLM fallback (or `verified=False`).
+
+    Algorithm:
+    1. Find matching blocks between quote and source via SequenceMatcher.
+    2. Filter out trivially-short matches (< 8 chars).
+    3. If matched characters cover >= `min_coverage` of the quote, take the
+       source span from the start of the first matching block to the end of
+       the last — this captures "what the model was paraphrasing", verbatim.
+    4. Sanity-check length: between 30% and 250% of the original quote length.
+    """
+    if not quote_raw or not source_text:
+        return None
+    from difflib import SequenceMatcher
+
+    source_lower = source_text.lower()
+    quote_lower = quote_raw.lower()
+
+    # Compare against source (a) and quote (b) so matching-block .a indices are
+    # source positions — we'll splice from the raw source for verbatim output.
+    matcher = SequenceMatcher(None, source_lower, quote_lower, autojunk=False)
+    blocks = [b for b in matcher.get_matching_blocks() if b.size >= 8]
+    if not blocks:
+        return None
+
+    matched_chars = sum(b.size for b in blocks)
+    if matched_chars / len(quote_lower) < min_coverage:
+        return None
+
+    blocks.sort(key=lambda b: b.a)
+    source_start = blocks[0].a
+    source_end = blocks[-1].a + blocks[-1].size
+    repaired = source_text[source_start:source_end]
+
+    # Length sanity: don't claim a repair that's wildly off from the model's
+    # intended span.
+    if not (0.3 * len(quote_raw) <= len(repaired) <= 2.5 * len(quote_raw)):
+        return None
+
+    # Defensive: extracted-from-source so this should always pass; included
+    # because boundary-case bugs would otherwise silently substitute hallucination.
+    if repaired not in source_text:
+        return None
+
+    return repaired
+
+
+def _try_repair_quote_llm(quote_raw: str, source_text: str) -> Optional[str]:
+    """LLM fallback for ambiguous quote repairs that difflib couldn't resolve.
+
+    Calls BAML's RepairQuote on the LocalRouter (fast local model). Verifies the
+    LLM's proposed repair is actually a substring of the source before accepting
+    — if the LLM hallucinated, we discard. Returns the verbatim source substring
+    or None.
+    """
+    try:
+        # Local import to avoid circular import at module load.
+        from baml_client.sync_client import b
+        result = b.RepairQuote(model_quote=quote_raw, source_text=source_text)
+        repaired = result.repaired_quote
+        if not repaired:
+            return None
+        # Defensive: the LLM might hallucinate; require the proposed repair to
+        # actually be present in the source text.
+        if repaired not in source_text:
+            return None
+        return repaired
+    except Exception as e:
+        print(f"DEBUG: BAML RepairQuote failed: {e}")
+        return None
+
+
+def _repair_quotes_in_answer(answer: str, chunks_by_sid: Dict[str, str]) -> Tuple[str, List[dict], List[dict]]:
+    """Hybrid quote repair: difflib first, LLM fallback for the rest.
+
+    Mutates the answer text by substituting verbatim source spans for any
+    paraphrased quotes that can be confidently repaired. Tracks both successful
+    repairs (for telemetry) and unrepairable failures (for verified=False).
+
+    Returns (repaired_answer, repairs, failures).
+    """
+    repairs: List[dict] = []
+    failures: List[dict] = []
+
+    def _replace(match: "re.Match[str]") -> str:
+        quote_raw = match.group(1)
+        sid = f"[{match.group(2)}]"
+        source = chunks_by_sid.get(sid)
+        if source is None:
+            failures.append({
+                "quote": quote_raw[:120],
+                "sentence_id": sid,
+                "reason": "cited_sid_not_in_context",
+            })
+            return match.group(0)
+
+        # Already verifies — leave the model's text untouched.
+        normalized_source = _normalize_for_quote_match(source)
+        if _quote_in_source(quote_raw, normalized_source):
+            return match.group(0)
+
+        # Try the fast deterministic repair first.
+        repaired = _try_repair_quote_difflib(quote_raw, source)
+        repair_source = "difflib" if repaired else None
+
+        # Fall back to LLM for ambiguous cases.
+        if not repaired:
+            repaired = _try_repair_quote_llm(quote_raw, source)
+            repair_source = "llm" if repaired else None
+
+        if repaired:
+            repairs.append({
+                "quote": quote_raw[:120],
+                "repaired": repaired[:120],
+                "sentence_id": sid,
+                "source": repair_source,
+            })
+            # Replace the quote content WITHIN the match, preserving the
+            # original surrounding characters (e.g. curly vs straight quote marks).
+            return match.group(0).replace(quote_raw, repaired, 1)
+
+        failures.append({
+            "quote": quote_raw[:120],
+            "sentence_id": sid,
+            "reason": "quote_not_verbatim",
+        })
+        return match.group(0)
+
+    repaired_answer = QUOTE_WITH_CITE_RE.sub(_replace, answer)
+    return repaired_answer, repairs, failures
 
 
 def _quote_in_source(quote_raw: str, normalized_source: str) -> bool:
@@ -465,31 +601,45 @@ class GroundedGillBot(dspy.Module):
              )
 
         # ---------------------------------------------------------
-        # Verbatim quote verification (ADR-0006).
+        # Verbatim quote verification + hybrid repair (ADR-0006).
         # ---------------------------------------------------------
-        # The GillSignature contract promises the user that every double-quoted
-        # span in the answer appears verbatim in Gill's source. Verify by
-        # substring-matching each "quote" [SID] pair against the source for
-        # that chunk (after normalization: lowercase, punctuation stripped,
-        # whitespace collapsed). The model legitimately rewrites punctuation
-        # and hyphenation when quoting; we still catch word-level paraphrase.
+        # The GillSignature contract promises that every double-quoted span in
+        # the answer appears verbatim in Gill's source. When the model drifts
+        # (paraphrases, inserts clarifying words, drops punctuation), the
+        # hybrid pipeline tries to recover the verbatim source:
         #
-        # Soft-fail: when quotes don't verify, set quote_failures on the
-        # Prediction so main.py can surface verified=False, but DON'T replace
-        # the answer text. Hard-replacing produced a bad sample-question UX
-        # ("Verification Failed:..." instead of a real Gill answer) and
-        # discouraged users from trusting the system. The frontend can
-        # render a subtle "some quoted passages may differ slightly" badge
-        # for verified=False without disrupting the answer.
+        # 1. Normalization-based substring check (lowercase, punctuation
+        #    stripped, hyphens collapsed) — passes the simple cases.
+        # 2. difflib repair — finds the source span the model was paraphrasing
+        #    when at least 50% of the quote's characters align to source.
+        #    Deterministic, ~0ms.
+        # 3. LLM repair via BAML's RepairQuote on the LocalRouter — handles
+        #    ambiguous cases that difflib can't. ~0.5-1.5s, gated by a
+        #    defensive check that the LLM's proposed repair is actually in
+        #    the source (rejects hallucinated repairs).
+        # 4. Unrepairable cases set quote_failures so main.py can surface
+        #    verified=False, but the model's text stays in the answer.
+        #
+        # The answer text is mutated in place to substitute verbatim source
+        # spans for any successfully-repaired quotes — the user sees Gill's
+        # actual words rather than the model's drift.
         chunks_by_sid = _build_chunks_by_sid(context_chunks)
-        quote_failures = _verify_quotes(pred.answer, chunks_by_sid)
+        repaired_answer, quote_repairs, quote_failures = _repair_quotes_in_answer(pred.answer, chunks_by_sid)
+
+        if quote_repairs:
+            n_difflib = sum(1 for r in quote_repairs if r["source"] == "difflib")
+            n_llm = sum(1 for r in quote_repairs if r["source"] == "llm")
+            print(f"DEBUG: Quote repairs applied: {len(quote_repairs)} ({n_difflib} difflib, {n_llm} llm)")
+            for r in quote_repairs:
+                print(f"  {r['sentence_id']}: {r['quote'][:60]!r} -> {r['repaired'][:60]!r} via {r['source']}")
         if quote_failures:
-            print(f"DEBUG: Quote verification failures (soft-failing, verified=False): {quote_failures}")
+            print(f"DEBUG: Unrepairable quote failures (verified=False): {quote_failures}")
 
         return dspy.Prediction(
-            answer=pred.answer,
+            answer=repaired_answer,
             citations=citations_list,
             quote_failures=quote_failures,
+            quote_repairs=quote_repairs,
         )
 
 if __name__ == "__main__":

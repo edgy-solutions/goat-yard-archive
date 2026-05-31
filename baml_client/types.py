@@ -68,7 +68,7 @@ class FailureCategory(str, Enum):
     LLMLaziness = "LLMLaziness"
 
 # #########################################################################
-# Generated classes (10)
+# Generated classes (11)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -109,6 +109,9 @@ class RAGAnalysis(BaseModel):
     category: FailureCategory
     reasoning: str
     fix_action: str
+
+class RepairedQuote(BaseModel):
+    repaired_quote: typing.Optional[str] = None
 
 class ResolvedPronoun(BaseModel):
     resolved_entity_names: typing.List[str]

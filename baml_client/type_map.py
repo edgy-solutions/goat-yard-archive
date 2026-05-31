@@ -40,6 +40,9 @@ type_map = {
     "types.RAGAnalysis": types.RAGAnalysis,
     "stream_types.RAGAnalysis": stream_types.RAGAnalysis,
 
+    "types.RepairedQuote": types.RepairedQuote,
+    "stream_types.RepairedQuote": stream_types.RepairedQuote,
+
     "types.ResolvedPronoun": types.ResolvedPronoun,
     "stream_types.ResolvedPronoun": stream_types.ResolvedPronoun,
 

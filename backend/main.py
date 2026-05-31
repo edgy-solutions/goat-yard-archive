@@ -378,13 +378,20 @@ async def search(request: Request, req: SearchRequest):
                     
                     answer = pred.answer
                     citations = pred.citations
-                    # Soft-fail on quote-verification failures: keep the answer,
-                    # flag verified=False so the frontend can render a subtle
-                    # indicator. See ADR-0006 telemetry note.
+                    # Hybrid quote repair (ADR-0006): the bot has already
+                    # attempted to substitute verbatim source spans for any
+                    # paraphrased quotes via difflib + LLM fallback. Surface
+                    # both repairs (telemetry on prompt drift) and unrepairable
+                    # failures (verified=False signal).
                     quote_failures = getattr(pred, "quote_failures", None) or []
+                    quote_repairs = getattr(pred, "quote_repairs", None) or []
                     verified = not quote_failures
-                    if quote_failures and generation:
-                        generation.update(metadata={"quote_verification_failures": len(quote_failures)})
+                    if (quote_failures or quote_repairs) and generation:
+                        generation.update(metadata={
+                            "quote_verification_failures": len(quote_failures),
+                            "quote_repairs_difflib": sum(1 for r in quote_repairs if r.get("source") == "difflib"),
+                            "quote_repairs_llm": sum(1 for r in quote_repairs if r.get("source") == "llm"),
+                        })
 
                     if generation:
                         generation.update(output=answer)

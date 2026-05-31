@@ -175,6 +175,20 @@ class BamlSyncClient:
                 "user_query": user_query,"available_entities": available_entities,
             })
             return typing.cast(types.OptimizedQuery, result.cast_to(types, types, stream_types, False, __runtime__))
+    def RepairQuote(self, model_quote: str,source_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.RepairedQuote:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            stream = self.stream.RepairQuote(model_quote=model_quote,source_text=source_text,
+                baml_options=baml_options)
+            return stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = self.__options.merge_options(baml_options).call_function_sync(function_name="RepairQuote", args={
+                "model_quote": model_quote,"source_text": source_text,
+            })
+            return typing.cast(types.RepairedQuote, result.cast_to(types, types, stream_types, False, __runtime__))
     def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
         baml_options: BamlCallOptions = {},
     ) -> types.ResolvedPronoun:
@@ -312,6 +326,18 @@ class BamlStreamClient:
           lambda x: typing.cast(types.OptimizedQuery, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def RepairQuote(self, model_quote: str,source_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.RepairedQuote, types.RepairedQuote]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="RepairQuote", args={
+            "model_quote": model_quote,"source_text": source_text,
+        })
+        return baml_py.BamlSyncStream[stream_types.RepairedQuote, types.RepairedQuote](
+          result,
+          lambda x: typing.cast(stream_types.RepairedQuote, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.RepairedQuote, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[stream_types.ResolvedPronoun, types.ResolvedPronoun]:
@@ -410,6 +436,13 @@ class BamlHttpRequestClient:
             "user_query": user_query,"available_entities": available_entities,
         }, mode="request")
         return result
+    def RepairQuote(self, model_quote: str,source_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="RepairQuote", args={
+            "model_quote": model_quote,"source_text": source_text,
+        }, mode="request")
+        return result
     def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -486,6 +519,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="OptimizeSearchQuery", args={
             "user_query": user_query,"available_entities": available_entities,
+        }, mode="stream")
+        return result
+    def RepairQuote(self, model_quote: str,source_text: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="RepairQuote", args={
+            "model_quote": model_quote,"source_text": source_text,
         }, mode="stream")
         return result
     def ResolveBoundaryPronouns(self, unresolved_text: str,previous_text: str,previous_entities: typing.List[str],
