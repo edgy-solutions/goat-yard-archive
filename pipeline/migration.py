@@ -42,7 +42,14 @@ def trigger_and_wait_weaviate_backup(url: str, payload: dict, action: str) -> st
         Exception: If the Weaviate operation reports a FAILED status.
     """
     response = requests.post(url, json=payload)
-    response.raise_for_status()
+    if not response.ok:
+        # Weaviate's 422 bodies tell you *which* class or setting it didn't
+        # like. raise_for_status alone drops that, leaving an opaque error.
+        raise Exception(
+            f"Weaviate {action} POST {url} failed: "
+            f"status={response.status_code} body={response.text} "
+            f"payload={payload}"
+        )
     data = response.json()
     backup_id = data["id"]
 
