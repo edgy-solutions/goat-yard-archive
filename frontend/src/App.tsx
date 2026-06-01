@@ -222,6 +222,16 @@ function App() {
                     setErrorKind('backend_unavailable');
                     throw new Error(errorMsg);
                 }
+                if (res.status === 404) {
+                    // /api/search never legitimately returns 404 — the route is
+                    // registered on the backend. When traefik has no healthy api
+                    // pods (e.g. mid-rollout, OOMKilled, scaled to 0) it returns
+                    // 404 with no matching backend. Treat as backend_unavailable
+                    // so the user sees the graceful-degradation message instead
+                    // of "bad request".
+                    setErrorKind('backend_unavailable');
+                    throw new Error(errorMsg);
+                }
                 if (res.status >= 400) {
                     setErrorKind('bad_request');
                     throw new Error(errorMsg);
