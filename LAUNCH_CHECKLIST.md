@@ -171,6 +171,22 @@ Cloudflare action.
 
 Captured here so they don't get lost, but **not blocking the launch**.
 
+### Known regressions / behaviors to investigate
+- [ ] **`two_thieves_001`** in the eval set fails (refuses instead of
+      answering). Calibration was flipped to `expected=answer` after we
+      observed Gill *does* discuss the Papist Disma tradition on
+      Luke 23:43. The bot in prod still refuses — likely the
+      LUKE_23_43_S05 chunk isn't surfacing in retrieval for the way the
+      question is phrased. Investigate: run the query, dump the retrieved
+      chunk IDs, see if Disma chunk appears at all.
+- [ ] **Test Weaviate's HNSW snapshot was corrupt** (caused the original
+      backup-based migration to fail). Fixed by deleting the corrupt
+      snapshot file + restarting test Weaviate. **Verify the next
+      backup→restore cycle on test works end-to-end** before the next
+      promote. The Dagster `promote_test_vectors_to_prod` job should
+      succeed without falling back to `copy_test_to_prod.py`.
+
+### Deferred ADRs
 - [ADR-0003](docs/adr/0003-cross-encoder-reranking.md) — Cross-encoder
   reranker for precision improvement. Best with eval-set feedback from
   real Puritan Board questions guiding what to tune.
