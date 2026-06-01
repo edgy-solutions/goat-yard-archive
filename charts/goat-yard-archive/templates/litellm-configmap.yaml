@@ -13,14 +13,26 @@ data:
           model: ollama/qwen3-embedding:latest
           api_base: {{ . | quote }}
           keep_alive: -1
+          num_ctx: 4096
 {{- end }}
       # --- BAML ROUTER MODELS (Gemma 4 Edge) ---
+      # Gemma is used for RepairQuote, which embeds the full CommentaryChunk
+      # as "source text" — long Gill verses (esp. Romans / Hebrews / footnoted
+      # chunks) regularly exceed 2k. 16k gives plenty of headroom.
+      # keep_alive duplicated into extra_body because litellm historically
+      # only forwards the top-level field on /api/embeddings, not /api/chat
+      # — Ollama then drops it back to its 5-min default for chat models.
 {{- range .Values.litellm.ollamaNodes }}
       - model_name: local-router
         litellm_params:
           model: ollama/gemma4:e4b
           api_base: {{ . | quote }}
           keep_alive: -1
+          num_ctx: 16384
+          extra_body:
+            keep_alive: -1
+            options:
+              num_ctx: 16384
 {{- end }}
     litellm_settings:
       success_callback: ["langfuse"]

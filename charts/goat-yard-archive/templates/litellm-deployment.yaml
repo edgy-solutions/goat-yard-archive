@@ -14,6 +14,12 @@ spec:
     metadata:
       labels:
         app: litellm
+      annotations:
+        # Force a rollout when the litellm-config configmap changes.
+        # subPath-mounted configmaps don't propagate live updates, so without
+        # this annotation a helm upgrade that only changes the config would
+        # leave the running pod on the stale snapshot.
+        checksum/config: {{ include (print $.Template.BasePath "/litellm-configmap.yaml") . | sha256sum }}
     spec:
       containers:
         - name: litellm
