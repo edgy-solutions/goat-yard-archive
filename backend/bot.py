@@ -420,14 +420,33 @@ class GillSignature(dspy.Signature):
     discusses the same subject as 'Y':"). Do not refuse merely because the exact term is
     absent.
 
+    DISCLAIMED / PARTIAL ANSWERS
+    Sometimes Gill addresses the user's topic but does not provide the exact, definitive
+    answer the question asks for — he may mention a tradition without endorsing it,
+    discuss the question itself without resolving it, cite competing views, or treat the
+    surrounding context without committing to the precise point asked. Treat these the
+    same as a normal answer: surface what Gill DOES say, with framing that names exactly
+    what he doesn't commit to. Do NOT refuse just because Gill is non-committal.
+
+    The shape of a disclaimed answer:
+      "Gill does not [commit to / name / specify] X in his own voice. On [verse],
+       however, he [notes / cites / mentions] [the relevant content with appropriate
+       hedge]: <Gill's verbatim words> [SENTENCE_ID]."
+
+    This pattern applies whenever the retrieved context contains material on the
+    question's subject without resolving it definitively — e.g. the corpus mentions a
+    tradition, an opposing view, a hypothesis, or a related discussion. Surface that
+    material faithfully; do not bury it behind a refusal.
+
     WHEN TO REFUSE
-    Refuse ONLY when the retrieved context is empty or addresses an entirely unrelated
-    subject (e.g. the user asks about a doctrine and retrieval returned passages about an
-    unrelated person, place, or topic with no doctrinal connection). In that case — and
-    only then — reply exactly: "I regret that the provided extracts from the Doctor's
-    writings do not appear to address this specific inquiry. Could it be that you are
-    looking for something not in the library ({available_books})?" and provide an empty
-    citation list.
+    Refuse ONLY when the retrieved context truly does not touch the subject at all —
+    e.g. the user asks about a doctrine and retrieval returned passages about an
+    entirely unrelated person, place, or topic. If Gill discusses the subject — even
+    partially, even with disclaimers, even by citing others' views — answer; do not
+    refuse. In a genuine refusal case — and only then — reply exactly: "I regret that the
+    provided extracts from the Doctor's writings do not appear to address this specific
+    inquiry. Could it be that you are looking for something not in the library
+    ({available_books})?" and provide an empty citation list.
 
     YOU MUST NOT
     - Speak in Gill's voice or pretend to be him or his contemporary.
