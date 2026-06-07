@@ -235,19 +235,21 @@ simple poll-based agent so the helm side can be automated too.
       verification and fail when a cited SID has no Gill-side match. KJV
       quotes remain fully valid as quotes — they just don't satisfy the
       "must quote Gill" obligation that goes with citing him.
-- [ ] **`real_ishmael_circumcision_001`** — **retrieval ranking miss.**
-      Log inspection (2026-06-07): the question explicitly cites Genesis
-      17:19-21, but retrieval returned a *covenant-themed* slice of
-      Genesis 17 — 17:7, 17:9, 17:11, 17:13, 17:15, 17:19 (Isaac's
-      covenant) — and missed the actual *act* verses 17:23, 17:25-26
-      (Abraham circumcising Ishmael). Model's reasoning correctly notes
-      the retrieved excerpts "focus on the confirmation of Isaac's
-      birth... but do not touch on the circumcision of Ishmael."
-      Fixes to explore: (a) boost verse-reference matching when the
-      question literally contains a verse number, (b) widen top-K so the
-      ranking isn't all clustered on the covenant theme, (c) entity-
-      anchored retrieval treating "Ishmael" + "circumcised" as a phrase
-      bias.
+- [ ] **`real_ishmael_circumcision_001`** — **retrieval ranking miss.
+      Source data is intact** (Weaviate query 2026-06-07 confirmed
+      Genesis 17:23, 17:24, 17:25, 17:26, 17:27 all exist with rich Gill
+      commentary on the circumcision act and Ishmael's age). The
+      question explicitly cites Genesis 17:19-21, but retrieval returned
+      a *covenant-themed* slice of Genesis 17 — 17:7, 17:9, 17:11,
+      17:13, 17:15, 17:19 (Isaac's covenant) — and missed the act
+      verses 17:23-27 right next to them on disk. Model's reasoning
+      correctly notes the retrieved excerpts "focus on the confirmation
+      of Isaac's birth... but do not touch on the circumcision of
+      Ishmael." Fixes to explore: (a) boost verse-reference matching
+      when the question literally contains a verse number, (b) widen
+      top-K so the ranking isn't all clustered on the covenant theme,
+      (c) entity-anchored retrieval treating "Ishmael" + "circumcised"
+      as a phrase bias.
 - [ ] **`two_thieves_001`** — **bot prompt/signature defect, not
       retrieval.** Log inspection (2026-06-07): retrieval correctly
       surfaced `[LUKE_23_43_S05]` and the model's *reasoning* field
