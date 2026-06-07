@@ -28,6 +28,11 @@ data:
   # External Integrations (Non-Sensitive)
   {{- if .Values.api.env.APP_ENV }}
   APP_ENV: {{ .Values.api.env.APP_ENV | quote }}
+  # Langfuse v3 reads its environment label from this env var when the
+  # client is initialized. Mirrors APP_ENV so each cluster's traces are
+  # tagged with the right environment in the Langfuse UI (prod = "production",
+  # test = "development"). Filterable via the Environment column on Traces.
+  LANGFUSE_TRACING_ENVIRONMENT: {{ .Values.api.env.APP_ENV | quote }}
   {{- end }}
   {{- if .Values.api.env.LITELLM_PROXY_URL }}
   LITELLM_PROXY_URL: {{ .Values.api.env.LITELLM_PROXY_URL | quote }}
