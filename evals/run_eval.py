@@ -83,15 +83,42 @@ def citation_set(items: List[str]) -> set:
     return {normalize_citation(c) for c in (items or []) if c}
 
 
-# Sentence-ID pattern: BOOK_CHAPTER_VERSE_Snn  e.g. [LEVITICUS_16_22_S00], [JOHN_1_42_S03]
-SENTENCE_ID_RE = re.compile(r"\[([A-Z0-9_]+_S\d+)\]")
+# Bracket pattern matches the frontend's citation parsing — comma-separated
+# Sentence IDs in a single bracket like [JOHN_1_42_S03, JOHN_1_42_S04] are
+# normal model output, and range-style [GENESIS_1_1_S02-S04] expands to
+# S02..S04. Lowercase letters are tolerated because the model occasionally
+# produces non-canonical IDs (e.g. [GENESIS_1_End_S00]) — the SID_FORMAT_RE
+# below still requires uppercase, so those just get dropped silently.
+BRACKET_RE = re.compile(r"\[([A-Za-z0-9_, -]+)\]")
+SID_FORMAT_RE = re.compile(r"^[A-Z0-9_]+_S\d+$")
+RANGE_RE = re.compile(r"^([A-Z0-9_]+)_S(\d+)-S(\d+)$")
+
+
+def _expand_range(sid: str) -> List[str]:
+    """Expand a range like GENESIS_1_1_S02-S04 to ['GENESIS_1_1_S02', '..._S03',
+    '..._S04']. Non-ranges return as-is."""
+    m = RANGE_RE.match(sid)
+    if not m:
+        return [sid]
+    prefix, start, end = m.group(1), int(m.group(2)), int(m.group(3))
+    return [f"{prefix}_S{i:02d}" for i in range(start, end + 1)]
 
 
 def extract_sentence_ids(answer: str) -> List[str]:
     """The API response's `citations` field is [Vol N, p. M]-style page citations;
     the actual Sentence IDs the eval cares about appear INLINE in the answer text.
-    Match the bracketed [BOOK_CH_VS_Snn] pattern."""
-    return [f"[{m}]" for m in SENTENCE_ID_RE.findall(answer or "")]
+    Match bracketed groups of one-or-more Sentence IDs, handle comma-separated
+    and range notation the same way the frontend does."""
+    ids: List[str] = []
+    for group in BRACKET_RE.findall(answer or ""):
+        for part in group.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            for sid in _expand_range(part):
+                if SID_FORMAT_RE.match(sid):
+                    ids.append(f"[{sid}]")
+    return ids
 
 
 @dataclass

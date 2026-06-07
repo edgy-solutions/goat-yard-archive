@@ -235,6 +235,13 @@ simple poll-based agent so the helm side can be automated too.
       verification and fail when a cited SID has no Gill-side match. KJV
       quotes remain fully valid as quotes — they just don't satisfy the
       "must quote Gill" obligation that goes with citing him.
+- [ ] **`real_ishmael_circumcision_001`** in the eval set fails the same
+      way as `two_thieves_001`: refuses with "the provided extracts do
+      not appear to address this specific inquiry" when the calibration
+      expects an answer. Two consecutive isolated re-runs reproduced the
+      refusal deterministically — likely a retrieval issue specific to
+      the question phrasing (multi-clause + Bible reference numbers in
+      the body). Investigate alongside two_thieves.
 - [ ] **`two_thieves_001`** in the eval set fails (refuses instead of
       answering). Calibration was flipped to `expected=answer` after we
       observed Gill *does* discuss the Papist Disma tradition on
