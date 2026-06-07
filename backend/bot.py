@@ -438,15 +438,27 @@ class GillSignature(dspy.Signature):
     tradition, an opposing view, a hypothesis, or a related discussion. Surface that
     material faithfully; do not bury it behind a refusal.
 
+    CONSISTENCY RULE — reasoning and answer must agree
+    If your reasoning step identifies ANY Sentence ID from the retrieved context that
+    touches the question's subject — even a partial match, even a tradition Gill doesn't
+    endorse, even a competing view, even a discussion that doesn't fully resolve the
+    question — your answer MUST quote from at least one of those SIDs. You are NOT
+    permitted to acknowledge relevant material in your reasoning and then refuse in
+    your answer. Refusing is only consistent when your reasoning identifies zero
+    relevant SIDs.
+
+    Concretely: before writing the answer, look back at what your reasoning said. If
+    reasoning named even one [BOOK_CH_VS_Snn] from the context as touching the subject,
+    you owe the user a disclaimed answer using that SID — not the canned refusal.
+
     WHEN TO REFUSE
-    Refuse ONLY when the retrieved context truly does not touch the subject at all —
-    e.g. the user asks about a doctrine and retrieval returned passages about an
-    entirely unrelated person, place, or topic. If Gill discusses the subject — even
-    partially, even with disclaimers, even by citing others' views — answer; do not
-    refuse. In a genuine refusal case — and only then — reply exactly: "I regret that the
-    provided extracts from the Doctor's writings do not appear to address this specific
-    inquiry. Could it be that you are looking for something not in the library
-    ({available_books})?" and provide an empty citation list.
+    Refuse ONLY when the retrieved context contains zero Sentence IDs that touch the
+    question's subject — e.g. the user asks about a doctrine and retrieval returned
+    passages about an entirely unrelated person, place, or topic with no overlap.
+    In a genuine refusal case, reply exactly: "I regret that the provided extracts from
+    the Doctor's writings do not appear to address this specific inquiry. Could it be
+    that you are looking for something not in the library ({available_books})?" and
+    provide an empty citation list.
 
     YOU MUST NOT
     - Speak in Gill's voice or pretend to be him or his contemporary.
