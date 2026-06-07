@@ -27,11 +27,26 @@ except ImportError:
 # without verification, those slips produce fake-Gill in disguise.
 # ---------------------------------------------------------------------------
 
-# Matches `"quoted text" [SENTENCE_ID]` — Sentence ID immediately after the
-# closing quote mark per the GillSignature output contract. The Sentence ID
-# pattern (BOOK_CH_VS_Snn) allows alphanumerics and underscores in the BOOK.
+# Matches `"quoted text" ...up to 80 chars... [SENTENCE_ID]`.
+#
+# The GillSignature contract asks the model to place the Sentence ID
+# immediately after the closing quote, but the model legitimately writes
+# things like `"verbatim phrase" explanatory framing [SID]` and we don't
+# want the verifier to lose the pair because of a few words of narration.
+#
+# The intervening gap excludes:
+#   - quote chars (`"` / `“` / `”`) — to avoid pairing across two quotes
+#   - newlines — quote-cite pairs shouldn't span paragraph breaks
+#   - `[` and `]` — so we can't accidentally jump over an unrelated bracket
+#     (e.g. `[work]`-style clarifications or another sentence ID earlier
+#     in the line) and pair with a citation further down the answer
+#
+# If we ever see the model attaching real Gill quotes to citations *more
+# than 80 chars away*, we'd revisit the limit. For now this catches the
+# legitimate-quote-with-inline-explanation pattern without inviting
+# silent mis-pairing.
 QUOTE_WITH_CITE_RE = re.compile(
-    r'["“”]([^"“”]+)["“”]\s*\[([A-Z0-9_]+_S\d+)\]'
+    r'["“”]([^"“”]+)["“”][^"“”\n\[\]]{0,80}\[([A-Z0-9_]+_S\d+)\]'
 )
 
 # Tokens we strip during normalization.

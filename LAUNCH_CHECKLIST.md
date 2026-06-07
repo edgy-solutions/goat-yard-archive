@@ -211,6 +211,16 @@ self-hosted runner on the launchpad, ArgoCD / Flux in the cluster, or a
 simple poll-based agent so the helm side can be automated too.
 
 ### Known regressions / behaviors to investigate
+- [ ] **Verifier prompt tightening (fallback if regex over-pairs).** The
+      quote/citation regex was widened to allow up to 80 chars of narration
+      between a quote and its `[SID]` because the model legitimately writes
+      `"verbatim" framing [SID]`. If real-world traffic shows the looser
+      gap causing silent mis-pairing (a quote getting attributed to the
+      wrong nearby SID), the fallback is to add explicit "do NOT" examples
+      to GillSignature instead — e.g. `Wrong: "quote" explanation [SID].
+      Right: "quote" [SID] explanation.` Holding off on the prompt change
+      preemptively because more instructions = more surface area for the
+      model to misinterpret something else.
 - [ ] **Verifier refinement: every Gill citation needs at least one Gill
       quote.** Today the verifier checks each `"quote" [SID]` pair as a
       substring match against the chunk's combined KJV+commentary source.
