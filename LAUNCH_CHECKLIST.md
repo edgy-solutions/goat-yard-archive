@@ -171,6 +171,45 @@ Cloudflare action.
 
 Captured here so they don't get lost, but **not blocking the launch**.
 
+### Top priority: blue/green deploy for safe promotion
+
+Current promote flow is one-instance: wipe prod Weaviate, copy from test
+into prod live storage, helm-upgrade backend with new image tag.
+Recoverable (we have safety snapshots) but visible to users if something
+fails mid-way.
+
+Target architecture:
+
+- **Two Weaviate statefulsets** in gya-backend (`weaviate-blue`,
+  `weaviate-green`), each with its own PVC.
+- **Two backend deployments** in gya-frontend, one per color, each with
+  `WEAVIATE_URL` pointing at its color's service.
+- **Two label-selector services**: `weaviate-live` and
+  `gya-frontend-api-live` select on `live=true`. The cloudflared tunnel +
+  Worker route `goatyardarchive.org/api/*` only ever hits these live
+  services.
+- **Preview hostname**: `preview.goatyardarchive.org` tunnel hostname
+  routes to the *standby* color so we can validate it under real DNS +
+  TLS before the swap.
+- **Promotion script** (in `pipeline/scripts/promote_blue_green.py` or
+  similar): determines standby color, wipes its data, runs
+  `copy_test_to_prod.py` against the standby's Weaviate URL, applies the
+  new helm release to the standby, runs evals against `preview.`, then
+  flips `live=true` labels atomically.
+- **Rollback**: re-flip the labels. Old color's data and pods are
+  preserved until next promotion overwrites them.
+
+Estimated effort: ~1 focused day. Best done after the launch settles and
+the existing single-instance flow has caused at least one minor incident
+that motivates the work.
+
+CI alignment (also blocked on this): with blue/green in place we can wire
+GitHub Actions to push to standby on tag, gating the live swap on a
+manual approval step. Without blue/green, tag-driven deploy is a foot-gun
+because it would touch the live path directly. Either set up a
+self-hosted runner on the launchpad, ArgoCD / Flux in the cluster, or a
+simple poll-based agent so the helm side can be automated too.
+
 ### Known regressions / behaviors to investigate
 - [ ] **`two_thieves_001`** in the eval set fails (refuses instead of
       answering). Calibration was flipped to `expected=answer` after we
