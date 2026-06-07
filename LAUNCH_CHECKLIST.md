@@ -235,20 +235,35 @@ simple poll-based agent so the helm side can be automated too.
       verification and fail when a cited SID has no Gill-side match. KJV
       quotes remain fully valid as quotes — they just don't satisfy the
       "must quote Gill" obligation that goes with citing him.
-- [ ] **`real_ishmael_circumcision_001`** in the eval set fails the same
-      way as `two_thieves_001`: refuses with "the provided extracts do
-      not appear to address this specific inquiry" when the calibration
-      expects an answer. Two consecutive isolated re-runs reproduced the
-      refusal deterministically — likely a retrieval issue specific to
-      the question phrasing (multi-clause + Bible reference numbers in
-      the body). Investigate alongside two_thieves.
-- [ ] **`two_thieves_001`** in the eval set fails (refuses instead of
-      answering). Calibration was flipped to `expected=answer` after we
-      observed Gill *does* discuss the Papist Disma tradition on
-      Luke 23:43. The bot in prod still refuses — likely the
-      LUKE_23_43_S05 chunk isn't surfacing in retrieval for the way the
-      question is phrased. Investigate: run the query, dump the retrieved
-      chunk IDs, see if Disma chunk appears at all.
+- [ ] **`real_ishmael_circumcision_001`** — **retrieval ranking miss.**
+      Log inspection (2026-06-07): the question explicitly cites Genesis
+      17:19-21, but retrieval returned a *covenant-themed* slice of
+      Genesis 17 — 17:7, 17:9, 17:11, 17:13, 17:15, 17:19 (Isaac's
+      covenant) — and missed the actual *act* verses 17:23, 17:25-26
+      (Abraham circumcising Ishmael). Model's reasoning correctly notes
+      the retrieved excerpts "focus on the confirmation of Isaac's
+      birth... but do not touch on the circumcision of Ishmael."
+      Fixes to explore: (a) boost verse-reference matching when the
+      question literally contains a verse number, (b) widen top-K so the
+      ranking isn't all clustered on the covenant theme, (c) entity-
+      anchored retrieval treating "Ishmael" + "circumcised" as a phrase
+      bias.
+- [ ] **`two_thieves_001`** — **bot prompt/signature defect, not
+      retrieval.** Log inspection (2026-06-07): retrieval correctly
+      surfaced `[LUKE_23_43_S05]` and the model's *reasoning* field
+      explicitly identifies Gill's mention of the Papist Disma tradition.
+      But the *answer* field outputs the canned refusal because Gill
+      never commits to a name (only notes the tradition). The
+      GillSignature defaults to refusal whenever it can't give a
+      definitive answer; it needs to also handle the
+      "partial-with-disclaimer" pattern. Concrete fix: add a clause to
+      the signature like "If the corpus mentions traditions,
+      hypotheses, or partial information that touches the question,
+      surface it with an appropriate disclaimer ('Gill does not name
+      them, but he mentions a Papist tradition that one was called
+      Disma...'). Reserve refusal for cases where Gill is silent on
+      the topic, not cases where he addresses it without committing to
+      a definitive answer."
 - [ ] **Test Weaviate's HNSW snapshot was corrupt** (caused the original
       backup-based migration to fail). Fixed by deleting the corrupt
       snapshot file + restarting test Weaviate. **Verify the next
