@@ -211,6 +211,20 @@ self-hosted runner on the launchpad, ArgoCD / Flux in the cluster, or a
 simple poll-based agent so the helm side can be automated too.
 
 ### Known regressions / behaviors to investigate
+- [ ] **Verifier refinement: every Gill citation needs at least one Gill
+      quote.** Today the verifier checks each `"quote" [SID]` pair as a
+      substring match against the chunk's combined KJV+commentary source.
+      That catches paraphrased "quotes" but not the more subtle failure
+      where the model attaches *only* KJV quotes (or no quote at all) to a
+      Gill citation — Gill is summarized rather than quoted. The Garden
+      query (2026-06-07) hit this: `[GENESIS_3_24_S00]` was cited with no
+      quote attached, `[GENESIS_3_23_S00]` only had KJV quotes attached,
+      and `[GENESIS_2_15_S00]` only had a KJV paraphrase. The chunk
+      already cleanly separates Gill's commentary from the KJV header, so
+      the fix is to track quote provenance (Gill vs KJV) during
+      verification and fail when a cited SID has no Gill-side match. KJV
+      quotes remain fully valid as quotes — they just don't satisfy the
+      "must quote Gill" obligation that goes with citing him.
 - [ ] **`two_thieves_001`** in the eval set fails (refuses instead of
       answering). Calibration was flipped to `expected=answer` after we
       observed Gill *does* discuss the Papist Disma tradition on
