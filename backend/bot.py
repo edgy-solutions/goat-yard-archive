@@ -77,38 +77,40 @@ def _normalize_for_quote_match(text: str) -> str:
     return s
 
 
-def _build_chunks_by_sid(context_chunks: List[dict]) -> Dict[str, str]:
-    """Build {sentence_id_in_brackets: source_text} from the retrieved chunks.
+def _build_chunks_by_sid(context_chunks: List[dict]) -> Dict[str, Dict[str, str]]:
+    """Build {sentence_id_in_brackets: {"gill": ..., "kjv": ...}} from chunks.
 
-    The "source text" for each Sentence ID is the FULL CHUNK content the SID
-    belongs to — concatenation of all sentence_data texts plus the chunk's KJV
-    scripture (if available). This is intentionally broader than just that
-    one sentence's text because:
+    Sources are kept separate so verification can track quote provenance:
 
-    - The model legitimately stitches quotes across consecutive sentences of
-      the same chunk (sentence-level granularity is finer than typical
-      readable-quote granularity).
-    - The model legitimately quotes the KJV scripture that Gill himself
-      cites in the same chunk.
+    - "gill": all sentence_data texts in the chunk, concatenated. This is the
+      portion that's authored by Gill (his commentary on the verse).
+    - "kjv": the KJV scripture text for the chunk's verse_ref, if any.
 
-    Strict per-sentence verification produced too many false positives; per-
-    chunk verification keeps the architectural promise (quoted text appears
-    in Gill's verbatim source for the cited verse) while avoiding the
-    cross-sentence-boundary false positives.
+    Why separated:
+    The faithfulness contract is "every Gill citation needs at least one
+    verbatim Gill quote attached." KJV quotes inside quotation marks are
+    welcome on their own merits, but they don't substitute for actually
+    quoting Gill when his sentence ID is cited. By tracking which source a
+    matched quote came from, we can fail an answer that only attaches KJV
+    quotes (or no quotes at all) to a Gill citation — Gill ends up
+    summarized rather than quoted, which is what the verifier is for.
+
+    Why the chunk's full Gill text (not just one sentence):
+    The model legitimately stitches quotes across consecutive sentences of
+    the same chunk, so per-sentence verification produces false positives.
     """
-    out: Dict[str, str] = {}
+    out: Dict[str, Dict[str, str]] = {}
     for chunk in context_chunks:
-        # Build the chunk's full searchable text once.
-        parts = []
-        # Scripture (Gill quotes the verse he's commenting on at the top).
         verse_ref = chunk.get("verse_ref", "")
+        kjv = ""
         try:
             scripture = KJV_DATA.get(verse_ref) if verse_ref else None
             if scripture:
-                parts.append(scripture)
+                kjv = scripture
         except Exception:
             pass
-        # All sentence-granularity texts in the chunk.
+
+        gill_parts: List[str] = []
         sentence_ids: List[str] = []
         for sent in (chunk.get("sentence_data") or []):
             sid = sent.get("sentence_id")
@@ -116,55 +118,21 @@ def _build_chunks_by_sid(context_chunks: List[dict]) -> Dict[str, str]:
             if sid:
                 sentence_ids.append(f"[{sid}]")
             if text:
-                parts.append(text)
+                gill_parts.append(text)
         # Fallback to the chunk's combined `content` if sentence_data is missing.
         if not sentence_ids and chunk.get("content"):
-            parts.append(chunk["content"])
-        combined = " ".join(parts)
+            gill_parts.append(chunk["content"])
+        gill = " ".join(gill_parts)
+
         for sid_bracketed in sentence_ids:
-            out[sid_bracketed] = combined
+            out[sid_bracketed] = {"gill": gill, "kjv": kjv}
     return out
 
 
-def _verify_quotes(answer: str, chunks_by_sid: Dict[str, str]) -> List[dict]:
-    """Return a list of failed-quote dicts. Empty list = all quotes verified.
-
-    Each failure dict has: quote, sentence_id, reason. Reasons:
-    - 'cited_sid_not_in_context': the Sentence ID after the quote isn't in any
-      retrieved chunk (the existing citation validator already catches this,
-      but harmless to repeat here for defense-in-depth).
-    - 'quote_not_verbatim': the normalized quoted text isn't a substring of
-      the normalized source. Strong signal the model paraphrased while
-      putting quote marks around the paraphrase.
-
-    Handles model conventions:
-    - Ellipsis (`...` or `…`) inside a quote: split and verify each part
-      independently against the source. The model uses ellipsis to elide
-      middle phrasing while attributing the rest to Gill.
-    - Bracketed insertions like `[work]` or parenthetical clarifications:
-      try a fallback match with the bracketed/parenthesized content stripped.
-    """
-    failures: List[dict] = []
-    for match in QUOTE_WITH_CITE_RE.finditer(answer or ""):
-        quote_raw = match.group(1)
-        sid = f"[{match.group(2)}]"
-        source = chunks_by_sid.get(sid)
-        if source is None:
-            failures.append({
-                "quote": quote_raw[:120],
-                "sentence_id": sid,
-                "reason": "cited_sid_not_in_context",
-            })
-            continue
-        ns = _normalize_for_quote_match(source)
-        if _quote_in_source(quote_raw, ns):
-            continue
-        failures.append({
-            "quote": quote_raw[:120],
-            "sentence_id": sid,
-            "reason": "quote_not_verbatim",
-        })
-    return failures
+# Permissive sid extractor used post-verification to find all Gill citations
+# in the answer text — including those NOT attached to a quote — so we can
+# enforce "every cited SID has at least one Gill quote attached."
+_ANY_CITE_RE = re.compile(r'\[([A-Z0-9_]+_S\d+)\]')
 
 
 _ELLIPSIS_RE = re.compile(r"\.{3,}|…")
@@ -248,23 +216,36 @@ def _try_repair_quote_llm(quote_raw: str, source_text: str) -> Optional[str]:
         return None
 
 
-def _repair_quotes_in_answer(answer: str, chunks_by_sid: Dict[str, str]) -> Tuple[str, List[dict], List[dict]]:
-    """Hybrid quote repair: difflib first, LLM fallback for the rest.
+def _repair_quotes_in_answer(
+    answer: str, chunks_by_sid: Dict[str, Dict[str, str]]
+) -> Tuple[str, List[dict], List[dict]]:
+    """Hybrid quote repair + provenance-aware verification.
 
-    Mutates the answer text by substituting verbatim source spans for any
-    paraphrased quotes that can be confidently repaired. Tracks both successful
-    repairs (for telemetry) and unrepairable failures (for verified=False).
+    Per quote match `"text" [SID]`:
+      1. Try to match against Gill commentary (sources["gill"]) — if it lands,
+         the SID has been "satisfied" by a Gill quote.
+      2. Else try to match against KJV (sources["kjv"]) — the quote is valid
+         (KJV is welcome) but doesn't satisfy the SID's Gill-quote obligation.
+      3. Else try difflib/LLM repair against the combined source; if the
+         repaired span lands in Gill text, that satisfies the SID.
+      4. Else: quote_not_verbatim failure.
+
+    After all quote/cite pairs are processed, scan the answer for any [SID]
+    references (with or without an attached quote) and check: every cited
+    Gill SID must have at least one Gill-side quote attached. If not, emit
+    a no_gill_quote_for_citation failure — Gill was summarized, not quoted.
 
     Returns (repaired_answer, repairs, failures).
     """
     repairs: List[dict] = []
     failures: List[dict] = []
+    sids_with_gill_quote: set[str] = set()
 
     def _replace(match: "re.Match[str]") -> str:
         quote_raw = match.group(1)
         sid = f"[{match.group(2)}]"
-        source = chunks_by_sid.get(sid)
-        if source is None:
+        sources = chunks_by_sid.get(sid)
+        if sources is None:
             failures.append({
                 "quote": quote_raw[:120],
                 "sentence_id": sid,
@@ -272,18 +253,28 @@ def _repair_quotes_in_answer(answer: str, chunks_by_sid: Dict[str, str]) -> Tupl
             })
             return match.group(0)
 
-        # Already verifies — leave the model's text untouched.
-        normalized_source = _normalize_for_quote_match(source)
-        if _quote_in_source(quote_raw, normalized_source):
+        gill_src = sources.get("gill", "")
+        kjv_src = sources.get("kjv", "")
+        gill_norm = _normalize_for_quote_match(gill_src)
+        kjv_norm = _normalize_for_quote_match(kjv_src)
+
+        # 1) Direct Gill match — satisfies the SID's obligation, leave text alone.
+        if _quote_in_source(quote_raw, gill_norm):
+            sids_with_gill_quote.add(sid)
             return match.group(0)
 
-        # Try the fast deterministic repair first.
-        repaired = _try_repair_quote_difflib(quote_raw, source)
-        repair_source = "difflib" if repaired else None
+        # 2) Direct KJV match — valid quote, doesn't satisfy Gill obligation.
+        if kjv_norm and _quote_in_source(quote_raw, kjv_norm):
+            return match.group(0)
 
-        # Fall back to LLM for ambiguous cases.
+        # 3) Repair against the combined source. Track which half the
+        # repaired span actually came from so we know whether to credit it
+        # toward the SID's Gill-quote obligation.
+        combined = (gill_src + " \n " + kjv_src).strip()
+        repaired = _try_repair_quote_difflib(quote_raw, combined)
+        repair_source = "difflib" if repaired else None
         if not repaired:
-            repaired = _try_repair_quote_llm(quote_raw, source)
+            repaired = _try_repair_quote_llm(quote_raw, combined)
             repair_source = "llm" if repaired else None
 
         if repaired:
@@ -294,14 +285,18 @@ def _repair_quotes_in_answer(answer: str, chunks_by_sid: Dict[str, str]) -> Tupl
             # each segment as its own div with margin-bottom, which displays
             # as an orphaned period after a blank line.
             repaired = _WHITESPACE_RE.sub(" ", repaired).strip()
+            # Determine provenance of the repaired span. Substring check
+            # against the gill source is enough — if the model was
+            # paraphrasing a Gill phrase, the repair lands in gill_src; if it
+            # was paraphrasing KJV, it lands in kjv_src.
+            if repaired and repaired in gill_src:
+                sids_with_gill_quote.add(sid)
             repairs.append({
                 "quote": quote_raw[:120],
                 "repaired": repaired[:120],
                 "sentence_id": sid,
                 "source": repair_source,
             })
-            # Replace the quote content WITHIN the match, preserving the
-            # original surrounding characters (e.g. curly vs straight quote marks).
             return match.group(0).replace(quote_raw, repaired, 1)
 
         failures.append({
@@ -312,6 +307,26 @@ def _repair_quotes_in_answer(answer: str, chunks_by_sid: Dict[str, str]) -> Tupl
         return match.group(0)
 
     repaired_answer = QUOTE_WITH_CITE_RE.sub(_replace, answer)
+
+    # Faithfulness pass: every cited Gill SID needs at least one Gill quote.
+    # Catches the failure mode where the model attaches only KJV quotes — or
+    # nothing at all — to a Gill citation, summarizing Gill rather than
+    # quoting him.
+    cited_sids = {f"[{m.group(1)}]" for m in _ANY_CITE_RE.finditer(answer or "")}
+    for sid in sorted(cited_sids):
+        if sid not in chunks_by_sid:
+            # 'cited_sid_not_in_context' was already added above if a quote
+            # was attached; bare citations to a non-existent SID we skip
+            # because the upstream citation validator already rejects them.
+            continue
+        if sid in sids_with_gill_quote:
+            continue
+        failures.append({
+            "quote": "",
+            "sentence_id": sid,
+            "reason": "no_gill_quote_for_citation",
+        })
+
     return repaired_answer, repairs, failures
 
 

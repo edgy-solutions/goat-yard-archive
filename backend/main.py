@@ -243,6 +243,11 @@ class SearchResponse(BaseModel):
     citations: List[str]
     evidence: List[EvidenceItem]
     verified: bool
+    # Sentence IDs whose Gill quote could not be verified (paraphrased, KJV-only,
+    # or no quote attached at all). Frontend uses this to mark the specific
+    # citation pills in the answer text with the warning color + icon, so the
+    # user can see *which* part is unverified instead of just the global pill.
+    unverified_sentence_ids: List[str] = []
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
     trace_id: Optional[str] = None
@@ -311,6 +316,7 @@ async def search(request: Request, req: SearchRequest):
     answer = "LLM Generation disabled (No Key)."
     citations = []
     verified = False
+    unverified_sentence_ids: List[str] = []
     
     evidence_objects = []
     for r in raw_results:
@@ -398,11 +404,19 @@ async def search(request: Request, req: SearchRequest):
                     quote_failures = getattr(pred, "quote_failures", None) or []
                     quote_repairs = getattr(pred, "quote_repairs", None) or []
                     verified = not quote_failures
+                    # Extract the bare sentence_ids (without surrounding brackets)
+                    # for the frontend's per-citation styling.
+                    unverified_sentence_ids = sorted({
+                        (f.get("sentence_id") or "").strip("[]")
+                        for f in quote_failures
+                        if f.get("sentence_id")
+                    } - {""})
                     if (quote_failures or quote_repairs) and generation:
                         generation.update(metadata={
                             "quote_verification_failures": len(quote_failures),
                             "quote_repairs_difflib": sum(1 for r in quote_repairs if r.get("source") == "difflib"),
                             "quote_repairs_llm": sum(1 for r in quote_repairs if r.get("source") == "llm"),
+                            "quote_failure_reasons": sorted({f.get("reason", "") for f in quote_failures}),
                         })
 
                     if generation:
@@ -518,6 +532,7 @@ async def search(request: Request, req: SearchRequest):
         citations=final_citations,
         evidence=evidence_objects,
         verified=verified,
+        unverified_sentence_ids=unverified_sentence_ids,
         expanded_query=search_text,
         mapped_entities=mapped_entities,
         trace_id=trace_id if 'trace_id' in locals() else None

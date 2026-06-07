@@ -51,6 +51,11 @@ interface SearchResponse {
     citations: string[];
     evidence: EvidenceItem[];
     verified: boolean;
+    // Sentence IDs (bare form, no brackets) whose Gill quote couldn't be
+    // verified — paraphrased, KJV-only, or no quote attached at all. Used
+    // to apply the warning color + icon to the specific citation pills in
+    // the answer, so the user can see WHERE the verification failure is.
+    unverified_sentence_ids?: string[];
     trace_id?: string;
 }
 
@@ -577,6 +582,7 @@ function App() {
                                                             ));
 
                                                             if (hasMatch) {
+                                                                const unverifiedSet = new Set(response.unverified_sentence_ids || []);
                                                                 return (
                                                                     <span key={partIdx} className="inline-flex flex-wrap gap-1 align-baseline mx-1">
                                                                         {ids.map((id, idIdx) => {
@@ -586,18 +592,28 @@ function App() {
 
                                                                             if (match) {
                                                                                 const isFocused = focusedSentenceId === id;
+                                                                                const isUnverified = unverifiedSet.has(id);
+                                                                                // Yellow + ⚠️ matches the "⚠️ Unverified" badge above,
+                                                                                // so users can pinpoint WHICH citation failed verification
+                                                                                // rather than only seeing a global pill at the top.
+                                                                                const pillClass = isUnverified
+                                                                                    ? (isFocused
+                                                                                        ? 'bg-amber-100 text-amber-900 border border-amber-300 shadow-sm'
+                                                                                        : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 hover:shadow-sm')
+                                                                                    : (isFocused
+                                                                                        ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
+                                                                                        : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm');
                                                                                 return (
                                                                                     <button
                                                                                         key={`${partIdx}-${idIdx}`}
                                                                                         onClick={(e) => handleCitationClick(match, id, e)}
-                                                                                        className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline
-                                                                                            ${isFocused
-                                                                                                ? 'bg-[#D7CCC8] text-[#2C241B] shadow-sm'
-                                                                                                : 'bg-[#EDE0D4] text-[#5D4037] hover:bg-[#D7CCC8] hover:shadow-sm'
-                                                                                            }
-                                                                                        `}
-                                                                                        title={`View Source: ${match.verse_ref || match.citation}`}
+                                                                                        className={`font-bold cursor-pointer px-2 py-1 rounded-md text-[10px] transition-all font-ui tracking-wide no-underline ${pillClass}`}
+                                                                                        title={isUnverified
+                                                                                            ? `Unverified — Gill quote could not be confirmed against ${match.verse_ref || match.citation}`
+                                                                                            : `View Source: ${match.verse_ref || match.citation}`
+                                                                                        }
                                                                                     >
+                                                                                        {isUnverified && <span className="mr-1" aria-hidden="true">⚠️</span>}
                                                                                         {match.verse_ref ? match.verse_ref.toUpperCase() : id}
                                                                                     </button>
                                                                                 );
