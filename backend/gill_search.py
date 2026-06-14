@@ -137,6 +137,7 @@ class GillSearchEngine:
         limit: int = 5,
         volume_filter: int = None,
         original_query: str = None,
+        _debug_capture: dict = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform Hybrid Search + Graph Boost.
@@ -179,6 +180,19 @@ class GillSearchEngine:
         embed_parts.append(query)
         embedding_input = " ".join(embed_parts)
         query_vector = await self._get_embedding(embedding_input)
+
+        if _debug_capture is not None:
+            import hashlib as _h
+            _debug_capture["embedding_input"] = embedding_input
+            _debug_capture["enhanced_query"] = enhanced_query
+            vec_for_hash = list(query_vector) if query_vector is not None else []
+            _debug_capture["embedding_hash"] = _h.sha256(
+                json.dumps(vec_for_hash).encode()
+            ).hexdigest()[:16]
+            _debug_capture["embedding_first_5"] = (
+                [round(float(x), 8) for x in vec_for_hash[:5]] if vec_for_hash else []
+            )
+            _debug_capture["embedding_len"] = len(vec_for_hash)
 
         weaviate_filters = None
         if volume_filter:

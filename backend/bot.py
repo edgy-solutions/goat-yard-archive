@@ -577,7 +577,7 @@ class GroundedGillBot(dspy.Module):
                 )
             
             # If it IS a refusal, we let it pass (Verified Negative)
-            return dspy.Prediction(answer=pred.answer, citations=[])
+            return dspy.Prediction(answer=pred.answer, citations=[], raw_answer=pred.answer)
 
         # ---------------------------------------------------------
         # Standard Checks (Only run if citations exist)
@@ -683,6 +683,10 @@ class GroundedGillBot(dspy.Module):
             # identified as relevant but chose not to commit to — surfacing
             # that turns an opaque refusal into an actionable starting point.
             reasoning=getattr(pred, "reasoning", "") or "",
+            # Pre-verifier model output. Used by the determinism harness to
+            # distinguish "bot LLM produced different text" from "verifier
+            # repaired differently" when comparing across runs.
+            raw_answer=pred.answer,
         )
 
 if __name__ == "__main__":

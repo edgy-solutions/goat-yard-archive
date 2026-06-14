@@ -231,6 +231,10 @@ lm_anon = None
 class SearchRequest(BaseModel):
     query: str
     volume_limit: Optional[int] = None
+    # When True, response includes a `stages` dict with per-stage I/O captures
+    # (BAML expansion, embedding hash, retrieved chunk SIDs, bot raw answer)
+    # so the determinism harness can pinpoint which stage flips between runs.
+    debug: bool = False
 
 class EvidenceItem(BaseModel):
     chunk_id: str
@@ -274,6 +278,10 @@ class SearchResponse(BaseModel):
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
     trace_id: Optional[str] = None
+    # Per-stage I/O snapshot, populated only when request.debug=True. Used by
+    # evals/determinism_harness.py to compare stage outputs across runs and
+    # isolate which stage introduces variance.
+    stages: Optional[dict] = None
 
 class FeedbackRequest(BaseModel):
     trace_id: str
@@ -286,15 +294,23 @@ class FeedbackRequest(BaseModel):
 async def search(request: Request, req: SearchRequest):
     import time
     t0 = time.perf_counter()
-    
+
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
-    
+
+    # Per-stage capture for the determinism harness — only populated when
+    # req.debug=True so production traffic is unaffected.
+    stages_capture: Optional[dict] = {} if req.debug else None
+    if stages_capture is not None:
+        stages_capture["question"] = req.query
+
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
     t1 = time.perf_counter()
     available_entity_names = await search_engine.get_relevant_entities(query=req.query, limit=50)
     t2 = time.perf_counter()
     print(f"[TIMING] get_relevant_entities: {t2-t1:.3f}s")
+    if stages_capture is not None:
+        stages_capture["available_entities"] = sorted(available_entity_names) if available_entity_names else []
     
     try:
         t3 = time.perf_counter()
@@ -308,21 +324,30 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities = optimized_query.official_entities
         print(f"BAML Optimized Query: {search_text}")
         print(f"BAML Mapped Entities: {mapped_entities}")
+        if stages_capture is not None:
+            stages_capture["baml_expansion"] = search_text
+            stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
     except Exception as e:
         import traceback
         error_msg = traceback.format_exc()
         print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
         search_text = req.query
         mapped_entities = None
+        if stages_capture is not None:
+            stages_capture["baml_expansion"] = None
+            stages_capture["baml_entities"] = []
+            stages_capture["baml_error"] = str(e)
 
     # 2. Retrieve Evidence
     t5 = time.perf_counter()
+    retrieval_debug: dict = {}
     raw_results = await search_engine.search_gill(
         query=search_text,
         entities=mapped_entities,
         limit=12,
         volume_filter=req.volume_limit,
         original_query=req.query,
+        _debug_capture=retrieval_debug if stages_capture is not None else None,
     )
     t6 = time.perf_counter()
     print(f"[TIMING] search_gill (embed+weaviate): {t6-t5:.3f}s")
@@ -342,7 +367,27 @@ async def search(request: Request, req: SearchRequest):
                     return sid
         return chunk.get("verse_ref") or ""
     raw_results.sort(key=lambda c: (_first_sid(c), c.get("chunk_id", "")))
-    
+
+    if stages_capture is not None:
+        stages_capture["embedding_input"] = retrieval_debug.get("embedding_input")
+        stages_capture["enhanced_query"] = retrieval_debug.get("enhanced_query")
+        stages_capture["embedding_hash"] = retrieval_debug.get("embedding_hash")
+        stages_capture["embedding_first_5"] = retrieval_debug.get("embedding_first_5")
+        stages_capture["embedding_len"] = retrieval_debug.get("embedding_len")
+        # Retrieved chunk SIDs in two views: sorted (set equality) and ordered
+        # (sequence equality — catches "same chunks, different ranking").
+        all_sids_ordered = []
+        all_sids_set = set()
+        for r in raw_results:
+            for sd in (r.get("sentence_data") or []):
+                sid = sd.get("sentence_id") if isinstance(sd, dict) else None
+                if sid:
+                    all_sids_ordered.append(sid)
+                    all_sids_set.add(sid)
+        stages_capture["retrieval_sids_set"] = sorted(all_sids_set)
+        stages_capture["retrieval_sids_ordered"] = all_sids_ordered
+        stages_capture["retrieval_chunk_ids_ordered"] = [r.get("chunk_id", "") for r in raw_results]
+
     if not raw_results:
         return SearchResponse(
             answer="No relevant commentary found.",
@@ -435,9 +480,14 @@ async def search(request: Request, req: SearchRequest):
                     )
                     t8 = time.perf_counter()
                     print(f"[TIMING] LLM generation (bot): {t8-t7:.3f}s")
-                    
+
                     answer = pred.answer
                     citations = pred.citations
+                    if stages_capture is not None:
+                        stages_capture["bot_raw_answer"] = getattr(pred, "raw_answer", None) or pred.answer
+                        stages_capture["bot_final_answer"] = pred.answer
+                        stages_capture["bot_citations"] = sorted(pred.citations) if pred.citations else []
+                        stages_capture["bot_reasoning"] = getattr(pred, "reasoning", "") or ""
                     # Hybrid quote repair (ADR-0006): the bot has already
                     # attempted to substitute verbatim source spans for any
                     # paraphrased quotes via difflib + LLM fallback. Surface
@@ -614,7 +664,8 @@ async def search(request: Request, req: SearchRequest):
         partial_match_sids=locals().get("partial_match_sids", []),
         expanded_query=search_text,
         mapped_entities=mapped_entities,
-        trace_id=trace_id if 'trace_id' in locals() else None
+        trace_id=trace_id if 'trace_id' in locals() else None,
+        stages=stages_capture,
     )
 
 @app.get("/api/books")
