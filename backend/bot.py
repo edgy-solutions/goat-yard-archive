@@ -677,6 +677,12 @@ class GroundedGillBot(dspy.Module):
             citations=citations_list,
             quote_failures=quote_failures,
             quote_repairs=quote_repairs,
+            # Expose the model's reasoning so main.py / the frontend can show
+            # users *what the model considered* when it produces a refusal.
+            # The reasoning often names specific Sentence IDs the model
+            # identified as relevant but chose not to commit to — surfacing
+            # that turns an opaque refusal into an actionable starting point.
+            reasoning=getattr(pred, "reasoning", "") or "",
         )
 
 if __name__ == "__main__":

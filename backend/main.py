@@ -1,10 +1,18 @@
 
 import os
+import re
 import uvicorn
 import dspy
 import litellm
 import json
 import logging
+
+# Structural refusal detection: a real verbatim answer must contain at least
+# one inline [SENTENCE_ID] citation per the GillSignature contract. If the
+# answer has zero, it's either the canned refusal or a malformed paraphrase —
+# in both cases, we want to surface the model's reasoning to the user instead
+# of just showing the refusal text.
+_SID_IN_ANSWER_RE = re.compile(r'\[([A-Z0-9_]+_S\d+)\]')
 import warnings
 import asyncio
 from langfuse import Langfuse
@@ -248,6 +256,21 @@ class SearchResponse(BaseModel):
     # citation pills in the answer text with the warning color + icon, so the
     # user can see *which* part is unverified instead of just the global pill.
     unverified_sentence_ids: List[str] = []
+    # Structural refusal detection — True when the answer contains NO inline
+    # [SENTENCE_ID] citations (i.e. zero verbatim Gill quotes). Robust to the
+    # model varying its refusal wording because it's based on a structural
+    # property (citation count), not a string match.
+    refused: bool = False
+    # The model's reasoning text. Always returned so the frontend can
+    # surface it when refused=True — the reasoning often names specific
+    # SIDs the model considered but chose not to commit to, which turns
+    # an opaque refusal into actionable starting points the user can click.
+    reasoning: Optional[str] = None
+    # Sentence IDs the model named in its reasoning that ARE in the retrieved
+    # context (i.e. real, clickable SIDs). Populated when refused=True so the
+    # frontend knows which SIDs to render as amber pills inside the reasoning
+    # block. Empty list when reasoning identified nothing relevant either.
+    partial_match_sids: List[str] = []
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
     trace_id: Optional[str] = None
@@ -317,6 +340,9 @@ async def search(request: Request, req: SearchRequest):
     citations = []
     verified = False
     unverified_sentence_ids: List[str] = []
+    refused: bool = False
+    reasoning_text: Optional[str] = None
+    partial_match_sids: List[str] = []
     
     evidence_objects = []
     for r in raw_results:
@@ -411,6 +437,32 @@ async def search(request: Request, req: SearchRequest):
                         for f in quote_failures
                         if f.get("sentence_id")
                     } - {""})
+
+                    # Structural refusal detection — does the answer contain any
+                    # inline [SENTENCE_ID]? No SID = no verbatim Gill quote = refusal
+                    # (or model paraphrase, which we also want to treat as refusal
+                    # since we can't verify it). This is robust to refusal wording
+                    # variations and doesn't depend on a string match.
+                    reasoning_text = (getattr(pred, "reasoning", "") or "")
+                    answer_sids = _SID_IN_ANSWER_RE.findall(pred.answer or "")
+                    refused = len(answer_sids) == 0
+                    # When refused, identify SIDs the model named in its reasoning
+                    # that are real (i.e. in the retrieved context). These become
+                    # the "you can still click these to read what the model
+                    # considered" pills the frontend renders.
+                    partial_match_sids: List[str] = []
+                    if refused and reasoning_text:
+                        # context_chunks is from the upstream search step
+                        valid_in_context = {
+                            s.get("sentence_id")
+                            for chunk in (raw_results or [])
+                            for s in (chunk.get("sentence_data") or [])
+                            if s.get("sentence_id")
+                        }
+                        partial_match_sids = sorted({
+                            sid for sid in _SID_IN_ANSWER_RE.findall(reasoning_text)
+                            if sid in valid_in_context
+                        })
                     if (quote_failures or quote_repairs) and generation:
                         generation.update(metadata={
                             "quote_verification_failures": len(quote_failures),
@@ -481,32 +533,40 @@ async def search(request: Request, req: SearchRequest):
                             model_name = last_run.get("model") or "deepseek-chat"
                             generation.update(usage_details=lf_usage, cost_details=lf_cost, model=model_name)
                     
+                    # Trace metadata + tags MUST be set while the gen_ctx span is
+                    # still active. update_current_trace relies on the active span
+                    # context to know which trace to attach to — once gen_ctx is
+                    # exited, "no active span" is logged and the call silently
+                    # drops. That's why tags column has been empty in the UI.
+                    if lf_client and generation:
+                        try:
+                            meta_books = locals().get("available_books_str", "Unknown")
+                            env_tag = os.getenv("APP_ENV", "production")
+                            lf_client.update_current_trace(
+                                metadata={
+                                    "available_books": meta_books,
+                                    "volume_context": "all",
+                                    "baml_expanded_query": search_text,
+                                    "baml_mapped_entities": mapped_entities,
+                                },
+                                tags=[env_tag, "v7_launch"],
+                            )
+                            # create_score takes explicit trace_id, so the active-
+                            # span constraint doesn't apply, but we keep it here
+                            # alongside the trace update for cohesion.
+                            if refused:
+                                lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Bot produced no inline-cited answer (refusal or empty quotes)")
+                            else:
+                                lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=1)
+                        except Exception as ex:
+                            print(f"Failed to update Langfuse trace metadata/score: {ex}")
+
                     if gen_ctx:
                         gen_ctx.__exit__(None, None, None)
-                    
+
                     if lf_client:
-                        await asyncio.sleep(0.5) 
+                        await asyncio.sleep(0.5)
                         lf_client.flush()
-                
-            if lf_client and generation:
-                try:
-                    meta_books = locals().get("available_books_str", "Unknown")
-                    env_tag = os.getenv("APP_ENV", "production")
-                    lf_client.update_current_trace(
-                        metadata={
-                            "available_books": meta_books, 
-                            "volume_context": "all",
-                            "baml_expanded_query": search_text,
-                            "baml_mapped_entities": mapped_entities
-                        }, 
-                        tags=[env_tag, "v7_launch"]
-                    )
-                    if "I regret that" in answer:
-                        lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=0, comment="Guardrail triggered: Empty context or manifest mismatch")
-                    else:
-                        lf_client.create_score(trace_id=generation.trace_id, name="retrieval_success", value=1)
-                except Exception as ex:
-                    print(f"Failed to update Langfuse trace metadata/score: {ex}")
 
         except Exception as e:
             if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
@@ -533,6 +593,9 @@ async def search(request: Request, req: SearchRequest):
         evidence=evidence_objects,
         verified=verified,
         unverified_sentence_ids=unverified_sentence_ids,
+        refused=locals().get("refused", False),
+        reasoning=locals().get("reasoning_text", None),
+        partial_match_sids=locals().get("partial_match_sids", []),
         expanded_query=search_text,
         mapped_entities=mapped_entities,
         trace_id=trace_id if 'trace_id' in locals() else None

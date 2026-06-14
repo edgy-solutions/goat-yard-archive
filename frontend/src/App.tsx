@@ -56,6 +56,18 @@ interface SearchResponse {
     // to apply the warning color + icon to the specific citation pills in
     // the answer, so the user can see WHERE the verification failure is.
     unverified_sentence_ids?: string[];
+    // True when the answer contained no inline [SENTENCE_ID] citations,
+    // i.e. the bot didn't produce a real verbatim quote (either canned
+    // refusal or paraphrase). When true, the UI surfaces the reasoning
+    // panel below so the user can see what the model considered.
+    refused?: boolean;
+    // Model's reasoning text — useful only in the refused=true case to
+    // surface what the model identified but chose not to commit to.
+    reasoning?: string;
+    // Sentence IDs the model named in its reasoning that are real
+    // (i.e. exist in the retrieved context). Frontend renders these as
+    // clickable amber pills inside the reasoning panel.
+    partial_match_sids?: string[];
     trace_id?: string;
 }
 
@@ -552,6 +564,13 @@ function App() {
                                             <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
                                                 ✓ Verified Source
                                             </span>
+                                        ) : response.refused && (response.partial_match_sids?.length ?? 0) > 0 ? (
+                                            // Refused-but-partial: model didn't quote anything but its
+                                            // reasoning identified relevant SIDs. Different shade so users
+                                            // know there's nuance below.
+                                            <span className="text-[10px] text-amber-900 bg-amber-100 px-2 py-1 rounded-full border border-amber-300 font-ui uppercase tracking-wider">
+                                                ⚠️ No Verbatim Quote — Partial Coverage
+                                            </span>
                                         ) : (
                                             <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-1 rounded-full border border-amber-200 font-ui uppercase tracking-wider">
                                                 ⚠️ Unverified
@@ -646,6 +665,57 @@ function App() {
                                             );
                                         })}
                                     </div>
+
+                                    {/*
+                                     * Reasoning panel — shown when the bot refused to produce a
+                                     * verbatim quote (refused=true) but its reasoning identified
+                                     * Sentence IDs that exist in the retrieved context. The model's
+                                     * own hedge often names exactly what it considered; surfacing
+                                     * that text plus clickable pills turns an opaque refusal into
+                                     * a starting point for the user.
+                                     */}
+                                    {response.refused && (response.partial_match_sids?.length ?? 0) > 0 && response.reasoning && (
+                                        <div className="mt-4 p-4 bg-amber-50/40 border border-amber-200 rounded-lg">
+                                            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-900 font-ui mb-2">
+                                                What the system reviewed
+                                            </div>
+                                            <p className="text-xs text-[#5D4037] leading-relaxed font-ui mb-3">
+                                                No verbatim quote could be produced for your question.
+                                                Below is the model's reasoning over the available
+                                                extracts — the cited passages may still be worth your
+                                                review.
+                                            </p>
+                                            <div className="text-sm text-[#3E2723] font-serif italic leading-relaxed">
+                                                {response.reasoning.split(/(\[[A-Z0-9_]+_S\d+\])/g).map((part, idx) => {
+                                                    const m = part.match(/^\[([A-Z0-9_]+_S\d+)\]$/);
+                                                    if (m) {
+                                                        const sid = m[1];
+                                                        const isPartialMatch = response.partial_match_sids?.includes(sid);
+                                                        const ev = response.evidence.find(e =>
+                                                            e.sentence_data?.some(s => s.sentence_id === sid)
+                                                        );
+                                                        if (isPartialMatch && ev) {
+                                                            return (
+                                                                <button
+                                                                    key={idx}
+                                                                    onClick={(e) => handleCitationClick(ev, sid, e)}
+                                                                    className="inline-flex items-center mx-1 font-bold cursor-pointer px-2 py-0.5 rounded-md text-[10px] not-italic bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 hover:shadow-sm transition-all font-ui tracking-wide"
+                                                                    title={`Open: ${ev.verse_ref || ev.citation}`}
+                                                                >
+                                                                    <span className="mr-1" aria-hidden="true">⚠️</span>
+                                                                    {ev.verse_ref ? ev.verse_ref.toUpperCase() : sid}
+                                                                </button>
+                                                            );
+                                                        }
+                                                        // SID not in retrieved context — render as text so the
+                                                        // reasoning still reads correctly without a dead button.
+                                                        return <span key={idx}>{part}</span>;
+                                                    }
+                                                    return <span key={idx}>{part}</span>;
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="mt-4 flex justify-end">
                                         <ResponseActions
