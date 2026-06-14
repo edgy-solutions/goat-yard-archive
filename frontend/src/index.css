@@ -134,6 +134,10 @@
     flex: 0 0 auto;
     max-height: 50%;
     overflow-y: auto;
+    /* Reserve space for the scrollbar so it doesn't overlap the text on the
+       right edge, and add a bit of breathing room between text and scrollbar. */
+    scrollbar-gutter: stable;
+    padding-right: 0.5rem;
 }
 
 .evidence-pane-responsive {
