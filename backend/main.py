@@ -326,6 +326,22 @@ async def search(request: Request, req: SearchRequest):
     )
     t6 = time.perf_counter()
     print(f"[TIMING] search_gill (embed+weaviate): {t6-t5:.3f}s")
+
+    # Deterministic chunk ordering. Weaviate hybrid scores can drift by tiny
+    # FP amounts between identical queries, so the same chunk SET can arrive
+    # in different orders — and the bot LLM is sensitive to context ordering.
+    # Sort by first SID with chunk_id as final tiebreaker so the bot prompt
+    # is byte-identical whenever retrieval returns the same chunks.
+    def _first_sid(chunk):
+        sd = chunk.get("sentence_data") or []
+        if sd and isinstance(sd, list):
+            first = sd[0]
+            if isinstance(first, dict):
+                sid = first.get("sentence_id") or first.get("sid")
+                if sid:
+                    return sid
+        return chunk.get("verse_ref") or ""
+    raw_results.sort(key=lambda c: (_first_sid(c), c.get("chunk_id", "")))
     
     if not raw_results:
         return SearchResponse(
