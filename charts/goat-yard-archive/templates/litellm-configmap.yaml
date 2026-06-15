@@ -7,14 +7,20 @@ data:
   config.yaml: |
     model_list:
       # --- EMBEDDING MODELS ---
-{{- range .Values.litellm.ollamaNodes }}
+      # DETERMINISM: pinned to ollamaNodes[0] (same node as local-router).
+      # Diagnosed 2026-06-14 via evals/determinism_harness.py: when round-robin
+      # was active, identical embedding_input text produced different vectors
+      # across runs in 6 of 22 questions (peter, scapegoat, justification,
+      # election, bread_of_life, covenant_grace) because qwen3-embedding's
+      # output varies imperceptibly between the two Ollama nodes — same model
+      # file, but different machine FP paths. Pinning eliminates that source
+      # of variance. Trade-off: no embedding redundancy if .179 fails.
       - model_name: qwen3-embedding
         litellm_params:
           model: ollama/qwen3-embedding:latest
-          api_base: {{ . | quote }}
+          api_base: {{ index .Values.litellm.ollamaNodes 0 | quote }}
           keep_alive: -1
           num_ctx: 4096
-{{- end }}
       # --- BAML ROUTER MODELS (Gemma 4 Edge) ---
       # Gemma is used for RepairQuote, which embeds the full CommentaryChunk
       # as "source text" — long Gill verses (esp. Romans / Hebrews / footnoted
