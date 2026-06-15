@@ -53,6 +53,28 @@ const Contact: React.FC<PageProps> = ({ onClose }) => {
                         </ul>
                     </section>
 
+                    <section className="mb-10">
+                        <h2 className="text-2xl font-bold text-[#3E2723] mb-4 border-b border-[#D7CCC8] pb-2">Further Reading</h2>
+                        <p>
+                            Readers wishing to explore Gill and the wider stream of Particular Baptist
+                            writing in print may find the following publishers useful.
+                        </p>
+                        <ul className="list-none pl-0">
+                            <li className="mb-3">
+                                <strong>Baptist Standard Bearer: </strong>
+                                <a href="https://www.standardbearer.org/" target="_blank" rel="noopener noreferrer" className="text-amber-800 hover:text-amber-600 hover:underline">standardbearer.org</a>
+                                <br />
+                                <span className="text-sm text-[#5D4037]">A long-established reprinter of historic Baptist literature, including older editions of Gill and many of his contemporaries.</span>
+                            </li>
+                            <li className="mb-3">
+                                <strong>Northpass Press: </strong>
+                                <a href="https://northpass.press/" target="_blank" rel="noopener noreferrer" className="text-amber-800 hover:text-amber-600 hover:underline">northpass.press</a>
+                                <br />
+                                <span className="text-sm text-[#5D4037]">A small press in the developer's family, working to bring Gill and other Baptist works to print in clean modern editions.</span>
+                            </li>
+                        </ul>
+                    </section>
+
                     <section className="mb-10 bg-[#FFFDF5] p-6 rounded-lg border border-[#D7CCC8] shadow-sm">
                         <h2 className="text-xl font-bold text-[#3E2723] mb-2 mt-0">Report an Issue</h2>
                         <p className="mb-4 text-sm text-[#5D4037]">
