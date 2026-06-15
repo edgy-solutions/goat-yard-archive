@@ -18,7 +18,7 @@ data:
       - model_name: qwen3-embedding
         litellm_params:
           model: ollama/qwen3-embedding:latest
-          api_base: {{ index .Values.litellm.ollamaNodes 0 | quote }}
+          api_base: {{ index .Values.litellm.ollamaNodes 1 | quote }}
           keep_alive: -1
           num_ctx: 4096
       # --- BAML ROUTER MODELS (Gemma 4 Edge) ---
@@ -42,7 +42,7 @@ data:
       - model_name: local-router
         litellm_params:
           model: ollama/gemma4:e4b
-          api_base: {{ index .Values.litellm.ollamaNodes 0 | quote }}
+          api_base: {{ index .Values.litellm.ollamaNodes 1 | quote }}
           keep_alive: -1
           num_ctx: 16384
           temperature: 0.0
