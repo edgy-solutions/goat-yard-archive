@@ -15,6 +15,12 @@ function OptimizeSearchQuery(user_query: string, available_entities: string[]) -
     1. **QUERY EXPANSION**: Expand their modern search terms into 18th-century synonyms that John Gill would likely use in his commentary.
        - Example: 'Christophany' -> 'The Angel of the Lord, appearance of the Son of God, divine manifestation'
        - Example: 'Rapture' -> 'The coming of Christ, the gathering of the saints, the resurrection'
+       - **Names of biblical figures the scripture leaves unnamed** (the two thieves
+         crucified with Jesus, the Magi, the rich man in Lazarus's parable, etc.):
+         expand toward 'tradition,' 'Papist tradition,' 'named in tradition,' 'feast day,'
+         'catalogue of saints,' and include known traditional names if you can recall them.
+         Example: 'Names of the two thieves' -> 'Disma, Dysmas, penitent thief,
+         Papist tradition, named in tradition, catalogue of saints, feast day'.
     
     2. **ENTITY MAPPING**: Map their concepts to these official database entities if applicable:
     {{ available_entities }}
