@@ -204,8 +204,22 @@ class GillSearchEngine:
         # those should be treated as search hints (keyword material), not as a
         # navigation signal that switches us to direct verse lookup. The user
         # knows when they're typing a verse reference.
+        #
+        # 2026-06-21: switched from re.search to re.fullmatch. The previous
+        # search-anywhere behavior matched verse refs embedded INSIDE question
+        # text (e.g. "Why did God have Ishmael circumcised when (according to
+        # Genesis 17:19-21)...") and triggered direct-verse-lookup mode,
+        # starving retrieval to the 3 sentences of that one verse. Sophisticated
+        # users who cite the verse they're asking about — the Puritan Board
+        # audience — were the worst affected. fullmatch only fires on bare
+        # verse-ref queries; embedded refs fall through to hybrid retrieval.
         ref_source = original_query if original_query and original_query.strip() else query
-        ref_match = re.search(r'\b(((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?))\b', ref_source, re.IGNORECASE)
+        ref_source_clean = (ref_source or "").strip().rstrip('?.!').strip()
+        ref_match = re.fullmatch(
+            r'\s*((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?)\s*',
+            ref_source_clean,
+            re.IGNORECASE,
+        )
 
         import time
         t_weaviate_start = time.perf_counter()
@@ -226,9 +240,10 @@ class GillSearchEngine:
         response = None
         used_hybrid_fallback = False
         if ref_match:
-            raw_book = ref_match.group(2).lower()
+            # New regex (fullmatch) has 2 groups: book, verse_part.
+            raw_book = ref_match.group(1).lower()
             raw_book = re.sub(r'\s+', ' ', raw_book)
-            verse_part = ref_match.group(3)
+            verse_part = ref_match.group(2)
 
             if raw_book in BIBLE_BOOK_MAP:
                 canonical_ref = f"{BIBLE_BOOK_MAP[raw_book]} {verse_part}"
