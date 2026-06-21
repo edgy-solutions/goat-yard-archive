@@ -7,42 +7,37 @@ data:
   config.yaml: |
     model_list:
       # --- EMBEDDING MODELS ---
-      # DETERMINISM: pinned to ollamaNodes[0] (same node as local-router).
-      # Diagnosed 2026-06-14 via evals/determinism_harness.py: when round-robin
-      # was active, identical embedding_input text produced different vectors
-      # across runs in 6 of 22 questions (peter, scapegoat, justification,
-      # election, bread_of_life, covenant_grace) because qwen3-embedding's
-      # output varies imperceptibly between the two Ollama nodes — same model
-      # file, but different machine FP paths. Pinning eliminates that source
-      # of variance. Trade-off: no embedding redundancy if .179 fails.
+      # Round-robin across all Ollama nodes for redundancy. The 7900 XTX
+      # matched-pair characterization (2026-06-21 evals/peter_role_smoke)
+      # showed .179 and .188 produce byte-identical first-run gemma output
+      # in 4 of 6 configs and similar embeddings — the same-GPU-architecture
+      # property. Cross-node variance for matched hardware is below the
+      # threshold that changes Weaviate hybrid retrieval. Other-architecture
+      # nodes (Strix Halo) should NOT be added to this list without separate
+      # determinism characterization.
+{{- range .Values.litellm.ollamaNodes }}
       - model_name: qwen3-embedding
         litellm_params:
           model: ollama/qwen3-embedding:latest
-          api_base: {{ index .Values.litellm.ollamaNodes 1 | quote }}
+          api_base: {{ . | quote }}
           keep_alive: -1
           num_ctx: 4096
+{{- end }}
       # --- BAML ROUTER MODELS (Gemma 4 Edge) ---
-      # Gemma is used for RepairQuote, which embeds the full CommentaryChunk
-      # as "source text" — long Gill verses (esp. Romans / Hebrews / footnoted
-      # chunks) regularly exceed 2k. 16k gives plenty of headroom.
+      # Round-robin across all Ollama nodes for redundancy. seed=0 +
+      # temperature=0 + num_ctx=16384 + keep_alive=-1 set explicitly to
+      # achieve byte-stable output for the matched 7900 XTX pair.
       # keep_alive duplicated into extra_body because litellm historically
       # only forwards the top-level field on /api/embeddings, not /api/chat
       # — Ollama then drops it back to its 5-min default for chat models.
-      #
-      # DETERMINISM: pinned to a SINGLE ollama node (not the round-robin
-      # range over .Values.litellm.ollamaNodes) and seed=0 set explicitly.
-      # Diagnosis (2026-06-14): the OptimizeSearchQuery prompt is long
-      # enough (~63 entities + instructions + schema) to hit token positions
-      # where logits are tied within floating-point noise. At temp=0 the
-      # greedy pick can still vary between calls — different cache state on
-      # the two servers compounds this, producing wildly different entity
-      # mappings and expanded search terms run-to-run. Pinning + seed makes
-      # the path fully deterministic: same question -> same retrieved
-      # chunks -> same answer.
+      # 16k context gives headroom for RepairQuote which embeds the full
+      # CommentaryChunk as "source text" — long Gill verses (esp. Romans /
+      # Hebrews / footnoted chunks) regularly exceed 2k.
+{{- range .Values.litellm.ollamaNodes }}
       - model_name: local-router
         litellm_params:
           model: ollama/gemma4:e4b
-          api_base: {{ index .Values.litellm.ollamaNodes 1 | quote }}
+          api_base: {{ . | quote }}
           keep_alive: -1
           num_ctx: 16384
           temperature: 0.0
@@ -53,6 +48,7 @@ data:
               num_ctx: 16384
               temperature: 0.0
               seed: 0
+{{- end }}
     litellm_settings:
       success_callback: ["langfuse"]
       failure_callback: ["langfuse"]
