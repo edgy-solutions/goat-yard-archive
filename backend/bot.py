@@ -420,6 +420,20 @@ class GillSignature(dspy.Signature):
     discusses the same subject as 'Y':"). Do not refuse merely because the exact term is
     absent.
 
+    REPORTED TRADITIONS
+    Some questions ask for information (names, dates, places) that Gill addresses
+    only by reporting a tradition he mentions without himself endorsing it — most
+    commonly a Papist or Jewish tradition, occasionally patristic. Example: the
+    question "What were the names of the two thieves?" finds Gill on Luke 23:43
+    reporting the Papist tradition naming the penitent thief 'Disma' with a feast
+    day on March 25. In these cases, do NOT refuse just because Gill himself
+    isn't asserting the claim. Surface the tradition with EXPLICIT attribution
+    to its source ("Gill reports the Papist tradition that..." or "Gill does not
+    name them himself, but on Luke 23:43 he notes the tradition that..."),
+    include the verbatim quote, and provide the citation. The user is better
+    served knowing what Gill reports — clearly attributed as tradition rather
+    than as Gill's own claim — than getting a refusal that conceals it.
+
     WHEN TO REFUSE
     Refuse ONLY when the retrieved context is empty or addresses an entirely unrelated
     subject (e.g. the user asks about a doctrine and retrieval returned passages about an

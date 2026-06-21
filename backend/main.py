@@ -13,28 +13,6 @@ import logging
 # in both cases, we want to surface the model's reasoning to the user instead
 # of just showing the refusal text.
 _SID_IN_ANSWER_RE = re.compile(r'\[([A-Z0-9_]+_S\d+)\]')
-
-# Eternal-justification pre-empt (fix #4 narrow, code-level). Matches questions
-# asking specifically about Gill's distinctive pre-temporal-justification
-# doctrine. The indexed corpus contains only standard imputation chunks
-# (GENESIS_15_6 / JOHN_5_24-type) which the bot will confidently confabulate as
-# evidence for the distinctive position unless we pre-empt. Patterns are
-# intentionally narrow — embedded "eternal justification" inside questions about
-# *other* topics will still match here, which is acceptable because the indexed
-# corpus genuinely cannot ground the distinctive argument either way.
-_ETERNAL_JUSTIFICATION_RE = re.compile(
-    r"\b("
-    r"eternal\s+justif\w*"                       # "eternal justification", "eternal justifying"
-    r"|justified\s+from\s+eternity"
-    r"|justification\s+from\s+eternity"
-    r"|justification\s+in\s+god'?s?\s+mind\s+(?:from|before)"
-    r"|justified\s+in\s+god'?s?\s+mind"
-    r"|pre[-\s]?temporal\s+justif\w*"
-    r"|justification\s+before\s+faith"
-    r"|immanent\s+act\s+of\s+god"
-    r")",
-    re.IGNORECASE,
-)
 import warnings
 import asyncio
 from langfuse import Langfuse
@@ -496,40 +474,15 @@ async def search(request: Request, req: SearchRequest):
                     available_books_str = ", ".join(books) if books else "Unknown"
 
                     t7 = time.perf_counter()
-                    # Pre-empt the bot for Gill's distinctive eternal-justification
-                    # doctrine. The indexed Gospel/Pentateuch corpus contains only
-                    # standard imputation chunks (GENESIS_15_6, JOHN_5_24-type); Gill's
-                    # pre-temporal-justification argument lives in his Body of Divinity
-                    # and Romans/Ephesians commentaries that aren't indexed. Letting
-                    # the bot run lets it confabulate the distinctive position from
-                    # generic imputation material. Deterministic pattern match avoids
-                    # a prompt-level instruction that would over-generalize to other
-                    # Gill-distinctive questions (universal_atonement, etc.) — observed
-                    # 2026-06-21 regression when this logic was in the prompt.
-                    if _ETERNAL_JUSTIFICATION_RE.search(req.query):
-                        print(f"[PRE-EMPT] Eternal-justification pattern matched; refusing without bot call.")
-                        pred = dspy.Prediction(
-                            answer=(
-                                f"I regret that the provided extracts from the Doctor's writings "
-                                f"do not appear to address this specific inquiry. Could it be that "
-                                f"you are looking for something not in the library ({available_books_str})?"
-                            ),
-                            citations=[],
-                            quote_failures=[],
-                            quote_repairs=[],
-                            reasoning="",
-                            raw_answer="",
-                        )
-                    else:
-                        # 90s matches the frontend's per-request timeout. The bot's
-                        # LLM-generation step plus the optional LLM-repair fallback
-                        # (when difflib can't repair an unverified quote) can push
-                        # the total well past 60s on cold cache or with multiple
-                        # repairs needed.
-                        pred = await asyncio.wait_for(
-                            asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str),
-                            timeout=90.0
-                        )
+                    # 90s matches the frontend's per-request timeout. The bot's
+                    # LLM-generation step plus the optional LLM-repair fallback
+                    # (when difflib can't repair an unverified quote) can push
+                    # the total well past 60s on cold cache or with multiple
+                    # repairs needed.
+                    pred = await asyncio.wait_for(
+                        asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str),
+                        timeout=90.0
+                    )
                     t8 = time.perf_counter()
                     print(f"[TIMING] LLM generation (bot): {t8-t7:.3f}s")
 
