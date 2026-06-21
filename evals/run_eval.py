@@ -143,6 +143,16 @@ class QuestionResult:
     must_not_cite_violated: bool = False
     must_cite_missing: List[str] = field(default_factory=list)
     must_not_cite_hits: List[str] = field(default_factory=list)
+    # Lexical semantic checks (fix #5). must_express requires every listed
+    # phrase (or one alternative from each OR-group) to appear in the answer;
+    # must_not_express forbids any listed phrase from appearing. Designed to
+    # catch theological flattening / confabulation that pure citation scoring
+    # cannot see — e.g. an answer that earns must_cite_recall=1.0 but states
+    # a generic-Reformed position as Gill's distinctive view.
+    must_express_ok: bool = True
+    must_express_missing: List[str] = field(default_factory=list)
+    must_not_express_ok: bool = True
+    must_not_express_hits: List[str] = field(default_factory=list)
     overall_pass: bool = False
 
 
@@ -197,15 +207,45 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
             result.must_not_cite_violated = True
             result.must_not_cite_hits = sorted(violations)
 
-    # Overall pass: refusal correct, must_cite met (>= 50%), no must_not_cite violations.
+    # Lexical semantic checks (fix #5). must_express is a list whose items
+    # may be either a bare string (required substring) or a list of strings
+    # (OR-group — any one alternative satisfies the slot). All slots must
+    # match for must_express_ok. must_not_express is a flat list of forbidden
+    # substrings — any match fails must_not_express_ok.
+    ans_lower = result.answer.lower()
+    must_express = q.get("must_express", []) or []
+    missing_express: List[str] = []
+    for item in must_express:
+        if isinstance(item, list):
+            if not any(alt.lower() in ans_lower for alt in item):
+                missing_express.append("OR(" + " | ".join(item) + ")")
+        else:
+            if item.lower() not in ans_lower:
+                missing_express.append(item)
+    result.must_express_ok = len(missing_express) == 0
+    result.must_express_missing = missing_express
+
+    must_not_express = q.get("must_not_express", []) or []
+    hits_not_express: List[str] = [t for t in must_not_express if t.lower() in ans_lower]
+    result.must_not_express_ok = len(hits_not_express) == 0
+    result.must_not_express_hits = hits_not_express
+
+    # Overall pass: refusal correct, must_cite met (>= 50%), no must_not_cite
+    # violations, lexical semantic checks pass.
     must_cite_pass = result.must_cite_recall >= 0.5 if q.get("must_cite") else True
     if result.expected_behavior == "refuse":
-        result.overall_pass = result.refusal_correct
+        result.overall_pass = (
+            result.refusal_correct
+            and result.must_express_ok
+            and result.must_not_express_ok
+        )
     else:
         result.overall_pass = (
             result.refusal_correct
             and must_cite_pass
             and not result.must_not_cite_violated
+            and result.must_express_ok
+            and result.must_not_express_ok
         )
     return result
 
