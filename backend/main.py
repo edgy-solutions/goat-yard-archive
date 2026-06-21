@@ -332,10 +332,15 @@ async def search(request: Request, req: SearchRequest):
         error_msg = traceback.format_exc()
         print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
         search_text = req.query
-        mapped_entities = None
+        # Defensive fallback: when BAML throws (e.g. gemma returns {} for some
+        # KV-state-dependent reason and the schema validation fails), keep
+        # entity-boost in retrieval by passing the deterministic BM25 entity
+        # list straight through. Otherwise entity-anchored answers (e.g. Mark
+        # 3:16 for "Who is Peter?") become unreachable on the raw-query path.
+        mapped_entities = available_entity_names
         if stages_capture is not None:
             stages_capture["baml_expansion"] = None
-            stages_capture["baml_entities"] = []
+            stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
             stages_capture["baml_error"] = str(e)
 
     # 2. Retrieve Evidence
