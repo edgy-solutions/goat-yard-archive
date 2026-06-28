@@ -24,7 +24,7 @@ api:
     # ghcr.io/<USERNAME>/<REPO_NAME>/backend
     repository: ghcr.io/edgy-solutions/goat-yard-archive/backend
     pullPolicy: Always
-    tag: "0.2.1"
+    tag: "0.2.2"
   service:
     type: ClusterIP
     port: 8000
@@ -99,7 +99,7 @@ ui:
     # ghcr.io/<USERNAME>/<REPO_NAME>/frontend
     repository: ghcr.io/edgy-solutions/goat-yard-archive/frontend
     pullPolicy: Always
-    tag: "0.2.1"
+    tag: "0.2.2"
   service:
     type: ClusterIP
     port: 3000
