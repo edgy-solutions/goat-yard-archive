@@ -1,6 +1,6 @@
 # ADR-0008: Three-Zone Generation Architecture and Voice-Marked UI
 
-- **Status:** Proposed
+- **Status:** Proposed (revised 2026-06-28 — added Execution Sequencing section after review; the architecture is approved but Phase 1 ships post-generation suppression only, not streaming)
 - **Date:** 2026-06-28
 - **Deciders:** Chris Nogradi
 
@@ -54,9 +54,11 @@ The prompt also instructs the model on two **refusal modes** (a category problem
 - **Informative refusal** for corpus-adjacent misses (Aquinas, the psalmody-debate question): explain the specific gap in Zone-1 voice, surface adjacent material with disclaimer, never characterize Gill on the subject. Replaces the current canned line for this category.
 - **Flat refusal** for true category errors (JavaScript for-loop, "did Esau eat pizza"): the canned line, no fishing for tangentially-related chunks (avoid the lentil trap).
 
-#### Optional: the Zone-3 release valve
+#### Optional: the Zone-3 release valve (deferred — see Execution Sequencing)
 
-Instruction-tuned models tend to comply better when given a channel for an impulse than when flatly forbidden. The prompt MAY optionally instruct the model to emit its Zone-3 slant into a designated discardable field (e.g., a `<interpretation>...</interpretation>` block or a tagged Zone-3 segment) that the backend strips before the response leaves the API. The field doubles as ground truth for the runtime classifier and the offline eval — what the model *wanted* to say about Gill's position, recoverable from logs without ever reaching the user. This is exploratory; we will measure whether it improves Zone-2 cleanliness relative to flat prohibition.
+Instruction-tuned models *may* comply better when given a channel for an impulse than when flatly forbidden. A future experiment could instruct the model to emit its Zone-3 slant into a designated discardable field (e.g., a `<interpretation>...</interpretation>` block) that the backend strips before the response leaves the API. The field would double as ground truth for the runtime classifier and the offline eval.
+
+**This is exploratory and does NOT ship with the Phase 1 zoning prompt.** It carries a real serialization-leak risk (if the backend strip ever misses, forbidden text lands in `response.answer` verbatim) and an empirical-effectiveness question (does it actually reduce Zone-2 leakage?). It must be A/B'd in isolation against the no-valve prompt, and must ship with an integration test that asserts the discardable field is absent from the API response — both *before* it touches the production prompt. See Execution Sequencing item 9.
 
 ### Layer 2 — Runtime: gated-stream verification
 
@@ -221,10 +223,75 @@ REFUSAL MODES:
 """
 ```
 
-### Runtime-level (Phase 1.5 or 2)
+### Runtime-level Phase 1 (post-generation suppression — synchronous, no streaming)
+
+This is the version that ships with the Phase 1 zoning prompt. It runs on the complete `pred.answer` inside `forward()` after quote verification but before the `dspy.Prediction` is returned. No new modules, no streaming plumbing.
 
 ```python
-# backend/streaming.py — new module
+# backend/bot.py — inside GroundedGillBot.forward(), after quote verification
+
+import re
+
+ZONE3_TRIGGER_RE = re.compile(
+    r"\bGill\s+("
+    r"distinguishes|affirms|holds|teaches|argues|supports|advocates|"
+    r"maintains|leans\s+toward|takes\s+the\s+\w+\s+position|believes\s+that"
+    r")\b",
+    re.IGNORECASE,
+)
+ZONE3_POSSESSIVE_RE = re.compile(
+    r"\bGill's\s+(view|position|stance|teaching|doctrine|opinion)\s+(of|on)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+
+
+def _suppress_zone3(answer: str) -> tuple[str, list[str]]:
+    """Excise Zone-3 sentences from the finished answer. Returns (cleaned, excised).
+
+    A Zone-3 sentence trips ZONE3_TRIGGER_RE or ZONE3_POSSESSIVE_RE AND is
+    NOT immediately followed by a verified quote (the QUOTE_WITH_CITE_RE
+    pattern). The "followed by quote" exemption protects legitimate Zone-1
+    bridges like 'Gill distinguishes the sign from the substance: "...".'
+    """
+    sentences = _SENTENCE_SPLIT_RE.split(answer)
+    kept, excised = [], []
+    for s in sentences:
+        if ZONE3_TRIGGER_RE.search(s) or ZONE3_POSSESSIVE_RE.search(s):
+            # Exempt if the sentence introduces a quote within 80 chars of the trigger
+            if not _trigger_introduces_quote(s):
+                excised.append(s)
+                continue
+        kept.append(s)
+    return " ".join(kept), excised
+
+
+def _trigger_introduces_quote(sentence: str) -> bool:
+    """Does the Zone-3-flagged sentence immediately introduce a verified quote?"""
+    m = ZONE3_TRIGGER_RE.search(sentence) or ZONE3_POSSESSIVE_RE.search(sentence)
+    if m is None:
+        return False
+    tail = sentence[m.end():]
+    return bool(QUOTE_WITH_CITE_RE.search(tail[:120]))
+
+
+# In forward(), after the existing _repair_quotes_in_answer() block:
+cleaned_answer, excised = _suppress_zone3(repaired_answer)
+if excised:
+    print(f"[ZONE3 SUPPRESSION] Excised {len(excised)} sentence(s): {excised}")
+    # Telemetry hook — record for later review (the lexical-scan corpus that
+    # informs the offline judge calibration and the eventual streaming gate)
+repaired_answer = cleaned_answer
+```
+
+The binary classifier (the Layer-2 secondary gate) attaches to this same hook: if calibrated > 95% on the held-out set, it runs after the lexical pass on any sentence that didn't trip the lexical trigger but is in Zone-1 framing position. Same synchronous interface.
+
+### Runtime-level Phase 2 (streaming proper — deferred, see Execution Sequencing)
+
+The streaming sketch below is the *Phase 2* version, deferred until the four feasibility checks land. It is the same enforcement logic re-shaped to run mid-stream against token-buffered units. Recorded here as the architectural target.
+
+```python
+# backend/streaming.py — new module (Phase 2, deferred)
 
 import asyncio, re
 from typing import AsyncIterator, Optional
@@ -356,6 +423,58 @@ Theme tokens go in `frontend/src/styles/zoning.css`:
 - **Does the release-valve discardable field meaningfully reduce Zone-2 leakage?** Empirical question. Run a paired-A/B offline: same prompt with and without the discardable field, score how often the model produces a Zone-3 sentence in the visible content. If the gains are marginal, drop the field for simplicity.
 - **How do we handle Zone-3 violations the model produces *despite* the prompt and gates?** The runtime layer excises; the offline eval flags. But the model may produce a span where lexical doesn't trigger, the classifier misclassifies, and the verifier has no view (because the violation isn't in a quote). The proper answer is that no single layer is sufficient — the prompt makes such violations rare, the classifier catches the common shapes, the lexical catches the obvious patterns, the offline judge catches the rest with high accuracy across the test set. The combination is the guarantee, not any single layer.
 - **What is the right UI affordance when the streamed answer has many excisions?** A user might see "[quote]. [quote]. [quote]" with no connective tissue if the model relies heavily on Zone-3 framing and the gates excise it all. That's degraded UX; the prompt should make this rare, but the UI may need a fallback rendering ("connective framing was suppressed; quotes follow").
+
+## Execution Sequencing (added 2026-06-28 after review)
+
+The four-layer architecture above is the recorded plan. **Its execution is split into two phases that must be sequenced carefully**, because the layers entangle if implemented together and one of them (Layer 2's streaming half) carries four unvalidated dependencies the others do not.
+
+### The key un-conflation
+
+Re-read Layer 2 carefully. It bundles two separable things:
+
+1. **Zone-3 suppression mechanics** — the lexical scan and binary classifier that detect and excise own-voice characterization sentences.
+2. **The streaming serving path** — token-buffering, unit-boundary parsing, async event yielding to the UI.
+
+**The Zone-3 suppression does not require streaming.** The lexical scan and the binary classifier can be invoked on the *complete generated answer*, post-generation, before the API returns the response. The faithfulness guarantee is identical whether the check runs token-by-token mid-generation or runs on the finished prediction at the end of `forward()`. Streaming only changes *when* the check fires (mid-stream vs post-generation) and *whether the user gets progressive rendering* — neither affects whether Zone 3 reaches the eye.
+
+This means **the trust-improving half of Layer 2 ships with no serving-path changes**. The streaming-rearchitecture half is a separate, later, optional UX project gated on its own feasibility checks.
+
+### Phase 1 (do now — no new architecture)
+
+1. **Verse-reference parser fix** (independent of Layer 1). Loosen `gill_search.py`'s regex to accept `.` as a verse separator: `\d+(?:[:.]\d+)?`. Two-line change. Validation: paired colon-vs-period query against deployed system; both should resolve via direct-lookup. **Ships before the zoning work** — it's a common-shape user fix (Matthew 28.17 → confident false refusal on the launch-week log) and it has zero interaction with anything else in this ADR.
+
+2. **BAML hardening** (also independent of Layer 1). Sanity-check the BAML output for the known failure modes — empty expansion, the literal "Please provide the modern search terms" self-clarifying response, the REPORTED-TRADITIONS over-generalization on named historical figures (Aquinas). Treat each as a BAML failure; fall through to dedup-only entity boost (no full entity dump — that was the 2026-06-22 universal-atonement amplification). Narrow REPORTED TRADITIONS to biblical unnamed figures only. **Ships before the zoning work** for a substantive reason: BAML failures currently poison the retrieval substrate the zoning prompt operates on, which would muddy the zoning multi-run A/B (a covenant or psalmody run might fail for retrieval reasons not zoning reasons). Clean the input layer first.
+
+3. **Layer 1 — the zoning prompt.** Add the three-zone teaching and the two refusal modes to the `GillSignature` docstring in `backend/bot.py`. **Do not include the release-valve discardable field at this stage** — see below.
+
+4. **Layer 2 (suppression only, NOT streaming) — post-generation Zone-3 sweep.** Implement `_suppress_zone3()` as a function called on the complete `pred.answer` inside `forward()`, after quote verification but before returning the `dspy.Prediction`. The function runs the lexical scan and (optionally) the binary classifier on the finished text, excises matched sentences, returns the cleaned answer. This delivers Layer 2's enforcement behavior — Zone 3 never reaches the user — without one byte of streaming plumbing. No `streaming.py` module. No async event yielding. No SID-buffered units. Just a synchronous string-in / string-out function on a finished prediction.
+
+5. **Layer 3 — offline semantic judge.** Extend `evals/run_eval.py` to call DeepSeek with the binary Zone-3 prompt on the answer field, alongside the existing `must_not_express` lexical check. Runs on the 28-case eval set on every prompt change. Latency-free because it's offline.
+
+6. **Multi-run A/B validation.** Pre-fix and post-fix N=5 each on `covenant_monocovenantal`, `aquinas`, `exclusive_psalmody`. **Hard pass criterion** — and this is load-bearing, not a gesture:
+   - **Conclusive pass:** pre-fix runs produce Zone-3 violations across at least 3 of 5 instances AND post-fix runs produce zero violations across all 5.
+   - **Conclusive fail:** post-fix runs produce ANY Zone-3 violations.
+   - **Inconclusive:** pre-fix runs produce zero violations (the bug is dormant due to state drift). When inconclusive, validation falls back to scoring the captured prod-log known-bad answer against the new instrument AND a prompt-construction review by a second reader. **Inconclusive must not be written up as a pass.** The result is "fix shipped, validation inconclusive, regression risk monitored."
+
+### Phase 2 (defer — gated on feasibility)
+
+7. **Layer 2 streaming proper.** Token-buffered SID-bounded units, mechanical gates only in the critical path, async event yielding. Gated on:
+   - Feasibility check: does DSPy/DeepSeek via LiteLLM support streaming today?
+   - Latency check: can the small binary classifier hit < 200 ms reliably on representative framing inputs?
+   - Accuracy check: does the binary classifier reach > 95% accuracy on the 100-sentence calibration suite (50 known Zone-3 + 50 known Zone-1)?
+   - Unit-boundary check: does the proposed regex handle real streamed tokens (interleaved partial markdown, edge cases) without corruption?
+
+   Failure on any → streaming deferred further. The post-generation suppression from Phase 1 continues to carry the runtime faithfulness load.
+
+8. **Layer 4 — gutter UI.** Depends on streaming events. Builds on the streaming plumbing.
+
+9. **The release-valve `<interpretation>` discardable field.** Separate isolated A/B: same prompt with-and-without the field, measure Zone-2 cleanliness delta on the existing eval set. The serialization-leak risk identified in the Risks section requires an integration test asserting the field is absent from `response.answer` *before* the prompt change ships. **Do not bundle into Phase 1's prompt change.** A failed release-valve experiment must not block the zoning prompt.
+
+### The principle being enforced
+
+Three layers of an architectural ADR can ship with no new serving-path code, no new modules, no streaming, no UI work. The fourth layer is a UX optimization that arrives later when its prerequisites validate. This decoupling is the load-bearing decision: it lets the credibility-improving fix ship this week, validated by the multi-run A/B discipline, without the gravitational pull of the streaming-rearchitecture stalling the prompt work behind four unvalidated dependencies.
+
+The ADR records the full architecture so the later phase has a written plan; the Execution Sequencing records that the full architecture does not all ship at once, and which half ships first.
 
 ## Related ADRs
 
