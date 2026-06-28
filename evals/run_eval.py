@@ -153,6 +153,15 @@ class QuestionResult:
     must_express_missing: List[str] = field(default_factory=list)
     must_not_express_ok: bool = True
     must_not_express_hits: List[str] = field(default_factory=list)
+    # Post-launch quote-placement guard (Phase 0). When a reference entry sets
+    # `must_be_verified: true`, the response's API-layer `verified` flag must
+    # be True (no `quote_failures` from the pipeline verifier). Defaults to
+    # True for answer-expected questions so any case where the model attaches
+    # a [SID] to text not present in that chunk turns the score red — even
+    # when no specific substring is forbidden. Catches the Garden / Word-of-God
+    # category where the bug is structural (citation placement), not lexical.
+    must_be_verified_ok: bool = True
+    must_be_verified_skipped: bool = False
     overall_pass: bool = False
 
 
@@ -230,8 +239,24 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
     result.must_not_express_ok = len(hits_not_express) == 0
     result.must_not_express_hits = hits_not_express
 
+    # Verifier-flag gate (Phase 0 quote-placement guard). The reference entry
+    # opts in via `must_be_verified: true` (default true for answer-expected
+    # questions). When the API response carries `verified=False`, the model
+    # attached at least one [SID] to text that the pipeline verifier could
+    # not authenticate against the cited chunk's content — that's the Garden
+    # category bug. Skipped when the reference entry sets `must_be_verified:
+    # false` (e.g. legacy entries that pre-date the verifier).
+    must_be_verified_default = result.expected_behavior == "answer"
+    must_be_verified = q.get("must_be_verified", must_be_verified_default)
+    if not must_be_verified:
+        result.must_be_verified_skipped = True
+        result.must_be_verified_ok = True
+    else:
+        api_verified = response.get("verified", True)  # default True if absent
+        result.must_be_verified_ok = bool(api_verified)
+
     # Overall pass: refusal correct, must_cite met (>= 50%), no must_not_cite
-    # violations, lexical semantic checks pass.
+    # violations, lexical semantic checks pass, verifier flag clean.
     must_cite_pass = result.must_cite_recall >= 0.5 if q.get("must_cite") else True
     if result.expected_behavior == "refuse":
         result.overall_pass = (
@@ -246,6 +271,7 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
             and not result.must_not_cite_violated
             and result.must_express_ok
             and result.must_not_express_ok
+            and result.must_be_verified_ok
         )
     return result
 
