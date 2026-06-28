@@ -216,7 +216,7 @@ class GillSearchEngine:
         ref_source = original_query if original_query and original_query.strip() else query
         ref_source_clean = (ref_source or "").strip().rstrip('?.!').strip()
         ref_match = re.fullmatch(
-            r'\s*((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?::\d+)?)\s*',
+            r'\s*((?:\d\s*)?[A-Za-z]+)\.?\s+(\d+(?:[:.]\d+)?)\s*',
             ref_source_clean,
             re.IGNORECASE,
         )
@@ -243,7 +243,7 @@ class GillSearchEngine:
             # New regex (fullmatch) has 2 groups: book, verse_part.
             raw_book = ref_match.group(1).lower()
             raw_book = re.sub(r'\s+', ' ', raw_book)
-            verse_part = ref_match.group(2)
+            verse_part = ref_match.group(2).replace('.', ':')
 
             if raw_book in BIBLE_BOOK_MAP:
                 canonical_ref = f"{BIBLE_BOOK_MAP[raw_book]} {verse_part}"
