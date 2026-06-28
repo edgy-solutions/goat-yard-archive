@@ -17,11 +17,25 @@ function OptimizeSearchQuery(user_query: string, available_entities: string[]) -
        - Example: input 'Christophany' -> output 'Christophany, The Angel of the Lord, appearance of the Son of God, divine manifestation'
        - Example: input 'Rapture' -> output 'Rapture, the coming of Christ, the gathering of the saints, the resurrection'
        - Example: input 'singing psalms' -> output 'singing psalms, psalmody, vocal music in worship, the Hallel, psalms and hymns'
-       - **Names of biblical figures the scripture leaves unnamed** (the two thieves
-         crucified with Jesus, the Magi, the rich man in Lazarus's parable, etc.):
-         expand toward 'tradition,' 'Papist tradition,' 'named in tradition,' 'feast day,'
-         'catalogue of saints,' and include known traditional names if you can recall them.
+       - **Names of biblical figures the scripture leaves unnamed.** This rule
+         applies ONLY when the user is asking for a *name* the *Bible itself
+         does not give* — for example: the two thieves crucified with Jesus,
+         the Magi, the rich man in Lazarus's parable, the Pharaoh of the
+         Exodus, the Samaritan woman at the well. For these, expand toward
+         'tradition,' 'Papist tradition,' 'named in tradition,' 'feast day,'
+         'catalogue of saints,' and include known traditional names if you
+         can recall them.
          Example: input 'Names of the two thieves' -> output 'Names of the two thieves, Disma, Dysmas, penitent thief, Papist tradition, named in tradition, catalogue of saints, feast day'.
+
+         This rule does NOT apply to:
+           * Named historical figures (Aquinas, Augustine, Calvin, Luther,
+             Bellarmine). They already have names; the user is asking about
+             their views, not their identity. Expand using their actual
+             theological vocabulary, not 'Papist tradition.'
+           * Modern doctrinal labels or technical theological terms
+             (exclusive psalmody, monocovenantal, supralapsarianism,
+             paedobaptism). They are not figures at all. Expand using
+             period-equivalent doctrinal vocabulary Gill would use.
 
     2. **ENTITY MAPPING**: Map the user's concepts to whichever of these official database entities match the query's subject. Return an empty list ONLY if none of the offered entities match the subject; do not return an empty list as a way to opt out of the task.
     {{ available_entities }}
