@@ -111,6 +111,95 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         }
     )
 
+# ---------------------------------------------------------------------------
+# BAML output sentinel (ADR-0008 step 2b/2c).
+#
+# Three STRUCTURAL signals catch BAML punts that the prompt-prevention work
+# in step 2a doesn't already foreclose. They trip the fallback by raising;
+# the except block downstream then applies the dedup-only entity fallback
+# (step 2d).
+#
+# A separate pair of LEXICAL regexes is kept as diagnostic logging ONLY — they
+# never trip the sentinel. Maintaining a growing regex allowlist of bad
+# phrasings is the symptom-chasing treadmill the ADR explicitly rejects;
+# refining the prompt (step 2a) is what closes the gap, not adding regexes.
+# ---------------------------------------------------------------------------
+_QUERY_STOPWORDS = frozenset({
+    "the","of","a","an","is","are","was","were","be","been","being",
+    "what","who","whom","whose","when","where","why","how","which",
+    "does","did","do","done","has","have","had","can","could","would",
+    "should","may","might","will","shall",
+    "about","in","on","at","for","to","from","with","by","as","into",
+    "and","or","but","not","no","so","then","than","that","this","these","those",
+    "i","you","he","she","it","we","they","me","him","her","us","them",
+    "my","your","his","its","our","their",
+    "tell","say","said","says",
+})
+
+_BAML_LEXICAL_DIAG_IMPERATIVE = re.compile(
+    r"\b(please|could you|kindly|can you)\s+\w{0,15}\s*"
+    r"(provide|share|specify|clarify|give|tell|let me know)\b",
+    re.IGNORECASE,
+)
+_BAML_LEXICAL_DIAG_META = re.compile(
+    r"\b("
+    r"search\s+terms?|your\s+query|you\s+wish\s+to|you\s+want\s+to|"
+    r"theological\s+synonyms|18th[-\s]century\s+synonyms|"
+    r"the\s+modern\s+terms?|provide\s+the\s+modern"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _query_content_tokens(query: str) -> set:
+    """Lowercased alphabetic-leading tokens of length >= 2 with stopwords
+    removed. Used by the structural sentinel's query-terms-present check
+    (the workhorse signal). Reliable ONLY when the BAML prompt mandates
+    input-echo (ADR-0008 step 2a) — pre-echo, an expansion lacking the
+    query is not necessarily a punt."""
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9]+", (query or "").lower())
+    return {t for t in tokens if len(t) >= 2 and t not in _QUERY_STOPWORDS}
+
+
+def _baml_output_punt_reasons(
+    *,
+    user_query: str,
+    expansion: str,
+    given_entities,
+    returned_entities,
+):
+    """Return a list of structural-signal names that classify the BAML
+    output as a punt. Empty list means accept the output. Lexical
+    diagnostics are logged as a side effect but never appended to the
+    returned list."""
+    reasons = []
+
+    if not (expansion or "").strip():
+        reasons.append("empty_expansion")
+
+    qtoks = _query_content_tokens(user_query)
+    if qtoks:
+        exp_lower = (expansion or "").lower()
+        if not any(t in exp_lower for t in qtoks):
+            reasons.append("no_query_terms_present")
+
+    if given_entities and not returned_entities:
+        reasons.append("entities_given_none_returned")
+
+    diag_hits = []
+    if _BAML_LEXICAL_DIAG_IMPERATIVE.search(expansion or ""):
+        diag_hits.append("imperative_pattern")
+    if _BAML_LEXICAL_DIAG_META.search(expansion or ""):
+        diag_hits.append("meta_vocab")
+    if diag_hits:
+        print(
+            f"[BAML LEXICAL DIAG] log-only, not tripping: hits={diag_hits} "
+            f"user_query={user_query!r} expansion={(expansion or '')[:200]!r}"
+        )
+
+    return reasons
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("--- STARTUP EVENT FIRED ---")
@@ -324,25 +413,53 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities = optimized_query.official_entities
         print(f"BAML Optimized Query: {search_text}")
         print(f"BAML Mapped Entities: {mapped_entities}")
+
+        # Structural sentinel (ADR-0008 step 2b). Three signals catch BAML
+        # punts the 2a prompt-prevention didn't already foreclose. Tripping
+        # routes to the dedup-only fallback in the except block (step 2d).
+        _punt_reasons = _baml_output_punt_reasons(
+            user_query=req.query,
+            expansion=search_text,
+            given_entities=list(available_entity_names or []),
+            returned_entities=list(mapped_entities or []),
+        )
+        if _punt_reasons:
+            print(
+                f"[BAML SENTINEL] Output classified as punt: reasons={_punt_reasons} "
+                f"user_query={req.query!r} expansion={(search_text or '')[:300]!r} "
+                f"returned_entities={mapped_entities!r}"
+            )
+            if stages_capture is not None:
+                stages_capture["baml_punt_reasons"] = _punt_reasons
+            raise ValueError(f"BAML output structurally punted: {_punt_reasons}")
+
         if stages_capture is not None:
             stages_capture["baml_expansion"] = search_text
             stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
     except Exception as e:
         import traceback
         error_msg = traceback.format_exc()
-        print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
+        print(f"BAML Optimization failed, falling back to raw query + dedup-only entities:\n{error_msg}")
         search_text = req.query
-        # No entity fallback: dumping the full BM25 entity list (~50 entities
-        # with off-topic noise) drowns the retrieval boost worse than no boost
-        # at all. Observed 2026-06-21: universal_atonement landed in BAML
-        # failure, the 50-entity flood (Bramines, Mary Magdalen, Korah's sons,
-        # mercy-seat, etc.) tilted retrieval toward Day-of-Atonement chunks
-        # and away from the LUKE_15_28 "redeem some" chunk that grounds the
-        # answer. Better to take the raw-query hit than amplify it.
-        mapped_entities = None
+        # Dedup-only fallback (ADR-0008 step 2d). The per-query relevant
+        # entity set returned by get_relevant_entities is already filtered
+        # for this query by BM25 — what we strip is the case-insensitive
+        # duplicates the lookup produces (Peter x2, Jona x2, Book of Psalms
+        # x2 etc., observed pre-launch). NOT a global manifest dump — the
+        # 2026-06-21 universal_atonement amplification was that pathology.
+        # Caveat: this does not fix the underlying noisy-lookup case (e.g.
+        # universal_atonement returns off-topic entities for unrelated
+        # reasons); that is a separate work item on get_relevant_entities.
+        _seen, _deduped = set(), []
+        for _e_name in (available_entity_names or []):
+            _key = _e_name.strip().lower()
+            if _key and _key not in _seen:
+                _seen.add(_key)
+                _deduped.append(_e_name)
+        mapped_entities = _deduped if _deduped else None
         if stages_capture is not None:
             stages_capture["baml_expansion"] = None
-            stages_capture["baml_entities"] = []
+            stages_capture["baml_entities"] = sorted(_deduped) if _deduped else []
             stages_capture["baml_error"] = str(e)
 
     # 2. Retrieve Evidence
