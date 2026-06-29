@@ -19,7 +19,6 @@ function OptimizeSearchQuery(user_query: string, available_entities: string[]) -
     - 'keeping the sabbath' -> 'keeping the sabbath, the Lord's day, the Christian sabbath, sabbath rest, the fourth commandment'
     - For a person Scripture leaves unnamed (the Magi, the rich man in Lazarus's parable, Pharaoh's daughter), also add tradition terms. E.g. 'the Magi' -> 'the Magi, the wise men, the three kings, named in tradition, Gaspar Melchior Balthasar'. This applies ONLY to unnamed biblical figures — never to named people or to doctrines.
 
-    {{ ctx.output_format }}
     Output only the raw JSON object, starting with { and ending with }. No markdown, no preamble.
 
     Map against these entities:
@@ -27,5 +26,7 @@ function OptimizeSearchQuery(user_query: string, available_entities: string[]) -
 
     Expand and map THIS query:
     <query>{{ user_query }}</query>
+
+    {{ ctx.output_format }}
   "#
 }
