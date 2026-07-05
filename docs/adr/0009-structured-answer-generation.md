@@ -144,4 +144,27 @@ With the schema in place, the gated-streaming design deferred in ADR-0008 Phase 
 
 The insight that made this ADR possible was empirical, not analytical. The 2026-07-05 covenant re-verification produced a run-1 answer that verified faithful end-to-end (the Step-3 flagship win) and a run-2 answer that slipped a Zone-3 inference-form phrasing the entire planned lexical scan would have missed. The reviewer's observation: "the lesson from the BAML sentinel applies exactly: enumerate required properties, not forbidden phrasings — and where you can't define a required property, use the semantic layer, not a longer regex." That framing pointed at structure — a schema is required-properties enforcement at generation time, upstream of both regex and semantic layers. The zones defined crisply enough to become fields is the design that dissolves the free-prose problem into the schema.
 
+### Additional evidence (Step 4 wired-in smoke, 2026-07-05)
+
+After Step 4 (`_suppress_zone3()`) landed and rolled to the test cluster, four consecutive covenant queries produced a Zone-3 shape the lexical scan does not target and cannot target without exploding false positives:
+
+> *"Gill does not use the term 'monocovenantal,' but **he distinguishes** the covenant of grace from other covenants... In Matthew 26:28, he describes the 'new testament' as 'a new dispensation, or administration of the covenant of grace,' ratified by Christ's blood. **This suggests Gill views the covenant of grace as a distinct, enduring covenant, though administered differently across time.**"*
+
+Three shapes appear:
+- **`he distinguishes`** — pronoun-anchored assertive form. Adding `(Gill|he)` anchors to the lexical scan would explode false positives on KJV *"he said unto..."* language in surrounding quotes.
+- **`Gill views X as Y`** — verb-form of a Zone-3 possessive pattern (*"Gill's view of X"*). Adding *"views/regards/treats X as Y"* to the pattern set adds surface without closing the space.
+- **`This suggests Gill...`** — inference-form. Unbounded phrasing variants.
+
+Each is a distinct anaphora / verb-form / inference construction. Enumerating them lexically is the growing-allowlist treadmill. In the structured schema of this ADR, all three become **structurally homeless**: *"he distinguishes the covenant of grace from other covenants"* has to fit inside a 10-word `Zone2Phrase.framing` field whose declared contract is *"orienting words only; never a claim about what Gill holds"*, and the closing systematizing sentence *"This suggests Gill views..."* has nowhere to live — no field carries prose-tier reflective claims. The classifier's job shrinks from "read this 800-token prose for Zone-3 patterns of unbounded shape" to "read this 10-word framing string against its declared contract." That's tractable even for a small model.
+
+This is the permanent answer to the state-drift observation: not a smarter regex (bounded by imagination) and not even a smarter judge (bounded by prompt attention over long text), but **removing the open prose the regex was asked to police**.
+
+### Related instrument design that this ADR extends
+
+The Step 5 semantic judge is being spec'd as a **three-way classifier** reporting **two independent rates** (see ADR-0008 Validation Notes for the concrete design): (1) is there own-voice characterization of Gill's position? — the *zone-contract* / discipline-erosion metric; (2) if so, is it substantiated by the quoted material? — the *faithfulness* / harm metric. Combined as *unsupported-characterization-rate* (credibility signal, target ~0) and *supported-characterization-rate* (prompt-compliance drift indicator).
+
+That instrument survives into the structured schema world unchanged. Under structure, the *unsupported-characterization-rate* stays roughly what it is now (the framing fields are still free strings that can technically house unsupported claims). The *supported-characterization-rate* drops materially — the schema's field descriptions actively teach the model that framing is orienting-only, so much of what today lands as "supported characterization in prose" gets structurally routed either into a quote (Zone 2) or into `zone3_notes` (the log-only sinkhole, if the release-valve A/B favors it). The two-rate reporting stays honest across the migration; the numbers move for interpretable reasons.
+
+### Sequencing
+
 Sequencing is load-bearing: do NOT swap the output architecture mid-Phase-1. Steps 4–6 complete on the current architecture; the lexical backstop and semantic judge are still needed in the structured world (structure shrinks the surface, does not eliminate it); nothing built during Phase 1 becomes wasted. This ADR files the design; Phase 2 executes it.

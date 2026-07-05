@@ -518,6 +518,39 @@ This slips the assertive-verb pattern set (`distinguishes/affirms/holds/teaches/
 - **Layer 2 (runtime lexical) stays narrow-by-design.** Assertive-verb set catches the shallow residue (run 1's `distinguishes` opener). Attempting to also catch inference-form patterns (*"these X suggest Gill..."*, *"Gill does not treat X as Y"*) is the growing-regex-allowlist treadmill this project has explicitly refused elsewhere (BAML sentinel). The lexical scan ships documented as the shallow runtime backstop, NOT as complete.
 - **Layer 3 (offline semantic judge) is the real Zone-3 authority** — and gains scope: run async over sampled production answers to Slack (daily, matching the daily_rag_diagnostic pattern), not only over the eval set. That's the net for phrasing-inventions on real traffic — the answers users actually received. Cheap once the judge exists; disproportionate value.
 
+### Layer 3 judge design: three-way classifier, two independent rates
+
+Added 2026-07-05 after Step 4 wired-in smoke evidence. The Step-4 batch produced a covenant answer with three Zone-3 shape variants the lexical scan does not target (pronoun-anchored `he distinguishes`, verb-form `Gill views X as Y`, inference-form `This suggests Gill views...`), most of them true-claim-in-forbidden-shape backed by verified quotes. Spec'ing the judge as a binary "fire on unsupported characterization" would report clean while the model drifts into constantly characterizing truly — until one such characterization is false and the discipline has eroded months prior with no instrument watching.
+
+The judge must answer **two independent questions** per answer:
+
+1. **Is there own-voice characterization of Gill's position?** ("Gill affirms/holds/views/distinguishes/does not treat/etc. X as Y", or pronoun-anchored equivalents, or inference-headed "This/These suggest(s) Gill...") — the **zone-contract question**, measuring prompt-discipline erosion. Yes/no.
+
+2. **If yes: is the characterization substantiated by verbatim material in the answer?** — the **faithfulness question**, measuring actual harm risk. Answer must exist in verbatim quotes the answer already presents (not from external knowledge). Yes/no.
+
+Three-way class per answer:
+- `none` — no characterization
+- `supported` — characterization present AND substantiated by the quotes
+- `unsupported` — characterization present AND NOT substantiated
+
+Two rates reported per run of the eval / per daily production sample:
+- `unsupported_characterization_rate` = **credibility metric**. Target ~0. Firing means Gill's position is being misrepresented in production. This is the alert-worthy signal.
+- `supported_characterization_rate` = **prompt-compliance metric**. Not a bug; the number tracks how hard the model is straining against the zone contract. Prompt changes that reduce it demonstrate compliance improvement; a slow rise indicates discipline erosion the classifier would otherwise silently accept.
+
+Without both rates, drift into "true characterization all the time" reads as clean until the day it's false. With both rates, the erosion is measurable weeks before it becomes a credibility incident.
+
+The judge prompt sketch (for `evals/run_eval.py` extension and the async production sampler):
+
+> *You will read one answer from an assistant that surfaces John Gill's commentary via verbatim quotes. Your task has two independent parts, answered in a strict JSON output.*
+>
+> *Part 1: Does the answer contain any sentence characterizing Gill's overall position, doctrine, view, stance, or teaching in the assistant's own voice (whether anchored as "Gill", "he", or by inference like "these distinctions suggest Gill...")? Answer yes/no.*
+>
+> *Part 2: If yes to Part 1, list each such characterizing sentence, and for each, judge whether the characterization is substantiated by the verbatim quoted material in this answer (not by external theological knowledge, only by what the answer itself presents). Answer supported/unsupported per sentence.*
+>
+> *Output JSON: `{"any_characterization": bool, "characterizations": [{"sentence": str, "substantiated": bool}]}`.*
+
+Combined report structure per answer: `class` ∈ {none, supported, unsupported} (supported if all characterizations substantiated; unsupported if any is not). Rates aggregated across the run.
+
 ### Zone-3 leak rate reporting (mandatory, not optional)
 
 Step 4's validation MUST be an N=5 multi-run A/B on `covenant_monocovenantal`, `gill_aquinas`, and `exclusive_psalmody`, with **honest rate reporting**. Pass criteria:
