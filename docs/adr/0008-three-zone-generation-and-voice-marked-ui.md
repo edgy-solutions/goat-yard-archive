@@ -476,11 +476,63 @@ Three layers of an architectural ADR can ship with no new serving-path code, no 
 
 The ADR records the full architecture so the later phase has a written plan; the Execution Sequencing records that the full architecture does not all ship at once, and which half ships first.
 
+## Validation Notes (added 2026-07-05 after Step 3 live smoke)
+
+Post-launch analysis identified the covenant_monocovenantal query as the flagship Zone-3 case. The 2026-06-22 prod-log answer read:
+
+> *"Gill distinguishes between different covenantal administrations while affirming their ultimate unity in grace."*
+
+No quotes, no [SID], no verifier signal — pure Zone-3 systematizing in the model's own voice. The Step-3 zoning prompt landed 2026-07-01 and was smoked against the same query on the test cluster (single run 1 of 2 captured verbatim, all quotes confirmed `Verified: True` by the ADR-0006 difflib verifier, no `unverified_sentence_ids`):
+
+> *"Gill distinguishes the covenant of grace from other covenants in the following ways:*
+>
+> *1. On the Noahic covenant: 'Not the covenant of grace in Christ, but of the preservation of the creatures in common, a promise that they should not be destroyed any more by a flood' [GENESIS_9_9_S00].*
+>
+> *2. On the covenant of circumcision: 'The covenant of circumcision, so called from the token of it, which God is said to make or give, being his own constitution, and depended on his sovereign will and pleasure' [GENESIS_17_2_S00].*
+>
+> *3. On the Mosaic covenant: 'The blood of the covenant, which the Lord hath made with you concerning all these words; being a ratification of the covenant on both sides, having been sprinkled both upon the altar, and upon the people' [EXODUS_24_8_S00]. Gill contrasts this with the new covenant: 'But the second covenant, or the new administration of the covenant of grace, for which reason it is called the New Testament, is exhibited and established in the blood of Christ the testator' [MATTHEW_26_28_S01].*
+>
+> *4. On the everlasting nature of the covenant of grace: 'For an everlasting covenant; to his natural seed... and to all his spiritual seed, with respect to the spiritual blessings of it, which are everlasting, and are never taken away, or become void' [GENESIS_17_7_S00].*
+>
+> *5. On the covenant's fulfillment in Christ: 'Which is shed for many, for the remission of sins; that is, was very shortly to be shed, and since has been, for all the elect of God... whereby the full forgiveness of all their sins was procured' [MATTHEW_26_28_S03]."*
+
+Reading the answer against the raw Genesis 9:9 chunk confirmed the framing is faithful, not merely more cautious: *"And I, behold, I establish my covenant with you, &c.] **Not the covenant of grace in Christ, but of the preservation of the creatures in common**, a promise that they should not be destroyed any more by a flood..."* Gill himself is doing the distinguishing in his own verse commentary. The Step-3 opener (*"Gill distinguishes the covenant of grace from other covenants"*) uses a forbidden Zone-3 verb but summarizes a claim genuinely supported by every quote that follows.
+
+### The concrete finding worth naming
+
+**"Administration of the covenant of grace" is Gill's own verse-local language, not an imported systematic label.** The Matt 26:28 quote returned by the Step-3 answer reads verbatim: *"the new administration of the covenant of grace, for which reason it is called the New Testament, is exhibited and established in the blood of Christ..."* Gill himself uses "administration" language at Matt 26:28.
+
+The 2026-06-22 launch-week sin was NOT the vocabulary. It was **taking Gill's verse-local usage and systematizing it into a tradition-level label** — the "ultimate unity in grace" thesis dressed in "administrations" language, unmoored from any specific quote, presented as Gill's overall doctrinal position. Zone 3 is precisely: elevating Gill's verse-anchored vocabulary into a systematic position claim the quotes don't collectively support. This is a more precise empirical definition of Zone 3 than the original definition in this ADR, discovered by reading run 1 against the source rather than by writing.
+
+### Non-determinism observed — validates the multi-run discipline
+
+A second run of the same query (2026-07-05, same seed=0, same prompt) produced a substantively different answer with a different quote set AND a new Zone-3 pattern in the closing sentence:
+
+> *"These distinctions suggest Gill does not treat all covenants as one unified 'monocovenantal' system."*
+
+This slips the assertive-verb pattern set (`distinguishes/affirms/holds/teaches/supports/advocates/maintains/leans/takes`) — the phrasing *"these distinctions suggest Gill does not treat"* is an inference-form Zone-3 pattern the current lexical scan will not catch. Single-run testing under-reports the Zone-3 rate.
+
+### Implications for the layer assignments
+
+- **Layer 1 (prompt) works.** Run 1 was faithful; the prompt shifted what the model reached for — from Westminster-import synthesis to Gill's own verse-anchored distinctions.
+- **Layer 2 (runtime lexical) stays narrow-by-design.** Assertive-verb set catches the shallow residue (run 1's `distinguishes` opener). Attempting to also catch inference-form patterns (*"these X suggest Gill..."*, *"Gill does not treat X as Y"*) is the growing-regex-allowlist treadmill this project has explicitly refused elsewhere (BAML sentinel). The lexical scan ships documented as the shallow runtime backstop, NOT as complete.
+- **Layer 3 (offline semantic judge) is the real Zone-3 authority** — and gains scope: run async over sampled production answers to Slack (daily, matching the daily_rag_diagnostic pattern), not only over the eval set. That's the net for phrasing-inventions on real traffic — the answers users actually received. Cheap once the judge exists; disproportionate value.
+
+### Zone-3 leak rate reporting (mandatory, not optional)
+
+Step 4's validation MUST be an N=5 multi-run A/B on `covenant_monocovenantal`, `gill_aquinas`, and `exclusive_psalmody`, with **honest rate reporting**. Pass criteria:
+
+- Assertive-form Zone 3 (lexical class): zero across all post-suppression runs
+- Inference-form Zone 3 (semantic-judge class): reported as leak rate X/N, with the semantic judge named as its designated catch — NOT declared clean by omission
+
+"Step 4 shipped, covenant clean" without the rate breakdown is the dormant-bug trap in a new disguise. Report what the lexical layer catches; report what escapes; name what will catch what escapes; do not conflate silence with cleanliness.
+
 ## Related ADRs
 
 - [ADR-0004: Reference eval set and CI gates](0004-reference-eval-set-and-ci-gates.md) — the eval framework this ADR extends with semantic Zone-3 judgment.
 - [ADR-0006: Verbatim quote verification](0006-verbatim-quote-verification.md) — the verifier that protects Zone 2; this ADR extends protection to the framing around it.
 - [ADR-0007: Availability and outage fallback](0007-availability-and-outage-fallback.md) — the SPA shell that will host the gutter UI.
+- **ADR-0009 (forthcoming): Structured answer generation** — Phase 2 architecture that supersedes the gated-streaming unit-boundary design (structure provides units natively), simplifies the ADR-0006 verifier to per-field checks, and shrinks (but does not eliminate) the Zone-3 surface. Includes the schema-safe release valve as a log-don't-discard field. Sequenced after Phase 1 Steps 4–6 complete on the current architecture.
 
 ## Notes
 
