@@ -612,6 +612,12 @@ async def search(request: Request, req: SearchRequest):
                         stages_capture["bot_final_answer"] = pred.answer
                         stages_capture["bot_citations"] = sorted(pred.citations) if pred.citations else []
                         stages_capture["bot_reasoning"] = getattr(pred, "reasoning", "") or ""
+                        # Zone-3 sweep observability (ADR-0008 Phase 1 Step 4).
+                        # Records surface via debug=True so the daily diagnostic
+                        # + Step 5 semantic judge can measure lexical excision
+                        # rates alongside their own outputs.
+                        stages_capture["zone3_excisions"] = getattr(pred, "zone3_excisions", None) or []
+                        stages_capture["bot_pre_sweep_answer"] = getattr(pred, "pre_zone3_sweep_answer", None)
                     # Hybrid quote repair (ADR-0006): the bot has already
                     # attempted to substitute verbatim source spans for any
                     # paraphrased quotes via difflib + LLM fallback. Surface

@@ -384,6 +384,287 @@ def _quote_in_source(quote_raw: str, normalized_source: str) -> bool:
 
     return False
 
+# ---------------------------------------------------------------------------
+# Zone-3 post-generation suppression (ADR-0008 Phase 1 Step 4).
+#
+# SHALLOW RUNTIME BACKSTOP — this function catches Gill-anchored assertive
+# and negation forms only. It is DELIBERATELY narrow. Two known gaps are
+# NOT patched by this scan; they are the semantic judge's territory
+# (ADR-0008 Layer 3, Step 5):
+#
+#   1. Inference-form Zone 3: "these distinctions suggest Gill...",
+#      "this shows Gill...", "the passages imply Gill..." — model's
+#      systematizing inference from the quotes. Unbounded surface forms.
+#      Regex enumeration would be the growing-allowlist treadmill this
+#      project refuses to build (see ADR-0008 Notes / substrate hardening).
+#
+#   2. Pronoun-anchored Zone 3: "he maintains that...", "he holds the...",
+#      "his teaching...". Real prose refers back to Gill with pronouns.
+#      Adding (Gill|he) anchors would explode false positives on the KJV
+#      "he said unto..." quote language pervasive in the corpus. The gap
+#      is documented explicitly and left to the semantic judge.
+#
+# Rate-report both gaps as leak classes when validating. Do NOT declare
+# clean by omission. See ADR-0008 Validation Notes for the mandatory
+# rate-reporting format.
+# ---------------------------------------------------------------------------
+
+_ZONE3_ASSERTIVE_RE = re.compile(
+    r"\bGill\s+("
+    r"distinguishes|affirms|holds|teaches|argues|supports|advocates|"
+    r"maintains|leans\s+toward|takes\s+the\s+\w+\s+position|believes\s+that"
+    r")\b",
+    re.IGNORECASE,
+)
+_ZONE3_POSSESSIVE_RE = re.compile(
+    r"\bGill's\s+(view|position|stance|teaching|doctrine|opinion)\s+(of|on)\b",
+    re.IGNORECASE,
+)
+# The single blatant new shape from 2026-07-05 covenant run 2 —
+# negation-form Zone 3, a direct inversion of the assertive verbs.
+_ZONE3_NEGATION_RE = re.compile(
+    r"\bGill\s+does\s+not\s+("
+    r"treat|conflate|equate|regard|distinguish|affirm|hold|teach|argue|"
+    r"support|advocate|maintain|consider|view"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Quote-adjacent exemption — a Zone-3 verb IS acceptable when it introduces
+# a verified quote within 120 chars (e.g., "Gill distinguishes the sign
+# from the substance: 'circumcision was...'" [SID]). Applied uniformly to
+# all three patterns.
+_QUOTE_AFTER_MATCH_RE = re.compile(
+    r'["""].{1,200}?["""][^"""\n\[\]]{0,80}\[[A-Z0-9_]+_S\d+\]'
+)
+
+
+def _suppress_zone3(answer: str) -> Tuple[str, List[dict]]:
+    """Post-generation Zone-3 sweep. Returns (cleaned_answer, excised_records).
+
+    Splits the answer paragraph-by-paragraph, then sentence-by-sentence.
+    Any sentence matching an assertive-verb, possessive, or negation
+    pattern is:
+
+      - Kept (with an "exempted" record) if a verified quote follows the
+        match within 120 chars (legitimate Zone-1 introduction of a
+        Zone-2 quote — the covenant-flagship shape).
+      - Replaced with a neutral template if the sentence was introducing
+        content (ends with ':' or is followed by a numbered list or a
+        quote). Prevents orphaned "For example..." openings after
+        excision. See ADR-0008 Consequences / Negative.
+      - Excised outright otherwise.
+
+    See ADR-0008 Validation Notes for the mandatory rate-reporting
+    format — this function catches shallow residue only.
+    """
+    if not answer:
+        return answer, []
+
+    paragraphs = re.split(r"(\n\s*\n)", answer)
+    excised: List[dict] = []
+    out: List[str] = []
+
+    for i, para in enumerate(paragraphs):
+        if i % 2 == 1:
+            out.append(para)
+            continue
+
+        text = para
+        working = []
+        cursor = 0
+        sent_index = 0
+
+        for sentence, sent_end in _iter_sentences(text):
+            sentence_end = cursor + sent_end
+            cursor = sentence_end
+            this_sent_index = sent_index
+            sent_index += 1
+
+            trip = _zone3_trip(sentence)
+            if not trip:
+                working.append(sentence)
+                continue
+
+            # Exemption: quote within 120 chars after the match (checked
+            # across the whole answer starting from the sentence, not just
+            # this paragraph, so that colon-then-list-then-quote structures
+            # like the covenant opener land inside the exemption window).
+            paragraph_tail = text[sentence_end:]
+            downstream = paragraph_tail
+            for j in range(i + 1, min(i + 4, len(paragraphs))):
+                downstream += paragraphs[j]
+            window = (sentence[trip["match_end"]:] + downstream)[:120]
+            if _QUOTE_AFTER_MATCH_RE.search(window):
+                excised.append({
+                    "paragraph_index": i,
+                    "pattern": trip["pattern"],
+                    "matched": trip["matched"],
+                    "sentence": sentence.strip(),
+                    "action": "exempted_quote_adjacent",
+                })
+                working.append(sentence)
+                continue
+
+            is_paragraph_opener = (this_sent_index == 0)
+            replacement, tail_edit = _template_for_content_introducer(
+                sentence, paragraph_tail, paragraphs, i, is_paragraph_opener
+            )
+            action = "template_replaced" if replacement is not None else "excised"
+            excised.append({
+                "paragraph_index": i,
+                "pattern": trip["pattern"],
+                "matched": trip["matched"],
+                "sentence": sentence.strip(),
+                "action": action,
+                "replacement": replacement,
+                "tail_edit": tail_edit,
+            })
+            if replacement is not None:
+                working.append(replacement)
+            elif tail_edit is not None:
+                # Strip an orphaning transition ("For example, " / "Similarly, ")
+                # from the immediate next-sentence continuation so the sweep
+                # doesn't leave a dangling connective.
+                pass  # tail_edit applied below by rewriting cursor position
+
+        assembled = "".join(working)
+        # If any excision recorded a tail_edit, apply it to the assembled text
+        for rec in excised:
+            if rec.get("action") == "excised" and rec.get("tail_edit"):
+                assembled = _apply_tail_edit(assembled, rec["tail_edit"])
+        out.append(assembled)
+
+    return "".join(out), excised
+
+
+def _iter_sentences(paragraph: str):
+    """Yield (sentence_with_trailing_ws, end_offset) tuples covering the
+    whole paragraph text. Splits on sentence terminators (.!?) followed
+    by whitespace, and additionally treats a trailing colon as a
+    boundary so a "Gill distinguishes ...:" opener that leads into a
+    quote or list is treated as its own sentence rather than continuing
+    into whatever follows."""
+    if not paragraph:
+        return
+    boundary_re = re.compile(r"(?<=[.!?:])\s+")
+    prev = 0
+    for m in boundary_re.finditer(paragraph):
+        end = m.end()
+        yield paragraph[prev:end], end - prev
+        prev = end
+    if prev < len(paragraph):
+        tail = paragraph[prev:]
+        yield tail, len(tail)
+
+
+def _zone3_trip(sentence: str) -> Optional[dict]:
+    for name, pattern in [
+        ("assertive", _ZONE3_ASSERTIVE_RE),
+        ("possessive", _ZONE3_POSSESSIVE_RE),
+        ("negation", _ZONE3_NEGATION_RE),
+    ]:
+        m = pattern.search(sentence)
+        if m:
+            return {"pattern": name, "matched": m.group(0), "match_end": m.end()}
+    return None
+
+
+_LIST_LEAD_RE = re.compile(r"^\s*(\d+\.|[-*•])\s+")
+_QUOTE_LEAD_RE = re.compile(r"""^\s*["“]""")
+# Orphaning transitions — clauses whose antecedent was excised. If the
+# next-content starts with one of these, the transition itself must go
+# so the sweep doesn't leave a dangling connective. Applied as a tail
+# edit when the surviving prose starts with these words.
+_ORPHAN_TRANSITION_RE = re.compile(
+    r"^\s*(For example,|Similarly,|Additionally,|Moreover,|Furthermore,|"
+    r"Also,|First,|Second,|Third,|Fourth,|Fifth,|Finally,|Notably,|"
+    r"Importantly,|In particular,|Specifically,|Consider),?\s+",
+    re.IGNORECASE,
+)
+
+
+def _template_for_content_introducer(
+    sentence: str,
+    paragraph_tail: str,
+    paragraphs: List[str],
+    para_index: int,
+    is_paragraph_opener: bool,
+) -> Tuple[Optional[str], Optional[dict]]:
+    """Decide how to handle an excised sentence.
+
+    Returns (replacement, tail_edit):
+      - (replacement, None): substitute the excised sentence with a neutral
+        template lead-in that flows into the surviving content.
+      - (None, tail_edit): excise cleanly AND apply the tail_edit dict to
+        strip an orphaning transition ("For example, ") from the next
+        surviving sentence.
+      - (None, None): excise cleanly with no tail edit.
+    """
+    trimmed = sentence.rstrip()
+    trailing_ws = sentence[len(trimmed):]
+    ends_with_colon = trimmed.endswith(":")
+
+    next_content = paragraph_tail.lstrip()
+    if not next_content:
+        for j in range(para_index + 1, min(para_index + 4, len(paragraphs))):
+            candidate = paragraphs[j].lstrip() if j % 2 == 0 else ""
+            if candidate:
+                next_content = candidate
+                break
+
+    if not next_content:
+        return None, None
+
+    # (a) List continuation: neutral list-header template
+    if _LIST_LEAD_RE.match(next_content):
+        return "Gill's commentary includes the following:" + trailing_ws, None
+    # (b) Quote continuation: quote-introduction template
+    if _QUOTE_LEAD_RE.match(next_content):
+        return "On this passage, Gill writes:" + trailing_ws, None
+    # (c) Colon-terminated intro: neutral list-header template
+    if ends_with_colon:
+        return "Gill's commentary includes the following:" + trailing_ws, None
+    # (d) Paragraph opener with more content: prevent "For example..." orphan
+    if is_paragraph_opener:
+        # If the next content begins with an orphaning transition, strip
+        # that transition alongside the excision — cleaner than a template.
+        if _ORPHAN_TRANSITION_RE.match(next_content):
+            return None, {
+                "action": "strip_transition",
+                "transition_pattern": _ORPHAN_TRANSITION_RE.pattern,
+            }
+        # Otherwise substitute a neutral prose-header that flows into the
+        # surviving content.
+        return "Gill's commentary on this subject includes several relevant passages." + trailing_ws, None
+    # (e) Mid-paragraph excision with orphaning transition next: strip it
+    if _ORPHAN_TRANSITION_RE.match(next_content):
+        return None, {
+            "action": "strip_transition",
+            "transition_pattern": _ORPHAN_TRANSITION_RE.pattern,
+        }
+    return None, None
+
+
+def _apply_tail_edit(assembled: str, tail_edit: dict) -> str:
+    """Apply a recorded tail_edit to the assembled paragraph text.
+    Currently supports stripping an orphaning transition from the first
+    surviving sentence."""
+    if tail_edit.get("action") != "strip_transition":
+        return assembled
+    # Strip the transition from the start of the assembled paragraph (after
+    # any leading whitespace).
+    stripped = assembled.lstrip()
+    lead_ws = assembled[: len(assembled) - len(stripped)]
+    m = _ORPHAN_TRANSITION_RE.match(stripped)
+    if not m:
+        return assembled
+    after = stripped[m.end():]
+    if after and after[0].islower():
+        after = after[0].upper() + after[1:]
+    return lead_ws + after
+
+
 class GillSignature(dspy.Signature):
     """You are a present-day research assistant helping a user explore Dr. John Gill's
     "An Exposition of the Old and New Testaments" (1746-1763). You are NOT Dr. Gill.
@@ -743,11 +1024,33 @@ class GroundedGillBot(dspy.Module):
         if quote_failures:
             print(f"DEBUG: Unrepairable quote failures (verified=False): {quote_failures}")
 
+        # Zone-3 post-generation sweep (ADR-0008 Phase 1 Step 4).
+        # SHALLOW runtime backstop — catches Gill-anchored assertive and
+        # negation forms only. Inference-form and pronoun-anchored Zone 3
+        # are documented as semantic-judge territory (Step 5), NOT patched
+        # here. Every excision is logged for observability. See ADR-0008
+        # Validation Notes for the rate-reporting requirement.
+        pre_sweep_answer = repaired_answer
+        repaired_answer, zone3_excisions = _suppress_zone3(repaired_answer)
+        if zone3_excisions:
+            print(f"DEBUG: Zone-3 sweep — {len(zone3_excisions)} record(s):")
+            for rec in zone3_excisions:
+                print(f"  action={rec['action']} pattern={rec['pattern']} "
+                      f"matched={rec['matched']!r}")
+
         return dspy.Prediction(
             answer=repaired_answer,
             citations=citations_list,
             quote_failures=quote_failures,
             quote_repairs=quote_repairs,
+            # Zone-3 sweep records — main.py can put these in stages_capture
+            # so the daily diagnostic + observability layer see excisions in
+            # real traffic (Step 5 async production sampling will build on
+            # this signal).
+            zone3_excisions=zone3_excisions,
+            # Pre-sweep answer text preserved so the daily diagnostic can
+            # compare pre/post per-answer without re-running generation.
+            pre_zone3_sweep_answer=pre_sweep_answer,
             # Expose the model's reasoning so main.py / the frontend can show
             # users *what the model considered* when it produces a refusal.
             # The reasoning often names specific Sentence IDs the model
