@@ -560,6 +560,16 @@ The corrected reading is above (both classes = violations, target zero for both,
 
 The drift matters as a pattern, not just a wording fix. The whole reason ADR-0009's structural elimination is the endgame is that discipline expressed as a rule can slide; discipline expressed as an unrepresentable state cannot. The correction restores the record to the design; ADR-0009 is where the record and the behavior stop being separable at all.
 
+### Layer-2 amendments (added 2026-07-06 after Step-3 tightening smoke)
+
+Two structural additions to `_suppress_zone3` after the smoke evidence:
+
+1. **`_strip_trailing_prose` — the bookend rule as an invariant.** Any substantive prose (2+ alphabetic characters) after the final `[SID]` in the answer is trailing editorializing — the empirically-observed site of closer violations that route around the assertive/negation lexical sweep because they lack a Gill-verb anchor (e.g., *"emphasizing its distinctiveness from the old covenant"* trailing a citation). This is a **positional** check, not lexical: cannot be routed around by rephrasing, because any closer prose after the final citation is excised regardless of its wording. Answers with no citations (flat refusals) are left alone. Wired to run after the assertive/negation sweep on the finalized answer inside `forward()`. This is the same "enforce required structure" move as the BAML sentinel — don't enumerate bad shapes, require the good shape.
+
+2. **Disclaimer-but preservation template.** Detects the compound `Gill does not use the (modern) term "X"[,] but [Zone-3 clause]` and, when the sweep fires on the thesis in the but-clause, replaces the whole sentence with just the disclaimer clause (`Gill does not use the term "X".`). Prevents the sweep from eating the unprompted anachronism disclaimer that emerged on covenant and psalmody — a preservation not just of prose but of the best Zone-1 behavior the prompt has produced. Handles both American typography (comma inside the closing quote) and British (comma outside).
+
+Neither is a growing-regex-allowlist add: the trailing-prose check is a single positional property (answer ends on `[SID]`); the disclaimer branch is a single compound-shape recognizer that either fires or doesn't. No new lexical patterns; no new adversarial surface to chase.
+
 ### Bookend rule (added 2026-07-06 — the empirically observed violation site)
 
 Every Zone-3 violation caught in production or testing has been a bookend. The launch covenant opener ("Gill distinguishes between different covenantal administrations while affirming their ultimate unity in grace"). The run-2 closer ("These distinctions suggest Gill does not treat all covenants as one unified 'monocovenantal' system"). The current-pod closer ("This suggests Gill views the covenant of grace as..."). The prod psalmody closer ("These examples illustrate Gill's view of singing as integral to worship"). The flagship opener ("Gill distinguishes the covenant of grace from other covenants in the following ways:"). Openers and closers, every single one — the model wants to open with a thesis and close with a synthesis, and the quote-bearing middle is consistently clean.

@@ -538,6 +538,49 @@ def _suppress_zone3(answer: str) -> Tuple[str, List[dict]]:
     return "".join(out), excised
 
 
+# Structural bookend enforcement (ADR-0008 Layer 2 amendment 2026-07-06).
+#
+# The bookend rule in the Step-3 prompt declares that answers end on the
+# final verbatim quote + [SID]. This function enforces that as an INVARIANT
+# rather than a request: any substantive prose after the final citation is
+# trailing editorializing — the empirically-observed site of closer
+# violations that route around the lexical assertive/negation sweep
+# ("emphasizing its distinctiveness from the old covenant" trailing a
+# Matthew 26:28 citation).
+#
+# Positional, not lexical. Cannot be routed around by rephrasing — any
+# closer prose after the final [SID] is excised regardless of its wording.
+# Answers with no citations (flat refusals) are left alone.
+_LAST_SID_RE = re.compile(r"\[[A-Z0-9_]+_S\d+\]")
+
+
+def _strip_trailing_prose(answer: str) -> Tuple[str, List[dict]]:
+    """Excise substantive prose that follows the final quote-anchoring
+    [SID] in the answer. Returns (cleaned_answer, excised_records)."""
+    if not answer:
+        return answer, []
+    matches = list(_LAST_SID_RE.finditer(answer))
+    if not matches:
+        # No citations at all — flat refusal or similar. Leave alone.
+        return answer, []
+    last_end = matches[-1].end()
+    tail = answer[last_end:]
+    # Any 2+ letter alphabetic word after the final [SID] counts as
+    # substantive trailing prose. A trailing period, whitespace, or paren
+    # alone does not.
+    if not re.search(r"[A-Za-z]{2,}", tail):
+        return answer, []
+    excised_text = tail.rstrip()
+    # Retain a single trailing period after the citation for readability.
+    cleaned = answer[:last_end] + "."
+    return cleaned, [{
+        "action": "trailing_prose_excised",
+        "pattern": "structural_bookend",
+        "matched": "prose after final [SID]",
+        "sentence": excised_text[:400],
+    }]
+
+
 def _iter_sentences(paragraph: str):
     """Yield (sentence_with_trailing_ws, end_offset) tuples covering the
     whole paragraph text. Splits on sentence terminators (.!?) followed
@@ -572,6 +615,21 @@ def _zone3_trip(sentence: str) -> Optional[dict]:
 
 _LIST_LEAD_RE = re.compile(r"^\s*(\d+\.|[-*•])\s+")
 _QUOTE_LEAD_RE = re.compile(r"""^\s*["“]""")
+# Anachronism-disclaimer + but + Zone-3 clause. The excise-the-whole-sentence
+# rule was eating the best Zone-1 behavior the prompt produces (the
+# unprompted 'Gill does not use the modern term X' anachronism disclaimer)
+# when the model attached a thesis to it with 'but'. Detects the compound
+# and preserves the disclaimer clause alone.
+_DISCLAIMER_BUT_RE = re.compile(
+    r"^\s*(Gill\s+(?:does\s+not|doesn't)\s+(?:use|employ)\s+the\s+"
+    r"(?:modern\s+)?(?:term|word|phrase)\s+"
+    r"[\"“'‘][^\"”'’]+[\"”'’]"
+    r"(?:\s+in\s+[^,]+)?)"
+    # Comma may live inside the closing quote (American typography) or
+    # outside it (British). Either shape allowed before 'but'.
+    r"[,\s]*but\s+",
+    re.IGNORECASE,
+)
 # Orphaning transitions — clauses whose antecedent was excised. If the
 # next-content starts with one of these, the transition itself must go
 # so the sweep doesn't leave a dangling connective. Applied as a tail
@@ -604,6 +662,23 @@ def _template_for_content_introducer(
     trimmed = sentence.rstrip()
     trailing_ws = sentence[len(trimmed):]
     ends_with_colon = trimmed.endswith(":")
+
+    # (a0) Disclaimer-but-thesis compound: preserve the disclaimer clause.
+    # Highest-priority branch — takes precedence over everything else so the
+    # sweep does not eat the unprompted anachronism disclaimer that emerged
+    # on covenant and psalmody. Runs BEFORE the next_content-based branches
+    # because it's a structural property of the excised sentence itself,
+    # independent of what follows.
+    m = _DISCLAIMER_BUT_RE.match(sentence)
+    if m:
+        disclaimer_clause = m.group(1)
+        # American typography puts the compound-sentence comma INSIDE the
+        # closing quote ("monocovenantal,") — that comma is punctuation from
+        # the sentence's structure, not part of the term. Strip it when it
+        # appears at the end of the captured disclaimer.
+        disclaimer_clause = re.sub(r",(?=[\"”'’]$)", "", disclaimer_clause)
+        disclaimer_clause = disclaimer_clause.rstrip(" ,")
+        return f"{disclaimer_clause}." + trailing_ws, None
 
     next_content = paragraph_tail.lstrip()
     if not next_content:
@@ -1095,6 +1170,15 @@ class GroundedGillBot(dspy.Module):
         # Validation Notes for the rate-reporting requirement.
         pre_sweep_answer = repaired_answer
         repaired_answer, zone3_excisions = _suppress_zone3(repaired_answer)
+        # Structural bookend enforcement (ADR-0008 Layer 2 amendment
+        # 2026-07-06). Runs after the lexical sweep; catches closer
+        # editorializing that lexical layer cannot see because it lacks a
+        # Gill-verb anchor ("emphasizing its distinctiveness..." trailing a
+        # citation). Positional check, not lexical — cannot be routed
+        # around by rephrasing.
+        repaired_answer, trailing_excisions = _strip_trailing_prose(repaired_answer)
+        if trailing_excisions:
+            zone3_excisions = list(zone3_excisions) + trailing_excisions
         if zone3_excisions:
             print(f"DEBUG: Zone-3 sweep — {len(zone3_excisions)} record(s):")
             for rec in zone3_excisions:
