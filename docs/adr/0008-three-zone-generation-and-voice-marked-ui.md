@@ -594,6 +594,28 @@ The Zone-1 bridge is also in scope for the leading-bias check. A permitted bridg
 
 The asymmetry is the product, not a compromise. Interpreting the user is necessary — bridging "monocovenantal" or "exclusive psalmody" into Gill's idiom is the entire reason the tool beats a page scan. Interpreting Gill is the one thing the tool promises never to do — that's the difference between it and every chatbot, and it's what lets a reader trust an amber badge and a green one.
 
+### Step 6 re-scoping (added 2026-07-06 after low-traffic reality check)
+
+Original framing gated Step 6's formal multi-run A/B on "a week of production rates" from the 5b sampler. That gate was a category error. It conflated:
+
+  - the **formal A/B experiment** — a controlled multi-run measurement on the flagship cases (`covenant_monocovenantal`, `gill_aquinas`, `exclusive_psalmody`), which measures the fix's effect on chosen inputs
+  - **ongoing production monitoring** — an opportunistic instrument that catches whatever real queries happen to appear
+
+They answer different questions. The tool is very infrequently used; real production volume is low enough that a "week of production rates" would collect ~20 answers, not a rate. Gating the formal proof on that data was gating it on data that won't arrive.
+
+Re-scoped:
+
+**Step 6 (the formal A/B) is a controlled experiment, runnable now.** Pre-fix and post-fix N=5 runs on each of the three flagship cases against the settled post-`2f2d975` configuration. The pre-fix substrate is captured from prod-log rescore + frozen eval-set answers from the 2026-06-22 launch. Post-fix runs against the deployed test cluster. Pass criteria remain as originally specified in the ADR (`unsupported_characterization_rate == 0` in ≥3/5 pre-fix and 0/5 post-fix). No production traffic needed.
+
+**Ongoing monitoring runs indefinitely as two permanent instruments** (Phase 1 Steps 5b + 5c, both scheduled daily at 12:00/12:30 UTC in `pipeline/__init__.py`):
+
+- **5b — Zone-3 production sampler**: queries Langfuse for the last 24h of `/api/search` traces, applies the calibrated judge N=3 per answer, reports the majority-vs-any-flag distribution, fires an escalation alert on any single unsupported flag. Opportunistic; at low traffic it may report 0-3 answers per day. Value = catches real user impact when it happens.
+- **5c — Zone-3 eval-set replay**: runs the 28 curated eval cases through the deployed bot daily and judges them the same way. 84 controlled verdicts/day regardless of traffic. Value = watches judge stability and prompt drift over time on inputs we chose. Same report shape as 5b so they're directly comparable.
+
+Both post a daily record. Both also emit a **separate high-visibility escalation alert** (not buried in the daily summary) when any answer classifies unsupported — the safety-net that works at any traffic level without depending on a human reading Slack. Optional at-mention via `ZONE3_ESCALATION_MENTION` env.
+
+The distinction the review named: 5c measures whether the instrument and substrate are stable; 5b measures whether real answers are faithful. 5c doesn't replace 5b — it fills the low-traffic gap while 5b captures whatever real queries trickle in.
+
 ### Zone-3 leak rate reporting (mandatory, not optional)
 
 Step 4's validation MUST be an N=5 multi-run A/B on `covenant_monocovenantal`, `gill_aquinas`, and `exclusive_psalmody`, with **honest rate reporting**. Pass criteria:

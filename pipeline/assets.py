@@ -598,35 +598,49 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
 
     slack: SlackResource = context.resources.slack
     langfuse = Langfuse()
-    
-    # 1. Fetch traces from last 24h that failed (score = 0)
+
+    # 1. Fetch traces from last 24h that failed (score = 0).
+    # Bug fix 2026-07-06: previous code called langfuse.get_traces(...)
+    # which does NOT exist in the current SDK — the read-side API lives
+    # under langfuse.api.trace.list(...) and langfuse.api.trace.get(...).
+    # This asset was silently broken since a Langfuse SDK upgrade;
+    # corrected in the same pass that ships the Zone-3 5b + 5c samplers.
     env_tag = os.getenv("APP_ENV", "production")
     traces = []
     page = 1
     while True:
-        traces_response = langfuse.get_traces(
+        traces_response = langfuse.api.trace.list(
             tags=[env_tag, "v7_launch"],
-            score_name="retrieval_success",
-            score_value=0,
-            page=page
+            page=page,
+            limit=50,
         )
-        batch = getattr(traces_response, "data", [])
+        batch = getattr(traces_response, "data", []) or []
+        # Filter to failed traces (retrieval_success score == 0) client-side;
+        # the current SDK's list() doesn't take score filters directly.
+        for t in batch:
+            scores = getattr(t, "scores", None) or []
+            hit = any(
+                (getattr(s, "name", None) == "retrieval_success"
+                 and getattr(s, "value", None) == 0)
+                for s in scores
+            )
+            if hit:
+                traces.append(t)
         if not batch:
             break
-        traces.extend(batch)
-        if len(batch) < 50 or page >= 10:  # standard default page size is 50, safety exit at 10 pages just in case
+        if len(batch) < 50 or page >= 10:
             break
         page += 1
 
     reports_data = []
-    
+
     for trace in traces:
         question = trace.input if isinstance(trace.input, str) else trace.input.get("query", "Unknown Query") if isinstance(trace.input, dict) else "Unknown Query"
-        
+
         # Discover weaviate retrieval output
         retrieval_context = "No context found in trace"
         try:
-            full_trace = langfuse.get_trace(trace.id)
+            full_trace = langfuse.api.trace.get(trace_id=trace.id)
             observations = full_trace.observations if hasattr(full_trace, "observations") else []
             
             for obs in observations:
@@ -701,6 +715,77 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
 
 
 @asset(group_name="operations", required_resource_keys={"slack"})
+def daily_eval_zone3_report(context: AssetExecutionContext):
+    """Daily eval-set replay Zone-3 judge (ADR-0008 Phase 1 Step 5c).
+
+    The controlled-baseline instrument that complements the 5b production
+    sampler. Runs the 28 curated eval-set questions through the deployed
+    bot and judges each answer N=3 times. Same DailyReport shape as 5b
+    so the reports are directly comparable.
+
+    Value at low traffic: 5b can go days seeing 0-3 answers; 5c gives
+    28 controlled answers × 3 judges = 84 verdicts of consistent
+    measurement daily, on inputs we chose. Together they cover both
+    'is the instrument stable on my substrate?' and 'is real traffic
+    faithful?' — two different questions.
+
+    Also fires the escalation alert on any unsupported flag (bias
+    toward sensitivity per the review's discipline).
+    """
+    try:
+        from evals.zone3_eval_replay import build_eval_replay_report, format_slack_blocks
+        from evals.zone3_judge_prod_sampler import post_escalation_alert
+    except ImportError as e:
+        context.log.warning(f"Eval-replay import failed: {e}")
+        return MaterializeResult(
+            metadata={"status": "skipped", "reason": f"missing dependency: {e}"}
+        )
+
+    slack: SlackResource = context.resources.slack
+    report = build_eval_replay_report()
+    blocks = format_slack_blocks(report)
+
+    target_channel = os.getenv("SLACK_DIAGNOSTICS_CHANNEL", "#gya-bot-testing")
+    try:
+        slack.get_client().chat_postMessage(
+            channel=target_channel,
+            blocks=blocks,
+            text="Daily Zone-3 Eval-Set Replay",
+        )
+    except Exception as e:
+        context.log.warning(f"Slack post failed: {e}")
+
+    # Separate high-visibility alert if any escalations. Fires
+    # independently of anyone reading the summary — the safety net that
+    # works at any traffic level.
+    if report.escalations:
+        try:
+            post_escalation_alert(
+                slack_client=slack.get_client(),
+                channel=target_channel,
+                report=report,
+                source_label="eval_replay",
+            )
+        except Exception as e:
+            context.log.warning(f"Escalation alert failed: {e}")
+
+    return MaterializeResult(
+        metadata={
+            "cases_run": report.total_answers_sampled,
+            "unsupported_escalations": len(report.escalations),
+            "majority_supported_rate": round(report.majority_supported_rate, 4),
+            "any_flag_supported_rate": round(report.any_flag_supported_rate, 4),
+            "supported_rate_gap": round(report.supported_rate_gap, 4),
+            "trailing_prose_excised": report.total_trailing_prose_excised,
+            "disclaimer_preserved": report.total_disclaimer_preserved,
+            "other_zone3_excised": report.total_other_excised,
+            "judge_errors": report.judge_error_count,
+            "slack_sent_to": target_channel,
+        }
+    )
+
+
+@asset(group_name="operations", required_resource_keys={"slack"})
 def daily_zone3_judge_report(context: AssetExecutionContext):
     """Daily Zone-3 semantic judge over sampled production traffic
     (ADR-0008 Phase 1 Step 5b).
@@ -726,7 +811,9 @@ def daily_zone3_judge_report(context: AssetExecutionContext):
     so all logic is unit-testable without Dagster + Langfuse mocks.
     """
     try:
-        from evals.zone3_judge_prod_sampler import build_report, format_slack_blocks
+        from evals.zone3_judge_prod_sampler import (
+            build_report, format_slack_blocks, post_escalation_alert,
+        )
     except ImportError as e:
         context.log.warning(f"Zone-3 sampler import failed: {e}")
         return MaterializeResult(
@@ -747,11 +834,30 @@ def daily_zone3_judge_report(context: AssetExecutionContext):
     except Exception as e:
         context.log.warning(f"Slack post failed (report metadata still returned): {e}")
 
+    # Separate high-visibility escalation alert. Fires whether or not
+    # anyone reads the daily summary — this is the safety net that
+    # works at any traffic level (including zero real traffic on a
+    # low-volume tool). Bias toward sensitivity per review: any single
+    # unsupported flag on any answer triggers the alert.
+    if report.escalations:
+        try:
+            post_escalation_alert(
+                slack_client=slack.get_client(),
+                channel=target_channel,
+                report=report,
+                source_label="production",
+            )
+        except Exception as e:
+            context.log.warning(f"Escalation alert failed: {e}")
+
     return MaterializeResult(
         metadata={
             "answers_sampled": report.total_answers_sampled,
             "commit_shas": report.commit_sha_summary_line,
             "unsupported_escalations": len(report.escalations),
+            "majority_supported_rate": round(report.majority_supported_rate, 4),
+            "any_flag_supported_rate": round(report.any_flag_supported_rate, 4),
+            "supported_rate_gap": round(report.supported_rate_gap, 4),
             "trailing_prose_excised": report.total_trailing_prose_excised,
             "disclaimer_preserved": report.total_disclaimer_preserved,
             "other_zone3_excised": report.total_other_excised,

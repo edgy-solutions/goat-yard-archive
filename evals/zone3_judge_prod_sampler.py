@@ -539,6 +539,67 @@ def format_slack_blocks(report: DailyReport) -> List[Dict[str, Any]]:
 # Top-level orchestrator — the Dagster asset calls this
 # ---------------------------------------------------------------------------
 
+def post_escalation_alert(
+    slack_client,
+    channel: str,
+    report: DailyReport,
+    source_label: str = "production",
+) -> None:
+    """Fire a SEPARATE high-visibility Slack alert when the report
+    contains any unsupported-classification answers.
+
+    The daily summary Slack post is a record; this is the alert. Fires
+    independently of anyone reading the summary, so the safety-net works
+    at any traffic level and doesn't depend on a human watching. This is
+    the sensitivity path per the 2026-07-06 review: any single of 3
+    judge runs flagging unsupported triggers escalation. Optional
+    at-mention via ZONE3_ESCALATION_MENTION (e.g. `<!channel>` or
+    `<@U01234ABCDE>`) so the alert actually notifies.
+    """
+    if not report.escalations:
+        return
+    mention = os.getenv("ZONE3_ESCALATION_MENTION", "").strip()
+    prefix = f"{mention} " if mention else ""
+    n = len(report.escalations)
+    header_text = (
+        f"{prefix}🚨 *Zone-3 UNSUPPORTED escalation* — "
+        f"{n} answer{'s' if n != 1 else ''} flagged in {source_label} traffic\n"
+        f"Window: {report.window_start} → {report.window_end}  •  "
+        f"Build(s): `{report.commit_sha_summary_line}`"
+    )
+    blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": header_text}},
+        {"type": "divider"},
+    ]
+    for e in report.escalations[:5]:
+        unsup_count = sum(1 for v in e.verdicts if v == "unsupported")
+        reasoning = e.reasoning_samples[0] if e.reasoning_samples else "(no reasoning captured)"
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*Q:* _{e.question[:200]}_\n"
+                    f"*Verdicts across N=3 judge runs:* `{e.verdicts}` "
+                    f"({unsup_count} unsupported)\n"
+                    f"*Sample reasoning:* {reasoning[:240]}\n"
+                    f"*Build:* `{e.commit_sha[:12]}`  *Trace:* `{e.trace_id[:16]}`"
+                ),
+            },
+        })
+        blocks.append({"type": "divider"})
+    if n > 5:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"...and *{n - 5}* more escalations in the daily summary."},
+        })
+    slack_client.chat_postMessage(
+        channel=channel,
+        blocks=blocks,
+        text=f"Zone-3 unsupported escalation ({source_label})",
+    )
+
+
 def build_report(hours: int = LOOKBACK_HOURS) -> DailyReport:
     """Fetch → extract → judge N=3 → aggregate. Returns a DailyReport
     ready for Slack formatting."""
