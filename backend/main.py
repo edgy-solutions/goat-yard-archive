@@ -566,13 +566,24 @@ async def search(request: Request, req: SearchRequest):
                 if lf_client:
                     gen_ctx = lf_client.start_as_current_observation(
                         name="bot_forward",
-                        metadata={"volume_limit": req.volume_limit},
+                        metadata={
+                            "volume_limit": req.volume_limit,
+                            # Commit SHA baked in at build time (Dockerfile
+                            # ARG). The daily Zone-3 judge sampler reads
+                            # this to name which build generated the
+                            # traffic it's judging. Permanent protection
+                            # against the stale-prod trap.
+                            "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
+                        },
                         as_type="generation"
                     )
                     generation = gen_ctx.__enter__()
                     if generation:
                         generation.update(input=req.query)
-                        lf_client.update_current_trace(user_id=user_id)
+                        lf_client.update_current_trace(
+                            user_id=user_id,
+                            metadata={"commit_sha": os.getenv("COMMIT_SHA", "unknown")},
+                        )
                 else:
                     gen_ctx = None
                     generation = None
@@ -668,7 +679,31 @@ async def search(request: Request, req: SearchRequest):
                         })
 
                     if generation:
-                        generation.update(output=answer)
+                        # Zone-3 sweep observability (ADR-0008 Phase 1 Steps 4
+                        # + 5b). The daily Zone-3 judge sampler reads these
+                        # counts alongside the answer text so amendment
+                        # excisions become measurable on real traffic — the
+                        # validation state-drift smoke can't produce.
+                        z3_excisions = getattr(pred, "zone3_excisions", None) or []
+                        n_trailing = sum(
+                            1 for e in z3_excisions
+                            if e.get("action") == "trailing_prose_excised"
+                        )
+                        n_disclaimer_preserved = sum(
+                            1 for e in z3_excisions
+                            if e.get("action") == "template_replaced"
+                            and "does not use" in (e.get("replacement") or "").lower()
+                        )
+                        n_other_excised = len(z3_excisions) - n_trailing - n_disclaimer_preserved
+                        generation.update(
+                            output=answer,
+                            metadata={
+                                "zone3_excision_count": len(z3_excisions),
+                                "zone3_trailing_prose_excised": n_trailing,
+                                "zone3_disclaimer_preserved": n_disclaimer_preserved,
+                                "zone3_other_excised": n_other_excised,
+                            },
+                        )
                     
                     trace_id = generation.trace_id if generation else None
                         

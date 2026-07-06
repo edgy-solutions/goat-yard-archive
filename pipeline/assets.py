@@ -700,11 +700,73 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
     )
 
 
+@asset(group_name="operations", required_resource_keys={"slack"})
+def daily_zone3_judge_report(context: AssetExecutionContext):
+    """Daily Zone-3 semantic judge over sampled production traffic
+    (ADR-0008 Phase 1 Step 5b).
+
+    Queries Langfuse for the last 24h of /api/search generations, applies
+    the calibrated Zone-3 judge N=3 times per answer (per the 2026-07-06
+    review's correction — single-judge rates carry per-answer noise that
+    would swamp the erosion signal supported_characterization_rate exists
+    to detect), and posts a Slack summary with:
+
+      - Pod commit SHA(s) that generated the sampled traffic (permanent
+        fix for the stale-prod trap — every daily post announces which
+        build was serving)
+      - Amendment excision counts (trailing-prose fires, disclaimer
+        preservations) — how the runtime layer's amendments actually get
+        exercised on real traffic
+      - Per-SHA supported-verdict distribution across N=3 judge runs
+      - Escalations: any answer where at least one of the 3 judge runs
+        flagged unsupported (credibility-harm bias toward sensitivity
+        per review)
+
+    Kept as a thin wrapper over `evals.zone3_judge_prod_sampler.build_report`
+    so all logic is unit-testable without Dagster + Langfuse mocks.
+    """
+    try:
+        from evals.zone3_judge_prod_sampler import build_report, format_slack_blocks
+    except ImportError as e:
+        context.log.warning(f"Zone-3 sampler import failed: {e}")
+        return MaterializeResult(
+            metadata={"status": "skipped", "reason": f"missing dependency: {e}"}
+        )
+
+    slack: SlackResource = context.resources.slack
+    report = build_report(hours=24)
+    blocks = format_slack_blocks(report)
+
+    target_channel = os.getenv("SLACK_DIAGNOSTICS_CHANNEL", "#gya-bot-testing")
+    try:
+        slack.get_client().chat_postMessage(
+            channel=target_channel,
+            blocks=blocks,
+            text="Daily Zone-3 Judge Report",
+        )
+    except Exception as e:
+        context.log.warning(f"Slack post failed (report metadata still returned): {e}")
+
+    return MaterializeResult(
+        metadata={
+            "answers_sampled": report.total_answers_sampled,
+            "commit_shas": report.commit_sha_summary_line,
+            "unsupported_escalations": len(report.escalations),
+            "trailing_prose_excised": report.total_trailing_prose_excised,
+            "disclaimer_preserved": report.total_disclaimer_preserved,
+            "other_zone3_excised": report.total_other_excised,
+            "judge_errors": report.judge_error_count,
+            "max_cap_hit": report.max_answers_hit,
+            "slack_sent_to": target_channel,
+        }
+    )
+
+
 @asset(
     partitions_def=volume_partitions,
     deps=[
         AssetDep(
-            "ingest", 
+            "ingest",
             partition_mapping=MultiToSingleDimensionPartitionMapping(partition_dimension_name="1_volume")
         )
     ]

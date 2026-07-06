@@ -1,6 +1,14 @@
 # Modern Backend Dockerfile using astral-sh/uv
 FROM python:3.12-slim
 
+# Commit SHA baked in at build time and exposed as an env var. The API
+# attaches it to each Langfuse trace's metadata so the daily Zone-3 judge
+# report can name which build generated the traffic it's judging.
+# Permanent protection against the prod-was-stale trap: a stale build
+# announces itself in every daily Slack post.
+ARG COMMIT_SHA=unknown
+ENV COMMIT_SHA=${COMMIT_SHA}
+
 # Install uv into the system
 COPY --from=ghcr.io/astral-sh/uv:0.4.15 /uv /bin/uv
 
