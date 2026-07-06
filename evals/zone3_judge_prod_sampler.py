@@ -119,6 +119,23 @@ class DailyReport:
     total_other_excised: int
     judge_error_count: int
     commit_sha_summary_line: str
+    # Two supported-rate flavors reported side-by-side per the 2026-07-06
+    # review correction. The gap between them IS the visible measure of
+    # judge marginal-noise on the class the supported rate is meant to
+    # measure. Collapsing N=3 to a single threshold would throw away the
+    # exact information the multi-judge design preserves.
+    #   majority_supported_rate — fraction with >=2 of 3 flagged supported.
+    #     The stability signal; a real week-over-week rise means erosion
+    #     the judge sees consistently.
+    #   any_flag_supported_rate — fraction with >=1 of 3 flagged supported.
+    #     The sensitivity signal; catches marginal cases the judge only
+    #     sometimes sees.
+    # gap = any_flag_rate - majority_rate. High gap = judge is coin-
+    # flipping on the boundary. Wide gap over time = shape drifting into
+    # marginal territory.
+    majority_supported_rate: float = 0.0
+    any_flag_supported_rate: float = 0.0
+    supported_rate_gap: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -127,63 +144,90 @@ class DailyReport:
 # the dep installed.
 # ---------------------------------------------------------------------------
 
+def _langfuse_read_client():
+    """Return the Langfuse SDK's read-side client (langfuse.api.trace /
+    langfuse.api.observations). Kept as its own helper because the SDK's
+    read API is nested and the write-side API (Langfuse.update_current_trace
+    etc.) does not include the read methods.
+
+    IMPORTANT: earlier drafts of this sampler AND the pre-existing
+    `daily_rag_diagnostic` asset call `langfuse.get_traces(...)`, which
+    does NOT exist in the current Langfuse Python SDK. That call fails
+    at runtime with `AttributeError: 'Langfuse' object has no attribute
+    'get_traces'`. The read API is `c.api.trace.list(...)` and
+    `c.api.observations.get_many(trace_id=...)`. See the Langfuse SDK's
+    `FernLangfuse` client under `langfuse.api.client`.
+    """
+    from langfuse import Langfuse  # noqa: WPS433
+    return Langfuse()
+
+
 def fetch_recent_traces(
     hours: int = LOOKBACK_HOURS,
+    name: Optional[str] = None,
     tags: Optional[List[str]] = None,
     max_pages: int = 10,
 ) -> List[Any]:
-    """Fetch Langfuse traces for the last N hours. Returns raw trace
-    objects; extract_answer_samples turns them into AnswerSample rows."""
-    from langfuse import Langfuse  # noqa: WPS433
-    langfuse = Langfuse()
+    """Fetch Langfuse traces for the last N hours via c.api.trace.list.
+    Returns raw trace objects; extract_answer_samples turns them into
+    AnswerSample rows."""
+    lf = _langfuse_read_client()
     now = datetime.now(timezone.utc)
     from_ts = now - timedelta(hours=hours)
     kwargs: Dict[str, Any] = {
         "from_timestamp": from_ts,
         "to_timestamp": now,
+        "limit": 50,
     }
+    if name:
+        kwargs["name"] = name
     if tags:
         kwargs["tags"] = tags
     traces: List[Any] = []
-    page = 1
-    while page <= max_pages:
-        response = langfuse.get_traces(page=page, **kwargs)
+    for page in range(1, max_pages + 1):
+        response = lf.api.trace.list(page=page, **kwargs)
         batch = getattr(response, "data", []) or []
         if not batch:
             break
         traces.extend(batch)
-        if len(batch) < 50:
+        if len(batch) < kwargs["limit"]:
             break
-        page += 1
     return traces
 
 
 def extract_answer_samples(traces: List[Any]) -> List[AnswerSample]:
     """Extract AnswerSample rows from Langfuse trace objects. Skips
-    traces without a bot_forward generation or without a text answer."""
+    traces without a bot_forward generation or without a text answer.
+
+    Prefers observation-level metadata for commit_sha (that's where
+    main.py attaches it on the `bot_forward` generation) and falls back
+    to trace-level metadata."""
+    lf = _langfuse_read_client()
     samples: List[AnswerSample] = []
     for trace in traces:
         try:
-            # Trace-level metadata carries commit_sha (attached in main.py).
-            md = trace.metadata or {} if hasattr(trace, "metadata") else {}
-            commit_sha = md.get("commit_sha", "unknown") if isinstance(md, dict) else "unknown"
+            trace_md_raw = getattr(trace, "metadata", None) or {}
+            trace_md = trace_md_raw if isinstance(trace_md_raw, dict) else {}
+            trace_sha = str(trace_md.get("commit_sha", "unknown"))
 
-            # Question lives at trace.input.
-            question = ""
             tin = getattr(trace, "input", None)
             if isinstance(tin, str):
                 question = tin
             elif isinstance(tin, dict):
                 question = tin.get("query") or tin.get("question") or ""
+            else:
+                question = ""
 
-            # Answer + zone3 counts live in the bot_forward generation
-            # observation. Fetch the full trace so we can walk it.
-            from langfuse import Langfuse  # noqa: WPS433
-            langfuse = Langfuse()
+            # Fetch the full trace (with observations expanded) to walk
+            # observations and pull the bot_forward generation's output.
+            trace_id = getattr(trace, "id", None)
+            if not trace_id:
+                continue
             try:
-                full = langfuse.get_trace(trace.id)
-            except Exception:
-                full = trace
+                full = lf.api.trace.get(trace_id=trace_id)
+            except Exception as e:
+                print(f"[SAMPLER] skipping trace {trace_id}: get() failed: {e}")
+                continue
 
             observations = getattr(full, "observations", None) or []
             answer = ""
@@ -195,23 +239,21 @@ def extract_answer_samples(traces: List[Any]) -> List[AnswerSample]:
                         answer = out
                     elif isinstance(out, dict):
                         answer = out.get("answer") or out.get("text") or ""
-                    obs_md = getattr(obs, "metadata", None) or {}
-                    if isinstance(obs_md, dict):
-                        gen_md = obs_md
+                    obs_md_raw = getattr(obs, "metadata", None) or {}
+                    if isinstance(obs_md_raw, dict):
+                        gen_md = obs_md_raw
                     break
 
             if not answer:
                 continue
 
-            # Prefer generation-level commit_sha if present (the trace-
-            # level metadata may not always be filled).
-            commit_sha = gen_md.get("commit_sha", commit_sha)
+            commit_sha = str(gen_md.get("commit_sha", trace_sha)) or "unknown"
 
             samples.append(AnswerSample(
-                trace_id=str(getattr(trace, "id", "")),
+                trace_id=str(trace_id),
                 question=question[:400],
                 answer=answer,
-                commit_sha=str(commit_sha) or "unknown",
+                commit_sha=commit_sha,
                 timestamp=str(getattr(trace, "timestamp", "")),
                 excision_count=int(gen_md.get("zone3_excision_count", 0) or 0),
                 trailing_prose_excised=int(gen_md.get("zone3_trailing_prose_excised", 0) or 0),
@@ -268,9 +310,25 @@ def aggregate(samples: List[AnswerSample], window_start: str, window_end: str) -
     total_disclaimer = 0
     total_other = 0
     judge_error_count = 0
+    # Global (across-SHA) counts for the two supported rates
+    global_majority_flagged = 0
+    global_any_flagged = 0
+    global_judged = 0
     for s in samples:
         by_sha[s.commit_sha]["count"] += 1
         by_sha[s.commit_sha]["supported_distribution"][s.supported_ratio] += 1
+        # Per-SHA majority and any-flag counts
+        n_verdicts = len(s.verdicts)
+        n_supported = s.supported_count
+        by_sha[s.commit_sha]["judged"] = by_sha[s.commit_sha].get("judged", 0) + (1 if n_verdicts else 0)
+        if n_verdicts:
+            global_judged += 1
+            if n_supported >= 2:  # majority of 3
+                by_sha[s.commit_sha]["majority_flagged"] = by_sha[s.commit_sha].get("majority_flagged", 0) + 1
+                global_majority_flagged += 1
+            if n_supported >= 1:
+                by_sha[s.commit_sha]["any_flagged"] = by_sha[s.commit_sha].get("any_flagged", 0) + 1
+                global_any_flagged += 1
         if s.escalate_unsupported:
             by_sha[s.commit_sha]["unsupported_escalations"] += 1
             escalations.append(s)
@@ -302,6 +360,9 @@ def aggregate(samples: List[AnswerSample], window_start: str, window_end: str) -
         if len(sha_counts) > 4:
             commit_sha_summary += f", +{len(sha_counts)-4} more"
 
+    majority_rate = (global_majority_flagged / global_judged) if global_judged else 0.0
+    any_flag_rate = (global_any_flagged / global_judged) if global_judged else 0.0
+
     return DailyReport(
         window_start=window_start,
         window_end=window_end,
@@ -314,6 +375,9 @@ def aggregate(samples: List[AnswerSample], window_start: str, window_end: str) -
         total_other_excised=total_other,
         judge_error_count=judge_error_count,
         commit_sha_summary_line=commit_sha_summary,
+        majority_supported_rate=majority_rate,
+        any_flag_supported_rate=any_flag_rate,
+        supported_rate_gap=any_flag_rate - majority_rate,
     )
 
 
@@ -346,6 +410,31 @@ def format_slack_blocks(report: DailyReport) -> List[Dict[str, Any]]:
         {"type": "divider"},
     ]
 
+    # Global supported-rate DISTRIBUTION per the 2026-07-06 review
+    # correction. Both rates reported side-by-side; the gap between them
+    # is the visible measure of judge marginal-noise. Do not collapse
+    # to a single boolean per answer — that throws away the exact info
+    # the multi-judge design preserves.
+    m_pct = report.majority_supported_rate * 100
+    a_pct = report.any_flag_supported_rate * 100
+    gap_pct = report.supported_rate_gap * 100
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": (
+                "*Supported-characterization rate (both thresholds — see the gap):*\n"
+                f"  • *majority* (>=2 of 3 judge runs): `{m_pct:.1f}%` — stable-signal rate\n"
+                f"  • *any-flag* (>=1 of 3 judge runs): `{a_pct:.1f}%` — sensitivity-signal rate\n"
+                f"  • *marginal-noise gap*: `{gap_pct:.1f} pp` — how much of the "
+                "any-flag rate is coin-flippy shape\n"
+                "  _Both rates are violation counts per the core ADR; target zero for both. "
+                "Gap widening over time indicates shape drift into marginal territory._"
+            ),
+        },
+    })
+    blocks.append({"type": "divider"})
+
     # Amendment excision counts — how the runtime layer's amendments
     # actually get exercised in production.
     blocks.append({
@@ -368,13 +457,20 @@ def format_slack_blocks(report: DailyReport) -> List[Dict[str, Any]]:
         # Order by numerator descending so "3/3" comes first
         parts = sorted(supported_dist.items(), key=lambda kv: (-int(kv[0].split('/')[0]), kv[0]))
         dist_line = ", ".join(f"`{k}` → {v}" for k, v in parts) or "(no answers)"
+        judged = data.get("judged", 0) or 1
+        m_flagged = data.get("majority_flagged", 0)
+        a_flagged = data.get("any_flagged", 0)
         blocks.append({
             "type": "section",
             "text": {
                 "type": "mrkdwn",
                 "text": (
                     f"*Build `{sha[:12]}` — {data['count']} answers*\n"
-                    f"  supported-verdict distribution across N=3 judge runs: {dist_line}\n"
+                    f"  supported-verdict distribution (N=3): {dist_line}\n"
+                    f"  majority-supported: `{m_flagged}/{judged}` "
+                    f"({(m_flagged / judged * 100):.1f}%)  •  "
+                    f"any-flag: `{a_flagged}/{judged}` "
+                    f"({(a_flagged / judged * 100):.1f}%)\n"
                     f"  unsupported escalations (any_of_3): *{data['unsupported_escalations']}*"
                 ),
             },
