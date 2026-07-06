@@ -533,9 +533,10 @@ Three-way class per answer:
 - `supported` — characterization present AND substantiated by the quotes
 - `unsupported` — characterization present AND NOT substantiated
 
-Two rates reported per run of the eval / per daily production sample:
-- `unsupported_characterization_rate` = **credibility metric**. Target ~0. Firing means Gill's position is being misrepresented in production. This is the alert-worthy signal.
-- `supported_characterization_rate` = **prompt-compliance metric**. Not a bug; the number tracks how hard the model is straining against the zone contract. Prompt changes that reduce it demonstrate compliance improvement; a slow rise indicates discipline erosion the classifier would otherwise silently accept.
+Two rates reported per run of the eval / per daily production sample (corrected 2026-07-06 — see the drift-correction note below):
+
+- `unsupported_characterization_rate` = **credibility-harm metric**. Target 0. **Hard CI gate.** Firing means Gill's position is being misrepresented — user gets misinformed.
+- `supported_characterization_rate` = **ratcheted violation count**. Also target 0. NOT a "compliance monitor" — a violation rate to drive down. Both classes are Zone-3 violations per the core ADR: interpretation of Gill is forbidden AT ALL; accurate interpretation is not permitted, it is a lesser severity of the same violation. The severity split exists so the CI gate can block on credibility harm while the supported count is driven toward zero by prompt pressure and, structurally, by ADR-0009.
 
 Without both rates, drift into "true characterization all the time" reads as clean until the day it's false. With both rates, the erosion is measurable weeks before it becomes a credibility incident.
 
@@ -550,6 +551,38 @@ The judge prompt sketch (for `evals/run_eval.py` extension and the async product
 > *Output JSON: `{"any_characterization": bool, "characterizations": [{"sentence": str, "substantiated": bool}]}`.*
 
 Combined report structure per answer: `class` ∈ {none, supported, unsupported} (supported if all characterizations substantiated; unsupported if any is not). Rates aggregated across the run.
+
+### Drift correction (2026-07-06)
+
+Between the initial Layer-3 spec and this correction, the reporting language for the two rates drifted. The first version framed `unsupported` as "credibility metric, alert-worthy" and `supported` as "prompt-compliance metric — not a bug, tracks how hard the model is straining." That framing softened into a permission taxonomy — one class was violation, one was drift-to-monitor. That reading contradicts the core ADR: **the zone contract forbids interpretation of Gill at all.** The severity split is a measurement axis for how to prioritize enforcement, NOT a permission axis where "accurate interpretation" is tolerated behavior.
+
+The corrected reading is above (both classes = violations, target zero for both, hard gate on `unsupported`). The three-way classifier survives unchanged as an instrument.
+
+The drift matters as a pattern, not just a wording fix. The whole reason ADR-0009's structural elimination is the endgame is that discipline expressed as a rule can slide; discipline expressed as an unrepresentable state cannot. The correction restores the record to the design; ADR-0009 is where the record and the behavior stop being separable at all.
+
+### Bookend rule (added 2026-07-06 — the empirically observed violation site)
+
+Every Zone-3 violation caught in production or testing has been a bookend. The launch covenant opener ("Gill distinguishes between different covenantal administrations while affirming their ultimate unity in grace"). The run-2 closer ("These distinctions suggest Gill does not treat all covenants as one unified 'monocovenantal' system"). The current-pod closer ("This suggests Gill views the covenant of grace as..."). The prod psalmody closer ("These examples illustrate Gill's view of singing as integral to worship"). The flagship opener ("Gill distinguishes the covenant of grace from other covenants in the following ways:"). Openers and closers, every single one — the model wants to open with a thesis and close with a synthesis, and the quote-bearing middle is consistently clean.
+
+Enforcement in the Step-3 prompt (see `backend/bot.py::GillSignature`): open with the Zone-1 navigational bridge (or the Zone-1 gap statement for a refusal) and nothing else — no thesis about what Gill holds. Close on the final verbatim quote + [SID] — no concluding paragraph, no synthesis, no "these examples illustrate", no "this suggests". The reader closes the loop themselves; that is the entire design of this tool.
+
+The judge tracks bookend `position` on each detected characterization so drift into the middle (should it occur) is separable from the bookend rate.
+
+### Label-import rule (added 2026-07-06)
+
+Locating Gill relative to a MODERN doctrinal label or systematic category that appears in NONE of the retrieved quotes is `unsupported`, even when phrased as a negation ("does not take the monocovenantal position") and even when the answer's shown distinctions might seem to derivably support the mapping. The mapping onto the modern category is itself an interpretation the quotes must supply, not one the model supplies. Fixed the run-2 closer classification; calibrated 6/6 with 100% consistency across the labeled examples on 2026-07-06.
+
+### Zone-1 constraint (added 2026-07-06)
+
+The Zone-1 bridge is also in scope for the leading-bias check. A permitted bridge maps the question to the material navigationally: *"'Monocovenantal' is a modern term Gill doesn't use; his material treating the covenant of grace in relation to other covenants follows."* A forbidden bridge predicts the verdict before Gill speaks: *"Your question about monocovenantalism relates to Gill's distinctions between covenants."* The word *distinctions* has already asserted a Gill position — Zone 3 wearing Zone 1 grammar.
+
+### The design in three lines
+
+- The model interprets the USER's question in Zone 1 — shown, owned, purely navigational.
+- Gill speaks verbatim in Zone 2 — shown, verified by ADR-0006 + the Step-4 sweep + this judge.
+- The model's interpretation of Gill (Zone 3) — TODAY (prose world) has no designated place: strict policy is don't emit (prompt), excise leaks (sweep), count survivors (judge). END-STATE (ADR-0009 schema world) lives in a `zone3_notes` field with no path to the screen, kept as telemetry for the judge's calibration and as a per-answer leak detector via cross-referencing against rendered fields. The release valve remains a Phase-2 A/B hypothesis; adopted only if the with-valve arm shows less Zone-3 leakage in the rendered fields than the without-valve arm.
+
+The asymmetry is the product, not a compromise. Interpreting the user is necessary — bridging "monocovenantal" or "exclusive psalmody" into Gill's idiom is the entire reason the tool beats a page scan. Interpreting Gill is the one thing the tool promises never to do — that's the difference between it and every chatbot, and it's what lets a reader trust an amber badge and a green one.
 
 ### Zone-3 leak rate reporting (mandatory, not optional)
 
