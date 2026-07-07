@@ -32,9 +32,25 @@ Discovery process for new entries:
   1. A narrow-vocabulary query fails at eval or in the prod log.
   2. Run E-7.1 probe (`evals/e7_query_expansion_probe/`) to identify
      the anchor entity in Gill's corpus.
-  3. Add an entry mapping the narrow term to the anchor tokens.
-  4. Re-run E-7 validation to confirm the expansion bridges.
-  5. Commit the thesaurus change with the E-7 evidence.
+  3. Consult a citable scholarly reference (see ADR-0011 section
+     "Near-term follow-up: ground thesaurus entries in a citable
+     reference") for the term's canonical historical vocabulary. Do
+     NOT rely on parametric knowledge alone — the whole tool refuses
+     that trust model elsewhere and the thesaurus should not be the
+     exception.
+  4. Add an entry with BOTH `justification` (E-7.1 probe result —
+     empirical grounding) AND `source` (scholarly reference —
+     provenance grounding). The existing five entries predate the
+     source-grounding requirement and carry only `justification`;
+     they will be retroactively audited (ADR-0011 follow-up).
+  5. Re-run E-7 validation to confirm the expansion bridges.
+  6. Commit the thesaurus change with the E-7 evidence.
+
+Standing principle (ADR-0011): source for the bridge, not source in
+the tool. Any citable reference may inform the thesaurus at build
+time; its content may not appear in a runtime answer. Only Gill's
+verified words and the model's owned reading of the user's question
+touch the answer.
 """
 from __future__ import annotations
 

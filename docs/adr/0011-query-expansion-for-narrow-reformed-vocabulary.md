@@ -139,6 +139,77 @@ The E-7.5 `pactum_salutis` result surfaces the reviewer's 2026-07-07 sequencing 
 
 Sequence expansion (this ADR, small, query-side) → then Psalms/Pauline ingestion → and the two together close the narrow-vocabulary cluster the way `covenant_monocovenantal` and `universal_atonement` were closed by ADR-0010. Neither of the two closes the cluster alone.
 
+## Standing design principle: source for the bridge, not source in the tool
+
+Two things touch the runtime answer: (1) Gill's verified words, and (2) the model's owned interpretation of the user's question. Everything else — entity vectors, BM25 index, this thesaurus, and any reference work consulted to build the thesaurus — is *machinery for finding the right Gill*. Bridge-machinery may be built from any citable source; runtime-answer content is only Gill (plus the model's owned reading of the question).
+
+The rule sorts any future addition to the pipeline instantly:
+
+- **Does it help decide what to search for?** Allowed, should be grounded in something citable.
+- **Does it end up as words the user reads?** Only Gill (plus the model's owned reading).
+
+The symmetry is what makes the principle real rather than a slogan: the same rule that permits consulting a modern reference work for bridge-machinery is the rule that stops that reference's definitions from appearing in an answer. That symmetry is how a future addition passes or fails the test consistently.
+
+Applied to this ADR: the thesaurus is bridge-machinery. It may be grounded in any citable source at authoring time; its outputs (search tokens) may not appear in the answer. This distinction is what makes the follow-up below (grounding entries in scholarly references) *strictly better than what shipped* rather than a wall crossing.
+
+Retroactively, the principle explains why the entity vectors felt fine and the thesaurus felt like cheating even though both are "using outside knowledge to route queries." The vectors were already grounded — qwen3's embedding of `"Hallel - Passover hymn of Psalms 113-118"` is a computed, reproducible representation of text that exists in Gill's corpus. The thesaurus was asserted — five mappings drawn from parametric knowledge of Reformed theology, with no citation trail. Same role (bridge), different provenance (grounded vs asserted). The follow-up below closes that gap without moving the thesaurus across the wall.
+
+## Near-term follow-up: ground thesaurus entries in a citable reference
+
+The current five entries are correct by empirical measurement — the E-7.1 probe verifies each mapping *works* (its anchor tokens bring the intended Gill entity into the confident tier or into the retrieved chunk set). What the entries lack is a *scholarly grounding* for why those particular anchor tokens are the right bridge for the modern term. Right now, if someone asks *"who decided that 'monergism' bridges to 'electing grace' and 'salvation by grace alone', and are they right?"* — the answer is *"the model said so, verified by the probe."* That's un-auditable in the same class of way the launch-week Zone-3 violations were un-auditable: parametric assertion where citation is needed.
+
+### The fix
+
+Each entry gains a `source` field citing a scholarly reference work — historically aware, careful about period vocabulary, definitional rather than positional. Post-grounding entry shape:
+
+```python
+"monergism": {
+    "anchor_tokens": ["electing grace", "salvation by grace alone"],
+    "justification": (
+        "E-7.1 probe: 'monergism' bare returns scattered top-5 "
+        "(libertinism, special adoption, mystical union); "
+        "'monergism electing grace' brings the target into..."
+    ),
+    "source": (
+        "Muller, Richard A. *Dictionary of Latin and Greek "
+        "Theological Terms*, 2nd ed. Baker Academic, 2017. "
+        "s.v. \"monergismus.\""
+    ),
+}
+```
+
+Each entry then carries two groundings:
+
+- **Empirical (`justification`)**: the probe shows these anchor tokens actually retrieve the right Gill chunk. Tests behavior.
+- **Scholarly (`source`)**: a reputable reference agrees these ARE the term's canonical historical vocabulary. Tests correctness.
+
+Together the entry is fully auditable: *why* these tokens (scholarly source) and *do they work* (probe result). Neither alone is enough.
+
+### Choosing the reference
+
+A theological decision, not an engineering one. Criteria drawn from the pattern the tool already enforces elsewhere:
+
+- **Historically aware** — traces terms to period vocabulary rather than defining them by present-day usage. The tool already resists present-day flattening of historical distinctions; the reference underneath the thesaurus should share that resistance.
+- **Tradition-careful** — does not flatten distinctions across Reformed sub-traditions (e.g. Baptist / paedobaptist covenant differences the launch-week `covenant_monocovenantal` failure exemplified).
+- **Definitional, not positional** — consulted for *what this term means and what its historical vocabulary is*, never for *what the correct view is*. This keeps the build-time consultation from importing the reference's slant into the bridge.
+
+Reference candidates (final choice deferred to Chris on theological grounds):
+
+- Muller, Richard A. *Dictionary of Latin and Greek Theological Terms* — historically grounded, careful about period vocabulary, low positional footprint. The natural fit for "old-to-new bridge" register.
+- A modern Reformed systematic (Berkhof, Bavinck, Grudem) — works as a definitional source but carries more positional content. Usable if leaned on carefully for *meaning + historical vocabulary* and specifically not for *correct view*.
+- Multiple complementary references — cited per-entry as appropriate.
+
+### Sequence
+
+1. Choose the reference (or a small set).
+2. Audit the current five entries against it. Any assertion the source does not back gets corrected or removed. Any that survive gain the `source` field.
+3. Extend the discovery loop for future entries: E-7.1 probe **and** reference lookup are both required before adding an entry.
+4. Amend this ADR with the chosen reference(s) and rationale, and any corrections the audit produced.
+
+### Timing
+
+Not urgent — the current five entries *work* (probes prove it); they are under-provenanced but not incorrect. But do it *before the thesaurus grows past ~12 entries*. Auditing five entries against a reference is an afternoon; auditing fifty is a project. The "fix the class while it's small" instinct the entity investigation (E-1..E-6) exemplified applies here: ground the practice now, and every future entry is born grounded rather than retrofitted.
+
 ## What this ADR does NOT solve
 
 - **Novel narrow-vocabulary terms not yet in the thesaurus.** The mitigation is the discovery loop above (E-7.1 probe → add entry → commit). This is by design: the deterministic thesaurus is a set of *verified* mappings, not a generalizer.
