@@ -616,6 +616,30 @@ Both post a daily record. Both also emit a **separate high-visibility escalation
 
 The distinction the review named: 5c measures whether the instrument and substrate are stable; 5b measures whether real answers are faithful. 5c doesn't replace 5b — it fills the low-traffic gap while 5b captures whatever real queries trickle in.
 
+### Step 6 results — the formal proof-of-record (executed 2026-07-07)
+
+Ran the controlled A/B on the three flagship cases against the settled post-`2f2d975` configuration. Pre-fix baseline was the 2026-06-22 launch-week prod-log answers (frozen); post-fix was N=5 fresh runs against the deployed test cluster at commit `128d22a`. Every answer judged N=3 by the calibrated Zone-3 judge (Claude Sonnet 4), classified by majority-of-3.
+
+**Per-case results:**
+
+| Case | Pre-fix (frozen) | Post-fix (N=5 fresh) | Gate | Verdict |
+|---|---|---|---|---|
+| covenant_monocovenantal | 1/1 unsupported (the Zone-3 exemplar: *"Gill distinguishes between different covenantal administrations while affirming their ultimate unity in grace"*) | **0/5 unsupported**, 5/5 supported, 5/5 informative shape | ADR mini-conclusive: pre had Zone-3, post 0/5 credibility-harm | **PASS** |
+| gill_aquinas | 0/2 unsupported (1 flat canned refusal + 1 short factual denial) | **0/5 unsupported**, 5/5 none, 3/5 informative shape | Fallback (pre had no Zone-3 to eliminate): post 0/5 unsupported AND informative ≥3/5 | **PASS** |
+| exclusive_psalmody | 0/3 unsupported (all 3 flat canned refusals) | **0/5 unsupported**, 5/5 none, 5/5 informative shape | Same fallback | **PASS** |
+
+**Overall: 0/15 unsupported across all post-fix runs on all three flagship cases.** The credibility-harm hard gate is clean on every measurement. Zero escalation-worthy answers under the drift-corrected ADR.
+
+**The one honest residual — covenant supported = 5/5.** Every post-fix covenant answer classified `supported` (characterization present, substantiated by the quotes). Under the drift-corrected ADR both `supported` and `unsupported` are violation counts (accurate characterization is not permitted, only a lesser severity), so this is a real residual, not tolerated behavior. The pattern is what the Step-3 tightening smoke also surfaced — bookend openers like *"Gill's commentary on this subject includes several relevant passages"*. The bookend rule reduced but didn't eliminate this shape. This is the exact ratcheted-count violation the drift correction named: **prompt pressure moves it down; structural elimination is ADR-0009**. The covenant supported residual is the empirical argument for the schema migration.
+
+**What the A/B formally proves about the fix:**
+
+1. Eliminates the launch-week credibility harm on the covenant flagship (1/1 pre-fix Zone-3 → 0/5 post-fix)
+2. Converts flat canned refusals into informative-refusal on aquinas + psalmody (0/2 and 0/3 pre-fix informative → 3/5 and 5/5 post-fix informative) without introducing any credibility-harm violations
+3. Retains a discipline residual on covenant where accurate characterization at bookend openers persists — expected under the drift correction, targeted for ADR-0009 elimination
+
+Step 6 is the formal proof-of-record the ADR was designed to produce. Phase 1 is complete on its own terms. Phase 2 (ADR-0009 structured answer generation) is where the residual gets structurally eliminated rather than prompt-suppressed.
+
 ### Zone-3 leak rate reporting (mandatory, not optional)
 
 Step 4's validation MUST be an N=5 multi-run A/B on `covenant_monocovenantal`, `gill_aquinas`, and `exclusive_psalmody`, with **honest rate reporting**. Pass criteria:
