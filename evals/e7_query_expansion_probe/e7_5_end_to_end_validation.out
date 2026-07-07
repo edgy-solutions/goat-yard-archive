@@ -1,0 +1,165 @@
+
+####################################################################################################
+# E-7.5 END-TO-END VALIDATION — ADR-0011 query-expansion fix
+# Phase A: manifest; Phase B: retrieval; Phase C: negative controls
+####################################################################################################
+Connecting to Weaviate at HTTP:192.168.1.54:80 / gRPC:192.168.1.53:50051
+
+====================================================================================================
+CASE: exclusive_psalmody  query='exclusive psalmody'  target_entity='Hallel'
+
+  --- Phase A: MANIFEST ---
+  raw query:      'exclusive psalmody'
+  expansion:      ['exclusive psalmody']
+  expanded query: 'exclusive psalmody Hallel Passover Psalms 113 118'
+[TIMING] Embedding via LiteLLM: 1.207s
+[TIMING] Embedding via LiteLLM: 7.074s
+  raw manifest:      ['key of David']
+  expanded manifest: ['הַלֵּל טָעוּן', 'Hallel', 'Lord our God', 'passover', 'passover-lamb']
+  target 'Hallel' in raw manifest?      False
+  target 'Hallel' in expanded manifest? True
+
+  --- Phase B: RETRIEVAL ---
+Searching for: exclusive psalmody
+Detected entities: ['key of David']
+Enhanced query for boost: exclusive psalmody key of David
+[TIMING] Embedding via LiteLLM: 0.669s
+[TIMING] Weaviate query: 0.520s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+Searching for: exclusive psalmody
+Detected entities: ['הַלֵּל טָעוּן', 'Hallel', 'Lord our God', 'passover', 'passover-lamb']
+Enhanced query for boost: exclusive psalmody הַלֵּל טָעוּן Hallel Lord our God passover passover-lamb
+[TIMING] Embedding via LiteLLM: 0.572s
+[TIMING] Weaviate query: 0.930s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+  PRE-fix (raw manifest) retrieved:
+    1. [LUKE 11:52] score=0.650
+       Woe unto you lawyers, &c.] Who are particularly addressed again in distinction from the Pharisees, though much the same things are said to them both in Matt. xxiii. 13. for ye have...
+    2. [GENESIS 30:2] score=0.650
+       And Jacob's anger was kindled against Rachel, &c.] Whom yet he dearly loved, hearing her talk in such an extravagant manner, as her words seemed to be, and were not only expressive...
+    3. [LUKE 15:26] score=0.350
+       the Scribes and Pharisees did; and to attend on ordinances, particularly at the administration of the ordinance of baptism, and seemed desirous of submitting to it in John's time; ...
+    4. [LUKE 20:42] score=0.345
+       *And David himself saith in the book of Psalms, &c.*] In Psal. cx. 1. *the Lord said to my Lord, sit thou on my right hand*; which words were delivered by David, as inspired by the...
+    5. [EXODUS 15:11] score=0.344
+       *Who is like unto thee, O Lord, among the gods? &c.*] For the perfections of his nature, for the blessings of his goodness, and for the works of his hands; and especially for the g...
+  POST-fix (expanded manifest) retrieved:
+    1. [MATTHEW 26:30] score=0.857
+       *And when they had sung an hymn, &c.*] The Hallel, which the Jews were obliged to sing on the night of the passover; for the passover, they say[^6], was הַלֵּל טָעוּן, bound to an ...
+    2. [MATTHEW 5:37] score=0.650
+       But let your communication be yea, yea, &c.] That is, let your speech, in your common conversation, and daily business of life, when ye answer to any thing in the affirmative, be y...
+    3. [MATTHEW 10:27] score=0.627
+       What I tell you in darkness, &c.] Hence Christ proceeds to encourage his disciples to an open, plain, and faithful ministration of the Gospel, not fearing the faces and frowns of m...
+    4. [LUKE 2:42] score=0.578
+       And when he was twelve years old, &c.] Not that he was now, בֶּן מִצְוָה, a son of the commandment[^1], to use the Jewish phrase; or now came under the yoke of the law; or was obli...
+    5. [MATTHEW 11:10] score=0.522
+       For this is he of whom it is written, &c.] Mal. iii. 1. Behold I send my messenger before thy face, which shall prepare thy way before thee. That these words belong לְעוֹלָם הַבָּא...
+  ideal-neighborhood (['MATTHEW 26:30']) hits PRE:  0/5
+  ideal-neighborhood (['MATTHEW 26:30']) hits POST: 1/5
+
+====================================================================================================
+CASE: pactum_salutis  query='what does Gill say about the pactum salutis'  target_entity='covenant engagements'
+
+  --- Phase A: MANIFEST ---
+  raw query:      'what does Gill say about the pactum salutis'
+  expansion:      ['pactum salutis']
+  expanded query: 'what does Gill say about the pactum salutis covenant of redemption covenant engagements'
+[TIMING] Embedding via LiteLLM: 0.605s
+[TIMING] Embedding via LiteLLM: 0.746s
+  raw manifest:      ['Megilla', 'Megillah', 'Chaldee paraphrases', 'איזהו מה', 'created angel']
+  expanded manifest: ['covenant of grace', 'covenant of works', 'covenant of conservation', 'everlasting covenant', 'Angel of the covenant']
+  target 'covenant engagements' in raw manifest?      False
+  target 'covenant engagements' in expanded manifest? False
+
+  --- Phase B: RETRIEVAL ---
+Searching for: what does Gill say about the pactum salutis
+Detected entities: ['Megilla', 'Megillah', 'Chaldee paraphrases', 'איזהו מה', 'created angel']
+Enhanced query for boost: what does Gill say about the pactum salutis Megilla Megillah Chaldee paraphrases איזהו מה created angel
+[TIMING] Embedding via LiteLLM: 0.836s
+[TIMING] Weaviate query: 0.625s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+Searching for: what does Gill say about the pactum salutis
+Detected entities: ['covenant of grace', 'covenant of works', 'covenant of conservation', 'everlasting covenant', 'Angel of the covenant']
+Enhanced query for boost: what does Gill say about the pactum salutis covenant of grace covenant of works covenant of conservation everlasting covenant Angel of the covenant
+[TIMING] Embedding via LiteLLM: 0.758s
+[TIMING] Weaviate query: 0.415s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+  PRE-fix (raw manifest) retrieved:
+    1. [NUMBERS 20:6] score=0.650
+       And Moses and Aaron went from the presence of the assembly, &c.] Like fugitives, as Aben Ezra; they fled from them through fear, lest they should rise and fall upon them, and stone...
+    2. [MATTHEW 9:13] score=0.559
+       But go ye and learn what that meaneth, &c.] צא ולמד, go and learn, is a phrase used by the Jews[^1], when they are about to explain a passage of Scripture, and fetch an argument fr...
+    3. [JOHN 1:41] score=0.465
+       *He first findeth his own brother Simon, &c.*] Either before the other disciple, or before he found any other person: after he and the other disciple departed from Christ, being af...
+    4. [MATTHEW 6:31] score=0.460
+       Therefore take no thought, &c.] That is, for the morrow, as it is explained, ver. 34. for it is lawful to take proper care and thought for present food, drink, and raiment; but not...
+    5. [MARK 4:30] score=0.403
+       And he said, &c.] Still continuing his discourse on this subject, and in order to convey to the minds of his disciples clearer ideas of the Gospel dispensation, the success of the ...
+  POST-fix (expanded manifest) retrieved:
+    1. [GENESIS 9:10] score=0.807
+       And with every living creature that is with you, &c.] This is a further proof that this was not the covenant of grace, but of conservation, since it is made with irrational as well...
+    2. [NUMBERS 25:12] score=0.536
+       Wherefore say, &c.] Moses is bid to tell what follows to Phinehas himself, for his comfort and encouragement, and to the people of Israel, that they might take notice of it, and gi...
+    3. [GENESIS 9:11] score=0.502
+       And I will establish my covenant with you, &c.] This is repeated to denote the certainty of it, as well as to lead on to the particulars of it: neither shall all flesh be cut off a...
+    4. [LUKE 1:72] score=0.486
+       To perform the mercy promised to our fathers, &c.] By mercy is meant salvation by Christ, which springs from the mercy of God; the promise of which was an instance of mercy to the ...
+    5. [JOHN 6:47] score=0.465
+       *Verily, verily, I say unto you, &c.*] This is a certain truth, and to be depended on: he that believeth on me hath everlasting life; not only he may have it, as in ver. 40. and sh...
+  ideal-neighborhood (['ROMANS', 'HEBREWS']) hits PRE:  0/5
+  ideal-neighborhood (['ROMANS', 'HEBREWS']) hits POST: 0/5
+
+====================================================================================================
+NEG-CTRL: no_narrow_terms  query='is the covenant of grace monocovenantal'
+
+  --- Phase C: NEGATIVE CONTROL ---
+  raw query:      'is the covenant of grace monocovenantal'
+  expansion matches: []
+  expanded query: 'is the covenant of grace monocovenantal'
+  ✓ no expansion — passes through unchanged.
+[TIMING] Embedding via LiteLLM: 0.629s
+  raw manifest: ['covenant of grace', 'covenant of works', 'covenant of conservation', 'everlasting covenant', 'Angel of the covenant']
+
+====================================================================================================
+NEG-CTRL: no_narrow_terms_2  query='universal atonement in Christ'
+
+  --- Phase C: NEGATIVE CONTROL ---
+  raw query:      'universal atonement in Christ'
+  expansion matches: []
+  expanded query: 'universal atonement in Christ'
+  ✓ no expansion — passes through unchanged.
+[TIMING] Embedding via LiteLLM: 0.637s
+  raw manifest: ['atonement', 'satisfaction of Christ', 'propitiation', 'Christ', 'Christians']
+
+====================================================================================================
+SUMMARY
+====================================================================================================
+  case                           expansion                                   raw_hit    exp_hit   pre_ideal  post_ideal
+------------------------------------------------------------------------------------------------------------------------
+  exclusive_psalmody             ['exclusive psalmody']                        False       True           0           1
+  pactum_salutis                 ['pactum salutis']                            False      False           0           0
+
+  Negative controls (should show no expansion):
+    - is the covenant of grace monocovenantal                      matches=(no match)
+    - universal atonement in Christ                                matches=(no match)
+
+  Raw: C:\Users\cnogr\git\goat-yard-archive\evals\e7_query_expansion_probe\e7_5_end_to_end_results.json
+C:\Users\cnogr\git\goat-yard-archive\.venv\Lib\site-packages\urllib3\poolmanager.py:288: ResourceWarning: unclosed <ssl.SSLSocket fd=2200, family=2, type=1, proto=0, laddr=('10.245.19.195', 62130), raddr=('54.73.99.175', 443)>
+  self.pools.clear()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback

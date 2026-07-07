@@ -1,0 +1,1570 @@
+{
+  "in_domain": [
+    {
+      "case": "exclusive_psalmody",
+      "query": "exclusive psalmody",
+      "target": "Hallel",
+      "phase_a": {
+        "raw_query": "exclusive psalmody",
+        "expanded_query": "exclusive psalmody Hallel Passover Psalms 113 118",
+        "expansion_matches": [
+          "exclusive psalmody"
+        ],
+        "raw_manifest": [
+          "key of David"
+        ],
+        "expanded_manifest": [
+          "\u05d4\u05b7\u05dc\u05b5\u05bc\u05dc \u05d8\u05b8\u05e2\u05d5\u05bc\u05df",
+          "Hallel",
+          "Lord our God",
+          "passover",
+          "passover-lamb"
+        ],
+        "raw_target_hit": false,
+        "expanded_target_hit": true
+      },
+      "phase_b": {
+        "pre_chunks": [
+          {
+            "chunk_id": "59b37c76-f5c4-58bf-b4be-6ec754856599",
+            "sentence_data": [
+              {
+                "sentence_id": "LUKE_11_52_S00",
+                "text": "Who are particularly addressed again in distinction from the Pharisees, though much the same things are said to them both in Matt. xxiii. 13. for ye have taken away the key of knowledge: of the Scriptures, of the law, and the prophets, and the true interpretation of them, and especially of such places as refer to the Messiah, and the Gospel dispensation, called the kingdom of heaven, Matt. xxiii. 13. they had not only arrogated the knowledge of these to themselves, setting up for the only interpreters of the sacred writings; but they had taken away from the people the true knowledge and sense of them, by their false glosses upon them, so that they were destroyed for lack of knowledge: and hence came that famine of hearing the word, which they say should be before the coming of the King Messiah, and now was.",
+                "index": 0
+              },
+              {
+                "sentence_id": "LUKE_11_52_S01",
+                "text": "The Syriac and Arabic versions read, the keys of knowledge; and the Ethiopic version, the key of righteousness.",
+                "index": 1
+              },
+              {
+                "sentence_id": "LUKE_11_52_S02",
+                "text": "The Jews sometimes speak of the keys of the law, and represent the oral law as the root and key of the written law[^1]: but, alas! it was by the oral law, or traditions of the elders, that they took away the key, or obscured the true sense of the written law.",
+                "index": 2
+              },
+              {
+                "sentence_id": "LUKE_11_52_S03",
+                "text": "Some think, that here is an allusion to the custom of delivering a key to any one, when he was ordained or promoted to the dignity of a doctor: it is said of R. Samuel[^2], that \"when he died they put, \" \u05d9\u05ea\u05e0\u05d5\u05d1\u05e0, his key, and his writing-book into his coffin, \" because he was not worthy of a son\" to succeed him: ye entered not in yourselves; into the kingdom of heaven, the Gospel dispensation, neither receiving its doctrines, nor submitting to its ordinances: and them that were entering in ye hindered; by reproaching the miracles and ministry of Christ; by threatening and excommunications; see the note on Matt. xxiii. 13.",
+                "index": 3
+              }
+            ],
+            "content": "Woe unto you lawyers, &c.] Who are particularly addressed again in distinction from the Pharisees, though much the same things are said to them both in Matt. xxiii. 13. for ye have taken away the key of knowledge: of the Scriptures, of the law, and the prophets, and the true interpretation of them, and especially of such places as refer to the Messiah, and the Gospel dispensation, called the kingdom of heaven, Matt. xxiii. 13. they had not only arrogated the knowledge of these to themselves, setting up for the only interpreters of the sacred writings; but they had taken away from the people the true knowledge and sense of them, by their false glosses upon them, so that they were destroyed for lack of knowledge: and hence came that famine of hearing the word, which they say should be before the coming of the King Messiah, and now was. The Syriac and Arabic versions read, the keys of knowledge; and the Ethiopic version, the key of righteousness. The Jews sometimes speak of the keys of the law, and represent the oral law as the root and key of the written law[^1]: but, alas! it was by the oral law, or traditions of the elders, that they took away the key, or obscured the true sense of the written law. Some think, that here is an allusion to the custom of delivering a key to any one, when he was ordained or promoted to the dignity of a doctor: it is said of R. Samuel[^2], that \"when he died they put, \" \u05d9\u05ea\u05e0\u05d5\u05d1\u05e0, his key, and his writing-book into his coffin, \" because he was not worthy of a son\" to succeed him: ye entered not in yourselves; into the kingdom of heaven, the Gospel dispensation, neither receiving its doctrines, nor submitting to its ordinances: and them that were entering in ye hindered; by reproaching the miracles and ministry of Christ; by threatening and excommunications; see the note on Matt. xxiii. 13.\n\nFootnotes:\n[2] Zohar in Exod. fol. 46. 1.",
+            "verse_ref": "LUKE 11:52",
+            "citation": "[Vol 7, p. 635]",
+            "vol": 7,
+            "page": 635,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 635,
+                "boxes": [
+                  {
+                    "x": 95,
+                    "y": 3985,
+                    "w": 1489,
+                    "h": 581
+                  },
+                  {
+                    "x": 1611,
+                    "y": 668,
+                    "w": 1513,
+                    "h": 2616
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[2] Zohar in Exod. fol. 46. 1."
+            ],
+            "entities": [
+              "Arabic",
+              "Jews",
+              "Christ",
+              "Pharisees",
+              "R. Samuel",
+              "Syriac",
+              "Key of knowledge",
+              "Jews oral law",
+              "lawyers",
+              "Ethiopic",
+              "kingdom of heaven",
+              "Messiah"
+            ],
+            "lemma": "Woe unto you lawyers, &c.]",
+            "score": 0.6499999761581421
+          },
+          {
+            "chunk_id": "ba67ceee-9f2a-563a-a263-a73d81c21b21",
+            "sentence_data": [
+              {
+                "sentence_id": "GENESIS_30_2_S00",
+                "text": "Whom yet he dearly loved, hearing her talk in such an extravagant manner, as her words seemed to be, and were not only expressive of great uneasiness and impatience, but implied what was not in the power of man to do: and he said, am I in God's stead; do you take me to be God, or one that has a dispensing power from him to do what otherwise no creature can do; and which also he never gives to any? for, as the Targum of Jerusalem on ver. 22. says, this is one of the 4 keys which God delivers not to an angel or a seraph; even the key of barrenness.",
+                "index": 0
+              },
+              {
+                "sentence_id": "GENESIS_30_2_S01",
+                "text": "Children are the gift of God, and his only, and therefore he is to be sought unto for them: hence Onkelos and Jonathan paraphrase it; \"wherefore dost thou seek them of me?",
+                "index": 1
+              },
+              {
+                "sentence_id": "GENESIS_30_2_S02",
+                "text": "\"shouldest thou not seek them of the Lord?\" who hath withheld from thee the fruit of the womb? children, Psal. cxxvii.",
+                "index": 2
+              },
+              {
+                "sentence_id": "GENESIS_30_2_S03",
+                "text": "3. not Jacob, but the Lord.",
+                "index": 3
+              }
+            ],
+            "content": "And Jacob's anger was kindled against Rachel, &c.] Whom yet he dearly loved, hearing her talk in such an extravagant manner, as her words seemed to be, and were not only expressive of great uneasiness and impatience, but implied what was not in the power of man to do: and he said, am I in God's stead; do you take me to be God, or one that has a dispensing power from him to do what otherwise no creature can do; and which also he never gives to any? for, as the Targum of Jerusalem on ver. 22. says, this is one of the 4 keys which God delivers not to an angel or a seraph; even the key of barrenness. Children are the gift of God, and his only, and therefore he is to be sought unto for them: hence Onkelos and Jonathan paraphrase it; \"wherefore dost thou seek them of me? \"shouldest thou not seek them of the Lord?\" who hath withheld from thee the fruit of the womb? children, Psal. cxxvii. 3. not Jacob, but the Lord.",
+            "verse_ref": "GENESIS 30:2",
+            "citation": "[Vol 1, p. 288]",
+            "vol": 1,
+            "page": 288,
+            "scan": [
+              {
+                "vol": 1,
+                "page": 288,
+                "boxes": [
+                  {
+                    "x": 424,
+                    "y": 3417,
+                    "w": 1470,
+                    "h": 1190
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "key of barrenness",
+              "Onkelos",
+              "Jonathan Ben Uzziel",
+              "God",
+              "Jerusalem Targum",
+              "Rachel",
+              "Jacob"
+            ],
+            "lemma": "And Jacob's anger was kindled against Rachel, &c.]",
+            "score": 0.6497399210929871
+          },
+          {
+            "chunk_id": "d9b8c720-3a1f-5df9-bdf4-9c9032d761f7",
+            "sentence_data": [
+              {
+                "sentence_id": "LUKE_15_26_S00",
+                "text": "the Scribes and Pharisees did; and to attend on ordinances, particularly at the administration of the ordinance of baptism, and seemed desirous of submitting to it in John's time; but never came to Christ in a spiritual way; nor entered into the kingdom of heaven, the Gospel dispensation; and did all that could be, to hinder others, especially publicans and sinners; he heard music and dancing.",
+                "index": 0
+              },
+              {
+                "sentence_id": "LUKE_15_26_S01",
+                "text": "The Syriac, Persic, and Ethiopic versions, leave out dancing; the former only reads, the voice of the singing of many, and the next, the voice of singing; and the last, pipes and songs; by music is meant not the instrumental music used in the Old-Testament church; nor vocal singing in the new; but the preaching of the Gospel by the ministers of it, the servants, in ver. 22, 23. setting forth the love of God, the righteousness of Christ, peace, pardon, and salvation by him; in which, as in music, there is a distinction of sounds, the voice of Christ in the Gospel, and the several doctrines of it, are distinctly pronounced, discerned, and understood: and there is also, as in music, an harmony and agreement; the Gospel does not give an uncertain sound, nor contradict itself; it is not yea and nay: and, like music, 'tis delightful and charming; it is a sound of love in all the three persons, Father, Son, and Spirit; of free grace, and rich mercy; of liberty, reconciliation, forgiveness, righteousness, and eternal life: and as music, has a powerful and attractive virtue in it; so the Gospel is mighty and efficacious in the hand of the spirit of God to quicken even dead sinners, to draw them to Christ, to allure, charm, and comfort them: dancing may design those expressions of joy, which are delivered by young converts at hearing the Gospel, as by the three thousand, in Acts ii. 41. by the inhabitants of Samaria, Acts viii. 6, 8. and by the jailor and his household, Acts xvi. 34. and by many others: now all this the elder brother, the Scribes and Pharisees, heard; not so as to know the true meaning of it, as appears from the following verse; nor as to approve of it; or so as to feel the power, and enjoy the sweetness of it; nor as to practise what was heard; only externally hearing, they heard, but understood not, their eyes were blinded, and their hearts were hardened. or rather, one of their own making, and which depends on their good behaviour: they are ignorant of salvation by Christ; of justification by his righteousness; of peace and pardon by his blood; of the doctrine of regeneration, and of living by faith on Christ; and of eternal life as God's free gift; and so likewise of spiritual joy, and mirth: they are strangers to themselves, their lost state and condition, and a deliverance out of it; to the kingdom of God, or an internal work of grace, the fruits of which are peace and joy in the Holy Ghost; and to the person, offices, and grace of Christ; to justification and atonement by him; to the promises of the Gospel, and to that itself which is the joyful sound; all which produce spiritual joy, delight, and pleasure in sensible souls: the rejoicing of such persons is only in themselves, and in their own works and duties; but as for true solid spiritual joy, they intermeddle not with it, nor know they what it means.",
+                "index": 1
+              }
+            ],
+            "content": "the Scribes and Pharisees did; and to attend on ordinances, particularly at the administration of the ordinance of baptism, and seemed desirous of submitting to it in John's time; but never came to Christ in a spiritual way; nor entered into the kingdom of heaven, the Gospel dispensation; and did all that could be, to hinder others, especially publicans and sinners; he heard music and dancing. The Syriac, Persic, and Ethiopic versions, leave out dancing; the former only reads, the voice of the singing of many, and the next, the voice of singing; and the last, pipes and songs; by music is meant not the instrumental music used in the Old-Testament church; nor vocal singing in the new; but the preaching of the Gospel by the ministers of it, the servants, in ver. 22, 23. setting forth the love of God, the righteousness of Christ, peace, pardon, and salvation by him; in which, as in music, there is a distinction of sounds, the voice of Christ in the Gospel, and the several doctrines of it, are distinctly pronounced, discerned, and understood: and there is also, as in music, an harmony and agreement; the Gospel does not give an uncertain sound, nor contradict itself; it is not yea and nay: and, like music, 'tis delightful and charming; it is a sound of love in all the three persons, Father, Son, and Spirit; of free grace, and rich mercy; of liberty, reconciliation, forgiveness, righteousness, and eternal life: and as music, has a powerful and attractive virtue in it; so the Gospel is mighty and efficacious in the hand of the spirit of God to quicken even dead sinners, to draw them to Christ, to allure, charm, and comfort them: dancing may design those expressions of joy, which are delivered by young converts at hearing the Gospel, as by the three thousand, in Acts ii. 41. by the inhabitants of Samaria, Acts viii. 6, 8. and by the jailor and his household, Acts xvi. 34. and by many others: now all this the elder brother, the Scribes and Pharisees, heard; not so as to know the true meaning of it, as appears from the following verse; nor as to approve of it; or so as to feel the power, and enjoy the sweetness of it; nor as to practise what was heard; only externally hearing, they heard, but understood not, their eyes were blinded, and their hearts were hardened.\n\nor rather, one of their own making, and which depends on their good behaviour: they are ignorant of salvation by Christ; of justification by his righteousness; of peace and pardon by his blood; of the doctrine of regeneration, and of living by faith on Christ; and of eternal life as God's free gift; and so likewise of spiritual joy, and mirth: they are strangers to themselves, their lost state and condition, and a deliverance out of it; to the kingdom of God, or an internal work of grace, the fruits of which are peace and joy in the Holy Ghost; and to the person, offices, and grace of Christ; to justification and atonement by him; to the promises of the Gospel, and to that itself which is the joyful sound; all which produce spiritual joy, delight, and pleasure in sensible souls: the rejoicing of such persons is only in themselves, and in their own works and duties; but as for true solid spiritual joy, they intermeddle not with it, nor know they what it means.",
+            "verse_ref": "LUKE 15:26",
+            "citation": "[Vol 7, p. 677]",
+            "vol": 7,
+            "page": 677,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 677,
+                "boxes": [
+                  {
+                    "x": 30,
+                    "y": 683,
+                    "w": 1518,
+                    "h": 4099
+                  },
+                  {
+                    "x": 1520,
+                    "y": 683,
+                    "w": 1563,
+                    "h": 2746
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "regeneration",
+              "Scribes and Pharisees",
+              "Christ",
+              "Syriac",
+              "publicans and sinners",
+              "music",
+              "elder brother",
+              "Ethiopic",
+              "dancing",
+              "Persic",
+              "justification",
+              "kingdom of heaven",
+              "Holy Ghost",
+              "John",
+              "Old-Testament church",
+              "Gospel"
+            ],
+            "lemma": "",
+            "score": 0.3499999940395355
+          },
+          {
+            "chunk_id": "d77c3d49-9570-5fc3-ba2f-5068c364c838",
+            "sentence_data": [
+              {
+                "sentence_id": "LUKE_20_42_S00",
+                "text": "In Psal. cx.",
+                "index": 0
+              },
+              {
+                "sentence_id": "LUKE_20_42_S01",
+                "text": "1.",
+                "index": 1
+              },
+              {
+                "sentence_id": "LUKE_20_42_S02",
+                "text": "*the Lord said to my Lord, sit thou on my right hand*; which words were delivered by David, as inspired by the spirit of God; and contain a speech of God the father to his son Jesus Christ, upon his ascension to heaven, after his sufferings, death, and resurrection from the dead; when he was bid to sit down in human nature, at the right hand of God, in token of having done his work on earth to full satisfaction; and in the relation of which David calls Christ his Lord; and is the reason of their being mentioned.",
+                "index": 2
+              }
+            ],
+            "content": "*And David himself saith in the book of Psalms, &c.*] In Psal. cx. 1. *the Lord said to my Lord, sit thou on my right hand*; which words were delivered by David, as inspired by the spirit of God; and contain a speech of God the father to his son Jesus Christ, upon his ascension to heaven, after his sufferings, death, and resurrection from the dead; when he was bid to sit down in human nature, at the right hand of God, in token of having done his work on earth to full satisfaction; and in the relation of which David calls Christ his Lord; and is the reason of their being mentioned.",
+            "verse_ref": "LUKE 20:42",
+            "citation": "[Vol 7, p. 724]",
+            "vol": 7,
+            "page": 724,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 724,
+                "boxes": [
+                  {
+                    "x": 1773,
+                    "y": 2315,
+                    "w": 1490,
+                    "h": 765
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "God",
+              "David"
+            ],
+            "lemma": "*And David himself saith in the book of Psalms, &c.*]",
+            "score": 0.3450760245323181
+          },
+          {
+            "chunk_id": "4edec65a-b7b0-50dc-af42-0eb5bebea722",
+            "sentence_data": [
+              {
+                "sentence_id": "EXODUS_15_11_S00",
+                "text": "For the perfections of his nature, for the blessings of his goodness, and for the works of his hands; and especially for the greatness and excellency of his power, seen in the salvation of his people, and the ruin of their enemies: there is none like him among the mighty ones, as it may be rendered; among the mighty angels, who excel in strength, and are sometimes called gods; or among the mighty ones on earth; or the sons of the mighty, kings, princes, judges, and civil magistrates of every rank and order; and especially for the following things: who is like thee, glorious in holiness? some understand this of the holy place, either heaven, where Christ is glorious above all created beings; or the church, where he shews himself glorious to his people: others, of holy persons, either holy angels, among whom he was at Sinai, and when he ascended on high, and will be when he comes again, in his own and his father's glory; or the saints, when he will bring them with him, and be glorified in them: but rather it is to be understood of the attribute of his holiness, which is eminently and perfectly in him; in his person, with respect to both his natures, divine and human; the glory of which is displayed in all the works he has wrought, especially in the great work of redemption, which was undertook both for the honour of the holiness and righteousness of God, and to redeem his people from sin, and make them righteous and holy: it appears in the holy doctrines he taught, and in the holy commandments and ordinances he enjoined his people, and in his judgements on his enemies; in all which it is plainly seen that he loves righteousness and hates iniquity, and there is none like him for it; there is none holy as the Lord among angels or men, 1 Sam. ii. 2. fearful in praises[^1]; or, in the things for which he is to be praised; as the glories and excellencies of his person, the blessings received from him, and through him, both temporal and spiritual; grace, and all the blessings of it here, now communicated, and glory and happiness promised and expected: and many things, for which he is to be praised, he is fearful, awful, and tremendous in them; there are some things his right hand teaches him, and it does, deserving of praise, which yet are terrible, and such were they which are here literally referred to; the plagues upon the Egyptians, and the destruction of Pharaoh and his host, called the wondrous works done in the land of Ham, and terrible things by the Red sea, Psal. cvi.",
+                "index": 0
+              },
+              {
+                "sentence_id": "EXODUS_15_11_S01",
+                "text": "9, 10. and yet these were matter of praise to Israel, and gave occasion for this song; and such are they, in a spiritual sense, which he has done to his and our enemies: when the year of his redeemed was come, it was a day of vengeance in his heart, and he exercised it; he made an end of sin, abolished death, destroyed him which had the power of it, and spoiled principalities and powers; and a dreadful slaughter will be made of antichrist and his followers, when the song of Moses and the Lamb will be sung on account of it; and such dispensations of Providence, and judgements on men, as on Pharaoh and antichrist, as they are terrible to wicked men, they strike an awe on the people of God, at the same time they furnish out a song of praise to them: moreover, this may respect not only the matter of praise, but the reverend manner in which it is performed by good men; who, as they have a concern that they cannot sufficiently praise the Lord, and fear they shall not perform it aright, and sensible of their weakness and imperfection, like the seraphim, cover their faces whilst they applaud his perfections, particularly that of his holiness, and declare the earth is full of his glory; so they desire to perform this, as all their other services, with a holy fear and trembling, with reverence and godly fear, since holy and reverend is his name: it follows, doing wonders; and for which there is none like him; wonders Christ did before his incarnate state, both in eternity, in the goings forth of his heart, in acts of love to his people, in asking for them, and betrothing them, in becoming the surety of them, in proposing to be a sacrifice in their stead, in entering into a covenant with his father on their account, in taking the care and charge of their persons, and in being the treasury of all grace and glory for them; and likewise in time, being concerned in the wondrous works of creation, which are a wonderful display of divine wisdom, power, and goodness, and in all the affairs of Providence; for there was not any remarkable occurrence, from the beginning of the world to the time of his coming in the flesh, but he was concerned therein; as the drowning of the old world, to whom previously he preached by his spirit in Noah; the burning of Sodom and Gomorrah, the plagues of Egypt, and the destruction of Pharaoh and his host, the deliverance of the children of Israel, both out of Egypt and Babylon, and many others: and when he became incarnate, how many wonders were wrought by him? the incarnation itself was a wonderful instance of his grace and condescension, to take upon him the nature of man, be made flesh, and dwell among them; and during his incarnate state on earth many wonders were done by him; the doctrines he taught, the miracles he wrought, and especially the great work of our redemption and salvation, which will be for ever the wonder of men and angels; his raising himself from the dead, his ascension to heaven, and his appearance there for his people, as well as his second coming to judgment, are all marvellous things; and on account of all this, and more, he may well be called wonderful; for working wonders there is none like him.",
+                "index": 1
+              }
+            ],
+            "content": "*Who is like unto thee, O Lord, among the gods? &c.*] For the perfections of his nature, for the blessings of his goodness, and for the works of his hands; and especially for the greatness and excellency of his power, seen in the salvation of his people, and the ruin of their enemies: there is none like him among the mighty ones, as it may be rendered; among the mighty angels, who excel in strength, and are sometimes called gods; or among the mighty ones on earth; or the sons of the mighty, kings, princes, judges, and civil magistrates of every rank and order; and especially for the following things: who is like thee, glorious in holiness? some understand this of the holy place, either heaven, where Christ is glorious above all created beings; or the church, where he shews himself glorious to his people: others, of holy persons, either holy angels, among whom he was at Sinai, and when he ascended on high, and will be when he comes again, in his own and his father's glory; or the saints, when he will bring them with him, and be glorified in them: but rather it is to be understood of the attribute of his holiness, which is eminently and perfectly in him; in his person, with respect to both his natures, divine and human; the glory of which is displayed in all the works he has wrought, especially in the great work of redemption, which was undertook both for the honour of the holiness and righteousness of God, and to redeem his people from sin, and make them righteous and holy: it appears in the holy doctrines he taught, and in the holy commandments and ordinances he enjoined his people, and in his judgements on his enemies; in all which it is plainly seen that he loves righteousness and hates iniquity, and there is none like him for it; there is none holy as the Lord among angels or men, 1 Sam. ii. 2. fearful in praises[^1]; or, in the things for which he is to be praised; as the glories and excellencies of his person, the blessings received from him, and through him, both temporal and spiritual; grace, and all the blessings of it here, now communicated, and glory and happiness promised and expected: and many things, for which he is to be praised, he is fearful, awful, and tremendous in them; there are some things his right hand teaches him, and it does, deserving of praise, which yet are terrible, and such were they which are here literally referred to; the plagues upon the Egyptians, and the destruction of Pharaoh and his host, called the wondrous works done in the land of Ham, and terrible things by the Red sea, Psal. cvi. 9, 10. and yet these were matter of praise to Israel, and gave occasion for this song; and such are they, in a spiritual sense, which he has done to his and our enemies: when the year of his redeemed was come, it was a day of vengeance in his heart, and he exercised it; he made an end of sin, abolished death, destroyed him which had the power of it, and spoiled principalities and powers; and a dreadful slaughter will be made of antichrist and his followers, when the song of Moses and the Lamb will be sung on account of it; and such dispensations of Providence, and judgements on men, as on Pharaoh and antichrist, as they are terrible to wicked men, they strike an awe on the people of God, at the same time they furnish out a song of praise to them: moreover, this may respect not only the matter of praise, but the reverend manner in which it is performed by good men; who, as they have a concern that they cannot sufficiently praise the Lord, and fear they shall not perform it aright, and sensible of their weakness and imperfection, like the seraphim, cover their faces whilst they applaud his perfections, particularly that of his holiness, and declare the earth is full of his glory; so they desire to perform this, as all their other services, with a holy fear and trembling, with reverence and godly fear, since holy and reverend is his name: it follows, doing wonders; and for which there is none like him; wonders Christ did before his incarnate state, both in eternity, in the goings forth of his heart, in acts of love to his people, in asking for them, and betrothing them, in becoming the surety of them, in proposing to be a sacrifice in their stead, in entering into a covenant with his father on their account, in taking the care and charge of their persons, and in being the treasury of all grace and glory for them; and likewise in time, being concerned in the wondrous works of creation, which are a wonderful display of divine wisdom, power, and goodness, and in all the affairs of Providence; for there was not any remarkable occurrence, from the beginning of the world to the time of his coming in the flesh, but he was concerned therein; as the drowning of the old world, to whom previously he preached by his spirit in Noah; the burning of Sodom and Gomorrah, the plagues of Egypt, and the destruction of Pharaoh and his host, the deliverance of the children of Israel, both out of Egypt and Babylon, and many others: and when he became incarnate, how many wonders were wrought by him? the incarnation itself was a wonderful instance of his grace and condescension, to take upon him the nature of man, be made flesh, and dwell among them; and during his incarnate state on earth many wonders were done by him; the doctrines he taught, the miracles he wrought, and especially the great work of our redemption and salvation, which will be for ever the wonder of men and angels; his raising himself from the dead, his ascension to heaven, and his appearance there for his people, as well as his second coming to judgment, are all marvellous things; and on account of all this, and more, he may well be called wonderful; for working wonders there is none like him.\n\nFootnotes:\n[1] fearful in praises: or, in the things for which he is to be praised; as the glories and excellencies of his person, the blessings received from him, and through him, both temporal and spiritual; grace, and all the blessings of it here, now communicated, and glory and happiness promised and expected: and many things, for which he is to be praised, he is fearful, awful, and tremendous in them; there are some things his right hand teaches him, and it does, deserving of praise, which yet are terrible, and such were they which are here literally referred to; the plagues upon the Egyptians, and the destruction of Pharaoh and his host, called the wondrous works done in the land of Ham, and terrible things by the Red sea, Psal. cvi. 9, 10. and yet these were matter of praise to Israel, and gave occasion for this song; and such are they, in a spiritual sense, which he has done to his and our enemies: when the year of his redeemed was come, it was a day of vengeance in his heart, and he exercised it; he made an end of sin, abolished death, destroyed him which had the power of it, and spoiled principalities and powers; and a dreadful slaughter will be made of antichrist and his followers, when the song of Moses and the Lamb will be sung on account of it; and such dispensations of Providence, and judgements on men, as on Pharaoh and antichrist, as they are terrible to wicked men, they strike an awe on the people of God, at the same time they furnish out a song of praise to them: moreover, this may respect not only the matter of praise, but the reverend manner in which it is performed by good men; who, as they have a concern that they cannot sufficiently praise the Lord, and fear they shall not perform it aright, and sensible of their weakness and imperfection, like the seraphim, cover their faces whilst they applaud his perfections, particularly that of his holiness, and declare the earth is full of his glory; so they desire to perform this, as all their other services, with a holy fear and trembling, with reverence and godly fear, since holy and reverend is his name: it follows, doing wonders; and for which there is none like him; wonders Christ did before his incarnate state, both in eternity, in the goings forth of his heart, in acts of love to his people, in asking for them, and betrothing them, in becoming the surety of them, in proposing",
+            "verse_ref": "EXODUS 15:11",
+            "citation": "[Vol 1, p. 483]",
+            "vol": 1,
+            "page": 483,
+            "scan": [
+              {
+                "vol": 1,
+                "page": 483,
+                "boxes": [
+                  {
+                    "x": 81,
+                    "y": 3823,
+                    "w": 1478,
+                    "h": 952
+                  },
+                  {
+                    "x": 1599,
+                    "y": 693,
+                    "w": 1523,
+                    "h": 4123
+                  }
+                ]
+              },
+              {
+                "vol": 1,
+                "page": 484,
+                "boxes": [
+                  {
+                    "x": 471,
+                    "y": 668,
+                    "w": 1496,
+                    "h": 1893
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] fearful in praises: or, in the things for which he is to be praised; as the glories and excellencies of his person, the blessings received from him, and through him, both temporal and spiritual; grace, and all the blessings of it here, now communicated, and glory and happiness promised and expected: and many things, for which he is to be praised, he is fearful, awful, and tremendous in them; there are some things his right hand teaches him, and it does, deserving of praise, which yet are terrible, and such were they which are here literally referred to; the plagues upon the Egyptians, and the destruction of Pharaoh and his host, called the wondrous works done in the land of Ham, and terrible things by the Red sea, Psal. cvi. 9, 10. and yet these were matter of praise to Israel, and gave occasion for this song; and such are they, in a spiritual sense, which he has done to his and our enemies: when the year of his redeemed was come, it was a day of vengeance in his heart, and he exercised it; he made an end of sin, abolished death, destroyed him which had the power of it, and spoiled principalities and powers; and a dreadful slaughter will be made of antichrist and his followers, when the song of Moses and the Lamb will be sung on account of it; and such dispensations of Providence, and judgements on men, as on Pharaoh and antichrist, as they are terrible to wicked men, they strike an awe on the people of God, at the same time they furnish out a song of praise to them: moreover, this may respect not only the matter of praise, but the reverend manner in which it is performed by good men; who, as they have a concern that they cannot sufficiently praise the Lord, and fear they shall not perform it aright, and sensible of their weakness and imperfection, like the seraphim, cover their faces whilst they applaud his perfections, particularly that of his holiness, and declare the earth is full of his glory; so they desire to perform this, as all their other services, with a holy fear and trembling, with reverence and godly fear, since holy and reverend is his name: it follows, doing wonders; and for which there is none like him; wonders Christ did before his incarnate state, both in eternity, in the goings forth of his heart, in acts of love to his people, in asking for them, and betrothing them, in becoming the surety of them, in proposing"
+            ],
+            "entities": [],
+            "lemma": "*Who is like unto thee, O Lord, among the gods? &c.*]",
+            "score": 0.3436930477619171
+          }
+        ],
+        "post_chunks": [
+          {
+            "chunk_id": "aa872ee4-eddc-516e-a689-25c78d59e071",
+            "sentence_data": [
+              {
+                "sentence_id": "MATTHEW_26_30_S00",
+                "text": "The Hallel, which the Jews were obliged to sing on the night of the passover; for the passover, they say[^6], was \u05d4\u05b7\u05dc\u05b5\u05bc\u05dc \u05d8\u05b8\u05e2\u05d5\u05bc\u05df, bound to an hymn.",
+                "index": 0
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S01",
+                "text": "This Hallel, or song of praise, consisted of six Psalms, the cxiiith, cxivth, cxvth, cxviith, cxviith, and cxviilth[^7]: now this they did not sing all at once, but in parts.",
+                "index": 1
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S02",
+                "text": "Just before the drinking of the second cup and eating of the lamb, they sung the first part of it, which contained the cxiiith and cxivth Psalms; and on mixing the fourth and last cup, they completed the Hallel, by singing the rest of the Psalms, beginning with the cxvth Psalm, and ending with the cxviilth; and said over it, what they call the blessing of the song, which was Psal. cxlv.",
+                "index": 2
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S03",
+                "text": "10, &c. and they might, if they would, mix a fifth cup, but that they were not obliged to, and say over it the great Hallel, or hymn, which was the cxxxvith Psalm[^8].",
+                "index": 3
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S04",
+                "text": "Now the last part of the Hallel, Christ deferred to the close of his supper; there being many things in it pertinent to him, and proper on this occasion, particularly Psal. cxv.",
+                "index": 4
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S05",
+                "text": "1. and cxvi.",
+                "index": 5
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S06",
+                "text": "12, 13, 14, 15. and cxviii.",
+                "index": 6
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S07",
+                "text": "22, 23, 24, 25, 26, 27. and the Jews themselves say[^9], that \u05d9\u05e1\u05d5\u05e8\u05d9\u05dd \u05e9\u05dc \u05de\u05e9\u05d9\u05d7, the sorrows of the Messiah are contained in this part: that this is the hymn which Christ and his disciples sung, may be rather thought, than that it was one of his own composing ; since not only he, but all the disciples sung it, and therefore must be what they were acquainted with; and since Christ in most things conformed to the rites and usages of the Jewish nation ; and he did not rise up from table and go away, until this concluding circumstance was over; though it was allowed to finish the Hallel, or hymn, in any place they pleased, even though it was not the place where the feast was kept[^1]: however, as soon as it was over, they went out to the Mount of Olives; he and his disciples, excepting Judas: first he himself alone, and then the disciples followed him, according to Luke xxii. 39. and the Persic version here reads it, he went out.",
+                "index": 7
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S08",
+                "text": "This seems to be contrary to a Jewish canon; for the passover was \u05de\u05b7\u05e2\u05b9\u05d5\u05df \u05dc\u05b4\u05d9\u05e0\u05b8\u05d4, bound to lodging a night[^2]; that is, as the gloss explains it, \"the first night (i. e. of the passover) a man must lodge in Jerusalem; thenceforward it was lawful to dwell without the wall, within the border.\"",
+                "index": 8
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S09",
+                "text": "And a little after, the same phrase, being bound to lodge, is explained, one night in the midst of the city: but Christ had more important business to attend unto, than to comply with this rule, which was not obligatory by the word of God, though the Jews pretend to found it on Deut. xvi. 7[^3].",
+                "index": 9
+              },
+              {
+                "sentence_id": "MATTHEW_26_30_S10",
+                "text": "The place where he went with his disciples, was the Mount of Olives, which was on the east side of Jerusalem; and was the place where the high-priest stood, and burnt the red heifer, and sprinkled its blood[^4]: now from the temple, or from the mountain of the house, there was a causeway, or bridge on arches, made to the Mount of Olives, in which the high-priest and the heifer, \u05d5\u05b0\u05db\u05b8\u05dc \u05e2\u05b6\u05d6\u05b0\u05e8\u05b8\u05d9\u05d5, and all his assistants, (the priests that helped him in this service,) went to this mount[^5]: in this same way 'tis very probable, went Christ the great high-priest, who was typified by the red heifer, and his companions the disciples, to the same place, where he had his bloody sweat, and where his sorrows and sufferings began.",
+                "index": 10
+              }
+            ],
+            "content": "*And when they had sung an hymn, &c.*] The Hallel, which the Jews were obliged to sing on the night of the passover; for the passover, they say[^6], was \u05d4\u05b7\u05dc\u05b5\u05bc\u05dc \u05d8\u05b8\u05e2\u05d5\u05bc\u05df, bound to an hymn. This Hallel, or song of praise, consisted of six Psalms, the cxiiith, cxivth, cxvth, cxviith, cxviith, and cxviilth[^7]: now this they did not sing all at once, but in parts. Just before the drinking of the second cup and eating of the lamb, they sung the first part of it, which contained the cxiiith and cxivth Psalms; and on mixing the fourth and last cup, they completed the Hallel, by singing the rest of the Psalms, beginning with the cxvth Psalm, and ending with the cxviilth; and said over it, what they call the blessing of the song, which was Psal. cxlv. 10, &c. and they might, if they would, mix a fifth cup, but that they were not obliged to, and say over it the great Hallel, or hymn, which was the cxxxvith Psalm[^8]. Now the last part of the Hallel, Christ deferred to the close of his supper; there being many things in it pertinent to him, and proper on this occasion, particularly Psal. cxv. 1. and cxvi. 12, 13, 14, 15. and cxviii. 22, 23, 24, 25, 26, 27. and the Jews themselves say[^9], that \u05d9\u05e1\u05d5\u05e8\u05d9\u05dd \u05e9\u05dc \u05de\u05e9\u05d9\u05d7, the sorrows of the Messiah are contained in this part: that this is the hymn which Christ and his disciples sung, may be rather thought, than that it was one of his own composing ; since not only he, but all the disciples sung it, and therefore must be what they were acquainted with; and since Christ in most things conformed to the rites and usages of the Jewish nation ; and he did not rise up from table and go away, until this concluding circumstance was over; though it was allowed to finish the Hallel, or hymn, in any place they pleased, even though it was not the place where the feast was kept[^1]: however, as soon as it was over, they went out to the Mount of Olives; he and his disciples, excepting Judas: first he himself alone, and then the disciples followed him, according to Luke xxii. 39. and the Persic version here reads it, he went out. This seems to be contrary to a Jewish canon; for the passover was \u05de\u05b7\u05e2\u05b9\u05d5\u05df \u05dc\u05b4\u05d9\u05e0\u05b8\u05d4, bound to lodging a night[^2]; that is, as the gloss explains it, \"the first night (i. e. of the passover) a man must lodge in Jerusalem; thenceforward it was lawful to dwell without the wall, within the border.\" And a little after, the same phrase, being bound to lodge, is explained, one night in the midst of the city: but Christ had more important business to attend unto, than to comply with this rule, which was not obligatory by the word of God, though the Jews pretend to found it on Deut. xvi. 7[^3]. The place where he went with his disciples, was the Mount of Olives, which was on the east side of Jerusalem; and was the place where the high-priest stood, and burnt the red heifer, and sprinkled its blood[^4]: now from the temple, or from the mountain of the house, there was a causeway, or bridge on arches, made to the Mount of Olives, in which the high-priest and the heifer, \u05d5\u05b0\u05db\u05b8\u05dc \u05e2\u05b6\u05d6\u05b0\u05e8\u05b8\u05d9\u05d5, and all his assistants, (the priests that helped him in this service,) went to this mount[^5]: in this same way 'tis very probable, went Christ the great high-priest, who was typified by the red heifer, and his companions the disciples, to the same place, where he had his bloody sweat, and where his sorrows and sufferings began.\n\nFootnotes:\n[2] T. Bab. Pesach. fol. 95. 2.\n[3] Talmud ib. & Jarchi in Deut. xvi. 7.\n[6] Misn. Pesach. c. 9. 3. T. Bab. Pesach. fol. 95. 1, 2.\n[8] Maimon. Hilch. Chametz Umetzah, c. 8. sect. 5. 10.\n[9] T. Bab. Pesachim, fol. 118. 1.",
+            "verse_ref": "MATTHEW 26:30",
+            "citation": "[Vol 7, p. 356]",
+            "vol": 7,
+            "page": 356,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 356,
+                "boxes": [
+                  {
+                    "x": 1826,
+                    "y": 2821,
+                    "w": 1476,
+                    "h": 1513
+                  }
+                ]
+              },
+              {
+                "vol": 7,
+                "page": 357,
+                "boxes": [
+                  {
+                    "x": 58,
+                    "y": 672,
+                    "w": 1507,
+                    "h": 2524
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[2] T. Bab. Pesach. fol. 95. 2.",
+              "[3] Talmud ib. & Jarchi in Deut. xvi. 7.",
+              "[6] Misn. Pesach. c. 9. 3. T. Bab. Pesach. fol. 95. 1, 2.",
+              "[8] Maimon. Hilch. Chametz Umetzah, c. 8. sect. 5. 10.",
+              "[9] T. Bab. Pesachim, fol. 118. 1."
+            ],
+            "entities": [
+              "Jews",
+              "Christ",
+              "Seventy Disciples",
+              "Judas",
+              "Jerusalem",
+              "red heifer",
+              "Hallel",
+              "Mount of Olives"
+            ],
+            "lemma": "*And when they had sung an hymn, &c.*]",
+            "score": 0.8572192192077637
+          },
+          {
+            "chunk_id": "565d6f49-18ae-5e69-8ad2-83a0fdda388c",
+            "sentence_data": [
+              {
+                "sentence_id": "MATTHEW_5_37_S00",
+                "text": "That is, let your speech, in your common conversation, and daily business of life, when ye answer to any thing in the affirmative, be yea; and when ye answer to any thing in the negative, nay; and for the stronger asseveration of the matter, when it is necessary, double these words; but let no oaths be joined unto them: this is enough; a righteous man's yea, is yea, and his no, is no; his word is sufficient.",
+                "index": 0
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S01",
+                "text": "Hence it appears, that our Lord is here speaking of rash swearing, and such as was used in common conversation, and is justly condemned by him.",
+                "index": 1
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S02",
+                "text": "The Jews have no reason to reject this advice of Christ, who often use and recommend the same modes of expression.",
+                "index": 2
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S03",
+                "text": "They endeavour to raise the esteem of their doctors and wise men, by saying, that their words, both in doctrines and dealings with men, are yea, yea.",
+                "index": 3
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S04",
+                "text": "[^1] One of their[^2] commentators on the word saying, in Exod. xx. 1. makes this observation; \"hence we learn, that they used to answer, \u05e2\u05b7\u05dc \u05d4\u05b5\u05df \u05d4\u05b5\u05df \u05d5\u05b0\u05e2\u05b7\u05dc \u05dc\u05b9\u05d0 \u05dc\u05b9\u05d0,\" \"concerning yea, yea, and concerning nay, nay.\"",
+                "index": 4
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S05",
+                "text": "This way of speaking, they looked upon equivalent to an oath; yea, they affirm it was one.",
+                "index": 5
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S06",
+                "text": "\"Says R. Eliezer[^3],\" \"\u05e0\u05b0\u05d2\u05b5\u05d1\u05b8\u05d4 \u05d4\u05b4\u05d9\u05d0 \u05e0\u05b6\u05d2\u05b6\u05d1\u05b8\u05d4 \u05d0\u05b5\u05d9\u05df, nay is an oath, yea is an oath,\" \"absolutely; nay is an oath, as it is written, Gen. ix. 11. and Isa. liv.",
+                "index": 6
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S07",
+                "text": "9.",
+                "index": 7
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S08",
+                "text": "But that yea is an oath, how does it appear?",
+                "index": 8
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S09",
+                "text": "It is concluded from hence, that nay is an oath; saith Rabba, there are that say nay, nay, twice; and there are that say yea, yea, twice; as it is written, Gen. ix. 11. and from hence, that nay is twice, yea is also twice said.\"",
+                "index": 9
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S10",
+                "text": "The gloss upon it is, \"he that says either nay, nay, twice, or yea, yea, twice; lo! it is \u05db\u05b0\u05bc\u05e9\u05b0\u05c1\u05d1\u05d5\u05bc\u05e2\u05b8\u05d4 \u05de\u05b5\u05d0\u05b7\u05d7\u05b7\u05e8, as an after oath, which confirms his words.\"",
+                "index": 10
+              },
+              {
+                "sentence_id": "MATTHEW_5_37_S11",
+                "text": "For whatsoever is more than these, cometh of evil: that is, whatever exceeds this way of speaking and conversation, in the common affairs of life, is either from the devil, who is the evil one, by way of eminency; or from the evil heart of man, from the pride, malice, envy, &c. that are in it.",
+                "index": 11
+              }
+            ],
+            "content": "But let your communication be yea, yea, &c.] That is, let your speech, in your common conversation, and daily business of life, when ye answer to any thing in the affirmative, be yea; and when ye answer to any thing in the negative, nay; and for the stronger asseveration of the matter, when it is necessary, double these words; but let no oaths be joined unto them: this is enough; a righteous man's yea, is yea, and his no, is no; his word is sufficient. Hence it appears, that our Lord is here speaking of rash swearing, and such as was used in common conversation, and is justly condemned by him. The Jews have no reason to reject this advice of Christ, who often use and recommend the same modes of expression. They endeavour to raise the esteem of their doctors and wise men, by saying, that their words, both in doctrines and dealings with men, are yea, yea.[^1] One of their[^2] commentators on the word saying, in Exod. xx. 1. makes this observation; \"hence we learn, that they used to answer, \u05e2\u05b7\u05dc \u05d4\u05b5\u05df \u05d4\u05b5\u05df \u05d5\u05b0\u05e2\u05b7\u05dc \u05dc\u05b9\u05d0 \u05dc\u05b9\u05d0,\" \"concerning yea, yea, and concerning nay, nay.\" This way of speaking, they looked upon equivalent to an oath; yea, they affirm it was one. \"Says R. Eliezer[^3],\" \"\u05e0\u05b0\u05d2\u05b5\u05d1\u05b8\u05d4 \u05d4\u05b4\u05d9\u05d0 \u05e0\u05b6\u05d2\u05b6\u05d1\u05b8\u05d4 \u05d0\u05b5\u05d9\u05df, nay is an oath, yea is an oath,\" \"absolutely; nay is an oath, as it is written, Gen. ix. 11. and Isa. liv. 9. But that yea is an oath, how does it appear? It is concluded from hence, that nay is an oath; saith Rabba, there are that say nay, nay, twice; and there are that say yea, yea, twice; as it is written, Gen. ix. 11. and from hence, that nay is twice, yea is also twice said.\" The gloss upon it is, \"he that says either nay, nay, twice, or yea, yea, twice; lo! it is \u05db\u05b0\u05bc\u05e9\u05b0\u05c1\u05d1\u05d5\u05bc\u05e2\u05b8\u05d4 \u05de\u05b5\u05d0\u05b7\u05d7\u05b7\u05e8, as an after oath, which confirms his words.\" For whatsoever is more than these, cometh of evil: that is, whatever exceeds this way of speaking and conversation, in the common affairs of life, is either from the devil, who is the evil one, by way of eminency; or from the evil heart of man, from the pride, malice, envy, &c. that are in it.\n\nFootnotes:\n[1] T. Bab. Moed Katan, fol. 20. 1. Maimon. Hilch. Dayot. c. 5. sect. 13.\n[2] R. Sol. Jarchi, in Exod. xx. 1.\n[3] T. Bab. Shebuot, fol. 36. 1. Vid. Maimon. Hilch. Shebuot, c. 2. sect. 1.",
+            "verse_ref": "MATTHEW 5:37",
+            "citation": "[Vol 7, p. 75]",
+            "vol": 7,
+            "page": 75,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 75,
+                "boxes": [
+                  {
+                    "x": 1662,
+                    "y": 3749,
+                    "w": 1471,
+                    "h": 640
+                  }
+                ]
+              },
+              {
+                "vol": 7,
+                "page": 76,
+                "boxes": [
+                  {
+                    "x": 229,
+                    "y": 695,
+                    "w": 1493,
+                    "h": 1915
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] T. Bab. Moed Katan, fol. 20. 1. Maimon. Hilch. Dayot. c. 5. sect. 13.",
+              "[2] R. Sol. Jarchi, in Exod. xx. 1.",
+              "[3] T. Bab. Shebuot, fol. 36. 1. Vid. Maimon. Hilch. Shebuot, c. 2. sect. 1."
+            ],
+            "entities": [
+              "Rabba",
+              "Jews",
+              "\u05e0\u05b0\u05d2\u05b5\u05d1\u05b8\u05d4 \u05d4\u05b4\u05d9\u05d0 \u05e0\u05b6\u05d2\u05b6\u05d1\u05b8\u05d4 \u05d0\u05b5\u05d9\u05df",
+              "R. Eliezer",
+              "\u05db\u05b0\u05bc\u05e9\u05b0\u05c1\u05d1\u05d5\u05bc\u05e2\u05b8\u05d4 \u05de\u05b5\u05d0\u05b7\u05d7\u05b7\u05e8",
+              "\u05e2\u05b7\u05dc \u05d4\u05b5\u05df \u05d4\u05b5\u05df \u05d5\u05b0\u05e2\u05b7\u05dc \u05dc\u05b9\u05d0 \u05dc\u05b9\u05d0"
+            ],
+            "lemma": "But let your communication be yea, yea, &c.]",
+            "score": 0.6499999761581421
+          },
+          {
+            "chunk_id": "9f667c22-a102-5718-8740-ca1601a3d52c",
+            "sentence_data": [
+              {
+                "sentence_id": "MATTHEW_10_27_S00",
+                "text": "Hence Christ proceeds to encourage his disciples to an open, plain, and faithful ministration of the Gospel, not fearing the faces and frowns of men.",
+                "index": 0
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S01",
+                "text": "For with respect to the Gospel, his meaning is, that what was hid and covered should not remain so, but should be revealed, and made known, and they were the persons who were to do it; and it was with that view that he had communicated it to them: and whereas he had told them it in darkness; not in a dark and obscure manner; for though he spoke in parables to others, yet to them he made known the mysteries of the kingdom of heaven: and if at any time he delivered parables, or dark sayings, to them, he would afterwards, or when alone, explain them to them; but his meaning chiefly is, that what he communicated to them in private houses, when they were by themselves, and no one saw, or heard them, and so were in darkness with respect to others, that speak ye in light; openly and publicly in the synagogues and temple, in the high places of the city, streets, or fields, wherever there is a concourse of people; hide and conceal nothing, but speak out all clearly, distinctly, fully, without the least reserve, or throwing any obscurity on it, which may cover the true sense of it from the view of the people.",
+                "index": 1
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S02",
+                "text": "And what ye hear in the ear, or is whispered to you by me, as your master.",
+                "index": 2
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S03",
+                "text": "Christ alludes to the custom of the Jewish doctors, who had each an interpreter, into whose ear he used to whisper his doctrine, and then the interpreter delivered it to the people: so it is said[^8], \"Rab came to the place of R. Shilla, and he had no speaker to stand by him; wherefore Rab stood by him, and explained.\"",
+                "index": 3
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S04",
+                "text": "The gloss upon it is, \"an interpreter stands before a doctor whilst he is preaching, and the doctor \u05dc\u05bc\u05d5\u05b9\u05d7\u05b5\u05e9\u05c1, whispers to him in the Hebrew tongue, and he interprets it to the multitude in a tongue they understand.\"",
+                "index": 4
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S05",
+                "text": "Again[^9], \"they said to Judah bar Nachmani, the interpreter of Resh Lekish, stand for a\n\n\"speaker for him.\"",
+                "index": 5
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S06",
+                "text": "The gloss upon it is, \"to cause his exposition to be heard by the congregation, \"\u05dc\u05b0\u05da\u05b8 \u05e9\u05b7\u05c1\u05d7\u05b2\u05d5\u05b6\u05d4, which he shall whisper to thee.\"",
+                "index": 6
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S07",
+                "text": "Now it was absolutely requisite, that the speaker, or interpreter, should faithfully relate what the doctor said; sometimes, it seems, he did not: 'tis said[^1] in commendation of the meekness of R. Aba, \"that he delivered one sense, and his speaker said another, and he was not angry.\"",
+                "index": 7
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S08",
+                "text": "The gloss says, \"his speaker was, he that interpreted to the multitude what he \u05dc\u05d5\u05b9 \u05e9\u05b8\u05c1\u05d7\u05b8\u05d4, whispered to him in the time of preaching.\"",
+                "index": 8
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S09",
+                "text": "Sometimes one doctor is said to whisper in the ear of another, when he instructed him, or informed him of any thing.",
+                "index": 9
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S10",
+                "text": "R. Jochanan[^2] whispered R. Joshua \u05d1\u05b0\u05bc\u05d0\u05d5\u05b9\u05d6\u05b6\u05e0\u05bc\u05d5\u05b9, in his ear.",
+                "index": 10
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S11",
+                "text": "The Jews have a notion that the law was given this way; so they interpret the eloquent orator in Isa. iii. 3.",
+                "index": 11
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S12",
+                "text": "*this is he to whom it is fit to deliver the words of the law, \u05e9\u05b0\u05c1\u05dc\u05b9\u05e9\u05b6\u05c1\u05ea \u05d4\u05b7\u05e0\u05b6\u05bc\u05d2\u05b6\u05df, which was given by whispering: and so, it seems, the Gospel was in like manner delivered by Christ to his disciples.",
+                "index": 12
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S13",
+                "text": "It was reckoned a very great honour, and a token of magisterial dignity, to have one to whisper in the ear to, and speak for them.",
+                "index": 13
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S14",
+                "text": "So to one that related his dream, that he saw an ass standing at his pillow, and braying, answer is made, thou shalt be a king, that is, the head of a school; and a speaker or an interpreter shall stand by thee[^3].",
+                "index": 14
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S15",
+                "text": "Our Lord very justly takes upon him the character of a doctor, master, and dictator, and solemnly charges his disciples, clearly, loudly, and faithfully to declare what he suggested to them.",
+                "index": 15
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S16",
+                "text": "That preach ye, says he, upon the house-tops; for the roofs of their houses were not ridged, but plain, and flat, upon which they could stand or walk; and battlements were made about them to prevent their falling off, according to the law in Deut. xii. 8.",
+                "index": 16
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S17",
+                "text": "Here many religious actions were performed: here Peter went up to pray, Acts x. 9. and here persons sometimes sat and read: hence that passage in the Misna[^4], if any one \u05d1\u05b0\u05bc\u05e8\u05b9\u05d0\u05e9\u05c1 \u05d2\u05b7\u05bc\u05d2 \u05e9\u05b9\u05c1\u05e0\u05b6\u05d4, was reading on the top of a roof, and the book is rolled out of his hand, &c. and sometimes they made their proclamations from hence of their festivals and solemn days, and particularly of their sabbath; which was done by the sound of a trumpet, that the people might cease from work in the fields, and shut up their shops in the city, and light up their lamps.",
+                "index": 17
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S18",
+                "text": "This proclamation, by the sound of a trumpet, was made six times by the chazan, or minister of the congregation, from an house-top; and, 'tis said, that there was, \u05d2\u05b7\u05bc\u05d2 \u05d1\u05b4\u05bc\u05de\u05b0\u05e7\u05d5\u05b9\u05dd \u05d2\u05b8\u05bc\u05d1\u05d5\u05b9\u05d4\u05b7\u05bc \u05d1\u05b4\u05bc\u05e8\u05b0\u05d7\u05d5\u05b9\u05d1, a peculiar roof in the highest part of the city, and from the middle of it he blew the trumpet[^5].",
+                "index": 18
+              },
+              {
+                "sentence_id": "MATTHEW_10_27_S19",
+                "text": "In allusion to this, our Lord orders his disciples to blow the trumpet of the everlasting Gospel; and loudly proclaim to all the truths and mysteries of grace, which he had made known to them.",
+                "index": 19
+              }
+            ],
+            "content": "What I tell you in darkness, &c.] Hence Christ proceeds to encourage his disciples to an open, plain, and faithful ministration of the Gospel, not fearing the faces and frowns of men. For with respect to the Gospel, his meaning is, that what was hid and covered should not remain so, but should be revealed, and made known, and they were the persons who were to do it; and it was with that view that he had communicated it to them: and whereas he had told them it in darkness; not in a dark and obscure manner; for though he spoke in parables to others, yet to them he made known the mysteries of the kingdom of heaven: and if at any time he delivered parables, or dark sayings, to them, he would afterwards, or when alone, explain them to them; but his meaning chiefly is, that what he communicated to them in private houses, when they were by themselves, and no one saw, or heard them, and so were in darkness with respect to others, that speak ye in light; openly and publicly in the synagogues and temple, in the high places of the city, streets, or fields, wherever there is a concourse of people; hide and conceal nothing, but speak out all clearly, distinctly, fully, without the least reserve, or throwing any obscurity on it, which may cover the true sense of it from the view of the people. And what ye hear in the ear, or is whispered to you by me, as your master. Christ alludes to the custom of the Jewish doctors, who had each an interpreter, into whose ear he used to whisper his doctrine, and then the interpreter delivered it to the people: so it is said[^8], \"Rab came to the place of R. Shilla, and he had no speaker to stand by him; wherefore Rab stood by him, and explained.\" The gloss upon it is, \"an interpreter stands before a doctor whilst he is preaching, and the doctor \u05dc\u05bc\u05d5\u05b9\u05d7\u05b5\u05e9\u05c1, whispers to him in the Hebrew tongue, and he interprets it to the multitude in a tongue they understand.\" Again[^9], \"they said to Judah bar Nachmani, the interpreter of Resh Lekish, stand for a\n\n\"speaker for him.\" The gloss upon it is, \"to cause his exposition to be heard by the congregation, \"\u05dc\u05b0\u05da\u05b8 \u05e9\u05b7\u05c1\u05d7\u05b2\u05d5\u05b6\u05d4, which he shall whisper to thee.\" Now it was absolutely requisite, that the speaker, or interpreter, should faithfully relate what the doctor said; sometimes, it seems, he did not: 'tis said[^1] in commendation of the meekness of R. Aba, \"that he delivered one sense, and his speaker said another, and he was not angry.\" The gloss says, \"his speaker was, he that interpreted to the multitude what he \u05dc\u05d5\u05b9 \u05e9\u05b8\u05c1\u05d7\u05b8\u05d4, whispered to him in the time of preaching.\" Sometimes one doctor is said to whisper in the ear of another, when he instructed him, or informed him of any thing. R. Jochanan[^2] whispered R. Joshua \u05d1\u05b0\u05bc\u05d0\u05d5\u05b9\u05d6\u05b6\u05e0\u05bc\u05d5\u05b9, in his ear. The Jews have a notion that the law was given this way; so they interpret the eloquent orator in Isa. iii. 3. *this is he to whom it is fit to deliver the words of the law, \u05e9\u05b0\u05c1\u05dc\u05b9\u05e9\u05b6\u05c1\u05ea \u05d4\u05b7\u05e0\u05b6\u05bc\u05d2\u05b6\u05df, which was given by whispering: and so, it seems, the Gospel was in like manner delivered by Christ to his disciples. It was reckoned a very great honour, and a token of magisterial dignity, to have one to whisper in the ear to, and speak for them. So to one that related his dream, that he saw an ass standing at his pillow, and braying, answer is made, thou shalt be a king, that is, the head of a school; and a speaker or an interpreter shall stand by thee[^3]. Our Lord very justly takes upon him the character of a doctor, master, and dictator, and solemnly charges his disciples, clearly, loudly, and faithfully to declare what he suggested to them. That preach ye, says he, upon the house-tops; for the roofs of their houses were not ridged, but plain, and flat, upon which they could stand or walk; and battlements were made about them to prevent their falling off, according to the law in Deut. xii. 8. Here many religious actions were performed: here Peter went up to pray, Acts x. 9. and here persons sometimes sat and read: hence that passage in the Misna[^4], if any one \u05d1\u05b0\u05bc\u05e8\u05b9\u05d0\u05e9\u05c1 \u05d2\u05b7\u05bc\u05d2 \u05e9\u05b9\u05c1\u05e0\u05b6\u05d4, was reading on the top of a roof, and the book is rolled out of his hand, &c. and sometimes they made their proclamations from hence of their festivals and solemn days, and particularly of their sabbath; which was done by the sound of a trumpet, that the people might cease from work in the fields, and shut up their shops in the city, and light up their lamps. This proclamation, by the sound of a trumpet, was made six times by the chazan, or minister of the congregation, from an house-top; and, 'tis said, that there was, \u05d2\u05b7\u05bc\u05d2 \u05d1\u05b4\u05bc\u05de\u05b0\u05e7\u05d5\u05b9\u05dd \u05d2\u05b8\u05bc\u05d1\u05d5\u05b9\u05d4\u05b7\u05bc \u05d1\u05b4\u05bc\u05e8\u05b0\u05d7\u05d5\u05b9\u05d1, a peculiar roof in the highest part of the city, and from the middle of it he blew the trumpet[^5]. In allusion to this, our Lord orders his disciples to blow the trumpet of the everlasting Gospel; and loudly proclaim to all the truths and mysteries of grace, which he had made known to them.\n\nFootnotes:\n[1] T. Bab. Sota, fol. 40. 1.\n[2] T. Hieros Kiddushin, fol. 65. 4.\n[3] T. Bab. Beracot, fol. 56. 1.\n[4] Erubin, c. 10. sect. 3.\n[5] T. Bab. Chagiga, fol. 14. 1. & T. Bab. Sabbat, fol. 35. 2. & Gloss. in ib.\n[8] T. Bab. Yoma, fol. 20. 2.\n[9] T. Bab. Sanhed. fol. 7. 2.",
+            "verse_ref": "MATTHEW 10:27",
+            "citation": "[Vol 7, p. 136]",
+            "vol": 7,
+            "page": 136,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 136,
+                "boxes": [
+                  {
+                    "x": 263,
+                    "y": 1149,
+                    "w": 111,
+                    "h": 46
+                  },
+                  {
+                    "x": 1797,
+                    "y": 1894,
+                    "w": 1482,
+                    "h": 2533
+                  }
+                ]
+              },
+              {
+                "vol": 7,
+                "page": 137,
+                "boxes": [
+                  {
+                    "x": 102,
+                    "y": 711,
+                    "w": 1511,
+                    "h": 3576
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] T. Bab. Sota, fol. 40. 1.",
+              "[2] T. Hieros Kiddushin, fol. 65. 4.",
+              "[3] T. Bab. Beracot, fol. 56. 1.",
+              "[4] Erubin, c. 10. sect. 3.",
+              "[5] T. Bab. Chagiga, fol. 14. 1. & T. Bab. Sabbat, fol. 35. 2. & Gloss. in ib.",
+              "[8] T. Bab. Yoma, fol. 20. 2.",
+              "[9] T. Bab. Sanhed. fol. 7. 2."
+            ],
+            "entities": [
+              "R. Joshua",
+              "Christ",
+              "Rab",
+              "Judah bar Nachmani",
+              "R. Shilla",
+              "\u05dc\u05bc\u05d5\u05b9\u05d7\u05b5\u05e9\u05c1",
+              "\u05d0\u05b7\u05e8\u05b0\u05d1\u05b5\u05bc\u05db\u05b7\u05e8 \u05d4\u05b7\u05e9\u05bb\u05bc\u05c1\u05dc\u05b0\u05d7\u05b8\u05df",
+              "kingdom of heaven",
+              "R. Jochanan",
+              "\u05e9\u05b0\u05c1\u05dc\u05b9\u05e9\u05b6\u05c1\u05ea \u05d4\u05b7\u05e0\u05b6\u05bc\u05d2\u05b6\u05df",
+              "Jewish doctors",
+              "R. Aba Bar Papa",
+              "Gospel",
+              "Peter"
+            ],
+            "lemma": "What I tell you in darkness, &c.]",
+            "score": 0.6269464492797852
+          },
+          {
+            "chunk_id": "12c92998-fcfe-529a-8213-b5b713f026c0",
+            "sentence_data": [
+              {
+                "sentence_id": "LUKE_2_42_S00",
+                "text": "Not that he was now, \u05d1\u05b6\u05bc\u05df \u05de\u05b4\u05e6\u05b0\u05d5\u05b8\u05d4, a son of the commandment[^1], to use the Jewish phrase; or now came under the yoke of the law; or was obliged to the duties of adult church-membership, as is asserted by some; nor particularly to go to Jerusalem to make his appearance at the feast of the passover, or any other feast: for, according to the maxims of the Jews, persons were not obliged to the duties of the law, or subject to the penalties of it in case of non-performance, until they were, a female, at the age of twelve years, and one day; and a male, at the age of thirteen years, and one day; but then they used to train up their children, and inure them to religious exercises before: as for instance, though they were not obliged to fast on the day of atonement, until they were at the age before-mentioned; yet they used them to it two or three years before, as they were able to endure it: a son of nine, or ten years old, they train him up by hours; they make him fast so many hours; and one of eleven, or twelve years old, they make him fast a whole day: but then this was not law, but custom; and which they observed, that they might be used to the commandments[^2], and be expert in them, and ready to perform them when required.",
+                "index": 0
+              },
+              {
+                "sentence_id": "LUKE_2_42_S01",
+                "text": "'Tis said[^3], that \"there was a good custom in Jerusalem to make their little sons and daughters fast on a fast-day; the son of a year, till the very day he is twelve years old, when he fasts the whole day; and after that they carry him, and bring him before every ancient man, that he may bless him, and confirm him, and pray over him, that he may be worthy in the law, and in good works; and every one that is greater than he in the city, he stands up from his place, and goes before him, and bows to him, to pray for him: and this is to learn him, that they are beautiful, and their works beautiful and acceptable to God; and they did not use to leave their little children behind them, but brought them to the synagogues, \u05e9\u05b0\u05c1\u05de\u05b7\u05e2 \u05d9\u05b4\u05e9\u05b0\u05c2\u05e8\u05b8\u05d0\u05b5\u05dc, that they might be ready in the commandments.\"",
+                "index": 1
+              },
+              {
+                "sentence_id": "LUKE_2_42_S02",
+                "text": "That they might be inured to them, and expert in them, when they were under obligation to them; for they were not properly under the law, until they were arrived to the age above mentioned; nor were they reckoned adult church-members till then, nor then neither, unless worthy persons: for so it is said[^4], \"he that is worthy, at thirteen years of age, is called \u05d1\u05b6\u05bc\u05df \u05e7\u05b8\u05d4\u05b8\u05dc, a son of the congregation of Israel;\" that is, a member of the church.",
+                "index": 2
+              },
+              {
+                "sentence_id": "LUKE_2_42_S03",
+                "text": "When therefore Joseph and Mary took Jesus along with them, at this age, when they went up to Jerusalem, after the custom of the feast of the passover, it shews their religious regard to him; and may be an instruction to parents, to bring up their children in the nurture and admonition of the Lord, after their example.",
+                "index": 3
+              }
+            ],
+            "content": "And when he was twelve years old, &c.] Not that he was now, \u05d1\u05b6\u05bc\u05df \u05de\u05b4\u05e6\u05b0\u05d5\u05b8\u05d4, a son of the commandment[^1], to use the Jewish phrase; or now came under the yoke of the law; or was obliged to the duties of adult church-membership, as is asserted by some; nor particularly to go to Jerusalem to make his appearance at the feast of the passover, or any other feast: for, according to the maxims of the Jews, persons were not obliged to the duties of the law, or subject to the penalties of it in case of non-performance, until they were, a female, at the age of twelve years, and one day; and a male, at the age of thirteen years, and one day; but then they used to train up their children, and inure them to religious exercises before: as for instance, though they were not obliged to fast on the day of atonement, until they were at the age before-mentioned; yet they used them to it two or three years before, as they were able to endure it: a son of nine, or ten years old, they train him up by hours; they make him fast so many hours; and one of eleven, or twelve years old, they make him fast a whole day: but then this was not law, but custom; and which they observed, that they might be used to the commandments[^2], and be expert in them, and ready to perform them when required. 'Tis said[^3], that \"there was a good custom in Jerusalem to make their little sons and daughters fast on a fast-day; the son of a year, till the very day he is twelve years old, when he fasts the whole day; and after that they carry him, and bring him before every ancient man, that he may bless him, and confirm him, and pray over him, that he may be worthy in the law, and in good works; and every one that is greater than he in the city, he stands up from his place, and goes before him, and bows to him, to pray for him: and this is to learn him, that they are beautiful, and their works beautiful and acceptable to God; and they did not use to leave their little children behind them, but brought them to the synagogues, \u05e9\u05b0\u05c1\u05de\u05b7\u05e2 \u05d9\u05b4\u05e9\u05b0\u05c2\u05e8\u05b8\u05d0\u05b5\u05dc, that they might be ready in the commandments.\" That they might be inured to them, and expert in them, when they were under obligation to them; for they were not properly under the law, until they were arrived to the age above mentioned; nor were they reckoned adult church-members till then, nor then neither, unless worthy persons: for so it is said[^4], \"he that is worthy, at thirteen years of age, is called \u05d1\u05b6\u05bc\u05df \u05e7\u05b8\u05d4\u05b8\u05dc, a son of the congregation of Israel;\" that is, a member of the church. When therefore Joseph and Mary took Jesus along with them, at this age, when they went up to Jerusalem, after the custom of the feast of the passover, it shews their religious regard to him; and may be an instruction to parents, to bring up their children in the nurture and admonition of the Lord, after their example.\n\nFootnotes:\n[1] T. Hieros. Kiddushin, fol. 61. 3.\n[2] Eliahu Adderet, p. 39. apud Trigland. de Sect. Kar\u00e6orum, p. 28.\n[3] Aben Ezra in Gen. xvii. 14.\n[4] Misn. Yoma, c. 8. sect. 4. & Maimon. & Bartenora in ib. T. Bab. Yoma, fol. 82. 1. Maimon. Hilch. Shebitat Asur, c. 2. sect. 10, 11.",
+            "verse_ref": "LUKE 2:42",
+            "citation": "[Vol 7, p. 558]",
+            "vol": 7,
+            "page": 558,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 558,
+                "boxes": [
+                  {
+                    "x": 269,
+                    "y": 4323,
+                    "w": 1466,
+                    "h": 253
+                  },
+                  {
+                    "x": 1784,
+                    "y": 698,
+                    "w": 1490,
+                    "h": 3172
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] T. Hieros. Kiddushin, fol. 61. 3.",
+              "[2] Eliahu Adderet, p. 39. apud Trigland. de Sect. Kar\u00e6orum, p. 28.",
+              "[3] Aben Ezra in Gen. xvii. 14.",
+              "[4] Misn. Yoma, c. 8. sect. 4. & Maimon. & Bartenora in ib. T. Bab. Yoma, fol. 82. 1. Maimon. Hilch. Shebitat Asur, c. 2. sect. 10, 11."
+            ],
+            "entities": [
+              "\u05d1\u05b6\u05bc\u05df \u05de\u05b4\u05e6\u05b0\u05d5\u05b8\u05d4",
+              "Mary",
+              "Jews",
+              "Joseph",
+              "\u05dc\u05b0\u05e9\u05b0\u05c1\u05db\u05b7\u05ea \u05d4\u05b7\u05e7\u05b9\u05bc\u05e8\u05b0\u05d1\u05b8\u05bc\u05df",
+              "Jerusalem",
+              "\u05e9\u05b0\u05c1\u05de\u05b7\u05e2 \u05d9\u05b4\u05e9\u05b0\u05c2\u05e8\u05b8\u05d0\u05b5\u05dc",
+              "our Lord Jesus"
+            ],
+            "lemma": "And when he was twelve years old, &c.]",
+            "score": 0.5779209136962891
+          },
+          {
+            "chunk_id": "d8c95125-7baf-5f0f-a4b7-d6f9ee224f99",
+            "sentence_data": [
+              {
+                "sentence_id": "MATTHEW_11_10_S00",
+                "text": "Mal. iii. 1.",
+                "index": 0
+              },
+              {
+                "sentence_id": "MATTHEW_11_10_S01",
+                "text": "Behold I send my messenger before thy face, which shall prepare thy way before thee.",
+                "index": 1
+              },
+              {
+                "sentence_id": "MATTHEW_11_10_S02",
+                "text": "That these words belong \u05dc\u05b0\u05e2\u05d5\u05b9\u05dc\u05b8\u05dd \u05d4\u05b7\u05d1\u05b8\u05bc\u05d0 to the world to come, or the times of the Messiah, that is, the Gospel dispensation, the Jews themselves own; but as to the particular person meant by the messenger, or angel, because they are not willing to acknowledge the right person, are at the utmost loss.",
+                "index": 2
+              },
+              {
+                "sentence_id": "MATTHEW_11_10_S03",
+                "text": "Jarchi makes him to be the angel of death, who is to destroy the wicked; Aben Ezra conjectures it may be Messiah the son of Joseph, who they fancy will come before Messiah the son of David.",
+                "index": 3
+              },
+              {
+                "sentence_id": "MATTHEW_11_10_S04",
+                "text": "Kimchi thinks an angel from heaven is designed; and Abarbinel Malachi himself: but the more ancient sense of the synagogue was, that the same person is meant, as in ch. ix. 5. under the name of Elijah the prophet; and some have thought, that Elijah the Tishbite himself, is intended; though others think, that some great prophet of equal degree with him, and who is called by his name, is what the prophecy has regard unto[^4]; which last is the true sense of the passage: nor should it be once called in question, when our Lord himself has applied it to John the Baptist; to whom the things said in it perfectly agree.",
+                "index": 4
+              },
+              {
+                "sentence_id": "MATTHEW_11_10_S05",
+                "text": "He was an angel, not by nature, but by office; a messenger sent by God, before the face of the Messiah; six months before him: such a space of time he was born before him; and such a space of time he entered on his public ministry before him; and prepared his way before him, by preaching the doctrine of repentance, administering the ordinance of baptism, pointing at the Messiah, and exhorting persons to believe on him.",
+                "index": 5
+              },
+              {
+                "sentence_id": "MATTHEW_11_10_S06",
+                "text": "All which proves him to be, what Christ says he was, more than a prophet.",
+                "index": 6
+              }
+            ],
+            "content": "For this is he of whom it is written, &c.] Mal. iii. 1. Behold I send my messenger before thy face, which shall prepare thy way before thee. That these words belong \u05dc\u05b0\u05e2\u05d5\u05b9\u05dc\u05b8\u05dd \u05d4\u05b7\u05d1\u05b8\u05bc\u05d0 to the world to come, or the times of the Messiah, that is, the Gospel dispensation, the Jews themselves own; but as to the particular person meant by the messenger, or angel, because they are not willing to acknowledge the right person, are at the utmost loss. Jarchi makes him to be the angel of death, who is to destroy the wicked; Aben Ezra conjectures it may be Messiah the son of Joseph, who they fancy will come before Messiah the son of David. Kimchi thinks an angel from heaven is designed; and Abarbinel Malachi himself: but the more ancient sense of the synagogue was, that the same person is meant, as in ch. ix. 5. under the name of Elijah the prophet; and some have thought, that Elijah the Tishbite himself, is intended; though others think, that some great prophet of equal degree with him, and who is called by his name, is what the prophecy has regard unto[^4]; which last is the true sense of the passage: nor should it be once called in question, when our Lord himself has applied it to John the Baptist; to whom the things said in it perfectly agree. He was an angel, not by nature, but by office; a messenger sent by God, before the face of the Messiah; six months before him: such a space of time he was born before him; and such a space of time he entered on his public ministry before him; and prepared his way before him, by preaching the doctrine of repentance, administering the ordinance of baptism, pointing at the Messiah, and exhorting persons to believe on him. All which proves him to be, what Christ says he was, more than a prophet.\n\nFootnotes:\n[4] Bemidbar Rabba, sect. 15. fol. 219. 4.",
+            "verse_ref": "MATTHEW 11:10",
+            "citation": "[Vol 7, p. 144]",
+            "vol": 7,
+            "page": 144,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 144,
+                "boxes": [
+                  {
+                    "x": 1757,
+                    "y": 1639,
+                    "w": 1482,
+                    "h": 2144
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[4] Bemidbar Rabba, sect. 15. fol. 219. 4."
+            ],
+            "entities": [
+              "John the Baptist",
+              "Jarchi",
+              "Abarbinel",
+              "Jews",
+              "Kimchi",
+              "our Lord",
+              "Gospel dispensation",
+              "Elijah the Tishbite",
+              "Malachi",
+              "Aben Ezra",
+              "\u05d1\u05b0\u05bc\u05e0\u05b5\u05d9 \u05d4\u05b8\u05e2\u05d5\u05b9\u05dc\u05b8\u05dd \u05d4\u05b7\u05d1\u05b8\u05bc\u05d0",
+              "world to come"
+            ],
+            "lemma": "For this is he of whom it is written, &c.]",
+            "score": 0.5218547582626343
+          }
+        ],
+        "pre_verse_refs": [
+          "LUKE 11:52",
+          "GENESIS 30:2",
+          "LUKE 15:26",
+          "LUKE 20:42",
+          "EXODUS 15:11"
+        ],
+        "post_verse_refs": [
+          "MATTHEW 26:30",
+          "MATTHEW 5:37",
+          "MATTHEW 10:27",
+          "LUKE 2:42",
+          "MATTHEW 11:10"
+        ],
+        "pre_ideal_hits": 0,
+        "post_ideal_hits": 1
+      }
+    },
+    {
+      "case": "pactum_salutis",
+      "query": "what does Gill say about the pactum salutis",
+      "target": "covenant engagements",
+      "phase_a": {
+        "raw_query": "what does Gill say about the pactum salutis",
+        "expanded_query": "what does Gill say about the pactum salutis covenant of redemption covenant engagements",
+        "expansion_matches": [
+          "pactum salutis"
+        ],
+        "raw_manifest": [
+          "Megilla",
+          "Megillah",
+          "Chaldee paraphrases",
+          "\u05d0\u05d9\u05d6\u05d4\u05d5 \u05de\u05d4",
+          "created angel"
+        ],
+        "expanded_manifest": [
+          "covenant of grace",
+          "covenant of works",
+          "covenant of conservation",
+          "everlasting covenant",
+          "Angel of the covenant"
+        ],
+        "raw_target_hit": false,
+        "expanded_target_hit": false
+      },
+      "phase_b": {
+        "pre_chunks": [
+          {
+            "chunk_id": "da244619-2229-59cf-84d4-055ee938fa89",
+            "sentence_data": [
+              {
+                "sentence_id": "NUMBERS_20_6_S00",
+                "text": "Like fugitives, as Aben Ezra; they fled from them through fear, lest they should rise and fall upon them, and stone them, as their fathers were ready to do in a like case, Exod. xvii. 4.",
+                "index": 0
+              },
+              {
+                "sentence_id": "NUMBERS_20_6_S01",
+                "text": "It is very likely this assembly gathered about the tents of Moses and Aaron, who went from thence unto the door of the tabernacle of the congregation; where the Lord had promised to meet Moses, and speak unto him, Exod. xxix. 42: and they fell upon their faces; to pray, as Aben Ezra, that God would forgive the sin of the people, and not break forth in his wrath against them, as he sometimes had done, and as their sin deserved, and that he would grant them what was needful for them.",
+                "index": 1
+              },
+              {
+                "sentence_id": "NUMBERS_20_6_S02",
+                "text": "In the Vulgate Latin version the following words are added as their prayer, \"and they cried unto the Lord, and said, Lord God, hear the cry of this people, and open to them thy treasure, the fountain of living water, that they being satiated, their murmuring may cease.\"",
+                "index": 2
+              },
+              {
+                "sentence_id": "NUMBERS_20_6_S03",
+                "text": "But they are not neither in the Hebrew text, nor in the Greek version, nor in the Chaldee paraphrases: and the glory of the Lord appeared unto them; either to Moses and Aaron, to encourage them to expect their prayers would be answered; or to the people, to terrify them, and silence their murmurings; see ch. xvi. 19.",
+                "index": 3
+              }
+            ],
+            "content": "And Moses and Aaron went from the presence of the assembly, &c.] Like fugitives, as Aben Ezra; they fled from them through fear, lest they should rise and fall upon them, and stone them, as their fathers were ready to do in a like case, Exod. xvii. 4. It is very likely this assembly gathered about the tents of Moses and Aaron, who went from thence unto the door of the tabernacle of the congregation; where the Lord had promised to meet Moses, and speak unto him, Exod. xxix. 42: and they fell upon their faces; to pray, as Aben Ezra, that God would forgive the sin of the people, and not break forth in his wrath against them, as he sometimes had done, and as their sin deserved, and that he would grant them what was needful for them. In the Vulgate Latin version the following words are added as their prayer, \"and they cried unto the Lord, and said, Lord God, hear the cry of this people, and open to them thy treasure, the fountain of living water, that they being satiated, their murmuring may cease.\" But they are not neither in the Hebrew text, nor in the Greek version, nor in the Chaldee paraphrases: and the glory of the Lord appeared unto them; either to Moses and Aaron, to encourage them to expect their prayers would be answered; or to the people, to terrify them, and silence their murmurings; see ch. xvi. 19.",
+            "verse_ref": "NUMBERS 20:6",
+            "citation": "[Vol 1, p. 890]",
+            "vol": 1,
+            "page": 890,
+            "scan": [
+              {
+                "vol": 1,
+                "page": 890,
+                "boxes": [
+                  {
+                    "x": 491,
+                    "y": 4632,
+                    "w": 1459,
+                    "h": 136
+                  },
+                  {
+                    "x": 1989,
+                    "y": 732,
+                    "w": 1483,
+                    "h": 1508
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "Aaron",
+              "Moses",
+              "Tabernacle of the Congregation",
+              "Aben Ezra",
+              "Chaldee paraphrases"
+            ],
+            "lemma": "And Moses and Aaron went from the presence of the assembly, &c.]",
+            "score": 0.6499999761581421
+          },
+          {
+            "chunk_id": "d6476977-4ed5-573e-847b-96a08855ed63",
+            "sentence_data": [
+              {
+                "sentence_id": "MATTHEW_9_13_S00",
+                "text": "\u05e6\u05d0 \u05d5\u05dc\u05de\u05d3, go and learn, is a phrase used by the Jews[^1], when they are about to explain a passage of Scripture, and fetch an argument from the connexion of the text.",
+                "index": 0
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S01",
+                "text": "So the phrase \u05de\u05d4 \u05e9\u05de\u05d5, what that is, or what that meaneth, is Talmudic, as, \u05de\u05d4, what is it?",
+                "index": 1
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S02",
+                "text": "\u05d0\u05d9\u05d6\u05d4\u05d5 \u05de\u05d4, what is that which is written?",
+                "index": 2
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S03",
+                "text": "\u05de\u05e7\u05e8\u05d0 \u05de\u05d4, what is the Scripture? that is, what is the meaning of it?",
+                "index": 3
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S04",
+                "text": "Our Lord speaks in their own dialect, and tacitly reproves their ignorance of the Scriptures; and instead of finding fault with him, and his conduct, he intimates, it would better become them to endeavour to find out the meaning of that passage in Hos. vi. 6.",
+                "index": 4
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S05",
+                "text": "I will have mercy, and not sacrifice; which, if rightly understood, was sufficient to silence all their cavils and objections: and which words are to be taken, not in an absolute and unlimited sense; for sacrifices even of slain beasts, which were offered up in the faith of Christ's sacrifice, and were attended with other acts of religion and piety, were acceptable to God, being his own institutions and appointments; but in a comparative sense, as the following clause in the prophet shews; and the knowledge of God more than burnt offerings; and so the sense is given in the Chaldee paraphrase, after this manner: for in those that exercise mercy is my good will and pleasure, or delight, \u05d7\u05b7\u05e8\u05b0\u05d1\u05bc\u05d5\u05b9\u05ea, more than in sacrifice: and the meaning is, that God takes more delight and pleasure, either in shewing mercy himself to poor miserable sinners; or in acts of mercy, compassion, and beneficence done by men, to fallen creatures in distress, whether for the good of their bodies, or more especially for the welfare of their souls, than he does even in sacrifices, and in any of the rituals of the ceremonial law, though of his own appointing: and therefore must be supposed to have a less regard to sacrifices, which were offered, neither in a right manner, nor from a right principle, nor to a right end; and still less to human traditions, and customs, which were put upon a level, and even preferred to his institutions; such as these the Pharisees were so zealous of.",
+                "index": 5
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S06",
+                "text": "The force of our Lord's reasoning is, that since his conversation, with publicans and sinners, was an act of mercy and compassion to their souls, and designed for their spiritual good; it must be much more pleasing to God, than had he attended to the traditions of the elders, they charge him with the breach of: besides, what he was now doing was the end of his coming into this world, and which was answered hereby; for I am not come to call the righteous, but sinners, to repentance.",
+                "index": 6
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S07",
+                "text": "The phrase, to repentance, is not in the Vulgate Latin, nor in Munster's Hebrew Gospel, nor in the Syriac, Ethiopic, and Persic versions; but is in the Arabic, and in the ancient Greek copies, and is very justly retained.",
+                "index": 7
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S08",
+                "text": "The repentance here designed, is not a legal, but an evangelical one: which is attended with faith in Christ, with views, at least hopes of pardon through his blood, and springs from a discovery and sense of his love: it lies in a true sense of sin, and the exceeding sinfulness of it, by the light of the spirit of God; in a godly sorrow for it, and hearty loathing of it; in real shame and blushing for it, ingenuous confession of it, and departing from it; all which is brought on, influenced, heightened, and increased, by displays of the love of God through Christ.",
+                "index": 8
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S09",
+                "text": "The persons called to this are not the righteous; meaning either such who are really so, because these are already called to it, though, whilst in a state of imperfection, daily need the exercise of this grace; or rather such who are so in their own opinion, and in the sight of men only, not in the sight of God, which was the case of the Scribes and Pharisees, and very few of these were called and brought to repentance; but sinners, even the worst, and chief of sinners, who, as they stand in need of this grace, and when thoroughly convinced, see they do; so Christ came into this world as a prophet and minister of the word to call them to it: which call of his does not suppose that they had a power to repent of themselves; for this man has not, he is naturally blind, and don't see his sin; his heart is hard and obdurate, and till his eyes are opened, and his stony heart taken away by a superior power to his own, he'll never repent; though he may have space, yet if he has not grace given him, he'll remain impenitent.",
+                "index": 9
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S10",
+                "text": "No means will bring him to it of themselves, neither the most severe judgments, nor the greatest kindnesses, nor the most powerful ministry; repentance is entirely a free grace-gift: nor does the call of Christ imply the contrary; which may be considered either as external, as a preacher of the word, and as such was not always attended to, and effectual, but often slighted and rejected: or as internal, being by the power of his grace effectual; for he who called to repentance, as a minister of the word, as a prince and a saviour, was able to give it, and which none but a divine person is able to do.",
+                "index": 10
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S11",
+                "text": "The Jews have a saying[^1] of \"shepherds, collectors of taxes and publicans, \u05e9\u05d5\u05e2\u05d1\u05d3\u05d5\u05ea \u05e7\u05e9\u05d9\u05df, that their repentance is difficult.\"",
+                "index": 11
+              },
+              {
+                "sentence_id": "MATTHEW_9_13_S12",
+                "text": "Now, since this was the end of his coming into the world, his conduct in conversing with publicans and sinners was in all respects highly to be justified.",
+                "index": 12
+              }
+            ],
+            "content": "But go ye and learn what that meaneth, &c.] \u05e6\u05d0 \u05d5\u05dc\u05de\u05d3, go and learn, is a phrase used by the Jews[^1], when they are about to explain a passage of Scripture, and fetch an argument from the connexion of the text. So the phrase \u05de\u05d4 \u05e9\u05de\u05d5, what that is, or what that meaneth, is Talmudic, as, \u05de\u05d4, what is it? \u05d0\u05d9\u05d6\u05d4\u05d5 \u05de\u05d4, what is that which is written? \u05de\u05e7\u05e8\u05d0 \u05de\u05d4, what is the Scripture? that is, what is the meaning of it? Our Lord speaks in their own dialect, and tacitly reproves their ignorance of the Scriptures; and instead of finding fault with him, and his conduct, he intimates, it would better become them to endeavour to find out the meaning of that passage in Hos. vi. 6. I will have mercy, and not sacrifice; which, if rightly understood, was sufficient to silence all their cavils and objections: and which words are to be taken, not in an absolute and unlimited sense; for sacrifices even of slain beasts, which were offered up in the faith of Christ's sacrifice, and were attended with other acts of religion and piety, were acceptable to God, being his own institutions and appointments; but in a comparative sense, as the following clause in the prophet shews; and the knowledge of God more than burnt offerings; and so the sense is given in the Chaldee paraphrase, after this manner: for in those that exercise mercy is my good will and pleasure, or delight, \u05d7\u05b7\u05e8\u05b0\u05d1\u05bc\u05d5\u05b9\u05ea, more than in sacrifice: and the meaning is, that God takes more delight and pleasure, either in shewing mercy himself to poor miserable sinners; or in acts of mercy, compassion, and beneficence done by men, to fallen creatures in distress, whether for the good of their bodies, or more especially for the welfare of their souls, than he does even in sacrifices, and in any of the rituals of the ceremonial law, though of his own appointing: and therefore must be supposed to have a less regard to sacrifices, which were offered, neither in a right manner, nor from a right principle, nor to a right end; and still less to human traditions, and customs, which were put upon a level, and even preferred to his institutions; such as these the Pharisees were so zealous of. The force of our Lord's reasoning is, that since his conversation, with publicans and sinners, was an act of mercy and compassion to their souls, and designed for their spiritual good; it must be much more pleasing to God, than had he attended to the traditions of the elders, they charge him with the breach of: besides, what he was now doing was the end of his coming into this world, and which was answered hereby; for I am not come to call the righteous, but sinners, to repentance. The phrase, to repentance, is not in the Vulgate Latin, nor in Munster's Hebrew Gospel, nor in the Syriac, Ethiopic, and Persic versions; but is in the Arabic, and in the ancient Greek copies, and is very justly retained. The repentance here designed, is not a legal, but an evangelical one: which is attended with faith in Christ, with views, at least hopes of pardon through his blood, and springs from a discovery and sense of his love: it lies in a true sense of sin, and the exceeding sinfulness of it, by the light of the spirit of God; in a godly sorrow for it, and hearty loathing of it; in real shame and blushing for it, ingenuous confession of it, and departing from it; all which is brought on, influenced, heightened, and increased, by displays of the love of God through Christ. The persons called to this are not the righteous; meaning either such who are really so, because these are already called to it, though, whilst in a state of imperfection, daily need the exercise of this grace; or rather such who are so in their own opinion, and in the sight of men only, not in the sight of God, which was the case of the Scribes and Pharisees, and very few of these were called and brought to repentance; but sinners, even the worst, and chief of sinners, who, as they stand in need of this grace, and when thoroughly convinced, see they do; so Christ came into this world as a prophet and minister of the word to call them to it: which call of his does not suppose that they had a power to repent of themselves; for this man has not, he is naturally blind, and don't see his sin; his heart is hard and obdurate, and till his eyes are opened, and his stony heart taken away by a superior power to his own, he'll never repent; though he may have space, yet if he has not grace given him, he'll remain impenitent. No means will bring him to it of themselves, neither the most severe judgments, nor the greatest kindnesses, nor the most powerful ministry; repentance is entirely a free grace-gift: nor does the call of Christ imply the contrary; which may be considered either as external, as a preacher of the word, and as such was not always attended to, and effectual, but often slighted and rejected: or as internal, being by the power of his grace effectual; for he who called to repentance, as a minister of the word, as a prince and a saviour, was able to give it, and which none but a divine person is able to do. The Jews have a saying[^1] of \"shepherds, collectors of taxes and publicans, \u05e9\u05d5\u05e2\u05d1\u05d3\u05d5\u05ea \u05e7\u05e9\u05d9\u05df, that their repentance is difficult.\" Now, since this was the end of his coming into the world, his conduct in conversing with publicans and sinners was in all respects highly to be justified.\n\nFootnotes:\n[1] Allegor. l. 2. p. 93.",
+            "verse_ref": "MATTHEW 9:13",
+            "citation": "[Vol 7, p. 117]",
+            "vol": 7,
+            "page": 117,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 117,
+                "boxes": [
+                  {
+                    "x": 125,
+                    "y": 3702,
+                    "w": 1478,
+                    "h": 565
+                  },
+                  {
+                    "x": 1655,
+                    "y": 866,
+                    "w": 1484,
+                    "h": 3612
+                  }
+                ]
+              },
+              {
+                "vol": 7,
+                "page": 118,
+                "boxes": [
+                  {
+                    "x": 252,
+                    "y": 694,
+                    "w": 1492,
+                    "h": 2027
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] Allegor. l. 2. p. 93."
+            ],
+            "entities": [
+              "\u05de\u05d4 \u05e9\u05de\u05d5",
+              "sinners",
+              "scribes",
+              "Jews",
+              "Arabic",
+              "Pharisees",
+              "Chaldee paraphrases",
+              "Syriac",
+              "mercy",
+              "Hoseah",
+              "Ethiopic",
+              "\u05d7\u05b7\u05e8\u05b0\u05d1\u05bc\u05d5\u05b9\u05ea",
+              "Persic",
+              "\u05e6\u05d0 \u05d5\u05dc\u05de\u05d3",
+              "Munster's Hebrew Gospel",
+              "publicans",
+              "\u05e9\u05d5\u05e2\u05d1\u05d3\u05d5\u05ea \u05e7\u05e9\u05d9\u05df",
+              "repentance"
+            ],
+            "lemma": "But go ye and learn what that meaneth, &c.]",
+            "score": 0.5588323473930359
+          },
+          {
+            "chunk_id": "6dca1139-a393-54bb-9876-da744f119eb3",
+            "sentence_data": [
+              {
+                "sentence_id": "JOHN_1_41_S00",
+                "text": "Either before the other disciple, or before he found any other person: after he and the other disciple departed from Christ, being affected with the grace bestowed upon him, and his heart warm with the conversation he had had with him, and transported with joy at finding the Messiah, goes in all haste in search of his relations, friends, and acquaintance, to communicate what he had seen and heard, in order to bring them to the knowledge of the same; for such is the nature of grace, 'tis very communicative, and those that have it, are very desirous that all others should be partakers of it: and the first person he lighted on was Simon, who was afterwards called Peter, who was his own brother; not a brother-in-law, but his own brother, by father and mother's side, and so dear unto him by the ties of nature and blood: and saith unto him; with all eagerness imaginable, and in a rapture of joy: *we have found the Messiah*; I, and a fellow disciple have had the Messiah, so often foretold by the prophets, and so long expected by our fathers, pointed out to us; and we have followed him, and have had conversation with him, and are well assured he is that illustrious person: which is, being interpreted, the Christ; which, as in ver. 38. are the words of the evangelist, and not Andrew, and are therefore left out in the Syriac version; the word Messiah needing no interpretation in that language, and which was the language in which Andrew spoke.",
+                "index": 0
+              },
+              {
+                "sentence_id": "JOHN_1_41_S01",
+                "text": "This name, Messiah, was well known among the Jews, for that great person who was promised, and they expected would come, as a Saviour and Redeemer; though it is not very often mentioned in the books of the Old Testament, chiefly in the following places, Psal. ii. 2. xviii. 50. lxxxix.",
+                "index": 1
+              },
+              {
+                "sentence_id": "JOHN_1_41_S02",
+                "text": "39, 51.",
+                "index": 2
+              },
+              {
+                "sentence_id": "JOHN_1_41_S03",
+                "text": "Dan. ix. 25, 26. but is very much used in the Chaldee paraphrases: Elias Levita[^1] says, he found it in more than fifty verses; and Buxtorf[^2] has added others to them, and the word appears in seventy-one places,[^3] which he takes notice of, and are worthy of regard; for they shew the sense of the ancient synagogue, concerning the passages of the Old Testament, respecting the Messiah: this Hebrew word is interpreted by the Greek word, Christ; and both signify anointed, and well agree with the person to whom they belong, to which there is an allusion in Cant. i. 3. thy name is as ointment poured forth: he is so called, because he was anointed from everlasting, to be prophet, priest, and king; see Psal. ii. 6. and lxxxix.",
+                "index": 3
+              },
+              {
+                "sentence_id": "JOHN_1_41_S04",
+                "text": "20.",
+                "index": 4
+              },
+              {
+                "sentence_id": "JOHN_1_41_S05",
+                "text": "Prov. viii. 23. and he was anointed as man, with the oil of gladness, with the graces of the spirit, without measure, Psal. xliv. 7.",
+                "index": 5
+              },
+              {
+                "sentence_id": "JOHN_1_41_S06",
+                "text": "Acts x. 38.",
+                "index": 6
+              },
+              {
+                "sentence_id": "JOHN_1_41_S07",
+                "text": "And it is from him the saints receive the anointing, or grace in measure; and are from him called Christians, and are really anointed ones; see 1 John ii. 27.",
+                "index": 7
+              },
+              {
+                "sentence_id": "JOHN_1_41_S08",
+                "text": "Acts xi. 26.",
+                "index": 8
+              },
+              {
+                "sentence_id": "JOHN_1_41_S09",
+                "text": "2 Cor. i. 21. hence it is a name precious to the saints, and savoury to them.",
+                "index": 9
+              },
+              {
+                "sentence_id": "JOHN_1_41_S10",
+                "text": "These words were delivered by Andrew, in a very exulting strain, expressing great joy; as indeed what can be greater joy to a sensible soul, than to find Christ? which in a spiritual sense, is to have a clear sight of him by faith, to go unto him, and lay hold on him, as the only Saviour and Redeemer: who is to be found in the Scriptures of truth, which testify of him; in the promises of grace, which are full of him: and in the Gospel, of which he is the sum and substance; and in the ordinances of it, where he shews himself; for he is not to be found by the light of nature, or by carnal reason, nor by the law of Moses, but by means of the Gospel, and the spirit of God attending that, as a spirit of wisdom and revelation, in the knowledge of him: and happy are those souls that find Christ under his direction; for they find life, spiritual and eternal, in him; a justifying righteousness; free and full pardon of their sins; spiritual food for their souls; and peace, comfort, joy, and rest, and eternal glory: wherefore this must needs be matter of joy unto them, since such a finding is a rich one, a pearl of great price, riches durable and unsearchable; and which a man that has found, would not part with for all the world; but parts with all he has for it; and is what can never be lost again; and, particularly to two sorts of persons, finding Christ must give a peculiar pleasure, and an inexpressible joy; to such as are under a sense of sin and damnation, and to such who have been under desertion.",
+                "index": 10
+              },
+              {
+                "sentence_id": "JOHN_1_41_S11",
+                "text": "The phrase of finding a person, twice used in this text, and hereafter in some following verses, is frequent in Talmudic and Rabbinic writings; as \"he went, \u05d5\u05d9\u05de\u05e6\u05d0\u05d4\u05d5, and \"found him with Rab.\"",
+                "index": 11
+              }
+            ],
+            "content": "*He first findeth his own brother Simon, &c.*] Either before the other disciple, or before he found any other person: after he and the other disciple departed from Christ, being affected with the grace bestowed upon him, and his heart warm with the conversation he had had with him, and transported with joy at finding the Messiah, goes in all haste in search of his relations, friends, and acquaintance, to communicate what he had seen and heard, in order to bring them to the knowledge of the same; for such is the nature of grace, 'tis very communicative, and those that have it, are very desirous that all others should be partakers of it: and the first person he lighted on was Simon, who was afterwards called Peter, who was his own brother; not a brother-in-law, but his own brother, by father and mother's side, and so dear unto him by the ties of nature and blood: and saith unto him; with all eagerness imaginable, and in a rapture of joy: *we have found the Messiah*; I, and a fellow disciple have had the Messiah, so often foretold by the prophets, and so long expected by our fathers, pointed out to us; and we have followed him, and have had conversation with him, and are well assured he is that illustrious person: which is, being interpreted, the Christ; which, as in ver. 38. are the words of the evangelist, and not Andrew, and are therefore left out in the Syriac version; the word Messiah needing no interpretation in that language, and which was the language in which Andrew spoke. This name, Messiah, was well known among the Jews, for that great person who was promised, and they expected would come, as a Saviour and Redeemer; though it is not very often mentioned in the books of the Old Testament, chiefly in the following places, Psal. ii. 2. xviii. 50. lxxxix. 39, 51. Dan. ix. 25, 26. but is very much used in the Chaldee paraphrases: Elias Levita[^1] says, he found it in more than fifty verses; and Buxtorf[^2] has added others to them, and the word appears in seventy-one places,[^3] which he takes notice of, and are worthy of regard; for they shew the sense of the ancient synagogue, concerning the passages of the Old Testament, respecting the Messiah: this Hebrew word is interpreted by the Greek word, Christ; and both signify anointed, and well agree with the person to whom they belong, to which there is an allusion in Cant. i. 3. thy name is as ointment poured forth: he is so called, because he was anointed from everlasting, to be prophet, priest, and king; see Psal. ii. 6. and lxxxix. 20. Prov. viii. 23. and he was anointed as man, with the oil of gladness, with the graces of the spirit, without measure, Psal. xliv. 7. Acts x. 38. And it is from him the saints receive the anointing, or grace in measure; and are from him called Christians, and are really anointed ones; see 1 John ii. 27. Acts xi. 26. 2 Cor. i. 21. hence it is a name precious to the saints, and savoury to them. These words were delivered by Andrew, in a very exulting strain, expressing great joy; as indeed what can be greater joy to a sensible soul, than to find Christ? which in a spiritual sense, is to have a clear sight of him by faith, to go unto him, and lay hold on him, as the only Saviour and Redeemer: who is to be found in the Scriptures of truth, which testify of him; in the promises of grace, which are full of him: and in the Gospel, of which he is the sum and substance; and in the ordinances of it, where he shews himself; for he is not to be found by the light of nature, or by carnal reason, nor by the law of Moses, but by means of the Gospel, and the spirit of God attending that, as a spirit of wisdom and revelation, in the knowledge of him: and happy are those souls that find Christ under his direction; for they find life, spiritual and eternal, in him; a justifying righteousness; free and full pardon of their sins; spiritual food for their souls; and peace, comfort, joy, and rest, and eternal glory: wherefore this must needs be matter of joy unto them, since such a finding is a rich one, a pearl of great price, riches durable and unsearchable; and which a man that has found, would not part with for all the world; but parts with all he has for it; and is what can never be lost again; and, particularly to two sorts of persons, finding Christ must give a peculiar pleasure, and an inexpressible joy; to such as are under a sense of sin and damnation, and to such who have been under desertion. The phrase of finding a person, twice used in this text, and hereafter in some following verses, is frequent in Talmudic and Rabbinic writings; as \"he went, \u05d5\u05d9\u05de\u05e6\u05d0\u05d4\u05d5, and \"found him with Rab.\"\n\nFootnotes:\n[1] Prefat. ad Methurgeman, & in voce \u05de\u05e9\u05d9\u05d7.\n[2] Lexicon Talmud. p 1263.\n[3] T. Bab. Sabbat, fol. 108. 1. Zohar in Lev. fol. 15. 3.",
+            "verse_ref": "JOHN 1:41",
+            "citation": "[Vol 7, p. 778]",
+            "vol": 7,
+            "page": 778,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 778,
+                "boxes": [
+                  {
+                    "x": 1810,
+                    "y": 3363,
+                    "w": 1492,
+                    "h": 1281
+                  }
+                ]
+              },
+              {
+                "vol": 7,
+                "page": 779,
+                "boxes": [
+                  {
+                    "x": 20,
+                    "y": 710,
+                    "w": 1532,
+                    "h": 3854
+                  },
+                  {
+                    "x": 1616,
+                    "y": 710,
+                    "w": 1475,
+                    "h": 494
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] Prefat. ad Methurgeman, & in voce \u05de\u05e9\u05d9\u05d7.",
+              "[2] Lexicon Talmud. p 1263.",
+              "[3] T. Bab. Sabbat, fol. 108. 1. Zohar in Lev. fol. 15. 3."
+            ],
+            "entities": [
+              "Jews",
+              "Christ",
+              "ancient synagogue",
+              "Buxtorf",
+              "Simon the leper",
+              "covenant of grace",
+              "Chaldee paraphrases",
+              "Messiah",
+              "Christians",
+              "Andrew"
+            ],
+            "lemma": "*He first findeth his own brother Simon, &c.*]",
+            "score": 0.4645775556564331
+          },
+          {
+            "chunk_id": "06e0b0ee-a3de-52a3-90f9-6bcaa8e7f79b",
+            "sentence_data": [
+              {
+                "sentence_id": "MATTHEW_6_31_S00",
+                "text": "That is, for the morrow, as it is explained, ver. 34. for it is lawful to take proper care and thought for present food, drink, and raiment; but not to be anxiously concerned for futurity; saying, what shall we eat? or what shall we drink? or wherewithal shall we be clothed?",
+                "index": 0
+              },
+              {
+                "sentence_id": "MATTHEW_6_31_S01",
+                "text": "These are a repetition of the several things instanced in, and are the very language and expressions of men of little faith; as in the above citation, \u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8, what shall I eat to-morrow?",
+                "index": 1
+              }
+            ],
+            "content": "Therefore take no thought, &c.] That is, for the morrow, as it is explained, ver. 34. for it is lawful to take proper care and thought for present food, drink, and raiment; but not to be anxiously concerned for futurity; saying, what shall we eat? or what shall we drink? or wherewithal shall we be clothed? These are a repetition of the several things instanced in, and are the very language and expressions of men of little faith; as in the above citation, \u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8, what shall I eat to-morrow?",
+            "verse_ref": "MATTHEW 6:31",
+            "citation": "[Vol 7, p. 92]",
+            "vol": 7,
+            "page": 92,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 92,
+                "boxes": [
+                  {
+                    "x": 278,
+                    "y": 1283,
+                    "w": 1473,
+                    "h": 627
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "\u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8",
+              "men of little faith"
+            ],
+            "lemma": "Therefore take no thought, &c.]",
+            "score": 0.460087388753891
+          },
+          {
+            "chunk_id": "3f692a79-5bbb-5add-a325-3d855c15bf86",
+            "sentence_data": [
+              {
+                "sentence_id": "MARK_4_30_S00",
+                "text": "Still continuing his discourse on this subject, and in order to convey to the minds of his disciples clearer ideas of the Gospel dispensation, the success of the Gospel, and the usefulness of their ministration of it, for their encouragement, how unpromising soever things might then be: whereunto shall we liken the kingdom of God, or with what comparison shall we compare it?",
+                "index": 0
+              },
+              {
+                "sentence_id": "MARK_4_30_S01",
+                "text": "It was usual with the Jewish doctors, when about to illustrate anything in a parabolical way, to begin with such like questions; as, \u05de\u05d4 \u05d4\u05d3\u05d1\u05e8 \u05d4\u05d6\u05d4, to what is this thing like[^1]? when the answer is to such or such thing, as here.",
+                "index": 1
+              }
+            ],
+            "content": "And he said, &c.] Still continuing his discourse on this subject, and in order to convey to the minds of his disciples clearer ideas of the Gospel dispensation, the success of the Gospel, and the usefulness of their ministration of it, for their encouragement, how unpromising soever things might then be: whereunto shall we liken the kingdom of God, or with what comparison shall we compare it? It was usual with the Jewish doctors, when about to illustrate anything in a parabolical way, to begin with such like questions; as, \u05de\u05d4 \u05d4\u05d3\u05d1\u05e8 \u05d4\u05d6\u05d4, to what is this thing like[^1]? when the answer is to such or such thing, as here.\n\nFootnotes:\n[1] T. Hieros. Bava Bathra, fol. 16. 2. T. Bab. Zebachim, fol. 82. 1. & Sabbat, fol. 108. 1. & passim.",
+            "verse_ref": "MARK 4:30",
+            "citation": "[Vol 7, p. 429]",
+            "vol": 7,
+            "page": 429,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 429,
+                "boxes": [
+                  {
+                    "x": 41,
+                    "y": 2882,
+                    "w": 1483,
+                    "h": 759
+                  }
+                ]
+              }
+            ],
+            "footnotes": [
+              "[1] T. Hieros. Bava Bathra, fol. 16. 2. T. Bab. Zebachim, fol. 82. 1. & Sabbat, fol. 108. 1. & passim."
+            ],
+            "entities": [
+              "Gospel dispensation",
+              "kingdom of God",
+              "\u05de\u05d4 \u05d4\u05d3\u05d1\u05e8 \u05d4\u05d6\u05d4",
+              "Jewish doctors",
+              "Gospel"
+            ],
+            "lemma": "And he said, &c.]",
+            "score": 0.4033847749233246
+          }
+        ],
+        "post_chunks": [
+          {
+            "chunk_id": "05ed954e-5ac5-5d27-9be9-39b402088c5b",
+            "sentence_data": [
+              {
+                "sentence_id": "GENESIS_9_10_S00",
+                "text": "This is a further proof that this was not the covenant of grace, but of conservation, since it is made with irrational as well as rational creatures: of the fowl, of the cattle, and of every beast of the earth with you; the birds of the air, the tame cattle, and the wild beasts: from all that go out of the ark, to every beast of the earth; which take in the creeping things not mentioned, for these were in the ark, and came out of the ark with Noah; and this covenant not only included all the several kinds of creatures that came out of the ark with Noah, but it reached to all that should spring from them in future ages, to the end of the world.",
+                "index": 0
+              }
+            ],
+            "content": "And with every living creature that is with you, &c.] This is a further proof that this was not the covenant of grace, but of conservation, since it is made with irrational as well as rational creatures: of the fowl, of the cattle, and of every beast of the earth with you; the birds of the air, the tame cattle, and the wild beasts: from all that go out of the ark, to every beast of the earth; which take in the creeping things not mentioned, for these were in the ark, and came out of the ark with Noah; and this covenant not only included all the several kinds of creatures that came out of the ark with Noah, but it reached to all that should spring from them in future ages, to the end of the world.",
+            "verse_ref": "GENESIS 9:10",
+            "citation": "[Vol 1, p. 153]",
+            "vol": 1,
+            "page": 153,
+            "scan": [
+              {
+                "vol": 1,
+                "page": 153,
+                "boxes": [
+                  {
+                    "x": 1694,
+                    "y": 1726,
+                    "w": 1474,
+                    "h": 873
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "Noah",
+              "covenant of conservation",
+              "covenant of grace"
+            ],
+            "lemma": "And with every living creature that is with you, &c.]",
+            "score": 0.8069308996200562
+          },
+          {
+            "chunk_id": "efcba6f5-df4c-5095-b17d-2f2a611ebc67",
+            "sentence_data": [
+              {
+                "sentence_id": "NUMBERS_25_12_S00",
+                "text": "Moses is bid to tell what follows to Phinehas himself, for his comfort and encouragement, and to the people of Israel, that they might take notice of it, and give him honour and respect, as one highly esteemed by the Lord: behold, I give unto him my covenant of peace; not only hereby assuring him that he had nothing to fear from the brethren and relations of the person he had slain, as Aben Ezra; but that he should enjoy all peace and happiness, external, internal, and eternal: Baal Hatturim on the place says, that Shalom, peace, is by geometry, or numerically, the Messiah; who is the peace, the peace-maker, and peace-giver, and in whom all the blessings of grace and peace are: and if this covenant is the same with the covenant of the priesthood in the next verse, it may be so called, because the priests had a peculiar nearness to God, and enjoyed his friendship, favour, and peace with him, and because the right administration of their office was the means of peace between God and his people; in this also Phinehas was a type of Christ; the covenant of grace made with him is called the covenant of peace, Isa. liv.",
+                "index": 0
+              },
+              {
+                "sentence_id": "NUMBERS_25_12_S01",
+                "text": "10.",
+                "index": 1
+              },
+              {
+                "sentence_id": "NUMBERS_25_12_S02",
+                "text": "Mal. ii. 5. for in this covenant the scheme of peace and reconciliation was formed, agreed to, and settled; Christ was appointed the peace-maker, which he agreed to be; and in consequence of it was sent and obtained peace by the blood of his cross, which is published in the everlasting Gospel, called therefore the Gospel of peace.",
+                "index": 2
+              }
+            ],
+            "content": "Wherefore say, &c.] Moses is bid to tell what follows to Phinehas himself, for his comfort and encouragement, and to the people of Israel, that they might take notice of it, and give him honour and respect, as one highly esteemed by the Lord: behold, I give unto him my covenant of peace; not only hereby assuring him that he had nothing to fear from the brethren and relations of the person he had slain, as Aben Ezra; but that he should enjoy all peace and happiness, external, internal, and eternal: Baal Hatturim on the place says, that Shalom, peace, is by geometry, or numerically, the Messiah; who is the peace, the peace-maker, and peace-giver, and in whom all the blessings of grace and peace are: and if this covenant is the same with the covenant of the priesthood in the next verse, it may be so called, because the priests had a peculiar nearness to God, and enjoyed his friendship, favour, and peace with him, and because the right administration of their office was the means of peace between God and his people; in this also Phinehas was a type of Christ; the covenant of grace made with him is called the covenant of peace, Isa. liv. 10. Mal. ii. 5. for in this covenant the scheme of peace and reconciliation was formed, agreed to, and settled; Christ was appointed the peace-maker, which he agreed to be; and in consequence of it was sent and obtained peace by the blood of his cross, which is published in the everlasting Gospel, called therefore the Gospel of peace.",
+            "verse_ref": "NUMBERS 25:12",
+            "citation": "[Vol 1, p. 921]",
+            "vol": 1,
+            "page": 921,
+            "scan": [
+              {
+                "vol": 1,
+                "page": 921,
+                "boxes": [
+                  {
+                    "x": 1753,
+                    "y": 1615,
+                    "w": 1486,
+                    "h": 1812
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "Egyptian priests",
+              "covenant of peace",
+              "covenant of the priesthood",
+              "Shalom",
+              "Moses",
+              "Phinehas",
+              "covenant of grace",
+              "Aben Ezra",
+              "Baal Hatturim",
+              "people of Israel"
+            ],
+            "lemma": "Wherefore say, &c.]",
+            "score": 0.536395788192749
+          },
+          {
+            "chunk_id": "e4792216-aff9-56f1-94e0-e799e29bcc50",
+            "sentence_data": [
+              {
+                "sentence_id": "GENESIS_9_11_S00",
+                "text": "This is repeated to denote the certainty of it, as well as to lead on to the particulars of it: neither shall all flesh be cut off any more by the waters of a flood; neither man nor beast, at least not all of them, and especially by water: neither shall there be any more a flood to destroy the earth; not a general deluge, otherwise notwithstanding this promise there might be, as there have been, particular inundations, which have overflowed particular countries and places, but not the whole earth; and this hinders not but that the whole earth may be destroyed by fire, as it will be at the last day, only not by water any more; and this is the sum and substance of the covenant with Noah, his sons, and all the creatures that have been, or shall be.",
+                "index": 0
+              }
+            ],
+            "content": "And I will establish my covenant with you, &c.] This is repeated to denote the certainty of it, as well as to lead on to the particulars of it: neither shall all flesh be cut off any more by the waters of a flood; neither man nor beast, at least not all of them, and especially by water: neither shall there be any more a flood to destroy the earth; not a general deluge, otherwise notwithstanding this promise there might be, as there have been, particular inundations, which have overflowed particular countries and places, but not the whole earth; and this hinders not but that the whole earth may be destroyed by fire, as it will be at the last day, only not by water any more; and this is the sum and substance of the covenant with Noah, his sons, and all the creatures that have been, or shall be.",
+            "verse_ref": "GENESIS 9:11",
+            "citation": "[Vol 1, p. 153]",
+            "vol": 1,
+            "page": 153,
+            "scan": [
+              {
+                "vol": 1,
+                "page": 153,
+                "boxes": [
+                  {
+                    "x": 1683,
+                    "y": 2615,
+                    "w": 1480,
+                    "h": 943
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "Noah",
+              "last day",
+              "earth",
+              "covenant of grace"
+            ],
+            "lemma": "And I will establish my covenant with you, &c.]",
+            "score": 0.5015743374824524
+          },
+          {
+            "chunk_id": "5490b49b-435e-53e0-a758-b2d62b595d0e",
+            "sentence_data": [
+              {
+                "sentence_id": "LUKE_1_72_S00",
+                "text": "By mercy is meant salvation by Christ, which springs from the mercy of God; the promise of which was an instance of mercy to the Jewish fathers under the Old Testament, and also the performance of it; for they were saved by the grace of our Lord Jesus, even as we: his blood was shed for the remission of sins that were past, and for the redemption of transgressions under the first Testament: and to remember his holy covenant; which was made between him and his son from all eternity; and was, at various times, dispensed and manifested to the patriarchs, and eminent saints, as Adam, Noah, Abraham, &c. This is called an holy one; not only because it was made by, and between holy persons, and provided for the holiness of the people of God, both here, and hereafter; but because in the article of redemption and salvation by Christ, which is here more particularly regarded, care was taken to secure the glory of God's holiness and justice, as well as to display his grace and mercy.",
+                "index": 0
+              },
+              {
+                "sentence_id": "LUKE_1_72_S01",
+                "text": "Now raising up, and sending Jesus a Saviour, shewed, that God was mindful of this covenant, and therefore sent redemption to his people.",
+                "index": 1
+              }
+            ],
+            "content": "To perform the mercy promised to our fathers, &c.] By mercy is meant salvation by Christ, which springs from the mercy of God; the promise of which was an instance of mercy to the Jewish fathers under the Old Testament, and also the performance of it; for they were saved by the grace of our Lord Jesus, even as we: his blood was shed for the remission of sins that were past, and for the redemption of transgressions under the first Testament: and to remember his holy covenant; which was made between him and his son from all eternity; and was, at various times, dispensed and manifested to the patriarchs, and eminent saints, as Adam, Noah, Abraham, &c. This is called an holy one; not only because it was made by, and between holy persons, and provided for the holiness of the people of God, both here, and hereafter; but because in the article of redemption and salvation by Christ, which is here more particularly regarded, care was taken to secure the glory of God's holiness and justice, as well as to display his grace and mercy. Now raising up, and sending Jesus a Saviour, shewed, that God was mindful of this covenant, and therefore sent redemption to his people.",
+            "verse_ref": "LUKE 1:72",
+            "citation": "[Vol 7, p. 543]",
+            "vol": 7,
+            "page": 543,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 543,
+                "boxes": [
+                  {
+                    "x": 78,
+                    "y": 810,
+                    "w": 1501,
+                    "h": 1458
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "Abraham",
+              "Christ",
+              "mercy",
+              "Jewish fathers",
+              "antediluvian patriarchs",
+              "Noah",
+              "remission of sins",
+              "Old-Testament dispensation",
+              "covenant of grace",
+              "particular redemption",
+              "first Testament",
+              "salvation",
+              "holy covenant",
+              "Adam"
+            ],
+            "lemma": "To perform the mercy promised to our fathers, &c.]",
+            "score": 0.48594745993614197
+          },
+          {
+            "chunk_id": "21e6ed14-8a03-554f-bf9a-da1183c36085",
+            "sentence_data": [
+              {
+                "sentence_id": "JOHN_6_47_S00",
+                "text": "This is a certain truth, and to be depended on: he that believeth on me hath everlasting life; not only he may have it, as in ver. 40. and shall have it, but he has it; he has it in Christ, his head and representative ; he has it in the covenant of grace; he has it in faith and hope; he has a right unto it, and a meetness for it; he has the earnest of it, the grace and spirit of God; and he has the beginning and foretastes of it in his soul, and shall certainly enjoy it.",
+                "index": 0
+              }
+            ],
+            "content": "*Verily, verily, I say unto you, &c.*] This is a certain truth, and to be depended on: he that believeth on me hath everlasting life; not only he may have it, as in ver. 40. and shall have it, but he has it; he has it in Christ, his head and representative ; he has it in the covenant of grace; he has it in faith and hope; he has a right unto it, and a meetness for it; he has the earnest of it, the grace and spirit of God; and he has the beginning and foretastes of it in his soul, and shall certainly enjoy it.",
+            "verse_ref": "JOHN 6:47",
+            "citation": "[Vol 7, p. 846]",
+            "vol": 7,
+            "page": 846,
+            "scan": [
+              {
+                "vol": 7,
+                "page": 846,
+                "boxes": [
+                  {
+                    "x": 278,
+                    "y": 3758,
+                    "w": 1472,
+                    "h": 633
+                  }
+                ]
+              }
+            ],
+            "footnotes": [],
+            "entities": [
+              "covenant of grace",
+              "everlasting life",
+              "God",
+              "Christ"
+            ],
+            "lemma": "*Verily, verily, I say unto you, &c.*]",
+            "score": 0.4647221863269806
+          }
+        ],
+        "pre_verse_refs": [
+          "NUMBERS 20:6",
+          "MATTHEW 9:13",
+          "JOHN 1:41",
+          "MATTHEW 6:31",
+          "MARK 4:30"
+        ],
+        "post_verse_refs": [
+          "GENESIS 9:10",
+          "NUMBERS 25:12",
+          "GENESIS 9:11",
+          "LUKE 1:72",
+          "JOHN 6:47"
+        ],
+        "pre_ideal_hits": 0,
+        "post_ideal_hits": 0
+      }
+    }
+  ],
+  "negative_control": [
+    {
+      "raw_query": "is the covenant of grace monocovenantal",
+      "expansion_matches": [],
+      "raw_manifest": [
+        "covenant of grace",
+        "covenant of works",
+        "covenant of conservation",
+        "everlasting covenant",
+        "Angel of the covenant"
+      ]
+    },
+    {
+      "raw_query": "universal atonement in Christ",
+      "expansion_matches": [],
+      "raw_manifest": [
+        "atonement",
+        "satisfaction of Christ",
+        "propitiation",
+        "Christ",
+        "Christians"
+      ]
+    }
+  ]
+}

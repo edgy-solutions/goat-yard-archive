@@ -1,0 +1,203 @@
+
+####################################################################################################
+# E-7.1 — psalmody expansion coverage: does adding descriptor vocabulary
+# bridge 'exclusive psalmody' -> 'Hallel' at the vector layer?
+# confident-tier threshold = 0.25 (ADR-0010)
+####################################################################################################
+
+====================================================================================================
+[baseline                ] query='exclusive psalmody'
+    target: 'Hallel'  rank: (>100)  dist: (n/a)  confident_tier: no 
+    top-5:
+     1. d=0.2513  [TypeOrSymbol    ] music                                  Preaching of Gospel doctrines harmonious
+     2. d=0.3014  [Doctrine        ] Gospel privileges                      cause of praise songs to God
+     3. d=0.3140  [Doctrine        ] pure Gospel of Christ                  Preached wholly by faithful ministers
+     4. d=0.3285  [Doctrine        ] way of God                             Taught truly by Christ in worship
+     5. d=0.3462  [Doctrine        ] calling grace                          cause of praise songs to God
+
+====================================================================================================
+[name-inject             ] query='exclusive psalmody Hallel'
+    target: 'Hallel'  rank: 1  dist: 0.1900  confident_tier: YES
+    top-5:
+    *1. d=0.1900  [TypeOrSymbol    ] Hallel                                 Jewish Passover hymn of Psalms 113-118
+     2. d=0.2015  [OriginalWord    ] הַלֵּל טָעוּן                          Passover bound to a hymn
+     3. d=0.2423  [OriginalWord    ] יסורים של משיח                         Sorrows of the Messiah in Hallel
+     4. d=0.3000  [OriginalWord    ] קְרִיאַת שְׁמַע                        Reading of 'Hear O Israel'
+     5. d=0.3162  [BiblicalFigure  ] Lord our God                           blessed in Passover cup thanksgiving pra
+
+====================================================================================================
+[descriptor-inject       ] query='exclusive psalmody Psalms 113-118 Passover hymn'
+    target: 'Hallel'  rank: 1  dist: 0.2096  confident_tier: YES
+    top-5:
+    *1. d=0.2096  [TypeOrSymbol    ] Hallel                                 Jewish Passover hymn of Psalms 113-118
+     2. d=0.2120  [OriginalWord    ] הַלֵּל טָעוּן                          Passover bound to a hymn
+     3. d=0.2697  [BiblicalFigure  ] Lord our God                           blessed in Passover cup thanksgiving pra
+     4. d=0.2962  [OriginalWord    ] יסורים של משיח                         Sorrows of the Messiah in Hallel
+     5. d=0.3185  [TimePeriod      ] days of the Messiah                    interpreted from Psalm 118:27
+
+====================================================================================================
+[domain-vocab            ] query='exclusive psalmody psalms singing worship hymn'
+    target: 'Hallel'  rank: 24  dist: 0.3729  confident_tier: no 
+    top-5:
+     1. d=0.2506  [TypeOrSymbol    ] music                                  Preaching of Gospel doctrines harmonious
+     2. d=0.2940  [Doctrine        ] Gospel privileges                      cause of praise songs to God
+     3. d=0.3111  [Doctrine        ] calling grace                          cause of praise songs to God
+     4. d=0.3247  [Doctrine        ] way of God                             Taught truly by Christ in worship
+     5. d=0.3286  [Doctrine        ] redeeming love                         cause of praise songs to God
+
+====================================================================================================
+[rephrase-modern         ] query='Are Psalms the only songs a church should sing?'
+    target: 'Hallel'  rank: 59  dist: 0.4961  confident_tier: no 
+    top-5:
+     1. d=0.3546  [Doctrine        ] Gospel privileges                      cause of praise songs to God
+     2. d=0.3815  [TypeOrSymbol    ] music                                  Preaching of Gospel doctrines harmonious
+     3. d=0.3928  [Doctrine        ] spiritual blessings                    cause of praise songs to God
+     4. d=0.3997  [ManuscriptOrVers] Book of Psalms                         compared to unified book of Moses
+     5. d=0.4025  [EntityCategory.M] Book of Psalms                         compared to unified book of Moses
+
+====================================================================================================
+[rephrase-passover-focus ] query='singing Psalms at Passover Hallel'
+    target: 'Hallel'  rank: 1  dist: 0.1431  confident_tier: YES
+    top-5:
+    *1. d=0.1431  [TypeOrSymbol    ] Hallel                                 Jewish Passover hymn of Psalms 113-118
+     2. d=0.1494  [OriginalWord    ] הַלֵּל טָעוּן                          Passover bound to a hymn
+     3. d=0.2362  [OriginalWord    ] יסורים של משיח                         Sorrows of the Messiah in Hallel
+     4. d=0.2469  [BiblicalFigure  ] Lord our God                           blessed in Passover cup thanksgiving pra
+     5. d=0.2912  [OriginalWord    ] קְרִיאַת שְׁמַע                        Reading of 'Hear O Israel'
+
+====================================================================================================
+[rephrase-worship-focus  ] query='singing psalms in Christian worship'
+    target: 'Hallel'  rank: 61  dist: 0.3919  confident_tier: no 
+    top-5:
+     1. d=0.2302  [TypeOrSymbol    ] music                                  Preaching of Gospel doctrines harmonious
+     2. d=0.2637  [Doctrine        ] way of God                             Taught truly by Christ in worship
+     3. d=0.2686  [Doctrine        ] Gospel privileges                      cause of praise songs to God
+     4. d=0.2841  [Doctrine        ] calling grace                          cause of praise songs to God
+     5. d=0.2881  [Doctrine        ] spiritual blessings                    cause of praise songs to God
+
+
+####################################################################################################
+# E-7.2 preview — other Reformed-narrow vocabulary terms
+# (which are already-reachable vs need-expansion)
+####################################################################################################
+
+====================================================================================================
+query='federal headship'  target_candidate='Adam'
+    rank: (>100 or no target)  dist: -  confident_tier: no 
+    top-5:
+     1. d=0.2519  [Doctrine        ] federal head                           Adam's role causing all posterity to sin
+     2. d=0.3173  [BiblicalFigure  ] the most High                          Directed division of nations by providen
+     3. d=0.3465  [PeopleGroup     ] kings and princes                      Rule under Christ's authority
+     4. d=0.3507  [Doctrine        ] obedience to civil magistrates         Instance and example in taxation journey
+     5. d=0.3670  [PeopleGroup     ] Grand sanhedrim                        Great council of nation
+
+====================================================================================================
+query='federal headship'  target_candidate='Christ'
+    rank: (>100 or no target)  dist: -  confident_tier: no 
+    top-5:
+     1. d=0.2520  [Doctrine        ] federal head                           Adam's role causing all posterity to sin
+     2. d=0.3172  [BiblicalFigure  ] the most High                          Directed division of nations by providen
+     3. d=0.3457  [PeopleGroup     ] kings and princes                      Rule under Christ's authority
+     4. d=0.3504  [Doctrine        ] obedience to civil magistrates         Instance and example in taxation journey
+     5. d=0.3665  [Doctrine        ] yoke of the commandment                Taken after kingdom yoke
+
+====================================================================================================
+query='regulative principle'  target_candidate=None
+    rank: (>100 or no target)  dist: -  confident_tier: no 
+    top-5:
+     1. d=0.2804  [Doctrine        ] golden rule                            moral principle of reciprocity in justic
+     2. d=0.3323  [Doctrine        ] moral                                  moral type of statutes and commandments
+     3. d=0.3336  [Doctrine        ] obedience to civil magistrates         Instance and example in taxation journey
+     4. d=0.3466  [Doctrine        ] new covenant                           Law reinscribed on regenerated hearts
+     5. d=0.3502  [Heresy          ] merit and free will                    Bad principles to repent of
+
+====================================================================================================
+query='monergism'  target_candidate='electing grace'
+    rank: (>100 or no target)  dist: -  confident_tier: no 
+    top-5:
+     1. d=0.3168  [Heresy          ] libertinism                            false charge against Christ's doctrine
+     2. d=0.3168  [EntityCategory.H] libertinism                            false charge against Christ's doctrine
+     3. d=0.3197  [Doctrine        ] special adoption                       Individual sonship of believers in God
+     4. d=0.3247  [Doctrine        ] mystical union                         indissoluble spiritual union with Christ
+     5. d=0.3252  [TypeOrSymbol    ] strange fire                           men's own works in salvation rejected
+
+====================================================================================================
+query='covenant of redemption'  target_candidate='covenant engagements'
+    rank: 1  dist: 0.2065  confident_tier: YES
+    top-5:
+    *1. d=0.2065  [Doctrine        ] covenant engagements                   obligations of Christ requiring his deat
+     2. d=0.2218  [Doctrine        ] holy covenant                          Made eternally between God and his Son
+     3. d=0.2328  [Doctrine        ] covenant of the priesthood             possibly same as covenant of peace
+     4. d=0.2376  [Doctrine        ] covenant of his grace                  Promised eternal life before world began
+     5. d=0.2452  [Doctrine        ] new covenant                           Law reinscribed on regenerated hearts
+
+====================================================================================================
+query='pactum salutis'  target_candidate='covenant engagements'
+    rank: 70  dist: 0.3091  confident_tier: no 
+    top-5:
+     1. d=0.2191  [Doctrine        ] free grace of God                      Basis of salvation eternal life
+     2. d=0.2419  [Doctrine        ] free grace                             reward of free grace
+     3. d=0.2449  [Doctrine        ] satisfaction of Christ                 Christ's atonement accepted by God
+     4. d=0.2466  [Doctrine        ] propitiation                           for sin provided in Christ
+     5. d=0.2467  [Doctrine        ] sovereign grace                        God's goodness in salvation works
+
+====================================================================================================
+query='sabbatarian'  target_candidate=None
+    rank: (>100 or no target)  dist: -  confident_tier: no 
+    top-5:
+     1. d=0.2186  [Doctrine        ] Sabbath                                Seventh day hallowed for holy worship
+     2. d=0.2376  [Doctrine        ] seventh-day sabbath                    Law requiring rest from all work
+     3. d=0.2527  [TypeOrSymbol    ] sabbath                                typical of spiritual rest and eternal re
+     4. d=0.2626  [Doctrine        ] spiritual rest                         typified by the sabbath here
+     5. d=0.2747  [Doctrine        ] eternal rest                           typified by the sabbath hereafter
+
+====================================================================================================
+query='imputation'  target_candidate='justifying righteousness of Christ'
+    rank: (>100 or no target)  dist: -  confident_tier: no 
+    top-5:
+     1. d=0.4248  [Doctrine        ] imputation of sin                      Sins laid on Christ as vicarious sacrifi
+     2. d=0.4473  [ManuscriptOrVers] Arabic                                 Version lacks inserted Cainan
+     3. d=0.4518  [EntityCategory.D] imputation of sins                     Sins transferred to goat typifying Chris
+     4. d=0.4518  [Doctrine        ] imputation of sins                     Sins transferred to goat typifying Chris
+     5. d=0.4544  [PeopleGroup     ] impostors                              Imposed on people promising deliverance
+
+====================================================================================================
+query='effectual calling'  target_candidate='calling grace'
+    rank: 10  dist: 0.4187  confident_tier: no 
+    top-5:
+     1. d=0.2583  [Doctrine        ] internal call                          Irresistible effectual call by grace
+     2. d=0.2719  [Doctrine        ] called                                 external outward and effectual calling
+     3. d=0.3148  [Doctrine        ] effectual vocation                     calling separating people of God
+     4. d=0.3160  [Doctrine        ] effectual calling                      Doctrine of grace not resistible.
+     5. d=0.3467  [Doctrine        ] external call                          Invitation to outward ordinances
+
+
+====================================================================================================
+SUMMARY — E-7.1: which expansion shape reaches Hallel?
+====================================================================================================
+  shape                          rank       dist     confident_tier
+----------------------------------------------------------------------------------------------------
+  baseline                       >100          -                 no
+  name-inject                       1     0.1900                YES
+  descriptor-inject                 1     0.2096                YES
+  domain-vocab                     24     0.3729                 no
+  rephrase-modern                  59     0.4961                 no
+  rephrase-passover-focus           1     0.1431                YES
+  rephrase-worship-focus           61     0.3919                 no
+
+====================================================================================================
+SUMMARY — E-7.2: which narrow terms are already vector-reachable?
+====================================================================================================
+  query                          candidate                            rank       dist
+----------------------------------------------------------------------------------------------------
+  federal headship               Adam                                    -          -
+  federal headship               Christ                                  -          -
+  regulative principle           (no target)                             -          -
+  monergism                      electing grace                          -          -
+  covenant of redemption         covenant engagements                    1     0.2065
+  pactum salutis                 covenant engagements                   70     0.3091
+  sabbatarian                    (no target)                             -          -
+  imputation                     justifying righteousness of Ch          -          -
+  effectual calling              calling grace                          10     0.4187
+
+  Raw: C:\Users\cnogr\git\goat-yard-archive\evals\e7_query_expansion_probe\e7_1_expansion_coverage_results.json

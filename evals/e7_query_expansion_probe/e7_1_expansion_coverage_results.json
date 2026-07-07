@@ -1,0 +1,717 @@
+{
+  "psalmody_variants": [
+    {
+      "query": "exclusive psalmody",
+      "target": "Hallel",
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.2512657642364502,
+          "name": "music",
+          "category": "TypeOrSymbol",
+          "description": "Preaching of Gospel doctrines harmoniously"
+        },
+        {
+          "rank": 2,
+          "distance": 0.30139756202697754,
+          "name": "Gospel privileges",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 3,
+          "distance": 0.3140352964401245,
+          "name": "pure Gospel of Christ",
+          "category": "Doctrine",
+          "description": "Preached wholly by faithful ministers"
+        },
+        {
+          "rank": 4,
+          "distance": 0.32848846912384033,
+          "name": "way of God",
+          "category": "Doctrine",
+          "description": "Taught truly by Christ in worship"
+        },
+        {
+          "rank": 5,
+          "distance": 0.3462064266204834,
+          "name": "calling grace",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        }
+      ],
+      "label": "baseline"
+    },
+    {
+      "query": "exclusive psalmody Hallel",
+      "target": "Hallel",
+      "target_rank": 1,
+      "target_distance": 0.19001394510269165,
+      "confident_tier_reached": true,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.19001394510269165,
+          "name": "Hallel",
+          "category": "TypeOrSymbol",
+          "description": "Jewish Passover hymn of Psalms 113-118"
+        },
+        {
+          "rank": 2,
+          "distance": 0.20145201683044434,
+          "name": "\u05d4\u05b7\u05dc\u05b5\u05bc\u05dc \u05d8\u05b8\u05e2\u05d5\u05bc\u05df",
+          "category": "OriginalWord",
+          "description": "Passover bound to a hymn"
+        },
+        {
+          "rank": 3,
+          "distance": 0.2423200011253357,
+          "name": "\u05d9\u05e1\u05d5\u05e8\u05d9\u05dd \u05e9\u05dc \u05de\u05e9\u05d9\u05d7",
+          "category": "OriginalWord",
+          "description": "Sorrows of the Messiah in Hallel"
+        },
+        {
+          "rank": 4,
+          "distance": 0.3000485897064209,
+          "name": "\u05e7\u05b0\u05e8\u05b4\u05d9\u05d0\u05b7\u05ea \u05e9\u05b0\u05c1\u05de\u05b7\u05e2",
+          "category": "OriginalWord",
+          "description": "Reading of 'Hear O Israel'"
+        },
+        {
+          "rank": 5,
+          "distance": 0.3161647915840149,
+          "name": "Lord our God",
+          "category": "BiblicalFigure",
+          "description": "blessed in Passover cup thanksgiving prayer"
+        }
+      ],
+      "label": "name-inject"
+    },
+    {
+      "query": "exclusive psalmody Psalms 113-118 Passover hymn",
+      "target": "Hallel",
+      "target_rank": 1,
+      "target_distance": 0.20957744121551514,
+      "confident_tier_reached": true,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.20957744121551514,
+          "name": "Hallel",
+          "category": "TypeOrSymbol",
+          "description": "Jewish Passover hymn of Psalms 113-118"
+        },
+        {
+          "rank": 2,
+          "distance": 0.21195393800735474,
+          "name": "\u05d4\u05b7\u05dc\u05b5\u05bc\u05dc \u05d8\u05b8\u05e2\u05d5\u05bc\u05df",
+          "category": "OriginalWord",
+          "description": "Passover bound to a hymn"
+        },
+        {
+          "rank": 3,
+          "distance": 0.2697025537490845,
+          "name": "Lord our God",
+          "category": "BiblicalFigure",
+          "description": "blessed in Passover cup thanksgiving prayer"
+        },
+        {
+          "rank": 4,
+          "distance": 0.296159029006958,
+          "name": "\u05d9\u05e1\u05d5\u05e8\u05d9\u05dd \u05e9\u05dc \u05de\u05e9\u05d9\u05d7",
+          "category": "OriginalWord",
+          "description": "Sorrows of the Messiah in Hallel"
+        },
+        {
+          "rank": 5,
+          "distance": 0.31851041316986084,
+          "name": "days of the Messiah",
+          "category": "TimePeriod",
+          "description": "interpreted from Psalm 118:27"
+        }
+      ],
+      "label": "descriptor-inject"
+    },
+    {
+      "query": "exclusive psalmody psalms singing worship hymn",
+      "target": "Hallel",
+      "target_rank": 24,
+      "target_distance": 0.3728967308998108,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.2506108283996582,
+          "name": "music",
+          "category": "TypeOrSymbol",
+          "description": "Preaching of Gospel doctrines harmoniously"
+        },
+        {
+          "rank": 2,
+          "distance": 0.29398858547210693,
+          "name": "Gospel privileges",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 3,
+          "distance": 0.3111121654510498,
+          "name": "calling grace",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 4,
+          "distance": 0.32470178604125977,
+          "name": "way of God",
+          "category": "Doctrine",
+          "description": "Taught truly by Christ in worship"
+        },
+        {
+          "rank": 5,
+          "distance": 0.3286391496658325,
+          "name": "redeeming love",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        }
+      ],
+      "label": "domain-vocab"
+    },
+    {
+      "query": "Are Psalms the only songs a church should sing?",
+      "target": "Hallel",
+      "target_rank": 59,
+      "target_distance": 0.49607157707214355,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.35463374853134155,
+          "name": "Gospel privileges",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 2,
+          "distance": 0.3815361261367798,
+          "name": "music",
+          "category": "TypeOrSymbol",
+          "description": "Preaching of Gospel doctrines harmoniously"
+        },
+        {
+          "rank": 3,
+          "distance": 0.39280176162719727,
+          "name": "spiritual blessings",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 4,
+          "distance": 0.3997136354446411,
+          "name": "Book of Psalms",
+          "category": "ManuscriptOrVersion",
+          "description": "compared to unified book of Moses"
+        },
+        {
+          "rank": 5,
+          "distance": 0.4024967551231384,
+          "name": "Book of Psalms",
+          "category": "EntityCategory.ManuscriptOrVersion",
+          "description": "compared to unified book of Moses"
+        }
+      ],
+      "label": "rephrase-modern"
+    },
+    {
+      "query": "singing Psalms at Passover Hallel",
+      "target": "Hallel",
+      "target_rank": 1,
+      "target_distance": 0.14311110973358154,
+      "confident_tier_reached": true,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.14311110973358154,
+          "name": "Hallel",
+          "category": "TypeOrSymbol",
+          "description": "Jewish Passover hymn of Psalms 113-118"
+        },
+        {
+          "rank": 2,
+          "distance": 0.14942121505737305,
+          "name": "\u05d4\u05b7\u05dc\u05b5\u05bc\u05dc \u05d8\u05b8\u05e2\u05d5\u05bc\u05df",
+          "category": "OriginalWord",
+          "description": "Passover bound to a hymn"
+        },
+        {
+          "rank": 3,
+          "distance": 0.23617780208587646,
+          "name": "\u05d9\u05e1\u05d5\u05e8\u05d9\u05dd \u05e9\u05dc \u05de\u05e9\u05d9\u05d7",
+          "category": "OriginalWord",
+          "description": "Sorrows of the Messiah in Hallel"
+        },
+        {
+          "rank": 4,
+          "distance": 0.24690532684326172,
+          "name": "Lord our God",
+          "category": "BiblicalFigure",
+          "description": "blessed in Passover cup thanksgiving prayer"
+        },
+        {
+          "rank": 5,
+          "distance": 0.2912416458129883,
+          "name": "\u05e7\u05b0\u05e8\u05b4\u05d9\u05d0\u05b7\u05ea \u05e9\u05b0\u05c1\u05de\u05b7\u05e2",
+          "category": "OriginalWord",
+          "description": "Reading of 'Hear O Israel'"
+        }
+      ],
+      "label": "rephrase-passover-focus"
+    },
+    {
+      "query": "singing psalms in Christian worship",
+      "target": "Hallel",
+      "target_rank": 61,
+      "target_distance": 0.39192402362823486,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.23017972707748413,
+          "name": "music",
+          "category": "TypeOrSymbol",
+          "description": "Preaching of Gospel doctrines harmoniously"
+        },
+        {
+          "rank": 2,
+          "distance": 0.26373815536499023,
+          "name": "way of God",
+          "category": "Doctrine",
+          "description": "Taught truly by Christ in worship"
+        },
+        {
+          "rank": 3,
+          "distance": 0.26861751079559326,
+          "name": "Gospel privileges",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 4,
+          "distance": 0.28407061100006104,
+          "name": "calling grace",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        },
+        {
+          "rank": 5,
+          "distance": 0.28807270526885986,
+          "name": "spiritual blessings",
+          "category": "Doctrine",
+          "description": "cause of praise songs to God"
+        }
+      ],
+      "label": "rephrase-worship-focus"
+    }
+  ],
+  "narrow_terms": [
+    {
+      "query": "federal headship",
+      "target": "Adam",
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.25194430351257324,
+          "name": "federal head",
+          "category": "Doctrine",
+          "description": "Adam's role causing all posterity to sin"
+        },
+        {
+          "rank": 2,
+          "distance": 0.3173478841781616,
+          "name": "the most High",
+          "category": "BiblicalFigure",
+          "description": "Directed division of nations by providence"
+        },
+        {
+          "rank": 3,
+          "distance": 0.3464791774749756,
+          "name": "kings and princes",
+          "category": "PeopleGroup",
+          "description": "Rule under Christ's authority"
+        },
+        {
+          "rank": 4,
+          "distance": 0.3506976366043091,
+          "name": "obedience to civil magistrates",
+          "category": "Doctrine",
+          "description": "Instance and example in taxation journey"
+        },
+        {
+          "rank": 5,
+          "distance": 0.36703431606292725,
+          "name": "Grand sanhedrim",
+          "category": "PeopleGroup",
+          "description": "Great council of nation"
+        }
+      ]
+    },
+    {
+      "query": "federal headship",
+      "target": "Christ",
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.2519626021385193,
+          "name": "federal head",
+          "category": "Doctrine",
+          "description": "Adam's role causing all posterity to sin"
+        },
+        {
+          "rank": 2,
+          "distance": 0.3171549439430237,
+          "name": "the most High",
+          "category": "BiblicalFigure",
+          "description": "Directed division of nations by providence"
+        },
+        {
+          "rank": 3,
+          "distance": 0.34567832946777344,
+          "name": "kings and princes",
+          "category": "PeopleGroup",
+          "description": "Rule under Christ's authority"
+        },
+        {
+          "rank": 4,
+          "distance": 0.3503841161727905,
+          "name": "obedience to civil magistrates",
+          "category": "Doctrine",
+          "description": "Instance and example in taxation journey"
+        },
+        {
+          "rank": 5,
+          "distance": 0.3664754629135132,
+          "name": "yoke of the commandment",
+          "category": "Doctrine",
+          "description": "Taken after kingdom yoke"
+        }
+      ]
+    },
+    {
+      "query": "regulative principle",
+      "target": null,
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.2804182767868042,
+          "name": "golden rule",
+          "category": "Doctrine",
+          "description": "moral principle of reciprocity in justice and beneficence"
+        },
+        {
+          "rank": 2,
+          "distance": 0.33228397369384766,
+          "name": "moral",
+          "category": "Doctrine",
+          "description": "moral type of statutes and commandments"
+        },
+        {
+          "rank": 3,
+          "distance": 0.33361637592315674,
+          "name": "obedience to civil magistrates",
+          "category": "Doctrine",
+          "description": "Instance and example in taxation journey"
+        },
+        {
+          "rank": 4,
+          "distance": 0.34657663106918335,
+          "name": "new covenant",
+          "category": "Doctrine",
+          "description": "Law reinscribed on regenerated hearts"
+        },
+        {
+          "rank": 5,
+          "distance": 0.3501753807067871,
+          "name": "merit and free will",
+          "category": "Heresy",
+          "description": "Bad principles to repent of"
+        }
+      ]
+    },
+    {
+      "query": "monergism",
+      "target": "electing grace",
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.31675028800964355,
+          "name": "libertinism",
+          "category": "Heresy",
+          "description": "false charge against Christ's doctrine"
+        },
+        {
+          "rank": 2,
+          "distance": 0.31675028800964355,
+          "name": "libertinism",
+          "category": "EntityCategory.Heresy",
+          "description": "false charge against Christ's doctrine"
+        },
+        {
+          "rank": 3,
+          "distance": 0.3197416663169861,
+          "name": "special adoption",
+          "category": "Doctrine",
+          "description": "Individual sonship of believers in God"
+        },
+        {
+          "rank": 4,
+          "distance": 0.3246886730194092,
+          "name": "mystical union",
+          "category": "Doctrine",
+          "description": "indissoluble spiritual union with Christ"
+        },
+        {
+          "rank": 5,
+          "distance": 0.3252485990524292,
+          "name": "strange fire",
+          "category": "TypeOrSymbol",
+          "description": "men's own works in salvation rejected"
+        }
+      ]
+    },
+    {
+      "query": "covenant of redemption",
+      "target": "covenant engagements",
+      "target_rank": 1,
+      "target_distance": 0.20651352405548096,
+      "confident_tier_reached": true,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.20651352405548096,
+          "name": "covenant engagements",
+          "category": "Doctrine",
+          "description": "obligations of Christ requiring his death"
+        },
+        {
+          "rank": 2,
+          "distance": 0.2218201756477356,
+          "name": "holy covenant",
+          "category": "Doctrine",
+          "description": "Made eternally between God and his Son"
+        },
+        {
+          "rank": 3,
+          "distance": 0.23281645774841309,
+          "name": "covenant of the priesthood",
+          "category": "Doctrine",
+          "description": "possibly same as covenant of peace"
+        },
+        {
+          "rank": 4,
+          "distance": 0.2375968098640442,
+          "name": "covenant of his grace",
+          "category": "Doctrine",
+          "description": "Promised eternal life before world began"
+        },
+        {
+          "rank": 5,
+          "distance": 0.24523842334747314,
+          "name": "new covenant",
+          "category": "Doctrine",
+          "description": "Law reinscribed on regenerated hearts"
+        }
+      ]
+    },
+    {
+      "query": "pactum salutis",
+      "target": "covenant engagements",
+      "target_rank": 70,
+      "target_distance": 0.309099018573761,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.219110369682312,
+          "name": "free grace of God",
+          "category": "Doctrine",
+          "description": "Basis of salvation eternal life"
+        },
+        {
+          "rank": 2,
+          "distance": 0.24194777011871338,
+          "name": "free grace",
+          "category": "Doctrine",
+          "description": "reward of free grace"
+        },
+        {
+          "rank": 3,
+          "distance": 0.2448674440383911,
+          "name": "satisfaction of Christ",
+          "category": "Doctrine",
+          "description": "Christ's atonement accepted by God"
+        },
+        {
+          "rank": 4,
+          "distance": 0.2466118335723877,
+          "name": "propitiation",
+          "category": "Doctrine",
+          "description": "for sin provided in Christ"
+        },
+        {
+          "rank": 5,
+          "distance": 0.24671810865402222,
+          "name": "sovereign grace",
+          "category": "Doctrine",
+          "description": "God's goodness in salvation works"
+        }
+      ]
+    },
+    {
+      "query": "sabbatarian",
+      "target": null,
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.21857893466949463,
+          "name": "Sabbath",
+          "category": "Doctrine",
+          "description": "Seventh day hallowed for holy worship"
+        },
+        {
+          "rank": 2,
+          "distance": 0.23760545253753662,
+          "name": "seventh-day sabbath",
+          "category": "Doctrine",
+          "description": "Law requiring rest from all work"
+        },
+        {
+          "rank": 3,
+          "distance": 0.2526554465293884,
+          "name": "sabbath",
+          "category": "TypeOrSymbol",
+          "description": "typical of spiritual rest and eternal rest"
+        },
+        {
+          "rank": 4,
+          "distance": 0.2625918984413147,
+          "name": "spiritual rest",
+          "category": "Doctrine",
+          "description": "typified by the sabbath here"
+        },
+        {
+          "rank": 5,
+          "distance": 0.27472007274627686,
+          "name": "eternal rest",
+          "category": "Doctrine",
+          "description": "typified by the sabbath hereafter"
+        }
+      ]
+    },
+    {
+      "query": "imputation",
+      "target": "justifying righteousness of Christ",
+      "target_rank": null,
+      "target_distance": null,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.4248391389846802,
+          "name": "imputation of sin",
+          "category": "Doctrine",
+          "description": "Sins laid on Christ as vicarious sacrifice."
+        },
+        {
+          "rank": 2,
+          "distance": 0.44733279943466187,
+          "name": "Arabic",
+          "category": "ManuscriptOrVersion",
+          "description": "Version lacks inserted Cainan"
+        },
+        {
+          "rank": 3,
+          "distance": 0.45181798934936523,
+          "name": "imputation of sins",
+          "category": "EntityCategory.Doctrine",
+          "description": "Sins transferred to goat typifying Christ"
+        },
+        {
+          "rank": 4,
+          "distance": 0.45181798934936523,
+          "name": "imputation of sins",
+          "category": "Doctrine",
+          "description": "Sins transferred to goat typifying Christ"
+        },
+        {
+          "rank": 5,
+          "distance": 0.45436835289001465,
+          "name": "impostors",
+          "category": "PeopleGroup",
+          "description": "Imposed on people promising deliverance"
+        }
+      ]
+    },
+    {
+      "query": "effectual calling",
+      "target": "calling grace",
+      "target_rank": 10,
+      "target_distance": 0.4186772108078003,
+      "confident_tier_reached": false,
+      "top5": [
+        {
+          "rank": 1,
+          "distance": 0.25830990076065063,
+          "name": "internal call",
+          "category": "Doctrine",
+          "description": "Irresistible effectual call by grace"
+        },
+        {
+          "rank": 2,
+          "distance": 0.27191102504730225,
+          "name": "called",
+          "category": "Doctrine",
+          "description": "external outward and effectual calling"
+        },
+        {
+          "rank": 3,
+          "distance": 0.3148057460784912,
+          "name": "effectual vocation",
+          "category": "Doctrine",
+          "description": "calling separating people of God"
+        },
+        {
+          "rank": 4,
+          "distance": 0.31595808267593384,
+          "name": "effectual calling",
+          "category": "Doctrine",
+          "description": "Doctrine of grace not resistible."
+        },
+        {
+          "rank": 5,
+          "distance": 0.3467216491699219,
+          "name": "external call",
+          "category": "Doctrine",
+          "description": "Invitation to outward ordinances"
+        }
+      ]
+    }
+  ]
+}

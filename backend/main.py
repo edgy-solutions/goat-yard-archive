@@ -26,6 +26,7 @@ from typing import List, Optional, Any
 
 # Import our modules
 from .gill_search import GillSearchEngine
+from .query_expansion import expand_query
 from .bot import GroundedGillBot
 from baml_client.async_client import b
 from .database import init_db
@@ -394,8 +395,21 @@ async def search(request: Request, req: SearchRequest):
         stages_capture["question"] = req.query
 
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
+    # 1a. Narrow-vocabulary expansion (ADR-0011). Bridges Reformed-tradition
+    #     terms that qwen3-embedding does not associate with Gill's anchor
+    #     entities (e.g. 'exclusive psalmody' -> Hallel/Passover). The
+    #     expanded form is used ONLY for entity lookup; BAML still sees the
+    #     raw user query so it does not over-emphasize appended tokens.
+    lookup_query, expansion_matches = expand_query(req.query)
+    if expansion_matches:
+        print(f"[EXPANSION] matched narrow terms: {expansion_matches}")
+        print(f"[EXPANSION] lookup query: {lookup_query!r}")
+    if stages_capture is not None:
+        stages_capture["expansion_matches"] = expansion_matches
+        stages_capture["lookup_query"] = lookup_query
+
     t1 = time.perf_counter()
-    available_entity_names = await search_engine.get_relevant_entities(query=req.query)
+    available_entity_names = await search_engine.get_relevant_entities(query=lookup_query)
     t2 = time.perf_counter()
     print(f"[TIMING] get_relevant_entities: {t2-t1:.3f}s")
     if stages_capture is not None:
@@ -574,6 +588,10 @@ async def search(request: Request, req: SearchRequest):
                             # traffic it's judging. Permanent protection
                             # against the stale-prod trap.
                             "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
+                            # ADR-0011 expansion trace. Empty when the
+                            # user's query contained no narrow-vocabulary
+                            # term; a list when the thesaurus fired.
+                            "query_expansion_matches": expansion_matches,
                         },
                         as_type="generation"
                     )
@@ -582,7 +600,10 @@ async def search(request: Request, req: SearchRequest):
                         generation.update(input=req.query)
                         lf_client.update_current_trace(
                             user_id=user_id,
-                            metadata={"commit_sha": os.getenv("COMMIT_SHA", "unknown")},
+                            metadata={
+                                "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
+                                "query_expansion_matches": expansion_matches,
+                            },
                         )
                 else:
                     gen_ctx = None
