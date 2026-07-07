@@ -1,0 +1,494 @@
+[
+  {
+    "query": "exclusive psalmody",
+    "vector": [],
+    "substring": [],
+    "bm25": [
+      {
+        "name": "key of David",
+        "score": 3.235994815826416
+      }
+    ],
+    "combined": [
+      "key of David"
+    ],
+    "polarity": "in-domain",
+    "target": "Hallel",
+    "target_in_manifest": false
+  },
+  {
+    "query": "universal atonement in Christ",
+    "vector": [
+      {
+        "name": "atonement",
+        "distance": 0.18093812465667725
+      },
+      {
+        "name": "satisfaction of Christ",
+        "distance": 0.22654998302459717
+      },
+      {
+        "name": "propitiation",
+        "distance": 0.23962849378585815
+      }
+    ],
+    "substring": [
+      {
+        "name": "day of atonement",
+        "matched_via": "atonement"
+      },
+      {
+        "name": "Universal History",
+        "matched_via": "universal"
+      },
+      {
+        "name": "Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christians",
+        "matched_via": "christ"
+      },
+      {
+        "name": "ancient Christian fathers",
+        "matched_via": "christ"
+      },
+      {
+        "name": "antichrist",
+        "matched_via": "christ"
+      },
+      {
+        "name": "antichristian party",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Blood of Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christian",
+        "matched_via": "christ"
+      },
+      {
+        "name": "1490 years before Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "body of Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christian writers",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christ's disciples",
+        "matched_via": "christ"
+      },
+      {
+        "name": "apostles of Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "between the death of Christ, and the destruction of the temple",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christian professors",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christ's human nature",
+        "matched_via": "christ"
+      },
+      {
+        "name": "antichristian",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christ's deity",
+        "matched_via": "christ"
+      },
+      {
+        "name": "author of the blasphemous book of the life of Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "Christ of God",
+        "matched_via": "christ"
+      },
+      {
+        "name": "ancient Christians",
+        "matched_via": "christ"
+      },
+      {
+        "name": "believers in Christ",
+        "matched_via": "christ"
+      },
+      {
+        "name": "1490 years before the coming of Christ",
+        "matched_via": "christ"
+      }
+    ],
+    "bm25": [
+      {
+        "name": "shaft",
+        "score": 4.256022930145264
+      },
+      {
+        "name": "Lord's supper",
+        "score": 4.070682525634766
+      }
+    ],
+    "combined": [
+      "atonement",
+      "satisfaction of Christ",
+      "propitiation",
+      "day of atonement",
+      "Universal History"
+    ],
+    "polarity": "in-domain",
+    "target": "Atonement",
+    "target_in_manifest": true
+  },
+  {
+    "query": "is the covenant of grace monocovenantal",
+    "vector": [],
+    "substring": [
+      {
+        "name": "covenant of grace",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of works",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of conservation",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "everlasting covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "Angel of the covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of circumcision",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "two covenants",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "ark of the covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "new covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of peace",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of salt",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "everlasting covenant of grace",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of the priesthood",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of his grace",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "messenger of the covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant of grace and peace",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "national covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "holy covenant",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "new covenant of grace",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenants",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant engagements",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "covenant-engagements of Christ",
+        "matched_via": "covenant"
+      },
+      {
+        "name": "election of grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "doctrines and blessings of grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "electing grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "Counterfeit Grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "distinguished grace of God",
+        "matched_via": "grace"
+      },
+      {
+        "name": "divine grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "efficacious grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "free grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "denial of efficacious grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "condescending grace of Christ",
+        "matched_via": "grace"
+      },
+      {
+        "name": "free grace of God",
+        "matched_via": "grace"
+      },
+      {
+        "name": "calling grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "abundant grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "fruits of grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "Gospel-grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "adopting grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "grace imparted",
+        "matched_via": "grace"
+      },
+      {
+        "name": "converting grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "distinguishing grace",
+        "matched_via": "grace"
+      },
+      {
+        "name": "call of divine grace",
+        "matched_via": "grace"
+      }
+    ],
+    "bm25": [],
+    "combined": [
+      "covenant of grace",
+      "covenant of works",
+      "covenant of conservation",
+      "everlasting covenant",
+      "Angel of the covenant"
+    ],
+    "polarity": "in-domain",
+    "target": "covenant of grace",
+    "target_in_manifest": true
+  },
+  {
+    "query": "how do I write a for loop in javascript",
+    "vector": [],
+    "substring": [
+      {
+        "name": "Jewish writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Arabic writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Ph\u0153nician writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "eastern writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Arabic writer",
+        "matched_via": "write"
+      },
+      {
+        "name": "Heathen writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Persian writer",
+        "matched_via": "write"
+      },
+      {
+        "name": "Jewish writer",
+        "matched_via": "write"
+      },
+      {
+        "name": "Arabic writer[^10]",
+        "matched_via": "write"
+      },
+      {
+        "name": "Jewish writers[^13]",
+        "matched_via": "write"
+      },
+      {
+        "name": "Arabic writers[^12]",
+        "matched_via": "write"
+      },
+      {
+        "name": "Jewish writer[^14]",
+        "matched_via": "write"
+      },
+      {
+        "name": "Mahometan writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "ancient Jewish writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Hebrew writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Heathen writer",
+        "matched_via": "write"
+      },
+      {
+        "name": "some Jewish writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Misnic writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "Christian writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "one of their best writers",
+        "matched_via": "write"
+      },
+      {
+        "name": "genealogical writer",
+        "matched_via": "write"
+      },
+      {
+        "name": "Ethiopic writer",
+        "matched_via": "write"
+      },
+      {
+        "name": "one of the Jewish writers",
+        "matched_via": "write"
+      }
+    ],
+    "bm25": [
+      {
+        "name": "Ehjeh",
+        "score": 3.5532214641571045
+      },
+      {
+        "name": "eimi",
+        "score": 3.2734718322753906
+      },
+      {
+        "name": "\u05e2\u05b2\u05e9\u05b5\u05c2\u05d4 \u05e8\u05b0\u05e6\u05d5\u05b9\u05e0\u05b0\u05da\u05b8 \u05d1\u05b7\u05bc\u05e9\u05b8\u05bc\u05c1\u05de\u05b7\u05d9\u05b4\u05dd",
+        "score": 3.252415180206299
+      }
+    ],
+    "combined": [
+      "Jewish writers",
+      "Arabic writers",
+      "Ph\u0153nician writers",
+      "eastern writers",
+      "Arabic writer"
+    ],
+    "polarity": "OOD",
+    "target": null,
+    "target_in_manifest": false
+  },
+  {
+    "query": "did Esau eat pizza",
+    "vector": [],
+    "substring": [
+      {
+        "name": "Esau",
+        "matched_via": "esau"
+      }
+    ],
+    "bm25": [
+      {
+        "name": "Jaalam",
+        "score": 5.015139579772949
+      },
+      {
+        "name": "Reuel",
+        "score": 5.015139579772949
+      },
+      {
+        "name": "Jeush",
+        "score": 5.015139579772949
+      }
+    ],
+    "combined": [
+      "Esau",
+      "Jaalam",
+      "Reuel",
+      "Jeush"
+    ],
+    "polarity": "OOD",
+    "target": null,
+    "target_in_manifest": false
+  }
+]

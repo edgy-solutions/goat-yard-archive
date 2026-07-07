@@ -1,0 +1,211 @@
+[
+  {
+    "case": "universal_atonement",
+    "query": "universal atonement in Christ",
+    "target": "Atonement",
+    "pre": {
+      "label": "PRE-fix",
+      "chunks": [
+        {
+          "rank": 1,
+          "verse_ref": "LUKE 23:31",
+          "score": 0.6499999761581421,
+          "content_head": "*For if they do these things in a green tree, &c.*] Or it may be rendered impersonally, if these things are done in a green tree; by which is meant the Lord Jesus Christ, who is often compared to a tr"
+        },
+        {
+          "rank": 2,
+          "verse_ref": "NUMBERS 15:28",
+          "score": 0.45219770073890686,
+          "content_head": "And the priest shall make atonement for the soul that sinneth ignorantly, &c.] By offering his sin-offering for him: when he sinneth by ignorance before the Lord; to whom it is known to be such, befor"
+        },
+        {
+          "rank": 3,
+          "verse_ref": "MARK 2:7",
+          "score": 0.3499999940395355,
+          "content_head": "Why doth this man thus speak blasphemies? &c.] They took Christ to be a mere man, and reasoned with themselves, that he must be a blasphemer, in assuming that to himself, which was peculiar to God: th"
+        },
+        {
+          "rank": 4,
+          "verse_ref": "MATTHEW 18:27",
+          "score": 0.34444430470466614,
+          "content_head": "Then the Lord of that servant was moved with compassion, &c.] Or had compassion on him, shewed pity to him, and extended mercy towards him; not that he was moved hereunto by any actions of his, as his"
+        },
+        {
+          "rank": 5,
+          "verse_ref": "JOHN 3:16",
+          "score": 0.301354318857193,
+          "content_head": "*For God so loved the world, &c.*] The Persian version reads *men*; but not every man in the world is here meant, or all the individuals of human nature; for all are not the objects of God's special l"
+        }
+      ],
+      "book_chapter_refs": [
+        "LUKE 23",
+        "NUMBERS 15",
+        "MARK 2",
+        "MATTHEW 18",
+        "JOHN 3"
+      ],
+      "neighborhood_hit_count": 0
+    },
+    "post": {
+      "label": "POST-fix",
+      "chunks": [
+        {
+          "rank": 1,
+          "verse_ref": "LEVITICUS 4:26",
+          "score": 0.7781853675842285,
+          "content_head": "*And he shall burn all his fat upon the altar, &c.*] Of burnt-offering, that is, the priest shall do it: as the fat of the sacrifice of peace-offerings; see ch. iii. 3, 4, 5. and the priest shall make"
+        },
+        {
+          "rank": 2,
+          "verse_ref": "NUMBERS 15:28",
+          "score": 0.751395583152771,
+          "content_head": "And the priest shall make atonement for the soul that sinneth ignorantly, &c.] By offering his sin-offering for him: when he sinneth by ignorance before the Lord; to whom it is known to be such, befor"
+        },
+        {
+          "rank": 3,
+          "verse_ref": "LEVITICUS 23:28",
+          "score": 0.6793164610862732,
+          "content_head": "Ye shall do no work in that same day, &c.] No more than on the weekly sabbath: for it is a day of atonement, to make atonement for you before the Lord your God: see the note on ch. xvi. 30. Aben Ezra'"
+        },
+        {
+          "rank": 4,
+          "verse_ref": "NUMBERS 15:25",
+          "score": 0.5848807096481323,
+          "content_head": "*And the priest shall make an atonement for* all the congregation of the children of Israel; &c.] By offering a sin-offering for them, a type of Christ, the propitiation not only for the sins of the p"
+        },
+        {
+          "rank": 5,
+          "verse_ref": "NUMBERS 7:86",
+          "score": 0.5652833580970764,
+          "content_head": "The golden spoons were twelve, full of incense, &c.] Which points at the use those spoons or cups were of, namely, to carry incense in them, such as were used on the day of atonement[^3]: weighing ten"
+        }
+      ],
+      "book_chapter_refs": [
+        "LEVITICUS 4",
+        "NUMBERS 15",
+        "LEVITICUS 23",
+        "NUMBERS 15",
+        "NUMBERS 7"
+      ],
+      "neighborhood_hit_count": 0
+    },
+    "overlap": [
+      "NUMBERS 15:28"
+    ],
+    "only_pre": [
+      "JOHN 3:16",
+      "LUKE 23:31",
+      "MARK 2:7",
+      "MATTHEW 18:27"
+    ],
+    "only_post": [
+      "LEVITICUS 23:28",
+      "LEVITICUS 4:26",
+      "NUMBERS 15:25",
+      "NUMBERS 7:86"
+    ]
+  },
+  {
+    "case": "covenant_monocovenantal",
+    "query": "is the covenant of grace monocovenantal",
+    "target": "covenant of grace",
+    "pre": {
+      "label": "PRE-fix",
+      "chunks": [
+        {
+          "rank": 1,
+          "verse_ref": "GENESIS 9:10",
+          "score": 1.0,
+          "content_head": "And with every living creature that is with you, &c.] This is a further proof that this was not the covenant of grace, but of conservation, since it is made with irrational as well as rational creatur"
+        },
+        {
+          "rank": 2,
+          "verse_ref": "GENESIS 9:9",
+          "score": 0.7098156213760376,
+          "content_head": "And I, behold, I establish my covenant with you, &c.] Not the covenant of grace in Christ, but of the preservation of the creatures in common, a promise that they should not be destroyed any more by a"
+        },
+        {
+          "rank": 3,
+          "verse_ref": "JOHN 6:47",
+          "score": 0.7098110318183899,
+          "content_head": "*Verily, verily, I say unto you, &c.*] This is a certain truth, and to be depended on: he that believeth on me hath everlasting life; not only he may have it, as in ver. 40. and shall have it, but he "
+        },
+        {
+          "rank": 4,
+          "verse_ref": "NUMBERS 25:12",
+          "score": 0.6424950361251831,
+          "content_head": "Wherefore say, &c.] Moses is bid to tell what follows to Phinehas himself, for his comfort and encouragement, and to the people of Israel, that they might take notice of it, and give him honour and re"
+        },
+        {
+          "rank": 5,
+          "verse_ref": "MATTHEW 26:28",
+          "score": 0.518088161945343,
+          "content_head": "*For this is my blood of the New Testament, &c.*] That is, the red wine in the cup, was an emblem and representation of his precious blood, whereby was exhibited a new dispensation, or administration "
+        }
+      ],
+      "book_chapter_refs": [
+        "GENESIS 9",
+        "GENESIS 9",
+        "JOHN 6",
+        "NUMBERS 25",
+        "MATTHEW 26"
+      ],
+      "neighborhood_hit_count": 3
+    },
+    "post": {
+      "label": "POST-fix",
+      "chunks": [
+        {
+          "rank": 1,
+          "verse_ref": "GENESIS 9:10",
+          "score": 1.0,
+          "content_head": "And with every living creature that is with you, &c.] This is a further proof that this was not the covenant of grace, but of conservation, since it is made with irrational as well as rational creatur"
+        },
+        {
+          "rank": 2,
+          "verse_ref": "GENESIS 9:9",
+          "score": 0.6219068765640259,
+          "content_head": "And I, behold, I establish my covenant with you, &c.] Not the covenant of grace in Christ, but of the preservation of the creatures in common, a promise that they should not be destroyed any more by a"
+        },
+        {
+          "rank": 3,
+          "verse_ref": "NUMBERS 25:12",
+          "score": 0.5451669692993164,
+          "content_head": "Wherefore say, &c.] Moses is bid to tell what follows to Phinehas himself, for his comfort and encouragement, and to the people of Israel, that they might take notice of it, and give him honour and re"
+        },
+        {
+          "rank": 4,
+          "verse_ref": "JOHN 6:47",
+          "score": 0.5338183641433716,
+          "content_head": "*Verily, verily, I say unto you, &c.*] This is a certain truth, and to be depended on: he that believeth on me hath everlasting life; not only he may have it, as in ver. 40. and shall have it, but he "
+        },
+        {
+          "rank": 5,
+          "verse_ref": "GENESIS 9:12",
+          "score": 0.5110943913459778,
+          "content_head": "And God said, this is the token of the covenant which I make between me and you, &c.] Meaning the bow in the cloud, and which might be formed in the cloud at this time, that Noah might see it, and kno"
+        }
+      ],
+      "book_chapter_refs": [
+        "GENESIS 9",
+        "GENESIS 9",
+        "NUMBERS 25",
+        "JOHN 6",
+        "GENESIS 9"
+      ],
+      "neighborhood_hit_count": 3
+    },
+    "overlap": [
+      "GENESIS 9:10",
+      "GENESIS 9:9",
+      "JOHN 6:47",
+      "NUMBERS 25:12"
+    ],
+    "only_pre": [
+      "MATTHEW 26:28"
+    ],
+    "only_post": [
+      "GENESIS 9:12"
+    ]
+  }
+]

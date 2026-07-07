@@ -1,0 +1,169 @@
+
+####################################################################################################
+# E-6 BM25 BASELINE — replicates current get_relevant_entities exactly
+# For each query: shows what the CURRENT lookup returns, so the
+# E-4 fix can be measured against a concrete counterfactual.
+####################################################################################################
+
+====================================================================================================
+[in-domain] QUERY: 'exclusive psalmody'
+  target: 'Hallel' -> NOT IN COMBINED
+  substring candidates: ['exclusive', 'psalmody']
+----------------------------------------------------------------------------------------------------
+  BM25 top-15:
+     rk   score category               name                                     description                             
+      1  3.2360 TypeOrSymbol           key of David                             Christ's exclusive authority to open and
+  Substring hits added (0):
+
+====================================================================================================
+[in-domain] QUERY: 'universal atonement in Christ'
+  target: 'Atonement' -> rank 2 in combined
+  substring candidates: ['atonement', 'christ', 'universal']
+----------------------------------------------------------------------------------------------------
+  BM25 top-15:
+     rk   score category               name                                     description                             
+      1  5.3414 Doctrine               satisfaction of Christ                   Christ's atonement accepted by God
+   *  2  5.1853 Doctrine               atonement                                by Christ's sacrifice
+      3  4.2560 TypeOrSymbol           shaft                                    Trunk typical of Christ or church univer
+      4  4.0707 TypeOrSymbol           Lord's supper                            Feast viewing Christ's atonement, reconc
+      5  3.8096 TypeOrSymbol           child-bearing                            Typical of Christ's atonement for sins
+      6  3.5800 TypeOrSymbol           pure and spotless garment of the flesh   Christ put off in low estate for atoneme
+      7  3.4858 CitedAuthority         Universal History                        Places Nimrod's reign 131 years post-flo
+      8  3.4160 EntityCategory.PeopleG Bramines                                 Indian tradition of universal deluge
+      9  3.4160 PeopleGroup            Bramines                                 Indian tradition of universal deluge
+     10  3.1819 TimePeriod             old world                                Pre-deluge era of universal wickedness.
+     11  3.1819 Doctrine               deluge                                   Universal flood covering all high hills
+     12  2.9039 Doctrine               covenant of peace                        Determines no pardon without atonement
+     13  2.9039 Location               mercy-seat                               sprinkled for holy place atonement
+     14  2.9039 TypeOrSymbol           mercy-seat                               Symbol of atonement and intercession
+     15  2.8581 EntityCategory.TypeOrS green fir-tree                           Tree comparison for Christ.
+  Substring hits added (19):
+      1  substring:christ       PeopleGroup            Christians                               mostly affirm pre-flood rainbow
+      2  substring:christ       CitedAuthority         ancient Christian fathers                Understood reference to Messiah.
+      3  substring:christ       Heresy                 antichrist                               Reign of antichrist with two witnesses
+      4  substring:christ       PeopleGroup            antichristian party                      Future enemies broken by Christ
+      5  substring:christ       TypeOrSymbol           Blood of Christ                          fountain to wash sin and uncleanness
+      6  substring:christ       PeopleGroup            Christian                                hired to light fires on Sabbath
+      7  substring:christ       TypeOrSymbol           body of Christ                           typified by broken pieces of meat-offeri
+      8  substring:christ       PeopleGroup            Christian writers                        Some thought light meant angels.
+      9  substring:christ       PeopleGroup            apostles of Christ                       Poor, unlearned fishermen sent to preach
+     10  substring:christ       TimePeriod             between the death of Christ, and the des Period when evil servants and stewards l
+     11  substring:christ       PeopleGroup            Christian professors                     Gathered before Christ for separation an
+     12  substring:christ       Doctrine               Christ's human nature                    proven by enduring desertion
+     13  substring:christ       Heresy                 antichristian                            pope granting pardons and indulgences
+     14  substring:christ       Doctrine               Christ's deity                           Confirmed by miracle over storm.
+     15  substring:christ       CitedAuthority         author of the blasphemous book of the li Confirms Bethlehem as nativity place
+
+====================================================================================================
+[in-domain] QUERY: 'is the covenant of grace monocovenantal'
+  target: 'covenant of grace' -> rank 11 in combined
+  substring candidates: ['covenant', 'grace', 'monocovenantal']
+----------------------------------------------------------------------------------------------------
+  BM25 top-15:
+     rk   score category               name                                     description                             
+      1  5.3020 TypeOrSymbol           covenant of salt                         Incorruptible, inviolable covenant with 
+      2  5.1073 Doctrine               covenant of circumcision                 Covenant made with Abram involving circu
+      3  4.9795 BiblicalFigure         messenger of the covenant                Covenant messenger sought by Jews.
+      4  4.9376 Doctrine               covenant of conservation                 Covenant made with all creatures post-fl
+      5  4.9146 Doctrine               free grace                               reward of free grace
+      6  4.7849 Doctrine               covenant of the priesthood               possibly same as covenant of peace
+      7  4.5683 Doctrine               saving grace                             Special grace absent in wicked servant
+      8  4.5683 Doctrine               preventing grace                         God's preceding grace to sinners
+      9  4.5163 TypeOrSymbol           rainbow                                  Emblem of covenant of grace and Christ
+     10  4.5163 PeopleGroup            them that are without                    not elect nor in covenant of grace
+   * 11  4.4898 Doctrine               covenant of grace                        Provides good things in Christ post-fall
+     12  4.4285 Heresy                 Counterfeit Grace                        Imitates true grace but of no avail
+     13  4.3687 Doctrine               grace of love                            flaming grace in full exercise
+     14  4.3687 Doctrine               grace of God                             Divine grace Jacob partook in
+     15  4.2083 Doctrine               grace of hope                            lively grace typified by green hyssop
+  Substring hits added (17):
+      1  substring:grace        Doctrine               election of grace                        God's choice preserving a remnant
+      2  substring:grace        Doctrine               doctrines and blessings of grace         signified by dew of heaven
+      3  substring:grace        Heresy                 denial of efficacious grace              Unnecessary for regeneration and works
+      4  substring:grace        Doctrine               condescending grace of Christ            Christ descended to suffer forsakenness
+      5  substring:grace        Doctrine               free grace of God                        Basis of salvation eternal life
+      6  substring:grace        Doctrine               fruits of grace                          Acts of kindness done in faith and love.
+      7  substring:grace        Doctrine               Gospel-grace                             New wine not put into hearts of Scribes/
+      8  substring:grace        Doctrine               adopting grace                           makes peacemakers children of God
+      9  substring:grace        Doctrine               grace imparted                           preparation for death and judgment
+     10  substring:grace        Doctrine               converting grace                         real notion or desire for brethren lacki
+     11  substring:grace        Doctrine               distinguishing grace                     doctrines relating to elect's salvation
+     12  substring:grace        EntityCategory.Doctrin call of divine grace                     call out of the world into the church
+     13  substring:covenant     TypeOrSymbol           Angel of the covenant                    Title referring to divine Son
+     14  substring:covenant     TypeOrSymbol           two covenants                            Figured by Sarah and Hagar respectively
+     15  substring:covenant     TypeOrSymbol           ark of the covenant                      Law laid up as fulfilling end in Christ
+
+====================================================================================================
+[OOD] QUERY: 'how do I write a for loop in javascript'
+  substring candidates: ['javascript', 'loop', 'write']
+----------------------------------------------------------------------------------------------------
+  BM25 top-15:
+     rk   score category               name                                     description                             
+      1  3.5532 OriginalWord           Ehjeh                                    Hebrew name meaning I AM that I AM
+      2  3.2735 OriginalWord           eimi                                     Greek for I am
+      3  3.2524 OriginalWord           עֲשֵׂה רְצוֹנְךָ בַּשָּׁמַיִם            do thy will in heaven
+      4  3.0295 PeopleGroup            unregenerate men                         Unable to think or do good.
+      5  3.0295 PeopleGroup            Christ's lambs and sheep                 Do not eat husks, renewed taste
+      6  3.0295 EntityCategory.PeopleG Christ's lambs and sheep                 Do not eat husks, renewed taste
+      7  2.8352 OriginalWord           לא מתים אלא ינודמים                      Hebrew for 'do not die but sleep'
+      8  2.8352 OriginalWord           אַל תָּבִיאֵנִי                          do not lead into sin or transgression
+      9  2.8352 PeopleGroup            wicked of the nations of the world       Children do not enter world to come.
+     10  2.8352 PeopleGroup            nations of the earth                     Do not consider glory of the law
+     11  2.8248 OriginalWord           ἐλευθέρωσεν                              Greek for 'I have made free'
+     12  2.8248 OriginalWord           Hosanna                                  Hebrew 'save now I beseech thee'
+     13  2.6643 OriginalWord           lizkoth                                  to merit or do alms to the poor
+     14  2.6643 TypeOrSymbol           servant of sin                           Do not abide forever in house of God
+     15  2.6643 EntityCategory.TypeOrS servant of sin                           Do not abide forever in house of God
+  Substring hits added (23):
+      1  substring:write        PeopleGroup            Jewish writers                           Mystically interpret plant and herb as t
+      2  substring:write        CitedAuthority         Arabic writers                           Say Cain trembled and quivered lifelong
+      3  substring:write        CitedAuthority         Phœnician writers                        Cited for ancient longevity
+      4  substring:write        CitedAuthority         eastern writers                          Say Methuselah died before flood
+      5  substring:write        CitedAuthority         Arabic writer                            Placed ark door on east side.
+      6  substring:write        PeopleGroup            Heathen writers                          Reported Abram famous for arithmetic and
+      7  substring:write        CitedAuthority         Persian writer                           Derives Nemurd as immortal for long reig
+      8  substring:write        CitedAuthority         Jewish writer                            States Peleg died in Abraham's 48th year
+      9  substring:write        CitedAuthority         Arabic writer[^10]                       Nimrod began reign in Reu's 130th year.
+     10  substring:write        CitedAuthority         Jewish writers[^13]                      Kingdoms of Egypt, Bohemians, Amazons be
+     11  substring:write        CitedAuthority         Arabic writers[^12]                      Idolatry and star worship prevailed.
+     12  substring:write        CitedAuthority         Jewish writer[^14]                       Reu died in Abraham's 75th year.
+     13  substring:write        CitedAuthority         Mahometan writers                        Derive Amalek from Noah via Ham
+     14  substring:write        CitedAuthority         ancient Jewish writers                   interpret seed as King Messiah
+     15  substring:write        CitedAuthority         Hebrew writers                           Say ejection was hardest grief for Abrah
+
+====================================================================================================
+[OOD] QUERY: 'did Esau eat pizza'
+  substring candidates: ['esau', 'pizza']
+----------------------------------------------------------------------------------------------------
+  BM25 top-15:
+     rk   score category               name                                     description                             
+      1  5.4207 BiblicalFigure         Kenaz                                    Grandson of Esau, potential ancestor of 
+      2  5.0151 BiblicalFigure         Jaalam                                   Son borne to Esau by Aholibamah
+      3  5.0151 BiblicalFigure         Korah                                    Son borne to Esau by Aholibamah
+      4  5.0151 BiblicalFigure         Reuel                                    Second son of Esau by Bashemath.
+      5  5.0151 BiblicalFigure         Jeush                                    Son borne to Esau by Aholibamah
+      6  3.6313 BiblicalFigure         Esau                                     Jewish writers say killed Nimrod
+      7  2.8690 BiblicalFigure         Eliphaz                                  Father of Amalek per Gen 36:12
+      8  2.8404 PeopleGroup            publican and sinner                      Become self-righteous, eat husks
+      9  2.8404 Location               Mauritania                               Bordering people eat preserved locusts.
+     10  2.8404 PeopleGroup            Chelonophagi                             Ancient people who eat tortoises
+     11  2.8404 EntityCategory.PeopleG publican and sinner                      Become self-righteous, eat husks
+     12  2.8210 CitedAuthority         Simeon the Just                          Did not use Rabbi title.
+     13  2.8210 CitedAuthority         Antigonus                                Did not use Rabbi title.
+     14  2.7265 TypeOrSymbol           face of God                              likened to Esau's pleasant face
+     15  2.7265 OriginalWord           Edom                                     Hebrew word meaning 'red' for Esau
+  Substring hits added (0):
+
+
+====================================================================================================
+SUMMARY — current vs vector (from E-6 near_vector probe)
+====================================================================================================
+  polarity   query                                                 BM25_rank BM25_top1                     
+----------------------------------------------------------------------------------------------------
+  in-domain  exclusive psalmody                                            - key of David                  
+  in-domain  universal atonement in Christ                                 2 satisfaction of Christ        
+  in-domain  is the covenant of grace monocovenantal                      11 covenant of salt              
+  OOD        how do I write a for loop in javascript                       - Ehjeh                         
+  OOD        did Esau eat pizza                                            - Kenaz                         
+
+  Raw: C:\Users\cnogr\AppData\Local\Temp\claude\c--Users-cnogr-git-goat-yard-archive\af8134a4-98a5-4323-8e1d-fe16c91515a4\scratchpad\e6_bm25_baseline_results.json

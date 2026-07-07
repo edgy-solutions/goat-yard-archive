@@ -395,7 +395,7 @@ async def search(request: Request, req: SearchRequest):
 
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
     t1 = time.perf_counter()
-    available_entity_names = await search_engine.get_relevant_entities(query=req.query, limit=50)
+    available_entity_names = await search_engine.get_relevant_entities(query=req.query)
     t2 = time.perf_counter()
     print(f"[TIMING] get_relevant_entities: {t2-t1:.3f}s")
     if stages_capture is not None:

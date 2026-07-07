@@ -12,6 +12,8 @@ batch_logs/
 .env
 *.log
 *.out
+# Probe-output logs under evals/ are the ADR's cited evidence — keep them.
+!evals/**/*.out
 .mcp.json
 frontend/node_modules/
 frontend/public/scans/

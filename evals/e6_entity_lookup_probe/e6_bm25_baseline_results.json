@@ -1,0 +1,1952 @@
+[
+  {
+    "query": "exclusive psalmody",
+    "target": "Hallel",
+    "target_rank": null,
+    "bm25_hits": [
+      {
+        "path": "bm25",
+        "score": 3.235994815826416,
+        "name": "key of David",
+        "category": "TypeOrSymbol",
+        "description": "Christ's exclusive authority to open and shut"
+      }
+    ],
+    "substring_hits": [],
+    "combined_names": [
+      "key of David"
+    ],
+    "substring_candidates": [
+      "exclusive",
+      "psalmody"
+    ],
+    "polarity": "in-domain"
+  },
+  {
+    "query": "universal atonement in Christ",
+    "target": "Atonement",
+    "target_rank": 2,
+    "bm25_hits": [
+      {
+        "path": "bm25",
+        "score": 5.341362953186035,
+        "name": "satisfaction of Christ",
+        "category": "Doctrine",
+        "description": "Christ's atonement accepted by God"
+      },
+      {
+        "path": "bm25",
+        "score": 5.185305118560791,
+        "name": "atonement",
+        "category": "Doctrine",
+        "description": "by Christ's sacrifice"
+      },
+      {
+        "path": "bm25",
+        "score": 4.256022930145264,
+        "name": "shaft",
+        "category": "TypeOrSymbol",
+        "description": "Trunk typical of Christ or church universal"
+      },
+      {
+        "path": "bm25",
+        "score": 4.070682525634766,
+        "name": "Lord's supper",
+        "category": "TypeOrSymbol",
+        "description": "Feast viewing Christ's atonement, reconciliation"
+      },
+      {
+        "path": "bm25",
+        "score": 3.80960750579834,
+        "name": "child-bearing",
+        "category": "TypeOrSymbol",
+        "description": "Typical of Christ's atonement for sins"
+      },
+      {
+        "path": "bm25",
+        "score": 3.5800023078918457,
+        "name": "pure and spotless garment of the flesh",
+        "category": "TypeOrSymbol",
+        "description": "Christ put off in low estate for atonement."
+      },
+      {
+        "path": "bm25",
+        "score": 3.4857962131500244,
+        "name": "Universal History",
+        "category": "CitedAuthority",
+        "description": "Places Nimrod's reign 131 years post-flood"
+      },
+      {
+        "path": "bm25",
+        "score": 3.416027784347534,
+        "name": "Bramines",
+        "category": "EntityCategory.PeopleGroup",
+        "description": "Indian tradition of universal deluge"
+      },
+      {
+        "path": "bm25",
+        "score": 3.416027784347534,
+        "name": "Bramines",
+        "category": "PeopleGroup",
+        "description": "Indian tradition of universal deluge"
+      },
+      {
+        "path": "bm25",
+        "score": 3.181924819946289,
+        "name": "old world",
+        "category": "TimePeriod",
+        "description": "Pre-deluge era of universal wickedness."
+      },
+      {
+        "path": "bm25",
+        "score": 3.181924819946289,
+        "name": "deluge",
+        "category": "Doctrine",
+        "description": "Universal flood covering all high hills"
+      },
+      {
+        "path": "bm25",
+        "score": 2.9039244651794434,
+        "name": "covenant of peace",
+        "category": "Doctrine",
+        "description": "Determines no pardon without atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.9039244651794434,
+        "name": "mercy-seat",
+        "category": "Location",
+        "description": "sprinkled for holy place atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.9039244651794434,
+        "name": "mercy-seat",
+        "category": "TypeOrSymbol",
+        "description": "Symbol of atonement and intercession"
+      },
+      {
+        "path": "bm25",
+        "score": 2.858144521713257,
+        "name": "green fir-tree",
+        "category": "EntityCategory.TypeOrSymbol",
+        "description": "Tree comparison for Christ."
+      },
+      {
+        "path": "bm25",
+        "score": 2.858144521713257,
+        "name": "green fir-tree",
+        "category": "TypeOrSymbol",
+        "description": "Tree comparison for Christ."
+      },
+      {
+        "path": "bm25",
+        "score": 2.858144521713257,
+        "name": "apple-tree",
+        "category": "TypeOrSymbol",
+        "description": "Tree comparison for Christ."
+      },
+      {
+        "path": "bm25",
+        "score": 2.858144521713257,
+        "name": "apple-tree",
+        "category": "EntityCategory.TypeOrSymbol",
+        "description": "Tree comparison for Christ."
+      },
+      {
+        "path": "bm25",
+        "score": 2.853372573852539,
+        "name": "Christ's time",
+        "category": "TimePeriod",
+        "description": "Pharisees murmured against Christ"
+      },
+      {
+        "path": "bm25",
+        "score": 2.853372573852539,
+        "name": "incarnation of Christ",
+        "category": "Doctrine",
+        "description": "Christ taking human nature."
+      },
+      {
+        "path": "bm25",
+        "score": 2.741701602935791,
+        "name": "12 apostles",
+        "category": "BiblicalFigure",
+        "description": "Standing round Christ on onyx"
+      },
+      {
+        "path": "bm25",
+        "score": 2.741701602935791,
+        "name": "wicked Jews",
+        "category": "PeopleGroup",
+        "description": "Rejected Christ and crucified him"
+      },
+      {
+        "path": "bm25",
+        "score": 2.729135036468506,
+        "name": "Ben Netzer",
+        "category": "BiblicalFigure",
+        "description": "Jewish designation for Christ"
+      },
+      {
+        "path": "bm25",
+        "score": 2.704916477203369,
+        "name": "blowing of the trumpets",
+        "category": "Doctrine",
+        "description": "Day distinguished from day of atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.704916477203369,
+        "name": "10th of the 7th month",
+        "category": "TimePeriod",
+        "description": "date for observing Day of Atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.704916477203369,
+        "name": "Reconciliation",
+        "category": "Doctrine",
+        "description": "Atonement for sins through altar sacrifices."
+      },
+      {
+        "path": "bm25",
+        "score": 2.704916477203369,
+        "name": "feast of tabernacles",
+        "category": "TimePeriod",
+        "description": "Distinguished from day of atonement afterwards"
+      },
+      {
+        "path": "bm25",
+        "score": 2.704916477203369,
+        "name": "priest that is anointed",
+        "category": "PeopleGroup",
+        "description": "Takes bullock blood for his atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.641218423843384,
+        "name": "Virgin Mary",
+        "category": "BiblicalFigure",
+        "description": "Socinians claim Christ born of her"
+      },
+      {
+        "path": "bm25",
+        "score": 2.5704917907714844,
+        "name": "1490 years before Christ",
+        "category": "TimePeriod",
+        "description": "Approximate date before Jesus Christ"
+      },
+      {
+        "path": "bm25",
+        "score": 2.5704917907714844,
+        "name": "condescending grace of Christ",
+        "category": "Doctrine",
+        "description": "Christ descended to suffer forsakenness"
+      },
+      {
+        "path": "bm25",
+        "score": 2.5461320877075195,
+        "name": "Christ's ministers",
+        "category": "PeopleGroup",
+        "description": "contempt of them reaches to Christ and Father"
+      },
+      {
+        "path": "bm25",
+        "score": 2.5461320877075195,
+        "name": "Christ's disciples",
+        "category": "PeopleGroup",
+        "description": "Faith tried by sudden storm on sea"
+      },
+      {
+        "path": "bm25",
+        "score": 2.531435251235962,
+        "name": "synagogues",
+        "category": "Location",
+        "description": "Jews attend barefooted on day of atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.531435251235962,
+        "name": "leper",
+        "category": "EntityCategory.PeopleGroup",
+        "description": "Receives oil on head and atonement rites"
+      },
+      {
+        "path": "bm25",
+        "score": 2.531435251235962,
+        "name": "Simeon ben Camhith",
+        "category": "HistoricalFigure",
+        "description": "High priest who became unclean on atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.531435251235962,
+        "name": "chamber Parhedrin",
+        "category": "Location",
+        "description": "high-priest dwelling seven days before atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.531435251235962,
+        "name": "Siphri",
+        "category": "ManuscriptOrVersion",
+        "description": "Book cited for day after atonement view."
+      },
+      {
+        "path": "bm25",
+        "score": 2.516597032546997,
+        "name": "day of atonement",
+        "category": "TypeOrSymbol",
+        "description": "High priest's sleepless night custom compared."
+      },
+      {
+        "path": "bm25",
+        "score": 2.497345447540283,
+        "name": "R. Akiba",
+        "category": "CitedAuthority",
+        "description": "Calls 'love thy neighbour' the great universal in the law."
+      },
+      {
+        "path": "bm25",
+        "score": 2.476588726043701,
+        "name": "his brethren",
+        "category": "EntityCategory.PeopleGroup",
+        "description": "Gone up to the feast before Jesus Christ"
+      },
+      {
+        "path": "bm25",
+        "score": 2.34126615524292,
+        "name": "denial of Christ's proper deity",
+        "category": "Heresy",
+        "description": "Treats Christ as mere creature"
+      },
+      {
+        "path": "bm25",
+        "score": 1.9254746437072754,
+        "name": "good shepherd",
+        "category": "TypeOrSymbol",
+        "description": "gathers sheep by word and grace"
+      },
+      {
+        "path": "bm25",
+        "score": 1.9254746437072754,
+        "name": "good shepherd",
+        "category": "EntityCategory.TypeOrSymbol",
+        "description": "gathers sheep by word and grace"
+      },
+      {
+        "path": "bm25",
+        "score": 1.9254746437072754,
+        "name": "wisdom of God",
+        "category": "TypeOrSymbol",
+        "description": "Justified by her children despite charges."
+      },
+      {
+        "path": "bm25",
+        "score": 1.8190312385559082,
+        "name": "Christ",
+        "category": "OriginalWord",
+        "description": "Greek interpretation of Hebrew Messiah."
+      },
+      {
+        "path": "bm25",
+        "score": 1.8190312385559082,
+        "name": "Christ",
+        "category": "BiblicalFigure",
+        "description": "Has power to forgive sins as God."
+      },
+      {
+        "path": "bm25",
+        "score": 1.6458731889724731,
+        "name": "Barchochab",
+        "category": "HistoricalFigure",
+        "description": "Received by thousands after rejection of Christ"
+      },
+      {
+        "path": "bm25",
+        "score": 1.6458731889724731,
+        "name": "him",
+        "category": "EntityCategory.BiblicalFigure",
+        "description": "Fame spread due to dispossessing unclean spirit"
+      },
+      {
+        "path": "bm25",
+        "score": 1.6458731889724731,
+        "name": "our Lord",
+        "category": "BiblicalFigure",
+        "description": "said men ate and drank before flood"
+      }
+    ],
+    "substring_hits": [
+      {
+        "path": "substring:christ",
+        "name": "Christians",
+        "category": "PeopleGroup",
+        "description": "mostly affirm pre-flood rainbow"
+      },
+      {
+        "path": "substring:christ",
+        "name": "ancient Christian fathers",
+        "category": "CitedAuthority",
+        "description": "Understood reference to Messiah."
+      },
+      {
+        "path": "substring:christ",
+        "name": "antichrist",
+        "category": "Heresy",
+        "description": "Reign of antichrist with two witnesses"
+      },
+      {
+        "path": "substring:christ",
+        "name": "antichristian party",
+        "category": "PeopleGroup",
+        "description": "Future enemies broken by Christ"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Blood of Christ",
+        "category": "TypeOrSymbol",
+        "description": "fountain to wash sin and uncleanness"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Christian",
+        "category": "PeopleGroup",
+        "description": "hired to light fires on Sabbath"
+      },
+      {
+        "path": "substring:christ",
+        "name": "body of Christ",
+        "category": "TypeOrSymbol",
+        "description": "typified by broken pieces of meat-offering"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Christian writers",
+        "category": "PeopleGroup",
+        "description": "Some thought light meant angels."
+      },
+      {
+        "path": "substring:christ",
+        "name": "apostles of Christ",
+        "category": "PeopleGroup",
+        "description": "Poor, unlearned fishermen sent to preach Gospel."
+      },
+      {
+        "path": "substring:christ",
+        "name": "between the death of Christ, and the destruction of the temple",
+        "category": "TimePeriod",
+        "description": "Period when evil servants and stewards lived"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Christian professors",
+        "category": "PeopleGroup",
+        "description": "Gathered before Christ for separation and judgment"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Christ's human nature",
+        "category": "Doctrine",
+        "description": "proven by enduring desertion"
+      },
+      {
+        "path": "substring:christ",
+        "name": "antichristian",
+        "category": "Heresy",
+        "description": "pope granting pardons and indulgences"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Christ's deity",
+        "category": "Doctrine",
+        "description": "Confirmed by miracle over storm."
+      },
+      {
+        "path": "substring:christ",
+        "name": "author of the blasphemous book of the life of Christ",
+        "category": "CitedAuthority",
+        "description": "Confirms Bethlehem as nativity place"
+      },
+      {
+        "path": "substring:christ",
+        "name": "Christ of God",
+        "category": "BiblicalFigure",
+        "description": "Peter's confession of Jesus' identity"
+      },
+      {
+        "path": "substring:christ",
+        "name": "ancient Christians",
+        "category": "PeopleGroup",
+        "description": "expunged Christ's weeping from text"
+      },
+      {
+        "path": "substring:christ",
+        "name": "believers in Christ",
+        "category": "PeopleGroup",
+        "description": "Dying members commit souls to God"
+      },
+      {
+        "path": "substring:christ",
+        "name": "1490 years before the coming of Christ",
+        "category": "EntityCategory.TimePeriod",
+        "description": "Approximate date of writing"
+      }
+    ],
+    "combined_names": [
+      "satisfaction of Christ",
+      "atonement",
+      "shaft",
+      "Lord's supper",
+      "child-bearing",
+      "pure and spotless garment of the flesh",
+      "Universal History",
+      "Bramines",
+      "Bramines",
+      "old world",
+      "deluge",
+      "covenant of peace",
+      "mercy-seat",
+      "mercy-seat",
+      "green fir-tree",
+      "green fir-tree",
+      "apple-tree",
+      "apple-tree",
+      "Christ's time",
+      "incarnation of Christ",
+      "12 apostles",
+      "wicked Jews",
+      "Ben Netzer",
+      "blowing of the trumpets",
+      "10th of the 7th month",
+      "Reconciliation",
+      "feast of tabernacles",
+      "priest that is anointed",
+      "Virgin Mary",
+      "1490 years before Christ",
+      "condescending grace of Christ",
+      "Christ's ministers",
+      "Christ's disciples",
+      "synagogues",
+      "leper",
+      "Simeon ben Camhith",
+      "chamber Parhedrin",
+      "Siphri",
+      "day of atonement",
+      "R. Akiba",
+      "his brethren",
+      "denial of Christ's proper deity",
+      "good shepherd",
+      "good shepherd",
+      "wisdom of God",
+      "Christ",
+      "Christ",
+      "Barchochab",
+      "him",
+      "our Lord",
+      "Christians",
+      "ancient Christian fathers",
+      "antichrist",
+      "antichristian party",
+      "Blood of Christ",
+      "Christian",
+      "body of Christ",
+      "Christian writers",
+      "apostles of Christ",
+      "between the death of Christ, and the destruction of the temple",
+      "Christian professors",
+      "Christ's human nature",
+      "antichristian",
+      "Christ's deity",
+      "author of the blasphemous book of the life of Christ",
+      "Christ of God",
+      "ancient Christians",
+      "believers in Christ",
+      "1490 years before the coming of Christ"
+    ],
+    "substring_candidates": [
+      "atonement",
+      "christ",
+      "universal"
+    ],
+    "polarity": "in-domain"
+  },
+  {
+    "query": "is the covenant of grace monocovenantal",
+    "target": "covenant of grace",
+    "target_rank": 11,
+    "bm25_hits": [
+      {
+        "path": "bm25",
+        "score": 5.301962852478027,
+        "name": "covenant of salt",
+        "category": "TypeOrSymbol",
+        "description": "Incorruptible, inviolable covenant with Aaron"
+      },
+      {
+        "path": "bm25",
+        "score": 5.107307434082031,
+        "name": "covenant of circumcision",
+        "category": "Doctrine",
+        "description": "Covenant made with Abram involving circumcision"
+      },
+      {
+        "path": "bm25",
+        "score": 4.97953987121582,
+        "name": "messenger of the covenant",
+        "category": "BiblicalFigure",
+        "description": "Covenant messenger sought by Jews."
+      },
+      {
+        "path": "bm25",
+        "score": 4.937621116638184,
+        "name": "covenant of conservation",
+        "category": "Doctrine",
+        "description": "Covenant made with all creatures post-flood"
+      },
+      {
+        "path": "bm25",
+        "score": 4.914584159851074,
+        "name": "free grace",
+        "category": "Doctrine",
+        "description": "reward of free grace"
+      },
+      {
+        "path": "bm25",
+        "score": 4.784884452819824,
+        "name": "covenant of the priesthood",
+        "category": "Doctrine",
+        "description": "possibly same as covenant of peace"
+      },
+      {
+        "path": "bm25",
+        "score": 4.56832218170166,
+        "name": "saving grace",
+        "category": "Doctrine",
+        "description": "Special grace absent in wicked servant"
+      },
+      {
+        "path": "bm25",
+        "score": 4.56832218170166,
+        "name": "preventing grace",
+        "category": "Doctrine",
+        "description": "God's preceding grace to sinners"
+      },
+      {
+        "path": "bm25",
+        "score": 4.5163116455078125,
+        "name": "rainbow",
+        "category": "TypeOrSymbol",
+        "description": "Emblem of covenant of grace and Christ"
+      },
+      {
+        "path": "bm25",
+        "score": 4.5163116455078125,
+        "name": "them that are without",
+        "category": "PeopleGroup",
+        "description": "not elect nor in covenant of grace"
+      },
+      {
+        "path": "bm25",
+        "score": 4.489838600158691,
+        "name": "covenant of grace",
+        "category": "Doctrine",
+        "description": "Provides good things in Christ post-fall"
+      },
+      {
+        "path": "bm25",
+        "score": 4.428502559661865,
+        "name": "Counterfeit Grace",
+        "category": "Heresy",
+        "description": "Imitates true grace but of no avail"
+      },
+      {
+        "path": "bm25",
+        "score": 4.3687424659729,
+        "name": "grace of love",
+        "category": "Doctrine",
+        "description": "flaming grace in full exercise"
+      },
+      {
+        "path": "bm25",
+        "score": 4.3687424659729,
+        "name": "grace of God",
+        "category": "Doctrine",
+        "description": "Divine grace Jacob partook in"
+      },
+      {
+        "path": "bm25",
+        "score": 4.208349227905273,
+        "name": "grace of hope",
+        "category": "Doctrine",
+        "description": "lively grace typified by green hyssop"
+      },
+      {
+        "path": "bm25",
+        "score": 4.0685296058654785,
+        "name": "spirit of grace",
+        "category": "EntityCategory.BiblicalFigure",
+        "description": "gives grace to each as He wills"
+      },
+      {
+        "path": "bm25",
+        "score": 4.0685296058654785,
+        "name": "spirit of grace",
+        "category": "BiblicalFigure",
+        "description": "gives grace to each as He wills"
+      },
+      {
+        "path": "bm25",
+        "score": 3.9426774978637695,
+        "name": "distinguished grace of God",
+        "category": "Doctrine",
+        "description": "Preached doctrine of God's grace"
+      },
+      {
+        "path": "bm25",
+        "score": 3.9017438888549805,
+        "name": "covenant of his grace",
+        "category": "Doctrine",
+        "description": "Promised eternal life before world began"
+      },
+      {
+        "path": "bm25",
+        "score": 3.9017438888549805,
+        "name": "new covenant of grace",
+        "category": "Doctrine",
+        "description": "Blessings now exhibited but rejected by them"
+      },
+      {
+        "path": "bm25",
+        "score": 3.9017438888549805,
+        "name": "everlasting covenant of grace",
+        "category": "Doctrine",
+        "description": "Brings spiritual blessings upon God's people"
+      },
+      {
+        "path": "bm25",
+        "score": 3.4498682022094727,
+        "name": "covenant of grace and peace",
+        "category": "Doctrine",
+        "description": "Everlasting council where dinner was contrived"
+      },
+      {
+        "path": "bm25",
+        "score": 3.1883749961853027,
+        "name": "heavenly father",
+        "category": "BiblicalFigure",
+        "description": "Forgives trespasses of adopted children"
+      },
+      {
+        "path": "bm25",
+        "score": 3.1883749961853027,
+        "name": "Lord God of Israel",
+        "category": "EntityCategory.BiblicalFigure",
+        "description": "blessed for visiting and redeeming his people"
+      },
+      {
+        "path": "bm25",
+        "score": 2.898421287536621,
+        "name": "national covenant",
+        "category": "Doctrine",
+        "description": "basis for Jewish adoption"
+      },
+      {
+        "path": "bm25",
+        "score": 2.898421287536621,
+        "name": "covenant engagements",
+        "category": "Doctrine",
+        "description": "obligations of Christ requiring his death"
+      },
+      {
+        "path": "bm25",
+        "score": 2.898421287536621,
+        "name": "new covenant",
+        "category": "Doctrine",
+        "description": "Law reinscribed on regenerated hearts"
+      },
+      {
+        "path": "bm25",
+        "score": 2.898421287536621,
+        "name": "holy covenant",
+        "category": "Doctrine",
+        "description": "Made eternally between God and his Son"
+      },
+      {
+        "path": "bm25",
+        "score": 2.898421287536621,
+        "name": "everlasting covenant",
+        "category": "Doctrine",
+        "description": "between God and every living creature"
+      },
+      {
+        "path": "bm25",
+        "score": 2.840409278869629,
+        "name": "uncircumcised persons",
+        "category": "PeopleGroup",
+        "description": "Persons outside covenant of circumcision"
+      },
+      {
+        "path": "bm25",
+        "score": 2.840409278869629,
+        "name": "everlasting priesthood",
+        "category": "Doctrine",
+        "description": "Aaronical covenant fulfilled in Christ."
+      },
+      {
+        "path": "bm25",
+        "score": 2.744262933731079,
+        "name": "oil-vessels",
+        "category": "TypeOrSymbol",
+        "description": "hearts containing grace"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "circumcision",
+        "category": "TypeOrSymbol",
+        "description": "Token of the covenant with Abraham"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "blood of bulls",
+        "category": "TypeOrSymbol",
+        "description": "Sprinkled on book of first covenant."
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "burning lamp",
+        "category": "TypeOrSymbol",
+        "description": "Emblem of divine Being in covenant."
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "inhabitants of the land",
+        "category": "PeopleGroup",
+        "description": "Not to covenant with upon entry"
+      },
+      {
+        "path": "bm25",
+        "score": 2.5263257026672363,
+        "name": "incorruptible seed",
+        "category": "TypeOrSymbol",
+        "description": "Represents truth of grace"
+      },
+      {
+        "path": "bm25",
+        "score": 2.5263257026672363,
+        "name": "self-denial",
+        "category": "Doctrine",
+        "description": "Increased by true grace"
+      },
+      {
+        "path": "bm25",
+        "score": 2.476067304611206,
+        "name": "Apostle Paul",
+        "category": "BiblicalFigure",
+        "description": "Interprets Hagar and Sarah as covenant types"
+      },
+      {
+        "path": "bm25",
+        "score": 2.476067304611206,
+        "name": "salt",
+        "category": "TypeOrSymbol",
+        "description": "Symbolizes covenant perpetuity and Christ's savouriness."
+      },
+      {
+        "path": "bm25",
+        "score": 2.4615535736083984,
+        "name": "covenant of works",
+        "category": "Doctrine",
+        "description": "Broken, brings wrath not life"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4615535736083984,
+        "name": "covenant of peace",
+        "category": "Doctrine",
+        "description": "Determines no pardon without atonement"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "efficacious grace",
+        "category": "Doctrine",
+        "description": "work of God creating new heart"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "true grace",
+        "category": "Doctrine",
+        "description": "In hearts vs light in heads"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "electing grace",
+        "category": "Doctrine",
+        "description": "Sure foundation securing church members"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "Special grace",
+        "category": "Doctrine",
+        "description": "God's sovereign gift to whomever he chooses."
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "abundant grace",
+        "category": "Doctrine",
+        "description": "In quickening dead sinners to life"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "justifying grace",
+        "category": "Doctrine",
+        "description": "Gospel blessing for new bottles"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "calling grace",
+        "category": "Doctrine",
+        "description": "cause of praise songs to God"
+      },
+      {
+        "path": "bm25",
+        "score": 2.388258218765259,
+        "name": "divine grace",
+        "category": "Doctrine",
+        "description": "power enabling spiritually good actions"
+      }
+    ],
+    "substring_hits": [
+      {
+        "path": "substring:grace",
+        "name": "election of grace",
+        "category": "Doctrine",
+        "description": "God's choice preserving a remnant"
+      },
+      {
+        "path": "substring:grace",
+        "name": "doctrines and blessings of grace",
+        "category": "Doctrine",
+        "description": "signified by dew of heaven"
+      },
+      {
+        "path": "substring:grace",
+        "name": "denial of efficacious grace",
+        "category": "Heresy",
+        "description": "Unnecessary for regeneration and works"
+      },
+      {
+        "path": "substring:grace",
+        "name": "condescending grace of Christ",
+        "category": "Doctrine",
+        "description": "Christ descended to suffer forsakenness"
+      },
+      {
+        "path": "substring:grace",
+        "name": "free grace of God",
+        "category": "Doctrine",
+        "description": "Basis of salvation eternal life"
+      },
+      {
+        "path": "substring:grace",
+        "name": "fruits of grace",
+        "category": "Doctrine",
+        "description": "Acts of kindness done in faith and love."
+      },
+      {
+        "path": "substring:grace",
+        "name": "Gospel-grace",
+        "category": "Doctrine",
+        "description": "New wine not put into hearts of Scribes/Pharisees"
+      },
+      {
+        "path": "substring:grace",
+        "name": "adopting grace",
+        "category": "Doctrine",
+        "description": "makes peacemakers children of God"
+      },
+      {
+        "path": "substring:grace",
+        "name": "grace imparted",
+        "category": "Doctrine",
+        "description": "preparation for death and judgment"
+      },
+      {
+        "path": "substring:grace",
+        "name": "converting grace",
+        "category": "Doctrine",
+        "description": "real notion or desire for brethren lacking"
+      },
+      {
+        "path": "substring:grace",
+        "name": "distinguishing grace",
+        "category": "Doctrine",
+        "description": "doctrines relating to elect's salvation"
+      },
+      {
+        "path": "substring:grace",
+        "name": "call of divine grace",
+        "category": "EntityCategory.Doctrine",
+        "description": "call out of the world into the church"
+      },
+      {
+        "path": "substring:covenant",
+        "name": "Angel of the covenant",
+        "category": "TypeOrSymbol",
+        "description": "Title referring to divine Son"
+      },
+      {
+        "path": "substring:covenant",
+        "name": "two covenants",
+        "category": "TypeOrSymbol",
+        "description": "Figured by Sarah and Hagar respectively"
+      },
+      {
+        "path": "substring:covenant",
+        "name": "ark of the covenant",
+        "category": "TypeOrSymbol",
+        "description": "Law laid up as fulfilling end in Christ"
+      },
+      {
+        "path": "substring:covenant",
+        "name": "covenants",
+        "category": "Doctrine",
+        "description": "privilege enumerated for Jews in Romans 9"
+      },
+      {
+        "path": "substring:covenant",
+        "name": "covenant-engagements of Christ",
+        "category": "Doctrine",
+        "description": "Agreed to necessity of crucifixion"
+      }
+    ],
+    "combined_names": [
+      "covenant of salt",
+      "covenant of circumcision",
+      "messenger of the covenant",
+      "covenant of conservation",
+      "free grace",
+      "covenant of the priesthood",
+      "saving grace",
+      "preventing grace",
+      "rainbow",
+      "them that are without",
+      "covenant of grace",
+      "Counterfeit Grace",
+      "grace of love",
+      "grace of God",
+      "grace of hope",
+      "spirit of grace",
+      "spirit of grace",
+      "distinguished grace of God",
+      "covenant of his grace",
+      "new covenant of grace",
+      "everlasting covenant of grace",
+      "covenant of grace and peace",
+      "heavenly father",
+      "Lord God of Israel",
+      "national covenant",
+      "covenant engagements",
+      "new covenant",
+      "holy covenant",
+      "everlasting covenant",
+      "uncircumcised persons",
+      "everlasting priesthood",
+      "oil-vessels",
+      "circumcision",
+      "blood of bulls",
+      "burning lamp",
+      "inhabitants of the land",
+      "incorruptible seed",
+      "self-denial",
+      "Apostle Paul",
+      "salt",
+      "covenant of works",
+      "covenant of peace",
+      "efficacious grace",
+      "true grace",
+      "electing grace",
+      "Special grace",
+      "abundant grace",
+      "justifying grace",
+      "calling grace",
+      "divine grace",
+      "election of grace",
+      "doctrines and blessings of grace",
+      "denial of efficacious grace",
+      "condescending grace of Christ",
+      "free grace of God",
+      "fruits of grace",
+      "Gospel-grace",
+      "adopting grace",
+      "grace imparted",
+      "converting grace",
+      "distinguishing grace",
+      "call of divine grace",
+      "Angel of the covenant",
+      "two covenants",
+      "ark of the covenant",
+      "covenants",
+      "covenant-engagements of Christ"
+    ],
+    "substring_candidates": [
+      "covenant",
+      "grace",
+      "monocovenantal"
+    ],
+    "polarity": "in-domain"
+  },
+  {
+    "query": "how do I write a for loop in javascript",
+    "target": null,
+    "target_rank": null,
+    "bm25_hits": [
+      {
+        "path": "bm25",
+        "score": 3.5532214641571045,
+        "name": "Ehjeh",
+        "category": "OriginalWord",
+        "description": "Hebrew name meaning I AM that I AM"
+      },
+      {
+        "path": "bm25",
+        "score": 3.2734718322753906,
+        "name": "eimi",
+        "category": "OriginalWord",
+        "description": "Greek for I am"
+      },
+      {
+        "path": "bm25",
+        "score": 3.252415180206299,
+        "name": "\u05e2\u05b2\u05e9\u05b5\u05c2\u05d4 \u05e8\u05b0\u05e6\u05d5\u05b9\u05e0\u05b0\u05da\u05b8 \u05d1\u05b7\u05bc\u05e9\u05b8\u05bc\u05c1\u05de\u05b7\u05d9\u05b4\u05dd",
+        "category": "OriginalWord",
+        "description": "do thy will in heaven"
+      },
+      {
+        "path": "bm25",
+        "score": 3.029524803161621,
+        "name": "unregenerate men",
+        "category": "PeopleGroup",
+        "description": "Unable to think or do good."
+      },
+      {
+        "path": "bm25",
+        "score": 3.029524803161621,
+        "name": "Christ's lambs and sheep",
+        "category": "PeopleGroup",
+        "description": "Do not eat husks, renewed taste"
+      },
+      {
+        "path": "bm25",
+        "score": 3.029524803161621,
+        "name": "Christ's lambs and sheep",
+        "category": "EntityCategory.PeopleGroup",
+        "description": "Do not eat husks, renewed taste"
+      },
+      {
+        "path": "bm25",
+        "score": 2.8352248668670654,
+        "name": "\u05dc\u05d0 \u05de\u05ea\u05d9\u05dd \u05d0\u05dc\u05d0 \u05d9\u05e0\u05d5\u05d3\u05de\u05d9\u05dd",
+        "category": "OriginalWord",
+        "description": "Hebrew for 'do not die but sleep'"
+      },
+      {
+        "path": "bm25",
+        "score": 2.8352248668670654,
+        "name": "\u05d0\u05b7\u05dc \u05ea\u05b8\u05bc\u05d1\u05b4\u05d9\u05d0\u05b5\u05e0\u05b4\u05d9",
+        "category": "OriginalWord",
+        "description": "do not lead into sin or transgression"
+      },
+      {
+        "path": "bm25",
+        "score": 2.8352248668670654,
+        "name": "wicked of the nations of the world",
+        "category": "PeopleGroup",
+        "description": "Children do not enter world to come."
+      },
+      {
+        "path": "bm25",
+        "score": 2.8352248668670654,
+        "name": "nations of the earth",
+        "category": "PeopleGroup",
+        "description": "Do not consider glory of the law"
+      },
+      {
+        "path": "bm25",
+        "score": 2.8248050212860107,
+        "name": "\u1f10\u03bb\u03b5\u03c5\u03b8\u03ad\u03c1\u03c9\u03c3\u03b5\u03bd",
+        "category": "OriginalWord",
+        "description": "Greek for 'I have made free'"
+      },
+      {
+        "path": "bm25",
+        "score": 2.8248050212860107,
+        "name": "Hosanna",
+        "category": "OriginalWord",
+        "description": "Hebrew 'save now I beseech thee'"
+      },
+      {
+        "path": "bm25",
+        "score": 2.6643457412719727,
+        "name": "lizkoth",
+        "category": "OriginalWord",
+        "description": "to merit or do alms to the poor"
+      },
+      {
+        "path": "bm25",
+        "score": 2.6643457412719727,
+        "name": "servant of sin",
+        "category": "TypeOrSymbol",
+        "description": "Do not abide forever in house of God"
+      },
+      {
+        "path": "bm25",
+        "score": 2.6643457412719727,
+        "name": "servant of sin",
+        "category": "EntityCategory.TypeOrSymbol",
+        "description": "Do not abide forever in house of God"
+      },
+      {
+        "path": "bm25",
+        "score": 2.643634796142578,
+        "name": "Diospolis",
+        "category": "Location",
+        "description": "Near Timnath per Jerom; i.e. Lydda"
+      },
+      {
+        "path": "bm25",
+        "score": 2.643634796142578,
+        "name": "\u05e0\u05d7\u05de\u05d4 \u05d9\u05e1\u05d5\u05d3",
+        "category": "OriginalWord",
+        "description": "Oath form may I never see consolation"
+      },
+      {
+        "path": "bm25",
+        "score": 2.643634796142578,
+        "name": "\u00c6lia",
+        "category": "Location",
+        "description": "Near Timnath per Jerom; i.e. Jerusalem"
+      },
+      {
+        "path": "bm25",
+        "score": 2.643634796142578,
+        "name": "R. Juda ben Tabai",
+        "category": "CitedAuthority",
+        "description": "Used oath may I never see consolation"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "R. Juda ben Tabai",
+        "category": "HistoricalFigure",
+        "description": "Used oath 'may I never see the consolation'."
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "Hierozoic",
+        "category": "EntityCategory.CitedAuthority",
+        "description": "par. i. l. 3. c. 27. col. 965."
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "\u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8",
+        "category": "OriginalWord",
+        "description": "Hebrew for 'what shall I eat to-morrow?'"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "R. Juda ben Tabai",
+        "category": "EntityCategory.HistoricalFigure",
+        "description": "Used oath 'may I never see the consolation'."
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "\u05de\u05e9\u05de\u05d9\u05d0 \u05de\u05df",
+        "category": "OriginalWord",
+        "description": "Aramaic phrase meaning from heaven, i.e. God"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "\u05de\u05b5\u05e2\u05d5\u05b9\u05dc\u05b8\u05dd \u05dc\u05b9\u05d0 \u05d9\u05b8\u05d3\u05b7\u05e2\u05b0\u05ea\u05b4\u05bc\u05d9\u05da\u05b8",
+        "category": "OriginalWord",
+        "description": "Hebrew for 'I never knew thee' in Talmud"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "\u05e9\u05de\u05d9 \u05e9\u05de",
+        "category": "OriginalWord",
+        "description": "Hebrew for name of heaven, i.e. God"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4843027591705322,
+        "name": "Hierozoic",
+        "category": "CitedAuthority",
+        "description": "par. i. l. 3. c. 27. col. 965."
+      },
+      {
+        "path": "bm25",
+        "score": 2.3430850505828857,
+        "name": "Kedar",
+        "category": "PeopleGroup",
+        "description": "tents covered with goats' hair per Cant. i. 5"
+      },
+      {
+        "path": "bm25",
+        "score": 2.3430850505828857,
+        "name": "\u05de\u05d9\u05ea\u05d4 \u05dc\u05e9\u05de\u05d9\u05e9",
+        "category": "OriginalWord",
+        "description": "Hebrew for death by heaven, i.e. by God"
+      },
+      {
+        "path": "bm25",
+        "score": 1.9409501552581787,
+        "name": "prophets do not arise from Galilee",
+        "category": "Heresy",
+        "description": "reproach against Jesus' origin"
+      },
+      {
+        "path": "bm25",
+        "score": 1.8097904920578003,
+        "name": "Targum on 1 Chron. i. 44",
+        "category": "ManuscriptOrVersion",
+        "description": "Claims Balaam son of Beor son of Laban"
+      }
+    ],
+    "substring_hits": [
+      {
+        "path": "substring:write",
+        "name": "Jewish writers",
+        "category": "PeopleGroup",
+        "description": "Mystically interpret plant and herb as two Messiahs"
+      },
+      {
+        "path": "substring:write",
+        "name": "Arabic writers",
+        "category": "CitedAuthority",
+        "description": "Say Cain trembled and quivered lifelong"
+      },
+      {
+        "path": "substring:write",
+        "name": "Ph\u0153nician writers",
+        "category": "CitedAuthority",
+        "description": "Cited for ancient longevity"
+      },
+      {
+        "path": "substring:write",
+        "name": "eastern writers",
+        "category": "CitedAuthority",
+        "description": "Say Methuselah died before flood"
+      },
+      {
+        "path": "substring:write",
+        "name": "Arabic writer",
+        "category": "CitedAuthority",
+        "description": "Placed ark door on east side."
+      },
+      {
+        "path": "substring:write",
+        "name": "Heathen writers",
+        "category": "PeopleGroup",
+        "description": "Reported Abram famous for arithmetic and astronomy"
+      },
+      {
+        "path": "substring:write",
+        "name": "Persian writer",
+        "category": "CitedAuthority",
+        "description": "Derives Nemurd as immortal for long reign"
+      },
+      {
+        "path": "substring:write",
+        "name": "Jewish writer",
+        "category": "CitedAuthority",
+        "description": "States Peleg died in Abraham's 48th year."
+      },
+      {
+        "path": "substring:write",
+        "name": "Arabic writer[^10]",
+        "category": "CitedAuthority",
+        "description": "Nimrod began reign in Reu's 130th year."
+      },
+      {
+        "path": "substring:write",
+        "name": "Jewish writers[^13]",
+        "category": "CitedAuthority",
+        "description": "Kingdoms of Egypt, Bohemians, Amazons began."
+      },
+      {
+        "path": "substring:write",
+        "name": "Arabic writers[^12]",
+        "category": "CitedAuthority",
+        "description": "Idolatry and star worship prevailed."
+      },
+      {
+        "path": "substring:write",
+        "name": "Jewish writer[^14]",
+        "category": "CitedAuthority",
+        "description": "Reu died in Abraham's 75th year."
+      },
+      {
+        "path": "substring:write",
+        "name": "Mahometan writers",
+        "category": "CitedAuthority",
+        "description": "Derive Amalek from Noah via Ham"
+      },
+      {
+        "path": "substring:write",
+        "name": "ancient Jewish writers",
+        "category": "CitedAuthority",
+        "description": "interpret seed as King Messiah"
+      },
+      {
+        "path": "substring:write",
+        "name": "Hebrew writers",
+        "category": "CitedAuthority",
+        "description": "Say ejection was hardest grief for Abraham"
+      },
+      {
+        "path": "substring:write",
+        "name": "Heathen writer",
+        "category": "CitedAuthority",
+        "description": "Observed Joseph's answers from God"
+      },
+      {
+        "path": "substring:write",
+        "name": "some Jewish writers",
+        "category": "CitedAuthority",
+        "description": "Said hid Moses in bedchamber"
+      },
+      {
+        "path": "substring:write",
+        "name": "Misnic writers",
+        "category": "CitedAuthority",
+        "description": "describe meat-offering as twelve cakes"
+      },
+      {
+        "path": "substring:write",
+        "name": "Christian writers",
+        "category": "PeopleGroup",
+        "description": "Some thought light meant angels."
+      },
+      {
+        "path": "substring:write",
+        "name": "one of their best writers",
+        "category": "CitedAuthority",
+        "description": "fully expressed rules of reproof"
+      },
+      {
+        "path": "substring:write",
+        "name": "genealogical writer",
+        "category": "CitedAuthority",
+        "description": "Confirms Zorobabel's descent from Jechonias"
+      },
+      {
+        "path": "substring:write",
+        "name": "Ethiopic writer",
+        "category": "CitedAuthority",
+        "description": "Claims Virgin Mary buried at Gethsemane"
+      },
+      {
+        "path": "substring:write",
+        "name": "one of the Jewish writers",
+        "category": "EntityCategory.CitedAuthority",
+        "description": "Describes valley of Hinnom with continual fire for defiled things."
+      }
+    ],
+    "combined_names": [
+      "Ehjeh",
+      "eimi",
+      "\u05e2\u05b2\u05e9\u05b5\u05c2\u05d4 \u05e8\u05b0\u05e6\u05d5\u05b9\u05e0\u05b0\u05da\u05b8 \u05d1\u05b7\u05bc\u05e9\u05b8\u05bc\u05c1\u05de\u05b7\u05d9\u05b4\u05dd",
+      "unregenerate men",
+      "Christ's lambs and sheep",
+      "Christ's lambs and sheep",
+      "\u05dc\u05d0 \u05de\u05ea\u05d9\u05dd \u05d0\u05dc\u05d0 \u05d9\u05e0\u05d5\u05d3\u05de\u05d9\u05dd",
+      "\u05d0\u05b7\u05dc \u05ea\u05b8\u05bc\u05d1\u05b4\u05d9\u05d0\u05b5\u05e0\u05b4\u05d9",
+      "wicked of the nations of the world",
+      "nations of the earth",
+      "\u1f10\u03bb\u03b5\u03c5\u03b8\u03ad\u03c1\u03c9\u03c3\u03b5\u03bd",
+      "Hosanna",
+      "lizkoth",
+      "servant of sin",
+      "servant of sin",
+      "Diospolis",
+      "\u05e0\u05d7\u05de\u05d4 \u05d9\u05e1\u05d5\u05d3",
+      "\u00c6lia",
+      "R. Juda ben Tabai",
+      "R. Juda ben Tabai",
+      "Hierozoic",
+      "\u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8",
+      "R. Juda ben Tabai",
+      "\u05de\u05e9\u05de\u05d9\u05d0 \u05de\u05df",
+      "\u05de\u05b5\u05e2\u05d5\u05b9\u05dc\u05b8\u05dd \u05dc\u05b9\u05d0 \u05d9\u05b8\u05d3\u05b7\u05e2\u05b0\u05ea\u05b4\u05bc\u05d9\u05da\u05b8",
+      "\u05e9\u05de\u05d9 \u05e9\u05de",
+      "Hierozoic",
+      "Kedar",
+      "\u05de\u05d9\u05ea\u05d4 \u05dc\u05e9\u05de\u05d9\u05e9",
+      "prophets do not arise from Galilee",
+      "Targum on 1 Chron. i. 44",
+      "Jewish writers",
+      "Arabic writers",
+      "Ph\u0153nician writers",
+      "eastern writers",
+      "Arabic writer",
+      "Heathen writers",
+      "Persian writer",
+      "Jewish writer",
+      "Arabic writer[^10]",
+      "Jewish writers[^13]",
+      "Arabic writers[^12]",
+      "Jewish writer[^14]",
+      "Mahometan writers",
+      "ancient Jewish writers",
+      "Hebrew writers",
+      "Heathen writer",
+      "some Jewish writers",
+      "Misnic writers",
+      "Christian writers",
+      "one of their best writers",
+      "genealogical writer",
+      "Ethiopic writer",
+      "one of the Jewish writers"
+    ],
+    "substring_candidates": [
+      "javascript",
+      "loop",
+      "write"
+    ],
+    "polarity": "OOD"
+  },
+  {
+    "query": "did Esau eat pizza",
+    "target": null,
+    "target_rank": null,
+    "bm25_hits": [
+      {
+        "path": "bm25",
+        "score": 5.420672416687012,
+        "name": "Kenaz",
+        "category": "BiblicalFigure",
+        "description": "Grandson of Esau, potential ancestor of Kenizzites"
+      },
+      {
+        "path": "bm25",
+        "score": 5.015139579772949,
+        "name": "Jaalam",
+        "category": "BiblicalFigure",
+        "description": "Son borne to Esau by Aholibamah"
+      },
+      {
+        "path": "bm25",
+        "score": 5.015139579772949,
+        "name": "Korah",
+        "category": "BiblicalFigure",
+        "description": "Son borne to Esau by Aholibamah"
+      },
+      {
+        "path": "bm25",
+        "score": 5.015139579772949,
+        "name": "Reuel",
+        "category": "BiblicalFigure",
+        "description": "Second son of Esau by Bashemath."
+      },
+      {
+        "path": "bm25",
+        "score": 5.015139579772949,
+        "name": "Jeush",
+        "category": "BiblicalFigure",
+        "description": "Son borne to Esau by Aholibamah"
+      },
+      {
+        "path": "bm25",
+        "score": 3.6313445568084717,
+        "name": "Esau",
+        "category": "BiblicalFigure",
+        "description": "Jewish writers say killed Nimrod"
+      },
+      {
+        "path": "bm25",
+        "score": 2.8690483570098877,
+        "name": "Eliphaz",
+        "category": "BiblicalFigure",
+        "description": "Father of Amalek per Gen 36:12"
+      },
+      {
+        "path": "bm25",
+        "score": 2.840409278869629,
+        "name": "publican and sinner",
+        "category": "PeopleGroup",
+        "description": "Become self-righteous, eat husks"
+      },
+      {
+        "path": "bm25",
+        "score": 2.840409278869629,
+        "name": "Mauritania",
+        "category": "Location",
+        "description": "Bordering people eat preserved locusts."
+      },
+      {
+        "path": "bm25",
+        "score": 2.840409278869629,
+        "name": "Chelonophagi",
+        "category": "PeopleGroup",
+        "description": "Ancient people who eat tortoises"
+      },
+      {
+        "path": "bm25",
+        "score": 2.840409278869629,
+        "name": "publican and sinner",
+        "category": "EntityCategory.PeopleGroup",
+        "description": "Become self-righteous, eat husks"
+      },
+      {
+        "path": "bm25",
+        "score": 2.820956230163574,
+        "name": "Simeon the Just",
+        "category": "CitedAuthority",
+        "description": "Did not use Rabbi title."
+      },
+      {
+        "path": "bm25",
+        "score": 2.820956230163574,
+        "name": "Antigonus",
+        "category": "CitedAuthority",
+        "description": "Did not use Rabbi title."
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "face of God",
+        "category": "TypeOrSymbol",
+        "description": "likened to Esau's pleasant face"
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Edom",
+        "category": "OriginalWord",
+        "description": "Hebrew word meaning 'red' for Esau"
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Beeri",
+        "category": "BiblicalFigure",
+        "description": "Father of Esau's wife Judith."
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Anah",
+        "category": "BiblicalFigure",
+        "description": "Father of Esau's wife Aholibamah"
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Zibeon",
+        "category": "BiblicalFigure",
+        "description": "Father of Esau's wife Aholibamah."
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Daughters of Heth",
+        "category": "PeopleGroup",
+        "description": "Esau's previous wives; both alive."
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "face of God",
+        "category": "EntityCategory.TypeOrSymbol",
+        "description": "likened to Esau's pleasant face"
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Edomite",
+        "category": "PeopleGroup",
+        "description": "Reuel son of Esau, not Midianite."
+      },
+      {
+        "path": "bm25",
+        "score": 2.7264888286590576,
+        "name": "Elon",
+        "category": "BiblicalFigure",
+        "description": "Father of Esau's wife Bashemath."
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "unclean",
+        "category": "PeopleGroup",
+        "description": "Not permitted to eat Passover lamb"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "Christ's lambs and sheep",
+        "category": "PeopleGroup",
+        "description": "Do not eat husks, renewed taste"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "\u05dc\u05b5\u05da\u05b0 \u05d5\u05b0\u05d0\u05b8\u05db\u05b0\u05dc\u05b8\u05d4",
+        "category": "OriginalWord",
+        "description": "Hebrew for 'go and eat him'"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "court of the tabernacle of the congregation",
+        "category": "Location",
+        "description": "Area where priests eat the offering"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "poor",
+        "category": "PeopleGroup",
+        "description": "Invited to eat peace-offering flesh."
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "Parthians",
+        "category": "PeopleGroup",
+        "description": "Eat locusts as agreeable grateful food."
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "Syrophoenician woman",
+        "category": "BiblicalFigure",
+        "description": "Pled dogs eat master's crumbs"
+      },
+      {
+        "path": "bm25",
+        "score": 2.645753860473633,
+        "name": "Christ's lambs and sheep",
+        "category": "EntityCategory.PeopleGroup",
+        "description": "Do not eat husks, renewed taste"
+      },
+      {
+        "path": "bm25",
+        "score": 2.627634048461914,
+        "name": "Korah's sons",
+        "category": "BiblicalFigure",
+        "description": "Did not die when others perished."
+      },
+      {
+        "path": "bm25",
+        "score": 2.627634048461914,
+        "name": "Babylonian Jews",
+        "category": "PeopleGroup",
+        "description": "Did not study law at night"
+      },
+      {
+        "path": "bm25",
+        "score": 2.551624059677124,
+        "name": "Eliphaz the Temanite",
+        "category": "EntityCategory.BiblicalFigure",
+        "description": "Possibly from Tema people not Esau descendant"
+      },
+      {
+        "path": "bm25",
+        "score": 2.551624059677124,
+        "name": "Nebaioth",
+        "category": "BiblicalFigure",
+        "description": "Sister's brother to Esau's wife."
+      },
+      {
+        "path": "bm25",
+        "score": 2.551624059677124,
+        "name": "Kenizzites",
+        "category": "PeopleGroup",
+        "description": "Supposed descendants of Kenaz, grandson of Esau"
+      },
+      {
+        "path": "bm25",
+        "score": 2.551624059677124,
+        "name": "Eliphaz the Temanite",
+        "category": "BiblicalFigure",
+        "description": "Possibly from Tema people not Esau descendant"
+      },
+      {
+        "path": "bm25",
+        "score": 2.551624059677124,
+        "name": "Horite",
+        "category": "PeopleGroup",
+        "description": "Ethnic group of Seir, intermarried with Esau."
+      },
+      {
+        "path": "bm25",
+        "score": 2.5461935997009277,
+        "name": "Edom",
+        "category": "BiblicalFigure",
+        "description": "Edomites received circumcision from him."
+      },
+      {
+        "path": "bm25",
+        "score": 2.476067304611206,
+        "name": "Nasamones",
+        "category": "PeopleGroup",
+        "description": "African people who dry and eat locusts"
+      },
+      {
+        "path": "bm25",
+        "score": 2.476067304611206,
+        "name": "passover-lamb",
+        "category": "TypeOrSymbol",
+        "description": "Sacrificed for household and neighbors to eat"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4591095447540283,
+        "name": "princes of the several tribes",
+        "category": "PeopleGroup",
+        "description": "Whose rods did not bud or blossom."
+      },
+      {
+        "path": "bm25",
+        "score": 2.4591095447540283,
+        "name": "manna",
+        "category": "TypeOrSymbol",
+        "description": "Did not descend on the Sabbath day"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4591095447540283,
+        "name": "sons-in-law",
+        "category": "BiblicalFigure",
+        "description": "Did not join Lot to escape destruction"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4591095447540283,
+        "name": "\u05ea\u05dd \u05d0\u05dc \u05d4\u05d1\u05e8\u05d5\u05e8\u05d1",
+        "category": "OriginalWord",
+        "description": "Targum: did not die in his sins"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4591095447540283,
+        "name": "Mary",
+        "category": "BiblicalFigure",
+        "description": "Did not recognize Christ at her elbow"
+      },
+      {
+        "path": "bm25",
+        "score": 2.4591095447540283,
+        "name": "Rabbi Joshua",
+        "category": "CitedAuthority",
+        "description": "Did not shake except at save words"
+      },
+      {
+        "path": "bm25",
+        "score": 2.3978376388549805,
+        "name": "Amalek",
+        "category": "PeopleGroup",
+        "description": "Branch of Esau's family commanded for destruction."
+      },
+      {
+        "path": "bm25",
+        "score": 2.3978376388549805,
+        "name": "Chushim",
+        "category": "BiblicalFigure",
+        "description": "Struck off Esau's head per Jewish tradition."
+      },
+      {
+        "path": "bm25",
+        "score": 2.3268346786499023,
+        "name": "\u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8",
+        "category": "OriginalWord",
+        "description": "Hebrew for 'what shall I eat to-morrow?'"
+      },
+      {
+        "path": "bm25",
+        "score": 2.310899019241333,
+        "name": "nominal Christians",
+        "category": "PeopleGroup",
+        "description": "Professed Christ but did not minister to him."
+      }
+    ],
+    "substring_hits": [],
+    "combined_names": [
+      "Kenaz",
+      "Jaalam",
+      "Korah",
+      "Reuel",
+      "Jeush",
+      "Esau",
+      "Eliphaz",
+      "publican and sinner",
+      "Mauritania",
+      "Chelonophagi",
+      "publican and sinner",
+      "Simeon the Just",
+      "Antigonus",
+      "face of God",
+      "Edom",
+      "Beeri",
+      "Anah",
+      "Zibeon",
+      "Daughters of Heth",
+      "face of God",
+      "Edomite",
+      "Elon",
+      "unclean",
+      "Christ's lambs and sheep",
+      "\u05dc\u05b5\u05da\u05b0 \u05d5\u05b0\u05d0\u05b8\u05db\u05b0\u05dc\u05b8\u05d4",
+      "court of the tabernacle of the congregation",
+      "poor",
+      "Parthians",
+      "Syrophoenician woman",
+      "Christ's lambs and sheep",
+      "Korah's sons",
+      "Babylonian Jews",
+      "Eliphaz the Temanite",
+      "Nebaioth",
+      "Kenizzites",
+      "Eliphaz the Temanite",
+      "Horite",
+      "Edom",
+      "Nasamones",
+      "passover-lamb",
+      "princes of the several tribes",
+      "manna",
+      "sons-in-law",
+      "\u05ea\u05dd \u05d0\u05dc \u05d4\u05d1\u05e8\u05d5\u05e8\u05d1",
+      "Mary",
+      "Rabbi Joshua",
+      "Amalek",
+      "Chushim",
+      "\u05de\u05d4 \u05d0\u05d5\u05db\u05dc \u05dc\u05de\u05d7\u05e8",
+      "nominal Christians"
+    ],
+    "substring_candidates": [
+      "esau",
+      "pizza"
+    ],
+    "polarity": "OOD"
+  }
+]

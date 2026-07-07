@@ -1,0 +1,122 @@
+
+####################################################################################################
+# E-6b POST-FIX VALIDATION
+# ADR-0010 tiered lookup: vector(dist<=0.25, cap 3)
+#                       + substring canonical-key
+#                       + BM25 (cap 3)
+#                       -> dedup, total cap 5
+####################################################################################################
+
+====================================================================================================
+[in-domain] QUERY: 'exclusive psalmody'
+  target: 'Hallel'  -> TARGET ABSENT
+----------------------------------------------------------------------------------------------------
+  Tier 1 vector (dist<=0.25, cap 3):
+    (empty — no entity below distance threshold)
+  Tier 2 substring (per-token, dedup):
+    (empty)
+  Tier 3 BM25 (cap 3, dedup):
+    - 'key of David' (score=3.2360)
+  FINAL MANIFEST (top 5):
+     1. key of David
+
+====================================================================================================
+[in-domain] QUERY: 'universal atonement in Christ'
+  target: 'Atonement'  -> TARGET IN MANIFEST
+----------------------------------------------------------------------------------------------------
+  Tier 1 vector (dist<=0.25, cap 3):
+    - 'atonement' (d=0.1809)
+    - 'satisfaction of Christ' (d=0.2265)
+    - 'propitiation' (d=0.2396)
+  Tier 2 substring (per-token, dedup):
+    - 'day of atonement' (via 'atonement')
+    - 'Universal History' (via 'universal')
+    - 'Christ' (via 'christ')
+    - 'Christians' (via 'christ')
+    - 'ancient Christian fathers' (via 'christ')
+    ... + 19 more (all dropped by total cap)
+  Tier 3 BM25 (cap 3, dedup):
+    - 'shaft' (score=4.2560)
+    - "Lord's supper" (score=4.0707)
+  FINAL MANIFEST (top 5):
+    *1. atonement
+     2. satisfaction of Christ
+     3. propitiation
+     4. day of atonement
+     5. Universal History
+
+====================================================================================================
+[in-domain] QUERY: 'is the covenant of grace monocovenantal'
+  target: 'covenant of grace'  -> TARGET IN MANIFEST
+----------------------------------------------------------------------------------------------------
+  Tier 1 vector (dist<=0.25, cap 3):
+    (empty — no entity below distance threshold)
+  Tier 2 substring (per-token, dedup):
+    - 'covenant of grace' (via 'covenant')
+    - 'covenant of works' (via 'covenant')
+    - 'covenant of conservation' (via 'covenant')
+    - 'everlasting covenant' (via 'covenant')
+    - 'Angel of the covenant' (via 'covenant')
+    ... + 37 more (all dropped by total cap)
+  Tier 3 BM25 (cap 3, dedup):
+    (empty — all dedup'd out)
+  FINAL MANIFEST (top 5):
+    *1. covenant of grace
+     2. covenant of works
+     3. covenant of conservation
+     4. everlasting covenant
+     5. Angel of the covenant
+
+====================================================================================================
+[OOD] QUERY: 'how do I write a for loop in javascript'
+----------------------------------------------------------------------------------------------------
+  Tier 1 vector (dist<=0.25, cap 3):
+    (empty — no entity below distance threshold)
+  Tier 2 substring (per-token, dedup):
+    - 'Jewish writers' (via 'write')
+    - 'Arabic writers' (via 'write')
+    - 'Phœnician writers' (via 'write')
+    - 'eastern writers' (via 'write')
+    - 'Arabic writer' (via 'write')
+    ... + 18 more (all dropped by total cap)
+  Tier 3 BM25 (cap 3, dedup):
+    - 'Ehjeh' (score=3.5532)
+    - 'eimi' (score=3.2735)
+    - 'עֲשֵׂה רְצוֹנְךָ בַּשָּׁמַיִם' (score=3.2524)
+  FINAL MANIFEST (top 5):
+     1. Jewish writers
+     2. Arabic writers
+     3. Phœnician writers
+     4. eastern writers
+     5. Arabic writer
+
+====================================================================================================
+[OOD] QUERY: 'did Esau eat pizza'
+----------------------------------------------------------------------------------------------------
+  Tier 1 vector (dist<=0.25, cap 3):
+    (empty — no entity below distance threshold)
+  Tier 2 substring (per-token, dedup):
+    - 'Esau' (via 'esau')
+  Tier 3 BM25 (cap 3, dedup):
+    - 'Jaalam' (score=5.0151)
+    - 'Reuel' (score=5.0151)
+    - 'Jeush' (score=5.0151)
+  FINAL MANIFEST (top 5):
+     1. Esau
+     2. Jaalam
+     3. Reuel
+     4. Jeush
+
+
+====================================================================================================
+SUMMARY — target-in-manifest by query
+====================================================================================================
+  polarity   query                                                  target_in_manifest   manifest_size
+----------------------------------------------------------------------------------------------------
+  in-domain  exclusive psalmody                                                     no               1
+  in-domain  universal atonement in Christ                                         YES               5
+  in-domain  is the covenant of grace monocovenantal                               YES               5
+  OOD        how do I write a for loop in javascript                                 -               5
+  OOD        did Esau eat pizza                                                      -               4
+
+  Raw: C:\Users\cnogr\git\goat-yard-archive\evals\e6_entity_lookup_probe\e6b_post_fix_results.json

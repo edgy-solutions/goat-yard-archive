@@ -1,0 +1,301 @@
+
+####################################################################################################
+# E-6: near_vector probe -- recall + precision + threshold
+# distance = cosine distance (0=identical, 2=opposite); LOWER = closer
+# K=100
+####################################################################################################
+
+
+############################################################
+### SANITY (direct name / gloss lookups)
+############################################################
+
+====================================================================================================
+QUERY: 'Hallel'
+  target: 'Hallel'  ->  rank 2 of top-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+    1   0.1688 OriginalWord           הַלֵּל טָעוּן                            Passover bound to a hymn
+ *  2   0.1750 TypeOrSymbol           Hallel                                   Jewish Passover hymn of Psalms 113-118
+    3   0.2236 OriginalWord           יסורים של משיח                           Sorrows of the Messiah in Hallel
+    4   0.2336 OriginalWord           קְרִיאַת שְׁמַע                          Reading of 'Hear O Israel'
+    5   0.2446 BiblicalFigure         Lord thy God                             
+    6   0.2546 HistoricalFigure       Aishah                                   From plains of Moab
+    7   0.2546 EntityCategory.Histori Aishah                                   From plains of Moab
+    8   0.2604 BiblicalFigure         Lord our God                             blessed in Passover cup thanksgiving pra
+    9   0.2652 ManuscriptOrVersion    Megilla                                  the book of Esther recited from memory
+   10   0.2662 BiblicalFigure         Messiah                                  kingdom fills earth with glory
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 2 -> 3: +0.0485  (from 0.1750 to 0.2236)
+    rank 13 -> 14: +0.0126  (from 0.2702 to 0.2829)
+    rank 4 -> 5: +0.0110  (from 0.2336 to 0.2446)
+    rank 5 -> 6: +0.0101  (from 0.2446 to 0.2546)
+    rank 3 -> 4: +0.0100  (from 0.2236 to 0.2336)
+
+====================================================================================================
+QUERY: 'Passover hymn consisting of Psalms 113-118'
+  target: 'Hallel'  ->  rank 1 of top-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+ *  1   0.1636 TypeOrSymbol           Hallel                                   Jewish Passover hymn of Psalms 113-118
+    2   0.2300 OriginalWord           הַלֵּל טָעוּן                            Passover bound to a hymn
+    3   0.2811 BiblicalFigure         Lord our God                             blessed in Passover cup thanksgiving pra
+    4   0.2839 OriginalWord           הא לחמא עניא                             This is the bread of affliction eaten in
+    5   0.2854 EntityCategory.Origina הא לחמא עניא                             This is the bread of affliction eaten in
+    6   0.3143 EntityCategory.Origina פסח                                      Hebrew for passover
+    7   0.3176 OriginalWord           יסורים של משיח                           Sorrows of the Messiah in Hallel
+    8   0.3210 OriginalWord           Chagigah                                 Festival day of Passover observance
+    9   0.3247 OriginalWord           Pesach                                   Hebrew word for passover eaten with appe
+   10   0.3334 TypeOrSymbol           passover                                 Lord's appointed ordinance and offering
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 1 -> 2: +0.0664  (from 0.1636 to 0.2300)
+    rank 2 -> 3: +0.0511  (from 0.2300 to 0.2811)
+    rank 5 -> 6: +0.0289  (from 0.2854 to 0.3143)
+    rank 11 -> 12: +0.0097  (from 0.3342 to 0.3439)
+    rank 9 -> 10: +0.0088  (from 0.3247 to 0.3334)
+
+====================================================================================================
+QUERY: 'universal atonement'
+  target: 'Atonement'  ->  rank 1 of top-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+ *  1   0.2020 Doctrine               atonement                                by Christ's sacrifice
+    2   0.2494 Doctrine               satisfaction of Christ                   Christ's atonement accepted by God
+    3   0.2653 Doctrine               propitiation                             for sin provided in Christ
+    4   0.2680 Doctrine               expiation                                of sins by Christ's shed blood
+    5   0.2695 Doctrine               free grace of God                        Basis of salvation eternal life
+    6   0.2851 Doctrine               eternal redemption                       Obtained in Christ's human likeness
+    7   0.2896 Doctrine               pardoning grace                          Sense of God's forgiveness upon believer
+    8   0.2915 Doctrine               sovereign grace                          God's goodness in salvation works
+    9   0.2957 Doctrine               particular redemption                    By Christ as one river branch
+   10   0.2965 EntityCategory.Doctrin good will towards men                    God's free favour to elect in Christ Jes
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 1 -> 2: +0.0474  (from 0.2020 to 0.2494)
+    rank 2 -> 3: +0.0159  (from 0.2494 to 0.2653)
+    rank 5 -> 6: +0.0156  (from 0.2695 to 0.2851)
+    rank 6 -> 7: +0.0045  (from 0.2851 to 0.2896)
+    rank 8 -> 9: +0.0042  (from 0.2915 to 0.2957)
+
+====================================================================================================
+QUERY: 'covenant of grace'
+  target: 'covenant of grace'  ->  rank 6 of top-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+    1   0.1671 Doctrine               covenant of his grace                    Promised eternal life before world began
+    2   0.1822 Doctrine               sovereign grace                          God's goodness in salvation works
+    3   0.2061 Doctrine               new covenant                             Law reinscribed on regenerated hearts
+    4   0.2106 Doctrine               free grace of God                        Basis of salvation eternal life
+    5   0.2118 Doctrine               efficacious grace                        work of God creating new heart
+ *  6   0.2121 Doctrine               covenant of grace                        Provides good things in Christ post-fall
+    7   0.2130 Doctrine               covenant engagements                     obligations of Christ requiring his deat
+    8   0.2186 Doctrine               election of grace                        God's choice preserving a remnant
+    9   0.2209 Doctrine               distinguishing grace                     doctrines relating to elect's salvation
+   10   0.2212 Doctrine               chosen                                   eternal election to grace and glory
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 2 -> 3: +0.0239  (from 0.1822 to 0.2061)
+    rank 1 -> 2: +0.0151  (from 0.1671 to 0.1822)
+    rank 7 -> 8: +0.0056  (from 0.2130 to 0.2186)
+    rank 23 -> 24: +0.0056  (from 0.2452 to 0.2509)
+    rank 3 -> 4: +0.0044  (from 0.2061 to 0.2106)
+
+
+############################################################
+### IN-DOMAIN (conceptual queries)
+############################################################
+
+====================================================================================================
+QUERY: 'exclusive psalmody'
+  target: 'Hallel'  ->  NOT IN TOP-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+    1   0.2515 TypeOrSymbol           music                                    Preaching of Gospel doctrines harmonious
+    2   0.3017 Doctrine               Gospel privileges                        cause of praise songs to God
+    3   0.3145 Doctrine               pure Gospel of Christ                    Preached wholly by faithful ministers
+    4   0.3285 Doctrine               way of God                               Taught truly by Christ in worship
+    5   0.3465 Doctrine               calling grace                            cause of praise songs to God
+    6   0.3482 Doctrine               spiritual blessings                      cause of praise songs to God
+    7   0.3494 Doctrine               redeeming love                           cause of praise songs to God
+    8   0.3498 BiblicalFigure         Lord thy God                             
+    9   0.3518 Doctrine               true worship of God                      contrasted with vain worship traditions
+   10   0.3574 TypeOrSymbol           true tabernacle                          Christ, means of acceptable worship
+   11   0.3605 BiblicalFigure         Messiah                                  kingdom fills earth with glory
+   12   0.3652 Doctrine               electing love                            cause of praise songs to God
+   13   0.3667 Doctrine               chosen                                   eternal election to grace and glory
+   14   0.3692 BiblicalFigure         Lord Jesus Christ                        Reigns forever and ever eternally
+   15   0.3695 TypeOrSymbol           piping                                   Symbol of Christ's delightful Gospel min
+   16   0.3695 OriginalWord           הַלֵּל טָעוּן                            Passover bound to a hymn
+   17   0.3710 Doctrine               new covenant                             Law reinscribed on regenerated hearts
+   18   0.3718 EntityCategory.TypeOrS servant of sin                           Do not abide forever in house of God
+   19   0.3718 TypeOrSymbol           servant of sin                           Do not abide forever in house of God
+   20   0.3726 Doctrine               profession of faith                      verbal and practical confession of grace
+   21   0.3726 BiblicalFigure         Psalmist                                 Speaks of people framing wickedness by l
+   22   0.3727 TypeOrSymbol           church of Christ                         where Christ and ordinances are present
+   23   0.3739 Doctrine               social prayer                            encouragement to social prayer
+   24   0.3742 Doctrine               ordinances of the Gospel                 rites submitted to by true professors
+   25   0.3755 BiblicalFigure         the blessed spirit                       suggests words and aids elocution
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 1 -> 2: +0.0501  (from 0.2515 to 0.3017)
+    rank 4 -> 5: +0.0180  (from 0.3285 to 0.3465)
+    rank 3 -> 4: +0.0141  (from 0.3145 to 0.3285)
+    rank 2 -> 3: +0.0128  (from 0.3017 to 0.3145)
+    rank 9 -> 10: +0.0056  (from 0.3518 to 0.3574)
+
+====================================================================================================
+QUERY: 'universal atonement in Christ'
+  target: 'Atonement'  ->  rank 1 of top-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+ *  1   0.1814 Doctrine               atonement                                by Christ's sacrifice
+    2   0.2269 Doctrine               satisfaction of Christ                   Christ's atonement accepted by God
+    3   0.2401 Doctrine               propitiation                             for sin provided in Christ
+    4   0.2486 Doctrine               expiation                                of sins by Christ's shed blood
+    5   0.2629 Doctrine               eternal redemption                       Obtained in Christ's human likeness
+    6   0.2724 PeopleGroup            chosen people                            Whose salvation effected by Christ's dea
+    7   0.2724 Doctrine               particular redemption                    By Christ as one river branch
+    8   0.2727 Doctrine               free grace of God                        Basis of salvation eternal life
+    9   0.2757 Doctrine               salvation of immortal souls              Certain, resting upon Christ
+   10   0.2783 EntityCategory.Doctrin good will towards men                    God's free favour to elect in Christ Jes
+   11   0.2796 Doctrine               good will towards men                    God's free favour to elect in Christ Jes
+   12   0.2845 TypeOrSymbol           antitypical scape-goat                   Christ for pardon and cleansing
+   13   0.2859 Doctrine               Godhead                                  Fulness dwells bodily in Christ
+   14   0.2913 CitedAuthority         Mr. Ainsworth                            Notes typology of Christ as sin-offering
+   15   0.2926 Doctrine               sin actual                               Atoned by Christ in purification type
+   16   0.2933 Doctrine               deity and eternity                       Doctrines respecting Christ's deity
+   17   0.2954 Doctrine               sovereign grace                          God's goodness in salvation works
+   18   0.2958 Doctrine               pardoning grace                          Sense of God's forgiveness upon believer
+   19   0.2982 Doctrine               justifying righteousness of Christ       saints' right to kingdom of heaven
+   20   0.2983 Doctrine               mystical union                           indissoluble spiritual union with Christ
+   21   0.2990 Doctrine               omniscience of Christ                    Christ's perfect knowledge of his people
+   22   0.2997 Doctrine               new covenant                             Law reinscribed on regenerated hearts
+   23   0.3001 Doctrine               decrees and purposes of God              Immutable fix of Christ's sufferings
+   24   0.3001 BiblicalFigure         spirit of uncleanness                    caused to depart by Christ
+   25   0.3010 TypeOrSymbol           child-bearing                            Typical of Christ's atonement for sins
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 1 -> 2: +0.0456  (from 0.1814 to 0.2269)
+    rank 4 -> 5: +0.0143  (from 0.2486 to 0.2629)
+    rank 2 -> 3: +0.0131  (from 0.2269 to 0.2401)
+    rank 5 -> 6: +0.0095  (from 0.2629 to 0.2724)
+    rank 3 -> 4: +0.0085  (from 0.2401 to 0.2486)
+
+====================================================================================================
+QUERY: 'is the covenant of grace monocovenantal'
+  target: 'covenant of grace'  ->  rank 5 of top-100
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+    1   0.2610 Doctrine               new covenant                             Law reinscribed on regenerated hearts
+    2   0.2804 Doctrine               covenant of his grace                    Promised eternal life before world began
+    3   0.2865 Doctrine               new covenant of grace                    Blessings now exhibited but rejected by 
+    4   0.2883 Doctrine               distinguishing grace                     doctrines relating to elect's salvation
+ *  5   0.2897 Doctrine               covenant of grace                        Provides good things in Christ post-fall
+    6   0.3046 Doctrine               sovereign grace                          God's goodness in salvation works
+    7   0.3048 Doctrine               covenant engagements                     obligations of Christ requiring his deat
+    8   0.3057 Doctrine               covenant of works                        Broken, brings wrath not life
+    9   0.3116 Doctrine               covenant of grace and peace              Everlasting council where dinner was con
+   10   0.3117 Doctrine               covenant of the priesthood               possibly same as covenant of peace
+   11   0.3239 Doctrine               efficacious grace                        work of God creating new heart
+   12   0.3250 Doctrine               holy covenant                            Made eternally between God and his Son
+   13   0.3286 Doctrine               election of grace                        God's choice preserving a remnant
+   14   0.3305 TypeOrSymbol           ark of the covenant                      Law laid up as fulfilling end in Christ
+   15   0.3305 TimePeriod             Gospel dispensation                      Clear day opposed to legal dispensation'
+   16   0.3352 EntityCategory.Doctrin call of divine grace                     call out of the world into the church
+   17   0.3352 Doctrine               call of divine grace                     call out of the world into the church
+   18   0.3366 Doctrine               profession of faith                      verbal and practical confession of grace
+   19   0.3367 Doctrine               everlasting covenant of grace            Brings spiritual blessings upon God's pe
+   20   0.3369 PeopleGroup            Arminian                                 Undervalues imputation of Christ's right
+   21   0.3374 Doctrine               particular redemption                    By Christ as one river branch
+   22   0.3377 Heresy                 denial of efficacious grace              Unnecessary for regeneration and works
+   23   0.3408 PeopleGroup            them that are without                    not elect nor in covenant of grace
+   24   0.3414 Doctrine               everlasting covenant                     between God and every living creature
+   25   0.3417 Doctrine               free grace of God                        Basis of salvation eternal life
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 1 -> 2: +0.0194  (from 0.2610 to 0.2804)
+    rank 5 -> 6: +0.0149  (from 0.2897 to 0.3046)
+    rank 10 -> 11: +0.0122  (from 0.3117 to 0.3239)
+    rank 2 -> 3: +0.0061  (from 0.2804 to 0.2865)
+    rank 8 -> 9: +0.0059  (from 0.3057 to 0.3116)
+
+
+############################################################
+### OUT-OF-DOMAIN
+############################################################
+
+====================================================================================================
+QUERY: 'how do I write a for loop in javascript'
+  target: (out-of-domain, no target)
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+    1   0.5023 OriginalWord           echad                                    Hebrew for 'one' in execution context
+    2   0.5405 OriginalWord           jod                                      Least letter in Hebrew alphabet
+    3   0.5629 OriginalWord           iota                                     Greek equivalent to Hebrew jod
+    4   0.5698 OriginalWord           כָּתוּב                                  Hebrew for 'it is written'
+    5   0.5716 OriginalWord           ישוא                                     equal or answerable in testimony
+    6   0.5742 OriginalWord           Python                                   spirit of divination like ventriloquism
+    7   0.5748 TypeOrSymbol           floor                                    represents the land of Israel
+    8   0.5807 CitedAuthority         Noldius                                  renders Hebrew בּ as 'before'
+    9   0.5827 TypeOrSymbol           apple-tree                               Tree comparison for Christ.
+   10   0.5829 EntityCategory.TypeOrS apple-tree                               Tree comparison for Christ.
+   11   0.5863 TypeOrSymbol           candlestick                              Golden candlestick with vessels
+   12   0.5869 PeopleGroup            nobles of Jerusalem                      Accompanied man to first booth
+   13   0.5879 EntityCategory.Heresy  visionary way                            denial of literal speaking ass by Jewish
+   14   0.5883 Heresy                 visionary way                            denial of literal speaking ass by Jewish
+   15   0.5887 ManuscriptOrVersion    Jewish writings                          Sources mentioning Rabbins in Bene-berak
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 1 -> 2: +0.0382  (from 0.5023 to 0.5405)
+    rank 2 -> 3: +0.0224  (from 0.5405 to 0.5629)
+    rank 3 -> 4: +0.0070  (from 0.5629 to 0.5698)
+    rank 7 -> 8: +0.0059  (from 0.5748 to 0.5807)
+    rank 10 -> 11: +0.0034  (from 0.5829 to 0.5863)
+
+====================================================================================================
+QUERY: 'did Esau eat pizza'
+  target: (out-of-domain, no target)
+----------------------------------------------------------------------------------------------------
+   rk     dist category               name                                     description                             
+----------------------------------------------------------------------------------------------------
+    1   0.3425 EntityCategory.TypeOrS face of God                              likened to Esau's pleasant face
+    2   0.3449 TypeOrSymbol           face of God                              likened to Esau's pleasant face
+    3   0.3807 PeopleGroup            Pamphagi                                 Nation eating all sorts of food
+    4   0.3859 BiblicalFigure         Jeush                                    Son borne to Esau by Aholibamah
+    5   0.3987 BiblicalFigure         Esau                                     Jewish writers say killed Nimrod
+    6   0.4087 Doctrine               God's providence                         Remarkable in Jacob's exit and Esau's en
+    7   0.4095 PeopleGroup            Hebrew                                   Joseph's ethnic background restricting f
+    8   0.4112 PeopleGroup            Joseph's brethren                        contrived story of wild beast devouring 
+    9   0.4195 PeopleGroup            Cannibals                                Linked to first hour eating time
+   10   0.4248 BiblicalFigure         Jaalam                                   Son borne to Esau by Aholibamah
+   11   0.4294 PeopleGroup            antediluvian patriarchs                  Struggled to obtain bread amid cursed gr
+   12   0.4305 EntityCategory.PeopleG your fathers                             ate manna and are dead
+   13   0.4305 PeopleGroup            your fathers                             ate manna and are dead
+   14   0.4318 TypeOrSymbol           passover-lamb                            Sacrificed for household and neighbors t
+   15   0.4376 EntityCategory.Origina הא לחמא עניא                             This is the bread of affliction eaten in
+  biggest distance-jumps (rank X -> X+1, delta):
+    rank 2 -> 3: +0.0359  (from 0.3449 to 0.3807)
+    rank 4 -> 5: +0.0128  (from 0.3859 to 0.3987)
+    rank 5 -> 6: +0.0100  (from 0.3987 to 0.4087)
+    rank 8 -> 9: +0.0083  (from 0.4112 to 0.4195)
+    rank 14 -> 15: +0.0058  (from 0.4318 to 0.4376)
+
+
+====================================================================================================
+SUMMARY — distance distributions per query
+====================================================================================================
+  polarity     query                                                    min     max  tgt_rk top1_name                     
+----------------------------------------------------------------------------------------------------
+  sanity       Hallel                                                0.1688  0.3549       2 הַלֵּל טָעוּן                 
+  sanity       Passover hymn consisting of Psalms 113-118            0.1636  0.4424       1 Hallel                        
+  sanity       universal atonement                                   0.2020  0.3387       1 atonement                     
+  sanity       covenant of grace                                     0.1671  0.3154       6 covenant of his grace         
+  in-domain    exclusive psalmody                                    0.2515  0.4065       - music                         
+  in-domain    universal atonement in Christ                         0.1814  0.3357       1 atonement                     
+  in-domain    is the covenant of grace monocovenantal               0.2610  0.3901       5 new covenant                  
+  OOD          how do I write a for loop in javascript               0.5023  0.6102       - echad                         
+  OOD          did Esau eat pizza                                    0.3425  0.4841       - face of God                   
+
+  Raw: C:\Users\cnogr\AppData\Local\Temp\claude\c--Users-cnogr-git-goat-yard-archive\af8134a4-98a5-4323-8e1d-fe16c91515a4\scratchpad\e6_near_vector_results.json

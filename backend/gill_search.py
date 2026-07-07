@@ -387,67 +387,123 @@ class GillSearchEngine:
         "only", "also", "ever", "even", "just", "really", "actually",
     }
 
-    async def get_relevant_entities(self, query: str, limit: int = 50) -> List[str]:
+    # Vector-tier constants — DERIVED from E-6 diagnostic probe (2026-07-07).
+    # See ADR-0010 for the probe methodology and the score distributions
+    # these numbers came from. Do not tune without re-running E-6.
+    #
+    #   VECTOR_CONFIDENT_DIST_MAX — cosine distance ceiling for "the vector
+    #     is confident this entity is a match." Sanity + strong in-domain
+    #     top-1s land 0.16-0.22; the observed vector-side false-positive
+    #     (`exclusive psalmody` -> `music` at 0.252) sits just above 0.25,
+    #     so 0.25 excludes it for free. Consequence: some in-domain queries
+    #     with dilute phrasing land above 0.25 and get NO vector boost.
+    #     Intentional — silence is safer than admitting middle-band noise.
+    #
+    #   VECTOR_TIER_CAP — top-K within the confident tier. E-6 found the
+    #     genuinely-adjacent hits are the first 1-3 with a visible score
+    #     cliff after; anything past 3 in the confident tier is tail noise.
+    #
+    #   MANIFEST_TOTAL_CAP — union across substring / vector / BM25 tiers
+    #     after dedup. Lower than the pre-fix limit of 50 to prevent the
+    #     manifest flood that caused the 2026-06-21 universal_atonement bug.
+    VECTOR_CONFIDENT_DIST_MAX = 0.25
+    VECTOR_TIER_CAP = 3
+    MANIFEST_TOTAL_CAP = 5
+
+    async def get_relevant_entities(self, query: str, limit: int | None = None) -> List[str]:
         """
         Fetch a list of relevant entities for query routing.
 
-        Combines BM25 ranking with substring matching against the deterministic
-        `search_key` property (see ADR-0005 Phase 4). The user's tokens are
-        canonicalized the same way (`re.sub(r'[^a-z0-9]', '', token.lower())`)
-        so 'scapegoat' matches 'scape-goat' / 'Scape-goat' / etc. without needing
-        casing or punctuation variants.
+        Three tiers merged in confidence order (ADR-0010):
+
+          Tier 1 — near_vector on qwen3-embedding, distance <= 0.25, cap 3.
+                   Bridges concept synonyms (e.g. 'universal atonement in
+                   Christ' -> 'atonement' Doctrine entity). Silent when the
+                   vector isn't confident; does NOT solve the vocabulary-
+                   bridge case (e.g. 'exclusive psalmody' -> 'Hallel'),
+                   which is a separate query-expansion work item.
+
+          Tier 2 — Substring canonical-key match (ADR-0005 Phase 4).
+                   Bridges casing/punctuation ('scapegoat' -> 'scape-goat').
+
+          Tier 3 — BM25 name-token match. Belt-and-suspenders for
+                   proper-noun hits the vector misses.
+
+        Total union capped at MANIFEST_TOTAL_CAP after dedup. `limit`, when
+        provided, overrides the total cap (used by enumeration-path callers
+        that need broader manifests).
         """
-        bm25_names: List[str] = []
+        total_cap = limit if limit is not None else self.MANIFEST_TOTAL_CAP
+
+        # Tier 1 — confident vector.
+        vector_names: List[str] = []
         try:
-            response = await self.entities.query.bm25(query=query, limit=limit)
-            bm25_names = [
+            query_vec = await self._get_embedding(query)
+            resp = await self.entities.query.near_vector(
+                near_vector=query_vec,
+                limit=self.VECTOR_TIER_CAP,
+                distance=self.VECTOR_CONFIDENT_DIST_MAX,
+                return_properties=["name"],
+            )
+            vector_names = [
                 obj.properties.get("name")
-                for obj in response.objects
+                for obj in resp.objects
                 if obj.properties.get("name")
             ]
         except Exception as e:
-            print(f"Error fetching entities (BM25): {e}")
+            print(f"Entity vector lookup failed: {e}")
 
-        # Substring pre-pass against the canonical search_key — surface entities
-        # whose canonical key contains any significant canonicalized query token.
-        seen = set(bm25_names)
+        # Tier 2 — substring canonical-key.
         substring_names: List[str] = []
-
+        seen_lower = {n.lower() for n in vector_names if n}
         candidates = set()
         for tok in re.findall(r"[A-Za-z]{4,}", query):
             t_lower = tok.lower()
             if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
                 continue
-            # Canonicalize: lowercase + alphanumeric-only (Unicode-aware), matching
-            # the search_key computation in ingest.py.compute_search_key.
             t_key = "".join(c for c in t_lower if c.isalnum())
             if not t_key:
                 continue
             candidates.add(t_key)
-            # Naive plural handling: also try the singular form.
             if t_key.endswith("s") and len(t_key) > 4:
                 candidates.add(t_key[:-1])
 
         for cand in candidates:
-            pattern = f"*{cand}*"
             try:
-                response = await self.entities.query.fetch_objects(
-                    filters=wvc.query.Filter.by_property("search_key").like(pattern),
+                resp = await self.entities.query.fetch_objects(
+                    filters=wvc.query.Filter.by_property("search_key").like(f"*{cand}*"),
                     limit=25,
+                    return_properties=["name"],
                 )
             except Exception as e:
-                print(f"Substring entity lookup failed for '{pattern}': {e}")
+                print(f"Substring entity lookup failed for '{cand}': {e}")
                 continue
-            for obj in response.objects:
+            for obj in resp.objects:
                 name = obj.properties.get("name")
-                if name and name not in seen:
-                    seen.add(name)
+                if name and name.lower() not in seen_lower:
+                    seen_lower.add(name.lower())
                     substring_names.append(name)
 
-        combined = bm25_names + substring_names
+        # Tier 3 — BM25.
+        bm25_names: List[str] = []
+        try:
+            resp = await self.entities.query.bm25(
+                query=query,
+                limit=self.VECTOR_TIER_CAP,
+                return_properties=["name"],
+            )
+            for obj in resp.objects:
+                name = obj.properties.get("name")
+                if name and name.lower() not in seen_lower:
+                    seen_lower.add(name.lower())
+                    bm25_names.append(name)
+        except Exception as e:
+            print(f"Error fetching entities (BM25): {e}")
+
+        combined = vector_names + substring_names + bm25_names
         if not combined:
             return ["Jesus Christ", "Apostle Paul", "Old Testament saints"]
-        return combined
+        return combined[:total_cap]
 
 if __name__ == "__main__":
     # Test

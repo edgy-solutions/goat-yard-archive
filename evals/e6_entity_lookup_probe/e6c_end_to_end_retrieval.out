@@ -1,0 +1,141 @@
+
+####################################################################################################
+# E-6c END-TO-END RETRIEVAL COMPARISON
+# Pre vs post entity-manifest; same query, same cluster, same embedding.
+####################################################################################################
+Connecting to Weaviate at HTTP:192.168.1.54:80 / gRPC:192.168.1.53:50051
+
+====================================================================================================
+CASE: universal_atonement  query='universal atonement in Christ'
+  target entity: 'Atonement'
+  expected verse neighborhood: ['LEVITICUS 16', 'JOHN 10', 'ROMANS 5', 'HEBREWS 9']
+  PRE-fix manifest size:  69
+  POST-fix manifest size: 5
+
+  PRE-fix manifest (first 10): ['satisfaction of Christ', 'atonement', 'shaft', "Lord's supper", 'child-bearing', 'pure and spotless garment of the flesh', 'Universal History', 'Bramines', 'Bramines', 'old world']
+  POST-fix manifest:           ['atonement', 'satisfaction of Christ', 'propitiation', 'day of atonement', 'Universal History']
+Searching for: universal atonement in Christ
+Detected entities: ['satisfaction of Christ', 'atonement', 'shaft', "Lord's supper", 'child-bearing', 'pure and spotless garment of the flesh', 'Universal History', 'Bramines', 'Bramines', 'old world', 'deluge', 'covenant of peace', 'mercy-seat', 'mercy-seat', 'green fir-tree', 'green fir-tree', 'apple-tree', 'apple-tree', "Christ's time", 'incarnation of Christ', '12 apostles', 'wicked Jews', 'Ben Netzer', 'blowing of the trumpets', '10th of the 7th month', 'Reconciliation', 'feast of tabernacles', 'priest that is anointed', 'Virgin Mary', '1490 years before Christ', 'condescending grace of Christ', "Christ's ministers", "Christ's disciples", 'synagogues', 'leper', 'Simeon ben Camhith', 'chamber Parhedrin', 'Siphri', 'day of atonement', 'R. Akiba', 'his brethren', "denial of Christ's proper deity", 'good shepherd', 'good shepherd', 'wisdom of God', 'Christ', 'Christ', 'Barchochab', 'him', 'our Lord', 'Christians', 'ancient Christian fathers', 'antichrist', 'antichristian party', 'Blood of Christ', 'Christian', 'body of Christ', 'Christian writers', 'apostles of Christ', 'between the death of Christ, and the destruction of the temple', 'Christian professors', "Christ's human nature", 'antichristian', "Christ's deity", 'author of the blasphemous book of the life of Christ', 'Christ of God', 'ancient Christians', 'believers in Christ', '1490 years before the coming of Christ']
+Enhanced query for boost: universal atonement in Christ satisfaction of Christ atonement shaft Lord's supper child-bearing pure and spotless garment of the flesh Universal History Bramines Bramines old world deluge covenant of peace mercy-seat mercy-seat green fir-tree green fir-tree apple-tree apple-tree Christ's time incarnation of Christ 12 apostles wicked Jews Ben Netzer blowing of the trumpets 10th of the 7th month Reconciliation feast of tabernacles priest that is anointed Virgin Mary 1490 years before Christ condescending grace of Christ Christ's ministers Christ's disciples synagogues leper Simeon ben Camhith chamber Parhedrin Siphri day of atonement R. Akiba his brethren denial of Christ's proper deity good shepherd good shepherd wisdom of God Christ Christ Barchochab him our Lord Christians ancient Christian fathers antichrist antichristian party Blood of Christ Christian body of Christ Christian writers apostles of Christ between the death of Christ, and the destruction of the temple Christian professors Christ's human nature antichristian Christ's deity author of the blasphemous book of the life of Christ Christ of God ancient Christians believers in Christ 1490 years before the coming of Christ
+[TIMING] Embedding via LiteLLM: 2.667s
+[TIMING] Weaviate query: 0.879s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+Searching for: universal atonement in Christ
+Detected entities: ['atonement', 'satisfaction of Christ', 'propitiation', 'day of atonement', 'Universal History']
+Enhanced query for boost: universal atonement in Christ atonement satisfaction of Christ propitiation day of atonement Universal History
+[TIMING] Embedding via LiteLLM: 7.251s
+[TIMING] Weaviate query: 0.409s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+
+  --- PRE-fix retrieved chunks ---
+    1. [LUKE 23:31] score=0.650
+       ...
+    2. [NUMBERS 15:28] score=0.452
+       ...
+    3. [MARK 2:7] score=0.350
+       ...
+    4. [MATTHEW 18:27] score=0.344
+       ...
+    5. [JOHN 3:16] score=0.301
+       ...
+
+  --- POST-fix retrieved chunks ---
+    1. [LEVITICUS 4:26] score=0.778
+       ...
+    2. [NUMBERS 15:28] score=0.751
+       ...
+    3. [LEVITICUS 23:28] score=0.679
+       ...
+    4. [NUMBERS 15:25] score=0.585
+       ...
+    5. [NUMBERS 7:86] score=0.565
+       ...
+
+  --- comparison ---
+  overlap: ['NUMBERS 15:28']
+  only PRE-fix: ['JOHN 3:16', 'LUKE 23:31', 'MARK 2:7', 'MATTHEW 18:27']
+  only POST-fix: ['LEVITICUS 23:28', 'LEVITICUS 4:26', 'NUMBERS 15:25', 'NUMBERS 7:86']
+  expected-neighborhood hits PRE: 0/5
+  expected-neighborhood hits POST: 0/5
+
+====================================================================================================
+CASE: covenant_monocovenantal  query='is the covenant of grace monocovenantal'
+  target entity: 'covenant of grace'
+  expected verse neighborhood: ['GENESIS 17', 'GENESIS 9', 'MATTHEW 26', 'HEBREWS 8']
+  PRE-fix manifest size:  67
+  POST-fix manifest size: 5
+
+  PRE-fix manifest (first 10): ['covenant of salt', 'covenant of circumcision', 'messenger of the covenant', 'covenant of conservation', 'free grace', 'covenant of the priesthood', 'saving grace', 'preventing grace', 'rainbow', 'them that are without']
+  POST-fix manifest:           ['covenant of grace', 'covenant of works', 'covenant of conservation', 'everlasting covenant', 'Angel of the covenant']
+Searching for: is the covenant of grace monocovenantal
+Detected entities: ['covenant of salt', 'covenant of circumcision', 'messenger of the covenant', 'covenant of conservation', 'free grace', 'covenant of the priesthood', 'saving grace', 'preventing grace', 'rainbow', 'them that are without', 'covenant of grace', 'Counterfeit Grace', 'grace of love', 'grace of God', 'grace of hope', 'spirit of grace', 'spirit of grace', 'distinguished grace of God', 'covenant of his grace', 'new covenant of grace', 'everlasting covenant of grace', 'covenant of grace and peace', 'heavenly father', 'Lord God of Israel', 'national covenant', 'covenant engagements', 'new covenant', 'holy covenant', 'everlasting covenant', 'uncircumcised persons', 'everlasting priesthood', 'oil-vessels', 'circumcision', 'blood of bulls', 'burning lamp', 'inhabitants of the land', 'incorruptible seed', 'self-denial', 'Apostle Paul', 'salt', 'covenant of works', 'covenant of peace', 'efficacious grace', 'true grace', 'electing grace', 'Special grace', 'abundant grace', 'justifying grace', 'calling grace', 'divine grace', 'election of grace', 'doctrines and blessings of grace', 'denial of efficacious grace', 'condescending grace of Christ', 'free grace of God', 'fruits of grace', 'Gospel-grace', 'adopting grace', 'grace imparted', 'converting grace', 'distinguishing grace', 'call of divine grace', 'Angel of the covenant', 'two covenants', 'ark of the covenant', 'covenants', 'covenant-engagements of Christ']
+Enhanced query for boost: is the covenant of grace monocovenantal covenant of salt covenant of circumcision messenger of the covenant covenant of conservation free grace covenant of the priesthood saving grace preventing grace rainbow them that are without covenant of grace Counterfeit Grace grace of love grace of God grace of hope spirit of grace spirit of grace distinguished grace of God covenant of his grace new covenant of grace everlasting covenant of grace covenant of grace and peace heavenly father Lord God of Israel national covenant covenant engagements new covenant holy covenant everlasting covenant uncircumcised persons everlasting priesthood oil-vessels circumcision blood of bulls burning lamp inhabitants of the land incorruptible seed self-denial Apostle Paul salt covenant of works covenant of peace efficacious grace true grace electing grace Special grace abundant grace justifying grace calling grace divine grace election of grace doctrines and blessings of grace denial of efficacious grace condescending grace of Christ free grace of God fruits of grace Gospel-grace adopting grace grace imparted converting grace distinguishing grace call of divine grace Angel of the covenant two covenants ark of the covenant covenants covenant-engagements of Christ
+[TIMING] Embedding via LiteLLM: 0.908s
+[TIMING] Weaviate query: 0.445s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+Searching for: is the covenant of grace monocovenantal
+Detected entities: ['covenant of grace', 'covenant of works', 'covenant of conservation', 'everlasting covenant', 'Angel of the covenant']
+Enhanced query for boost: is the covenant of grace monocovenantal covenant of grace covenant of works covenant of conservation everlasting covenant Angel of the covenant
+[TIMING] Embedding via LiteLLM: 1.202s
+[TIMING] Weaviate query: 0.810s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+
+  --- PRE-fix retrieved chunks ---
+    1. [GENESIS 9:10] score=1.000
+       ...
+    2. [GENESIS 9:9] score=0.710
+       ...
+    3. [JOHN 6:47] score=0.710
+       ...
+    4. [NUMBERS 25:12] score=0.642
+       ...
+    5. [MATTHEW 26:28] score=0.518
+       ...
+
+  --- POST-fix retrieved chunks ---
+    1. [GENESIS 9:10] score=1.000
+       ...
+    2. [GENESIS 9:9] score=0.622
+       ...
+    3. [NUMBERS 25:12] score=0.545
+       ...
+    4. [JOHN 6:47] score=0.534
+       ...
+    5. [GENESIS 9:12] score=0.511
+       ...
+
+  --- comparison ---
+  overlap: ['GENESIS 9:10', 'GENESIS 9:9', 'JOHN 6:47', 'NUMBERS 25:12']
+  only PRE-fix: ['MATTHEW 26:28']
+  only POST-fix: ['GENESIS 9:12']
+  expected-neighborhood hits PRE: 3/5
+  expected-neighborhood hits POST: 3/5
+
+====================================================================================================
+SUMMARY
+====================================================================================================
+  case                             pre_hood_hits  post_hood_hits    overlap  post_only
+----------------------------------------------------------------------------------------------------
+  universal_atonement                          0               0          1          4
+  covenant_monocovenantal                      3               3          4          1
+
+  Raw: C:\Users\cnogr\git\goat-yard-archive\evals\e6_entity_lookup_probe\e6c_end_to_end_results.json
+C:\Users\cnogr\git\goat-yard-archive\.venv\Lib\site-packages\urllib3\poolmanager.py:288: ResourceWarning: unclosed <ssl.SSLSocket fd=3540, family=2, type=1, proto=0, laddr=('10.245.19.195', 59389), raddr=('54.73.99.175', 443)>
+  self.pools.clear()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
