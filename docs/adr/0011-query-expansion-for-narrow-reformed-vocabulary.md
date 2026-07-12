@@ -316,6 +316,60 @@ The v2 fix removes the cliff for **typo shapes**. It does not remove it for **in
 
 The BAML sentinel + dedup-only fallback correctly *detects* upstream failures but structurally *cannot rescue them* — a useless manifest passed to the fallback remains a useless manifest for retrieval. This is a load-bearing limit of the current architecture and it belongs recorded here so a future reader doesn't assume the sentinel is doing more than it can.
 
+## Amendment 2026-07-12 evening (v3): vector tier reinstated + span-based matching
+
+### The incident that forced the revisit
+
+A real UI query — `"was gill an exclusive psalmist?"` — droughted after v2 shipped. The trace showed:
+
+- v2 fuzzy tier did not fire: `psalmist` and `psalmody` are Levenshtein-distance 3+, above `FUZZY_EDIT_DISTANCE = 1`.
+- Near-miss log correctly recorded `{term: 'exclusive psalmody', distance: 0.30}` — the mechanism worked, but 0.30 is above any safe auto-fire threshold on the whole query.
+- BAML disambiguated the wrapped query in the *wrong direction* — expanded to `"Psalter author, poet of David, writer of hymns"` (biblical figure Psalmist) rather than the Reformed exclusive-psalmody doctrine — because there was no thesaurus anchor to steer it.
+- Retrieval landed on Scripture-verse-shape chunks (JOHN 2:17, LUKE 20:42, MARK 12:36). The bot chose informative refusal and padded the answer with Scripture verses embedded in Gill's commentary — a lentil trap in a new shape.
+
+The reviewer identified the v2 threshold-restatement muddle from earlier as the cause: I had rejected the vector tier when the E-8.1 probe showed paraphrase-shape overlap, but the probe's tighter numbers (typos + inflections at 0.031–0.216) did NOT overlap adjacent-but-different queries under a 0.15 cutoff. The vector-tier design was thrown out with the loose-threshold design, and the classes it *would* have caught (inflections, reorderings, morphological variants) were lost.
+
+### The v3 fix
+
+Reinstate the vector tier at **`VECTOR_MATCH_THRESHOLD = 0.15`**, applied to BOTH the whole query AND all 2–3 word contiguous spans of the query (`SPAN_LENGTHS = (2, 3)`).
+
+- **Whole-query vector match** catches bare inflections like `exclusive psalmist` at cosine 0.102.
+- **Span-based vector match** catches concept-carrying substrings inside wrapped questions. For `"was gill an exclusive psalmist?"`, the 2-word span `exclusive psalmist` still measures 0.102 against `exclusive psalmody` even though the whole query dilutes to 0.30. The span extractor produces `[was gill, gill an, an exclusive, exclusive psalmist, was gill an, gill an exclusive, an exclusive psalmist]` and `exclusive psalmist` is one of them.
+
+### Re-reading E-8.1 with the 0.15 rule (structural exclusion of false-positives)
+
+For each key, does any should-NOT query fall under 0.15?
+
+| Key | Closest should-NOT | Margin above 0.15 |
+|---|---|---|
+| exclusive psalmody | 0.194 (`psalm singing in the Old Testament`) | 0.044 |
+| pactum salutis | 0.174 (`covenant of grace`) | **0.024** — tightest |
+| monergism | 0.267 (`justification by faith`) | 0.117 |
+| regulative principle | 0.323 (`covenant of grace`) | 0.173 |
+| imputation | 0.486 (`justification by faith`) | 0.336 |
+
+**No should-NOT query falls under 0.15 for any key.** The vector tier is architecturally excluded from firing the wrong bridge, not merely empirically avoided — the same structural-exclusion property that made fuzzy attractive, with strictly better coverage.
+
+### V3 verified against Chris's incident
+
+Offline E-8.4-style probe against real qwen3-embeddings:
+
+- `was gill an exclusive psalmist?` → matches `exclusive psalmody` via **vector on span `exclusive psalmist`** at distance 0.103. Expansion appends `Hallel Passover Psalms 113 118`.
+- `is gill monergistic in his soteriology` → matches `monergism` via vector on span `monergistic in` at distance 0.076. Expansion appends `electing grace salvation by grace alone`.
+- `covenant of grace` (adjacent should-not) → no auto-fire; near-miss log records `pactum salutis=0.173`.
+- `what does gill say about cain` → no auto-fire, no near-misses.
+
+The wrapped-inflection cliff that v2 left open is closed by v3 without touching the fuzzy tier or the exact tier — v3 adds a strictly-more-powerful match mechanism that is *architecturally* constrained from false positives.
+
+### Runtime constants (v3, current)
+
+- `FUZZY_EDIT_DISTANCE = 1` — Tier 2.
+- `VECTOR_MATCH_THRESHOLD = 0.15` — Tier 3.
+- `SPAN_LENGTHS = (2, 3)` — window sizes for the span-based vector match within Tier 3.
+- `NEAR_MISS_LOG_MAX = 0.40` — observation window (unchanged from v2).
+
+The v2 threshold-restatement section above is retained for historical accuracy of the reasoning that led to v3. The v3 mechanism is what runs.
+
 ## References
 
 - [ADR-0010](0010-entity-lookup-semantic-bridge.md) — the retrieval-layer fix this ADR complements. Explicitly named the psalmody case as out-of-scope and pointed here.

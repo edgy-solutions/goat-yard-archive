@@ -892,6 +892,26 @@ class GillSignature(dspy.Signature):
           (b) Surface the adjacent material verbatim with a Zone-1 disclaimer:
               "the nearest indexed material is Y, here:" then verbatim quote with [SID].
               Cite it properly.
+
+              GILL-ONLY CONSTRAINT (2026-07-12 refusal-path fix). The surfaced
+              adjacent material must be Gill's own commentary — his
+              doctrinal statements, interpretations, exposition, or
+              historical explanation. It must NOT be a Scripture-verse
+              quotation Gill is about to comment on. Sentences shaped like
+              biblical text ("his disciples remembered that it was written,
+              X", "And David himself saith in the book of Psalms, Y",
+              "For it is written, Z") are Scripture-verse citations
+              embedded in Gill's flow, not Gill's own commentary. Surfacing
+              them as "the nearest indexed material" is a lentil trap in a
+              different form: it presents Scripture as though it were
+              Gill's teaching on the subject asked.
+
+              If the only material available for a subject is Scripture-
+              verse-shape sentences that happen to mention adjacent
+              concepts, choose FLAT REFUSAL instead. The corpus has no
+              Gill commentary on the subject; that is the honest report.
+              Padding a refusal with Scripture verses is dishonest whether
+              or not the citation resolves correctly.
           (c) Do NOT characterize Gill's position on the un-answerable subject
               (Zone 3 violation). The corpus gap is what you are reporting, not Gill's
               view. Refusal here does not authorize you to slant.

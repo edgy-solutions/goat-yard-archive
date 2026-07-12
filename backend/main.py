@@ -477,9 +477,43 @@ async def search(request: Request, req: SearchRequest):
                 stages_capture["baml_punt_reasons"] = _punt_reasons
             raise ValueError(f"BAML output structurally punted: {_punt_reasons}")
 
+        # ADR-0013: two-pass entity lookup. BAML's `expanded_search_terms`
+        # is 18th-century-vocabulary paraphrase of the user's query — it
+        # is often much closer semantically to Gill's actual entity
+        # descriptions (e.g. 'psalm singing, musical praise' is
+        # embedding-adjacent to Hallel's "Passover hymn consisting of
+        # Psalms 113-118"; the raw query 'exclusive psalmody' is not).
+        # Re-run entity lookup on the BAML expansion and union with the
+        # raw manifest. This is the automated bridge for concept queries
+        # that no thesaurus entry can reach.
+        second_pass_entities: list[str] = []
+        try:
+            if search_text and search_text.strip() and search_text.strip() != req.query.strip():
+                _tp0 = time.perf_counter()
+                second_pass_entities = await search_engine.get_relevant_entities(query=search_text)
+                _tp1 = time.perf_counter()
+                print(f"[TIMING] two-pass entity lookup: {_tp1-_tp0:.3f}s")
+                print(f"[TWO-PASS] baml_expansion manifest: {second_pass_entities}")
+        except Exception as _tp_err:
+            print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
+
+        # Union: BAML's picks (highest signal — the picker explicitly
+        # said these fit the query) plus the semantic manifest from
+        # BAML's expansion (concept recall). Preserve first-appearance
+        # order so BAML's picks lead the boost text.
+        _seen_union: set[str] = set()
+        _union: list[str] = []
+        for _name in list(mapped_entities or []) + list(second_pass_entities or []):
+            _key_l = (_name or "").strip().lower()
+            if _key_l and _key_l not in _seen_union:
+                _seen_union.add(_key_l)
+                _union.append(_name)
+        mapped_entities = _union if _union else mapped_entities
+
         if stages_capture is not None:
             stages_capture["baml_expansion"] = search_text
             stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
+            stages_capture["second_pass_entities"] = sorted(second_pass_entities) if second_pass_entities else []
     except Exception as e:
         import traceback
         error_msg = traceback.format_exc()
