@@ -477,43 +477,25 @@ async def search(request: Request, req: SearchRequest):
                 stages_capture["baml_punt_reasons"] = _punt_reasons
             raise ValueError(f"BAML output structurally punted: {_punt_reasons}")
 
-        # ADR-0013 Part A (revised 2026-07-13 hotfix): two-pass entity
-        # lookup — GATED on thesaurus miss.
-        #
-        # Original design: always run get_relevant_entities on BAML's
-        # expansion, union with raw manifest. Rationale was semantic
-        # recall for concept queries.
-        #
-        # Observed regression: for queries where the thesaurus DID fire
-        # (any of exact/fuzzy/vector/span), the raw manifest was already
-        # anchored to concept-adjacent entities (Hallel, Book of Psalms,
-        # etc.). Running a second pass on BAML's expansion — which
-        # contains common English tokens like 'book' — surfaced
-        # substring-matched noise entities ('book of Wisdom', 'sealed
-        # book', 'authors of an edition of the book of Zohar') and
-        # unioning them into the boost diluted the load-bearing signal.
-        # Chris's 2026-07-12 evening retest showed MATTHEW 26:30 fell
-        # from top-1 (offline clean-manifest test) to past-top-6 (live
-        # trace) purely because of two-pass noise.
-        #
-        # Revised rule: only run the second pass when the thesaurus did
-        # NOT fire. If the thesaurus fired, the raw manifest is already
-        # anchored — the second pass can only dilute. If the thesaurus
-        # droughted, the raw manifest may be poor and the second pass
-        # can add semantic recall from BAML's expansion.
+        # ADR-0013 Part A: two-pass entity lookup. Always runs when
+        # BAML's expansion differs from the raw query. The substring-
+        # noise regression that led to the 2026-07-13 hotfix has been
+        # fixed at the source (get_relevant_entities length-5 floor),
+        # so the two-pass no longer surfaces book-of-X flood from
+        # common English tokens in BAML's paraphrase. The conditional
+        # gating "only run when thesaurus missed" that the hotfix
+        # introduced has been removed — it was a workaround for the
+        # substring bug and is not justified on its own merits.
         second_pass_entities: list[str] = []
-        if not expansion_matches:
-            try:
-                if search_text and search_text.strip() and search_text.strip() != req.query.strip():
-                    _tp0 = time.perf_counter()
-                    second_pass_entities = await search_engine.get_relevant_entities(query=search_text)
-                    _tp1 = time.perf_counter()
-                    print(f"[TIMING] two-pass entity lookup: {_tp1-_tp0:.3f}s")
-                    print(f"[TWO-PASS] baml_expansion manifest: {second_pass_entities}")
-            except Exception as _tp_err:
-                print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
-        else:
-            print(f"[TWO-PASS] skipped — thesaurus fired ({len(expansion_matches)} match(es)); raw manifest already anchored")
+        try:
+            if search_text and search_text.strip() and search_text.strip() != req.query.strip():
+                _tp0 = time.perf_counter()
+                second_pass_entities = await search_engine.get_relevant_entities(query=search_text)
+                _tp1 = time.perf_counter()
+                print(f"[TIMING] two-pass entity lookup: {_tp1-_tp0:.3f}s")
+                print(f"[TWO-PASS] baml_expansion manifest: {second_pass_entities}")
+        except Exception as _tp_err:
+            print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
 
         # Union: BAML's picks (highest signal — the picker explicitly
         # said these fit the query) plus the semantic manifest from

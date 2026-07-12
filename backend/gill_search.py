@@ -454,10 +454,26 @@ class GillSearchEngine:
             print(f"Entity vector lookup failed: {e}")
 
         # Tier 2 — substring canonical-key.
+        #
+        # Length floor is 5, not 4, since the 2026-07-13 psalmist
+        # incident. At 4, common short theological tokens ("book",
+        # "life", "word", "name", "day", "way", "son", "law", "sin",
+        # "god", "lord", "holy", "faith") substring-flood the results.
+        # A query or BAML expansion containing "Book of Psalms" produced
+        # `*book*` matches against every `book of X` entity in the
+        # corpus — bookofpsalms (right), bookofwisdom, bookoflife,
+        # sealedbook, authorsofaneditionofthebookofzohar (all noise),
+        # then unioned into the boost until the load-bearing signal
+        # was drowned. Real query targets are distinctive by design:
+        # 'psalms' (6), 'wisdom' (6), 'atonement' (9), 'covenant' (8),
+        # 'scapegoat' (9). Single-word 4-char entity names (Cain, Adam,
+        # Ruth, Paul, Mary) are covered by Tier 3 BM25 via word-token
+        # match on the entity name field — no substring path needed.
+        # See ADR-0013 amendment 2026-07-13 for the incident trace.
         substring_names: List[str] = []
         seen_lower = {n.lower() for n in vector_names if n}
         candidates = set()
-        for tok in re.findall(r"[A-Za-z]{4,}", query):
+        for tok in re.findall(r"[A-Za-z]{5,}", query):
             t_lower = tok.lower()
             if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
                 continue
@@ -465,7 +481,7 @@ class GillSearchEngine:
             if not t_key:
                 continue
             candidates.add(t_key)
-            if t_key.endswith("s") and len(t_key) > 4:
+            if t_key.endswith("s") and len(t_key) > 5:
                 candidates.add(t_key[:-1])
 
         for cand in candidates:

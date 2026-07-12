@@ -63,42 +63,68 @@ The choice between informative-refusal and flat-refusal is now Gill-material-onl
 - `search_gill` with the enlarged manifest still gets the same enhanced_query boost text, just with more entity names concatenated. BM25 scoring may shift for boundary cases.
 - The refusal-path constraint is prompt-level, not code-level; a future prompt refactor must preserve the Gill-only rule or the fix regresses silently. The [ADR-0011 v3 amendment](0011-query-expansion-for-narrow-reformed-vocabulary.md) documents the same class of concern for the thesaurus.
 
-## Amendment 2026-07-13 hotfix: gate two-pass on thesaurus miss
+## Amendment 2026-07-13 (v2): fix the substring bug at the root; drop the conditional
 
-### The observed regression
+### Correction to the earlier hotfix
 
-Post-deploy of `2098be7` (v3 + two-pass + refusal-path bundle), Chris re-ran the incident query `"was gill an exclusive psalmist?"`. The v3 span-based vector match fired correctly (`matched_span: exclusive psalmist, distance: 0.102`), and the lookup query was correctly expanded to include `Hallel Passover Psalms 113 118`. The raw manifest surfaced the load-bearing entities cleanly:
+An earlier hotfix (commit `15bbec2`) gated the two-pass on `expansion_matches` being empty — "only run when thesaurus missed." That was a workaround for the substring-bug symptom, not a fix. The reviewer flagged it: *"the fix treats the symptom … the substring pass matches on arbitrary short tokens … the substring pass has been in there since ADR-0005 which means this noise has always been present on any query containing a short common token, silently degrading manifests you never inspected. The two-pass didn't create the bug; it just made it loud enough to catch."*
 
+This amendment fixes the substring pass itself and drops the conditional.
+
+### The real bug
+
+[`backend/gill_search.py get_relevant_entities`](../../backend/gill_search.py) has a Tier 2 substring pass that tokenizes the query with `re.findall(r"[A-Za-z]{4,}", query)`. Four characters is the length floor. Common short English theological tokens — `book`, `life`, `word`, `name`, `day`, `way`, `son`, `law`, `sin`, `god`, `lord`, `holy`, `faith` — all pass the filter, and each substring-matches every entity whose canonical (space-stripped) key contains it. `book` matches `bookofpsalms` (right), and also `bookofwisdom`, `bookoflife`, `sealedbook`, `authorsofaneditionofthebookofzohar` (all noise).
+
+This has been present *on every query* since ADR-0005 (May 2026). The first-pass entity lookup's `MANIFEST_TOTAL_CAP = 5` masked the damage — noise was truncated below the cap. The two-pass added *after* the cap without capping itself, so noise leaked in and the flood was visible for the first time.
+
+### The fix
+
+Raise the substring pass length floor from 4 to 5:
+
+```python
+# backend/gill_search.py, Tier 2 substring pass
+for tok in re.findall(r"[A-Za-z]{5,}", query):
+    ...
+    if t_key.endswith("s") and len(t_key) > 5:
+        candidates.add(t_key[:-1])
 ```
-available_entities: [Book of Psalms, Hallel, Megilla, Psalmist, הַלֵּל טָעוּן]
-```
 
-But retrieval **still** did not reach MATTHEW 26:30 (the Hallel commentary). Instead: EXODUS 10:23, EXODUS 32:32-33, LUKE 10:20, LUKE 20:42, LUKE 24:45.
+Rationale: legitimate distinctive query tokens for compound entities are structurally longer than the generic-word tokens that flood — `psalms` (6), `wisdom` (6), `atonement` (9), `covenant` (8), `scapegoat` (9). Single-word entities whose names ARE 4 characters (Cain, Adam, Ruth, Paul, Mary) are covered by Tier 3 BM25's word-token match on the entity `name` field — the substring path is redundant for them anyway. The 5-char floor removes the flood without breaking any known valid lookup.
 
-Root cause: the two-pass entity lookup, running on BAML's expansion `"Book of Psalms, Psalter, hymns, songs of David"`, surfaced substring-matched **noise entities** — `book of Wisdom`, `book of life`, `sealed book`, `authors of an edition of the book of Zohar` — because the token `book` (4 characters, passes the substring pass's `[A-Za-z]{4,}` filter) matches many `book of X` entities in the corpus. The union pushed those into `mapped_entities`, `search_gill` concatenated them into the BM25 boost, and the load-bearing Hallel signal was diluted enough that MATTHEW 26:30 dropped out of top-6.
+### Empirical verification
 
-Offline verification confirmed the diagnosis: calling `search_gill` with the same query text and the **clean 4-entity manifest** `[Book of Psalms, Hallel, Psalmist, הַלֵּל טָעוּן]` (i.e. what would be passed without the two-pass) returned MATTHEW 26:30 at **rank 2 with score 0.648** — well within any reasonable top-N.
+Against the live gya-test Weaviate, `get_relevant_entities` for the psalmist BAML expansion `"was gill an exclusive psalmist?, Book of Psalms, Psalter, hymns, songs of David"`:
 
-### Revised rule
+- BEFORE fix: `[Psalmist, authors of an edition of the book of Zohar, book of Wisdom, book of life, sealed book]`
+- AFTER fix:  `[Book of Psalms, Psalmist, David, times of David, house of David]`
 
-**Only run the second pass when the thesaurus did NOT fire.** Formally: `if not expansion_matches: run second pass; else: skip`.
+All David-related after the fix — legitimately concept-adjacent to a "psalmist" query, not noise.
 
-- **Thesaurus fires (exact/fuzzy/vector/span)** — the raw manifest was already anchored to concept-adjacent entities via the appended anchor tokens. A second-pass on BAML's expansion can only add unanchored entities via lexical substring match, and those dilute the boost.
-- **Thesaurus droughts** — the raw manifest was built from the raw query alone, with no anchor tokens. It may be poor. The second-pass on BAML's expansion may add useful semantic-recall entities. Two-pass runs.
+### Two-pass conditional dropped
 
-This gating is consistent with the ADR-0013 Part A rationale as originally stated: two-pass is the **automated concept-bridge for queries no thesaurus entry can reach**. When a thesaurus entry *does* reach the query (through any tier), the bridge is already built and adding another one to it is not additive — it's dilutive.
+Once the substring pass is clean, the reason for gating the two-pass evaporated. The conditional (`if not expansion_matches: run`) had one honest justification: *the other path was broken.* Dropping it restores ADR-0013 Part A to its originally-stated design: the two-pass is the automated concept-bridge, and it runs for *every* successful-BAML query. The reviewer's guidance was correct: rules whose real reason is "the other path is broken" tend to outlive the breakage and calcify as architecture nobody can explain.
 
-### Post-fix expected behavior for the incident query
+### End-to-end verification (both branches)
 
-- `expand_query` fires v3 span-based match → `expansion_matches = [{term: 'exclusive psalmody', method: 'vector', ...}]`
-- Two-pass is skipped (thesaurus fired)
-- `mapped_entities` = BAML's picks from the raw (already-anchored) manifest — no substring-book noise
-- `search_gill` retrieval reaches MATTHEW 26:30 in top-N
-- Bot generates a proper answer citing Gill's Hallel commentary, not the ADR-0013 Part B refusal path.
+**Thesaurus-fires branch** (`was gill an exclusive psalmist?`):
+- Raw manifest: `[Hebrew Hallel, Hallel, Book of Psalms, Psalmist, passover]` — anchored by v3 span-match.
+- Two-pass manifest: `[Book of Psalms, Psalmist, David, times of David, house of David]`.
+- Union: 8 entities, all Hallel/Psalm/David-adjacent.
+- Retrieval: MATTHEW 26:30 lands rank 4, score 0.558 — within the bot's top-5 window.
 
-### Trade recorded
+**Paraphrase-drought branch** (`should we sing only psalms in worship?`, no thesaurus match):
+- Raw manifest: `[Psalmist, Book of Psalms, worship of the sun and moon, true worship of God, worshippers of Baal]` — worship-adjacent.
+- Two-pass manifest: `[worship of the sun and moon, true worship of God, worshippers of Baal, Book of Psalms, music]` — adds `music` as new.
+- Union: 6 entities. Retrieval covers Psalm-singing and worship material honestly.
 
-The unamended Part A design still runs two-pass on queries where the thesaurus droughted (paraphrases with no matching entry). Those queries may still see the same substring-noise problem BAML expansion introduces. If real traffic surfaces that regression, the fix will be at the entity-lookup layer — tighten `_ENTITY_LOOKUP_STOPWORDS` to include common short English tokens like `book`, `word`, `name`, or restrict the substring pass to canonical keys that are word-suffix or word-prefix, not arbitrary substrings. Recorded as a follow-up rather than fixed pre-emptively because there's no evidence yet that the paraphrase-drought class is common.
+The concept bridge now works on both branches for the same reason: no substring flood, no calcified workaround.
+
+### What the earlier commits still stand on
+
+- ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.
+- ADR-0013 Part A (two-pass) is now unconditional and works because the substring bug is fixed.
+- ADR-0013 Part B (refusal-path Gill-only) is unchanged and shipped correctly.
+- ADR-0012 (poisoned-manifest suppression) is unchanged and still the honest floor.
 
 ## References
 
