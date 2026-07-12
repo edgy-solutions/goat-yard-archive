@@ -26,7 +26,7 @@ from typing import List, Optional, Any
 
 # Import our modules
 from .gill_search import GillSearchEngine
-from .query_expansion import expand_query
+from .query_expansion import expand_query, init_vector_thesaurus
 from .bot import GroundedGillBot
 from baml_client.async_client import b
 from .database import init_db
@@ -227,6 +227,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Failed to init Search Engine/DB: {e}")
 
+    # 1b. Vector thesaurus (ADR-0011 v2). Precompute embeddings for each
+    #     narrow-vocabulary key so per-query expansion is one embed call +
+    #     N in-memory cosine distances. Failure here degrades gracefully
+    #     to exact-only matching — the pre-v2 behavior — not a request-
+    #     path crash.
+    try:
+        if search_engine is not None:
+            await init_vector_thesaurus(search_engine._get_embedding)
+        else:
+            print("[EXPANSION INIT] search engine unavailable; vector tier disabled")
+    except Exception as e:
+        print(f"[EXPANSION INIT] failed: {e}; vector tier disabled")
+
     # 2. DSPy Bot (Dual Key Logic)
     try:
         key_main = os.getenv("OPENROUTER_API_KEY")
@@ -395,17 +408,29 @@ async def search(request: Request, req: SearchRequest):
         stages_capture["question"] = req.query
 
     # 1. Optimize and Expand Query (Enterprise Search Upgrade)
-    # 1a. Narrow-vocabulary expansion (ADR-0011). Bridges Reformed-tradition
-    #     terms that qwen3-embedding does not associate with Gill's anchor
-    #     entities (e.g. 'exclusive psalmody' -> Hallel/Passover). The
-    #     expanded form is used ONLY for entity lookup; BAML still sees the
-    #     raw user query so it does not over-emphasize appended tokens.
-    lookup_query, expansion_matches = expand_query(req.query)
+    # 1a. Narrow-vocabulary expansion (ADR-0011 v2, 2026-07-12). Bridges
+    #     Reformed-tradition terms that qwen3-embedding does not associate
+    #     with Gill's anchor entities. Two-tier: exact regex first
+    #     (deterministic, cheapest), then cosine-distance vector match at
+    #     <=0.15 for typos/inflections/reorderings (E-8.1 derived). The
+    #     v1 exact-only design cliffed on a single-char typo — 'exlusive
+    #     psalmody' -> drought. v2 removes that cliff for typos; near-
+    #     misses (0.15 < d <= 0.40) are logged for observability so
+    #     paraphrases traffic actually uses can be promoted to explicit
+    #     thesaurus entries over time. The expanded form is used ONLY for
+    #     entity lookup; BAML still sees the raw user query.
+    lookup_query, expansion_matches, expansion_near_misses = await expand_query(
+        req.query,
+        embed_fn=search_engine._get_embedding if search_engine is not None else None,
+    )
     if expansion_matches:
         print(f"[EXPANSION] matched narrow terms: {expansion_matches}")
         print(f"[EXPANSION] lookup query: {lookup_query!r}")
+    if expansion_near_misses:
+        print(f"[EXPANSION] near-misses (log-only, no expansion): {expansion_near_misses}")
     if stages_capture is not None:
         stages_capture["expansion_matches"] = expansion_matches
+        stages_capture["expansion_near_misses"] = expansion_near_misses
         stages_capture["lookup_query"] = lookup_query
 
     t1 = time.perf_counter()
@@ -588,10 +613,15 @@ async def search(request: Request, req: SearchRequest):
                             # traffic it's judging. Permanent protection
                             # against the stale-prod trap.
                             "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
-                            # ADR-0011 expansion trace. Empty when the
-                            # user's query contained no narrow-vocabulary
-                            # term; a list when the thesaurus fired.
+                            # ADR-0011 v2 expansion trace. Each entry is
+                            # {term, method, distance} — method is 'exact'
+                            # or 'vector', distance is 0.0 for exact and
+                            # cosine distance for vector. Near-misses are
+                            # log-only paraphrase-shape queries in the
+                            # observability window used to grow the
+                            # thesaurus from real traffic.
                             "query_expansion_matches": expansion_matches,
+                            "query_expansion_near_misses": expansion_near_misses,
                         },
                         as_type="generation"
                     )
@@ -603,6 +633,7 @@ async def search(request: Request, req: SearchRequest):
                             metadata={
                                 "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
                                 "query_expansion_matches": expansion_matches,
+                                "query_expansion_near_misses": expansion_near_misses,
                             },
                         )
                 else:

@@ -231,6 +231,73 @@ Not urgent — the current five entries *work* (probes prove it); they are under
 **Neutral (worth naming):**
 - The `covenant engagements` entity for `pactum_salutis` did not land in the top-5 manifest despite being an explicit anchor token, because the cap-5 tier ordering pushed it out in favor of vector/BM25-adjacent `covenant of X` entities. Retrieval was still improved (Genesis 9 covenant chunks vs Talmudic drift). A follow-up work item is *priority-anchor insertion* — a get_relevant_entities parameter that forces thesaurus-derived anchor entities to the top of the manifest bypassing tier ordering. Not urgent for this ADR's target cases.
 
+## Amendment 2026-07-12: fuzzy-tolerant match + observation-only vector (v2)
+
+### The incident
+
+The v1 exact-regex thesaurus shipped in [ADR-0011 as-committed](../../backend/query_expansion.py) `\b<term>\b` (case-insensitive whole-phrase match). On 2026-07-12 a real user query — `"what was gill's opinion on the exlusive psalmody debate?"` — cliffed off the fix. The typo `exlusive` (missing 'c') prevented the regex from matching, and the cascade that followed proved the thesaurus is a *cliff-shaped* dependency, not a graceful-degradation one:
+
+1. Thesaurus miss (typo) → no anchor tokens appended to lookup query.
+2. `get_relevant_entities` returns useless top-5: `[Ben Zeta, Judea, Megilla, Megillah, world to come]` — BM25 matches on Aramaic/Talmudic footnotes.
+3. BAML `OptimizeSearchQuery` disengages entirely — `baml_expansion: None`, `baml_punt_reasons: ['entities_given_none_returned']`.
+4. The ADR-0008 sentinel *does* catch the punt and route to the dedup-only fallback. But the fallback re-uses the same useless manifest as the entity boost.
+5. Retrieval lands on JOHN 3:25 (baptism dispute — matches the Jewish/Aramaic entities) and LUKE 15:26 (music-preaching). Answer becomes a soft refusal.
+
+The sentinel is doing exactly its job (detect the punt) but cannot rescue an *upstream* failure. The fix must live at the thesaurus layer where the cliff begins.
+
+The reviewer surfaced a broader implication: **the incident is not about typos, it's about class fragility.** Every near-miss shape — typo, inflection ("exclusive psalms"), reordering, paraphrase ("psalms-only worship"), question-form wrapping ("is exclusive psalmody biblical?") — falls off the same cliff. Fixing typos specifically leaves every other near-miss shape catastrophically brittle.
+
+### E-8.1 threshold-discovery probe
+
+Before choosing between fuzzy edit-distance and cosine-similarity matching, an E-8.1 probe (`evals/e8_vector_thesaurus_probe/e8_1_threshold_discovery.out`) measured whether qwen3-embedding could cleanly gate a vector-thesaurus tier. For each of the five keys, distances were computed from a should-match set (typos + inflections + reorderings + paraphrases + question forms) and a should-NOT-match set (real other theological queries, including intentional adjacencies like `psalm singing in the Old Testament` vs `exclusive psalmody`).
+
+**Every key showed overlap** between the paraphrase-shape should-match tail and the closest adjacent-but-different should-NOT:
+
+| Key | Worst should-match | Closest should-NOT | Gap |
+|---|---|---|---|
+| `exclusive psalmody` | 0.320 (question form) | 0.194 (`psalm singing in the OT`) | -0.126 |
+| `pactum salutis` | 0.303 (Trinity paraphrase) | 0.174 (`covenant of grace`) | -0.130 |
+| `monergism` | 0.286 (English paraphrase) | 0.267 (`justification by faith`) | -0.018 |
+| `regulative principle` | 0.395 (`sola scriptura in worship`) | 0.323 (`covenant of grace`) | -0.071 |
+| `imputation` | 0.572 (question form) | 0.486 (`justification by faith`) | -0.086 |
+
+**No global clean threshold covers every match shape.** Typos and close inflections *are* separable at ≤0.15 (all typos measured 0.031–0.161; closest should-NOT is 0.174), but wrapped question forms with typos — like Chris's actual UI query — sit at ~0.325, well into overlap territory. The reviewer's explicit fallback plan for this case was: *"If the probe shows overlap, ship exact→fuzzy and log near-misses as the fallback plan."*
+
+### Decision: exact → fuzzy → observation-only vector
+
+The v2 [`expand_query`](../../backend/query_expansion.py) uses two deterministic firing tiers plus a third observation-only tier:
+
+- **Tier 1 — EXACT** regex on the term's `\b`-bounded phrase. Cheapest, highest precision. Handles the well-spelled case unchanged from v1.
+- **Tier 2 — FUZZY** substring at Levenshtein `FUZZY_EDIT_DISTANCE = 1` via the `regex` module's `{e<=1}` syntax. Matches the term as a bounded substring within a longer query, tolerating a single character edit. **This is what closes the incident case**: `exlusive psalmody` inside the wrapping question matches `exclusive psalmody` at edit distance 1.
+- **Observation only — VECTOR similarity.** For any key not matched by Tier 1 or Tier 2, if the query embedding is within `NEAR_MISS_LOG_MAX = 0.40` cosine distance of the key, record it in the `near_misses` list. Never fires expansion. The near-miss log is the mechanism by which the thesaurus grows from real traffic patterns rather than speculation — a paraphrase that keeps showing up in near-misses is a candidate for a new explicit entry.
+
+### The constants are derived, not chosen
+
+- **`FUZZY_EDIT_DISTANCE = 1`** — catches every single-character typo in the incident and E-8.4 test set (`exlusive` → `exclusive`, `paktum` → `pactum`) without collisions in the thesaurus's five-entry neighborhood. Raising to 2 would collide with adjacent English words (`imputation` ↔ `reputation` is edit-distance 2).
+- **`NEAR_MISS_LOG_MAX = 0.40`** — covers the paraphrase distance range E-8.1 measured across all five keys (worst-paraphrase should-match distances span 0.286–0.572). Broad enough to see paraphrases; not so broad that unrelated queries flood the log.
+
+### Why not fire the vector tier
+
+Reviewer's original hope was that vector matching would catch typo + inflection + paraphrase in a single tier. The E-8.1 probe empirically refuted that: the paraphrase distances overlap adjacent-but-different theological queries in embedding space, and firing the vector tier at any threshold wide enough to catch paraphrases would silently boost the *wrong* concept for some real queries. Observation-only preserves the auditability of the deterministic-bridge posture: every firing is traceable to an exact or fuzzy match against a written entry, and the vector similarity is data for review, not a hidden rule.
+
+### E-8.4 end-to-end validation
+
+Run against real LiteLLM embeddings (`e8_4_end_to_end_validation.out`):
+
+- **Chris's incident case**: `"what was gill's opinion on the exlusive psalmody debate?"` → matches term `exclusive psalmody` via fuzzy tier at edit distance 1 (matched span `'exlusive psalmody'`), expansion fires, lookup query gains `Hallel Passover Psalms 113 118`. ✅
+- **SHOULD-MATCH**: 5 of 8 caught (all typos + exact + case variants; 3 legitimate inflection/reorder misses recorded as near-miss observations at 0.097–0.316, all correctly closest to their intended key).
+- **SHOULD-NOT-MATCH**: 7 of 7 silenced. No false-positive firings on `covenant of grace`, `universal atonement`, `justification by faith`, or any of the deliberately-adjacent queries.
+
+### Auditability preserved
+
+Every firing (exact or fuzzy) carries `{term, method, distance, matched_span}` for traceability. Every observation (near-miss) carries `{term, distance}` sorted by ascending distance. Both are threaded into `stages_capture` and Langfuse trace metadata (`query_expansion_matches`, `query_expansion_near_misses`) alongside `commit_sha`. The daily Zone-3 sampler (ADR-0008 Phase 1 Step 5b) can now distinguish exact-fired, fuzzy-fired, and near-miss-observed traces if a future failure surfaces.
+
+### Honest statement of the residual cliff
+
+The v2 fix removes the cliff for **typo shapes**. It does not remove it for **inflection or paraphrase shapes** — those still cliff off the fuzzy tier's edge, produce a useless manifest, cause BAML to punt, and land the fallback on off-topic material. The mitigation is the near-miss log: paraphrase queries that keep showing up in near-misses should be promoted to explicit thesaurus entries via the same discovery loop the module docstring documents (probe → verify → add → commit).
+
+The BAML sentinel + dedup-only fallback correctly *detects* upstream failures but structurally *cannot rescue them* — a useless manifest passed to the fallback remains a useless manifest for retrieval. This is a load-bearing limit of the current architecture and it belongs recorded here so a future reader doesn't assume the sentinel is doing more than it can.
+
 ## References
 
 - [ADR-0010](0010-entity-lookup-semantic-bridge.md) — the retrieval-layer fix this ADR complements. Explicitly named the psalmody case as out-of-scope and pointed here.

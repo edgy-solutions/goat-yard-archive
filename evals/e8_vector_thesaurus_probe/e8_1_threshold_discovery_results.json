@@ -1,0 +1,259 @@
+{
+  "keys": [
+    "exclusive psalmody",
+    "pactum salutis",
+    "monergism",
+    "regulative principle",
+    "imputation"
+  ],
+  "should_match": {
+    "exclusive psalmody": [
+      {
+        "query": "exlusive psalmody",
+        "distance": 0.030949003365571603
+      },
+      {
+        "query": "exclusive psalms",
+        "distance": 0.09732528820638187
+      },
+      {
+        "query": "psalms only worship",
+        "distance": 0.19540008200844983
+      },
+      {
+        "query": "is exclusive psalmody biblical?",
+        "distance": 0.1279502744725135
+      },
+      {
+        "query": "what was gill's opinion on the exclusive psalmody debate?",
+        "distance": 0.3199301381116181
+      },
+      {
+        "query": "should we sing only psalms in worship?",
+        "distance": 0.22016578477340487
+      },
+      {
+        "query": "psalmody exclusive position",
+        "distance": 0.13550730973483271
+      }
+    ],
+    "pactum salutis": [
+      {
+        "query": "paktum salutis",
+        "distance": 0.1605132401642233
+      },
+      {
+        "query": "pactum salutis doctrine",
+        "distance": 0.07478006080149835
+      },
+      {
+        "query": "covenant of redemption between father and son",
+        "distance": 0.28778460371162984
+      },
+      {
+        "query": "eternal covenant among the persons of the Trinity",
+        "distance": 0.30306363319219476
+      },
+      {
+        "query": "what does gill say about pactum salutis?",
+        "distance": 0.22095208049983006
+      }
+    ],
+    "monergism": [
+      {
+        "query": "monergistic",
+        "distance": 0.05963073618320047
+      },
+      {
+        "query": "monergism vs synergism",
+        "distance": 0.11006220330658201
+      },
+      {
+        "query": "salvation entirely by God's work",
+        "distance": 0.28545683937086963
+      },
+      {
+        "query": "does gill teach monergism?",
+        "distance": 0.24862979184211287
+      }
+    ],
+    "regulative principle": [
+      {
+        "query": "the regulative principle of worship",
+        "distance": 0.21599153251851444
+      },
+      {
+        "query": "regulative principle in worship",
+        "distance": 0.16737898813466545
+      },
+      {
+        "query": "worship regulated by scripture alone",
+        "distance": 0.3454123544711739
+      },
+      {
+        "query": "sola scriptura in worship",
+        "distance": 0.3944818597931946
+      }
+    ],
+    "imputation": [
+      {
+        "query": "imputation of Christ's righteousness",
+        "distance": 0.3781251192217261
+      },
+      {
+        "query": "imputed righteousness",
+        "distance": 0.3653750106492497
+      },
+      {
+        "query": "does Christ's righteousness get credited to us?",
+        "distance": 0.5722036670166808
+      },
+      {
+        "query": "sin imputed to Christ",
+        "distance": 0.43807377721661866
+      }
+    ]
+  },
+  "should_not": [
+    {
+      "query": "why the dietary laws",
+      "distances": {
+        "exclusive psalmody": 0.49949080251892186,
+        "pactum salutis": 0.46687131180299724,
+        "monergism": 0.5029380102553667,
+        "regulative principle": 0.4268849124572881,
+        "imputation": 0.5832847559163302
+      }
+    },
+    {
+      "query": "covenant of grace",
+      "distances": {
+        "exclusive psalmody": 0.36166433315410584,
+        "pactum salutis": 0.17356883568877057,
+        "monergism": 0.2781064158506945,
+        "regulative principle": 0.3233509153191161,
+        "imputation": 0.5028370685372155
+      }
+    },
+    {
+      "query": "baptism",
+      "distances": {
+        "exclusive psalmody": 0.4113244517626007,
+        "pactum salutis": 0.32882695864806455,
+        "monergism": 0.371137627234445,
+        "regulative principle": 0.4415465865797339,
+        "imputation": 0.4868667247531734
+      }
+    },
+    {
+      "query": "the two thieves crucified with Christ",
+      "distances": {
+        "exclusive psalmody": 0.49382797508974996,
+        "pactum salutis": 0.38688315951335084,
+        "monergism": 0.43639002655355363,
+        "regulative principle": 0.5089371888800225,
+        "imputation": 0.5703136131009756
+      }
+    },
+    {
+      "query": "universal atonement in Christ",
+      "distances": {
+        "exclusive psalmody": 0.3929902964908183,
+        "pactum salutis": 0.2631986354289729,
+        "monergism": 0.29376123089291406,
+        "regulative principle": 0.3947328865237788,
+        "imputation": 0.5269949850029993
+      }
+    },
+    {
+      "query": "did Esau eat pizza",
+      "distances": {
+        "exclusive psalmody": 0.6316095950686345,
+        "pactum salutis": 0.5496662892196957,
+        "monergism": 0.6073883371406266,
+        "regulative principle": 0.6168458133359107,
+        "imputation": 0.6292258078581794
+      }
+    },
+    {
+      "query": "what does Gill say about Cain",
+      "distances": {
+        "exclusive psalmody": 0.6104745377674392,
+        "pactum salutis": 0.5292128014437665,
+        "monergism": 0.5587552346222802,
+        "regulative principle": 0.5607352328656212,
+        "imputation": 0.5965907416080249
+      }
+    },
+    {
+      "query": "psalm singing in the Old Testament",
+      "distances": {
+        "exclusive psalmody": 0.1935830770580268,
+        "pactum salutis": 0.4127420021617534,
+        "monergism": 0.4314035183051128,
+        "regulative principle": 0.48328179331797727,
+        "imputation": 0.5829611154800769
+      }
+    },
+    {
+      "query": "singing at Passover",
+      "distances": {
+        "exclusive psalmody": 0.34270965696058764,
+        "pactum salutis": 0.4382378649921961,
+        "monergism": 0.5093616766715096,
+        "regulative principle": 0.5238296140249523,
+        "imputation": 0.5697567507574743
+      }
+    },
+    {
+      "query": "worship in the New Testament",
+      "distances": {
+        "exclusive psalmody": 0.31511227001621234,
+        "pactum salutis": 0.3640811871812918,
+        "monergism": 0.3545095663374287,
+        "regulative principle": 0.4242737317512123,
+        "imputation": 0.5689616570760624
+      }
+    },
+    {
+      "query": "justification by faith",
+      "distances": {
+        "exclusive psalmody": 0.38544633043989784,
+        "pactum salutis": 0.1958216114418283,
+        "monergism": 0.26727993750403733,
+        "regulative principle": 0.3370896745126287,
+        "imputation": 0.4859813761154853
+      }
+    },
+    {
+      "query": "Christ's righteousness",
+      "distances": {
+        "exclusive psalmody": 0.37663066603881823,
+        "pactum salutis": 0.2332468379244781,
+        "monergism": 0.3155186921559504,
+        "regulative principle": 0.3659819609892656,
+        "imputation": 0.5187132430422405
+      }
+    },
+    {
+      "query": "who was Aquinas",
+      "distances": {
+        "exclusive psalmody": 0.6647515095492924,
+        "pactum salutis": 0.569862915695827,
+        "monergism": 0.5938361629791903,
+        "regulative principle": 0.6369956301806594,
+        "imputation": 0.7122274685104057
+      }
+    },
+    {
+      "query": "what is the covenant of grace monocovenantal",
+      "distances": {
+        "exclusive psalmody": 0.4163641723296333,
+        "pactum salutis": 0.34619617587937324,
+        "monergism": 0.28453563823906114,
+        "regulative principle": 0.40469151374539813,
+        "imputation": 0.5977053933030112
+      }
+    }
+  ]
+}

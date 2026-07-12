@@ -1,0 +1,198 @@
+====================================================================================================
+E-8.1 — vector-thesaurus threshold discovery
+model=qwen3-embedding  distance=cosine (Weaviate style, lower=closer)
+====================================================================================================
+
+Embedding thesaurus keys...
+  embedded 5 keys, dim=4096
+
+====================================================================================================
+SHOULD-MATCH — each key's typo/paraphrase/question-form variants
+====================================================================================================
+
+KEY: 'exclusive psalmody'
+  d=0.0309  'exlusive psalmody'
+  d=0.0973  'exclusive psalms'
+  d=0.1280  'is exclusive psalmody biblical?'
+  d=0.1355  'psalmody exclusive position'
+  d=0.1954  'psalms only worship'
+  d=0.2202  'should we sing only psalms in worship?'
+  d=0.3199  "what was gill's opinion on the exclusive psalmody debate?"
+
+KEY: 'pactum salutis'
+  d=0.0748  'pactum salutis doctrine'
+  d=0.1605  'paktum salutis'
+  d=0.2210  'what does gill say about pactum salutis?'
+  d=0.2878  'covenant of redemption between father and son'
+  d=0.3031  'eternal covenant among the persons of the Trinity'
+
+KEY: 'monergism'
+  d=0.0596  'monergistic'
+  d=0.1101  'monergism vs synergism'
+  d=0.2486  'does gill teach monergism?'
+  d=0.2855  "salvation entirely by God's work"
+
+KEY: 'regulative principle'
+  d=0.1674  'regulative principle in worship'
+  d=0.2160  'the regulative principle of worship'
+  d=0.3454  'worship regulated by scripture alone'
+  d=0.3945  'sola scriptura in worship'
+
+KEY: 'imputation'
+  d=0.3654  'imputed righteousness'
+  d=0.3781  "imputation of Christ's righteousness"
+  d=0.4381  'sin imputed to Christ'
+  d=0.5722  "does Christ's righteousness get credited to us?"
+
+====================================================================================================
+SHOULD-NOT-MATCH — for each query, its distance to every thesaurus key
+====================================================================================================
+
+  QUERY: 'why the dietary laws'
+    closest key: 'regulative principle' at d=0.4269
+      exclusive psalmody        d=0.4995
+      pactum salutis            d=0.4669
+      monergism                 d=0.5029
+      regulative principle      d=0.4269
+      imputation                d=0.5833
+
+  QUERY: 'covenant of grace'
+    closest key: 'pactum salutis' at d=0.1736
+      exclusive psalmody        d=0.3617
+      pactum salutis            d=0.1736
+      monergism                 d=0.2781
+      regulative principle      d=0.3234
+      imputation                d=0.5028
+
+  QUERY: 'baptism'
+    closest key: 'pactum salutis' at d=0.3288
+      exclusive psalmody        d=0.4113
+      pactum salutis            d=0.3288
+      monergism                 d=0.3711
+      regulative principle      d=0.4415
+      imputation                d=0.4869
+
+  QUERY: 'the two thieves crucified with Christ'
+    closest key: 'pactum salutis' at d=0.3869
+      exclusive psalmody        d=0.4938
+      pactum salutis            d=0.3869
+      monergism                 d=0.4364
+      regulative principle      d=0.5089
+      imputation                d=0.5703
+
+  QUERY: 'universal atonement in Christ'
+    closest key: 'pactum salutis' at d=0.2632
+      exclusive psalmody        d=0.3930
+      pactum salutis            d=0.2632
+      monergism                 d=0.2938
+      regulative principle      d=0.3947
+      imputation                d=0.5270
+
+  QUERY: 'did Esau eat pizza'
+    closest key: 'pactum salutis' at d=0.5497
+      exclusive psalmody        d=0.6316
+      pactum salutis            d=0.5497
+      monergism                 d=0.6074
+      regulative principle      d=0.6168
+      imputation                d=0.6292
+
+  QUERY: 'what does Gill say about Cain'
+    closest key: 'pactum salutis' at d=0.5292
+      exclusive psalmody        d=0.6105
+      pactum salutis            d=0.5292
+      monergism                 d=0.5588
+      regulative principle      d=0.5607
+      imputation                d=0.5966
+
+  QUERY: 'psalm singing in the Old Testament'
+    closest key: 'exclusive psalmody' at d=0.1936
+      exclusive psalmody        d=0.1936
+      pactum salutis            d=0.4127
+      monergism                 d=0.4314
+      regulative principle      d=0.4833
+      imputation                d=0.5830
+
+  QUERY: 'singing at Passover'
+    closest key: 'exclusive psalmody' at d=0.3427
+      exclusive psalmody        d=0.3427
+      pactum salutis            d=0.4382
+      monergism                 d=0.5094
+      regulative principle      d=0.5238
+      imputation                d=0.5698
+
+  QUERY: 'worship in the New Testament'
+    closest key: 'exclusive psalmody' at d=0.3151
+      exclusive psalmody        d=0.3151
+      pactum salutis            d=0.3641
+      monergism                 d=0.3545
+      regulative principle      d=0.4243
+      imputation                d=0.5690
+
+  QUERY: 'justification by faith'
+    closest key: 'pactum salutis' at d=0.1958
+      exclusive psalmody        d=0.3854
+      pactum salutis            d=0.1958
+      monergism                 d=0.2673
+      regulative principle      d=0.3371
+      imputation                d=0.4860
+
+  QUERY: "Christ's righteousness"
+    closest key: 'pactum salutis' at d=0.2332
+      exclusive psalmody        d=0.3766
+      pactum salutis            d=0.2332
+      monergism                 d=0.3155
+      regulative principle      d=0.3660
+      imputation                d=0.5187
+
+  QUERY: 'who was Aquinas'
+    closest key: 'pactum salutis' at d=0.5699
+      exclusive psalmody        d=0.6648
+      pactum salutis            d=0.5699
+      monergism                 d=0.5938
+      regulative principle      d=0.6370
+      imputation                d=0.7122
+
+  QUERY: 'what is the covenant of grace monocovenantal'
+    closest key: 'monergism' at d=0.2845
+      exclusive psalmody        d=0.4164
+      pactum salutis            d=0.3462
+      monergism                 d=0.2845
+      regulative principle      d=0.4047
+      imputation                d=0.5977
+
+====================================================================================================
+THRESHOLD ANALYSIS
+====================================================================================================
+
+KEY: 'exclusive psalmody'
+  worst should-match:  d=0.3199  ("what was gill's opinion on the exclusive psalmody debate?")
+  best  should-NOT:    d=0.1936  ('psalm singing in the Old Testament')
+  gap = -0.1263  ->  OVERLAP
+
+KEY: 'pactum salutis'
+  worst should-match:  d=0.3031  ('eternal covenant among the persons of the Trinity')
+  best  should-NOT:    d=0.1736  ('covenant of grace')
+  gap = -0.1295  ->  OVERLAP
+
+KEY: 'monergism'
+  worst should-match:  d=0.2855  ("salvation entirely by God's work")
+  best  should-NOT:    d=0.2673  ('justification by faith')
+  gap = -0.0182  ->  OVERLAP
+
+KEY: 'regulative principle'
+  worst should-match:  d=0.3945  ('sola scriptura in worship')
+  best  should-NOT:    d=0.3234  ('covenant of grace')
+  gap = -0.0711  ->  OVERLAP
+
+KEY: 'imputation'
+  worst should-match:  d=0.5722  ("does Christ's righteousness get credited to us?")
+  best  should-NOT:    d=0.4860  ('justification by faith')
+  gap = -0.0862  ->  OVERLAP
+
+====================================================================================================
+GLOBAL:  worst should-match across all keys = 0.5722
+         best  should-NOT across all keys   = 0.1736
+         gap = -0.3986
+         OVERLAP — no single threshold; per-key thresholds needed or fall back to fuzzy+exact
+
+Raw: C:\Users\cnogr\git\goat-yard-archive\evals\e8_vector_thesaurus_probe\e8_1_threshold_discovery_results.json

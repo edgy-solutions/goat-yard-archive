@@ -1,0 +1,50 @@
+====================================================================================================
+E-8.4 end-to-end — FUZZY_EDIT_DISTANCE=1 NEAR_MISS_LOG_MAX=0.4
+====================================================================================================
+
+[1] Initializing vector thesaurus...
+[EXPANSION INIT] vector thesaurus ready with 5 keys
+
+[2] Chris's original UI query — the incident case
+----------------------------------------------------------------------------------------------------
+  query:         "what was gill's opinion on the exlusive psalmody debate?"
+  matches:       [{'term': 'exclusive psalmody', 'method': 'fuzzy', 'distance': 1.0, 'matched_span': 'exlusive psalmody'}]
+  near_misses:   []
+  expanded:      "what was gill's opinion on the exlusive psalmody debate? Hallel Passover Psalms 113 118"
+  Chris's typo case BRIDGED?  YES
+
+[3] SHOULD-MATCH cases
+----------------------------------------------------------------------------------------------------
+  query                                              expected   method       distance  expanded?
+  exclusive psalmody                           exact    exact     0.0000  True  near:pactum salutis=0.363, monergism=0.318
+  exlusive psalmody                            vector   fuzzy     1.0000  True  near:pactum salutis=0.364, monergism=0.318
+  EXCLUSIVE PSALMODY                           exact    exact     0.0000  True  near:pactum salutis=0.385, monergism=0.367
+  exclusive psalms                             vector   -            nan False  near:exclusive psalmody=0.097, pactum salutis
+  psalmody exclusive position                  vector   -            nan False  near:exclusive psalmody=0.136, pactum salutis
+  paktum salutis                               vector   fuzzy     1.0000  True  near:monergism=0.394, regulative principle=0.
+  monergistic                                  vector   -            nan False  near:exclusive psalmody=0.316, pactum salutis
+  regulative principle in worship              vector   exact     0.0000  True  near:exclusive psalmody=0.291, pactum salutis
+
+  SHOULD-MATCH pass rate: 5/8
+
+[4] SHOULD-NOT-MATCH cases
+----------------------------------------------------------------------------------------------------
+  query                                                fired?                                        near-misses
+  covenant of grace                                        no exclusive psalmody=0.361, pactum salutis=0.173, mo
+  universal atonement in Christ                            no exclusive psalmody=0.394, pactum salutis=0.263, mo
+  what does Gill say about Cain                            no                                             (none)
+  did Esau eat pizza                                       no                                             (none)
+  psalm singing in the Old Testament                       no                           exclusive psalmody=0.194
+  justification by faith                                   no exclusive psalmody=0.385, pactum salutis=0.196, mo
+  who was Aquinas                                          no                                             (none)
+
+  SHOULD-NOT-MATCH silence rate: 7/7
+
+====================================================================================================
+VERDICT
+====================================================================================================
+  Chris's typo case bridged: True
+  SHOULD-MATCH: 5/8 caught
+  SHOULD-NOT-MATCH: 7/7 silenced
+
+  PRIMARY WIN: Chris's incident case is fixed. No false-positives on should-not set.
