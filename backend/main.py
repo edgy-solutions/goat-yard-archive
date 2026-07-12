@@ -440,6 +440,10 @@ async def search(request: Request, req: SearchRequest):
     if stages_capture is not None:
         stages_capture["available_entities"] = sorted(available_entity_names) if available_entity_names else []
     
+    # Track punt reasons across the try/except so the fallback can
+    # dispatch on which sentinel signal fired (ADR-0012 poisoned-manifest
+    # suppression vs dedup-only fallback).
+    _punt_reasons: list[str] = []
     try:
         t3 = time.perf_counter()
         optimized_query = await b.OptimizeSearchQuery(
@@ -455,7 +459,8 @@ async def search(request: Request, req: SearchRequest):
 
         # Structural sentinel (ADR-0008 step 2b). Three signals catch BAML
         # punts the 2a prompt-prevention didn't already foreclose. Tripping
-        # routes to the dedup-only fallback in the except block (step 2d).
+        # routes to the fallback in the except block (see ADR-0012 for
+        # the punt-reason-based dispatch).
         _punt_reasons = _baml_output_punt_reasons(
             user_query=req.query,
             expansion=search_text,
@@ -478,28 +483,56 @@ async def search(request: Request, req: SearchRequest):
     except Exception as e:
         import traceback
         error_msg = traceback.format_exc()
-        print(f"BAML Optimization failed, falling back to raw query + dedup-only entities:\n{error_msg}")
+        print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
         search_text = req.query
-        # Dedup-only fallback (ADR-0008 step 2d). The per-query relevant
-        # entity set returned by get_relevant_entities is already filtered
-        # for this query by BM25 — what we strip is the case-insensitive
-        # duplicates the lookup produces (Peter x2, Jona x2, Book of Psalms
-        # x2 etc., observed pre-launch). NOT a global manifest dump — the
-        # 2026-06-21 universal_atonement amplification was that pathology.
-        # Caveat: this does not fix the underlying noisy-lookup case (e.g.
-        # universal_atonement returns off-topic entities for unrelated
-        # reasons); that is a separate work item on get_relevant_entities.
-        _seen, _deduped = set(), []
-        for _e_name in (available_entity_names or []):
-            _key = _e_name.strip().lower()
-            if _key and _key not in _seen:
-                _seen.add(_key)
-                _deduped.append(_e_name)
-        mapped_entities = _deduped if _deduped else None
+
+        # ADR-0012 punt-reason-based fallback dispatch.
+        #
+        # Case A — poisoned manifest (`entities_given_none_returned`):
+        #     BAML looked at the manifest and rejected all of it. Re-
+        #     using those entities as an entity boost injects known-
+        #     wrong signal into retrieval — the 2026-07-12 psalmody
+        #     incident showed the Aramaic/Talmudic manifest (Ben Zeta,
+        #     Megilla, Chaldee paraphrases) confidently steered
+        #     retrieval to JOHN 3:25. Suppress the entity boost entirely
+        #     here (`mapped_entities = []`), so retrieval falls back to
+        #     pure hybrid (BM25 + qwen3 vector) with no false anchor.
+        #     Degrades a wrong answer to an honest "not found in the
+        #     corpus" — the cliff becomes a slope.
+        #
+        # Case B — other punts (empty_expansion, no_query_terms_present)
+        #     or a raw BAML exception: the manifest itself may be fine;
+        #     only the query rewrite failed. Keep the dedup-only fallback
+        #     (ADR-0008 step 2d) unchanged.
+        if "entities_given_none_returned" in _punt_reasons:
+            mapped_entities = []
+            fallback_kind = "poisoned_manifest_suppressed"
+            print(
+                "[BAML FALLBACK] entities_given_none_returned -> suppressing "
+                "entity boost (ADR-0012). Retrieval will run on hybrid "
+                "BM25+vector alone with no entity anchor."
+            )
+        else:
+            # Dedup-only fallback (ADR-0008 step 2d). The per-query relevant
+            # entity set returned by get_relevant_entities is already filtered
+            # for this query by BM25 — what we strip is the case-insensitive
+            # duplicates the lookup produces (Peter x2, Jona x2, Book of Psalms
+            # x2 etc., observed pre-launch). NOT a global manifest dump — the
+            # 2026-06-21 universal_atonement amplification was that pathology.
+            _seen, _deduped = set(), []
+            for _e_name in (available_entity_names or []):
+                _key = _e_name.strip().lower()
+                if _key and _key not in _seen:
+                    _seen.add(_key)
+                    _deduped.append(_e_name)
+            mapped_entities = _deduped if _deduped else None
+            fallback_kind = "dedup_only"
+
         if stages_capture is not None:
             stages_capture["baml_expansion"] = None
-            stages_capture["baml_entities"] = sorted(_deduped) if _deduped else []
+            stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
             stages_capture["baml_error"] = str(e)
+            stages_capture["baml_fallback"] = fallback_kind
 
     # 2. Retrieve Evidence
     t5 = time.perf_counter()

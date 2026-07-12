@@ -288,6 +288,24 @@ Run against real LiteLLM embeddings (`e8_4_end_to_end_validation.out`):
 - **SHOULD-MATCH**: 5 of 8 caught (all typos + exact + case variants; 3 legitimate inflection/reorder misses recorded as near-miss observations at 0.097–0.316, all correctly closest to their intended key).
 - **SHOULD-NOT-MATCH**: 7 of 7 silenced. No false-positive firings on `covenant of grace`, `universal atonement`, `justification by faith`, or any of the deliberately-adjacent queries.
 
+### Threshold logic — unambiguous restatement
+
+The v2 amendment discusses two distance measures — Levenshtein edit distance and cosine similarity — and the earlier draft conflated them by describing a "0.15 threshold" that could be read as either an auto-fire cutoff or a rejection floor. It is neither, at runtime.
+
+The runtime constants:
+
+- **Auto-fire (Tier 2 fuzzy)** — a query fires expansion iff its raw text contains a bounded substring within **Levenshtein edit distance ≤ 1** of some thesaurus key. This is a *rule*, not a threshold on a score.
+- **Observation only (near-miss log)** — for each key that did NOT auto-fire, if the query embedding sits within **cosine distance ≤ 0.40** of the key's embedding, record `{term, distance}` in the trace metadata. This is a *log window*, not a firing condition.
+
+The E-8.1 probe's 0.15 cosine number is historical rationale for **why we rejected a vector-fire tier**, not a runtime constant. It appears here because the reasoning is worth carrying forward: even if we had built a vector-fire tier at 0.15, its coverage would be strictly less than fuzzy for typo shapes, and its false-positive risk on adjacent-but-different theological queries (e.g. `pactum salutis` vs `covenant of grace` at cosine 0.174) was uncomfortably close. The empirical answer was to drop the vector-fire idea entirely.
+
+**No-false-positive verification for `covenant of grace` specifically.** `covenant of grace` is the closest adjacent theological query for `pactum salutis` in embedding space (cosine 0.174). Under the shipped v2 design:
+
+- The fuzzy tier requires Levenshtein ≤ 1 substring match against a key. The strings `covenant of grace` and `pactum salutis` are Levenshtein-distance ≫ 1 from each other, so the fuzzy tier cannot fire. Confirmed empirically in E-8.4's SHOULD-NOT-MATCH set (row 4 output: `covenant of grace ... fired?: no`).
+- The near-miss log records `{term: 'pactum salutis', distance: 0.173}` for the trace, but the near-miss list is never used to fire expansion. Confirmed by re-reading `expand_query` in [`backend/query_expansion.py`](../../backend/query_expansion.py): the return tuple structure is `(expanded_query, matches, near_misses)`, and only `matches` contributes anchor tokens to `expanded_query`.
+
+There is no runtime path by which `covenant of grace` can fire the `pactum salutis` bridge. The class of "wrong bridge is worse than no bridge" is architecturally excluded, not merely empirically avoided.
+
 ### Auditability preserved
 
 Every firing (exact or fuzzy) carries `{term, method, distance, matched_span}` for traceability. Every observation (near-miss) carries `{term, distance}` sorted by ascending distance. Both are threaded into `stages_capture` and Langfuse trace metadata (`query_expansion_matches`, `query_expansion_near_misses`) alongside `commit_sha`. The daily Zone-3 sampler (ADR-0008 Phase 1 Step 5b) can now distinguish exact-fired, fuzzy-fired, and near-miss-observed traces if a future failure surfaces.

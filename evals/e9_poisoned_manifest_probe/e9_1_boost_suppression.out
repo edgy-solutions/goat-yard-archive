@@ -1,0 +1,125 @@
+
+####################################################################################################
+# E-9.1 — poisoned-manifest fallback verification (ADR-0012)
+# BEFORE Fix 2: search_gill(entities=<poisoned>)
+# AFTER  Fix 2: search_gill(entities=[])
+####################################################################################################
+Connecting to Weaviate at HTTP:192.168.1.54:80 / gRPC:192.168.1.53:50051
+
+====================================================================================================
+CASE: means_of_grace  query='means of grace'
+  poisoned manifest (what BAML rejected): ['covenant of grace', 'dew of heaven', 'divine grace', 'election of grace', 'sovereign grace']
+Searching for: means of grace
+Detected entities: ['covenant of grace', 'dew of heaven', 'divine grace', 'election of grace', 'sovereign grace']
+Enhanced query for boost: means of grace covenant of grace dew of heaven divine grace election of grace sovereign grace
+[TIMING] Embedding via LiteLLM: 0.991s
+[TIMING] Weaviate query: 0.219s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+Searching for: means of grace
+Detected entities: []
+[TIMING] Embedding via LiteLLM: 0.194s
+[TIMING] Weaviate query: 0.163s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+
+  --- BEFORE Fix 2 (poisoned-manifest boost) ---
+    1. [MARK 4:7] score=0.712
+       but drop the profession of it: and it yielded no fruit; it was not the means of grace; faith did not come by it, nor any other grace; nor di...
+    2. [GENESIS 6:8] score=0.677
+       But Noah found grace in the eyes of the Lord.] This man and his family were the only exception to the general apostacy; God always reserves ...
+    3. [MATTHEW 25:9] score=0.629
+       But the wise answered, saying, not so, &c.] A flat denial; and which sprung not from want of compassion; for the saints are taught not only ...
+    4. [MATTHEW 20:23] score=0.576
+       And he saith unto them, ye shall drink indeed of my cup, &c.] Not of the self-same, but of what was like unto it; meaning, that they should ...
+    5. [MATTHEW 13:12] score=0.568
+       For whosoever hath, to him shall be given, &c.] Whoever has the true grace of God implanted in him, has a saving knowledge of Christ, and a ...
+
+  --- AFTER Fix 2 (entities=[], no boost) ---
+    1. [MARK 4:7] score=0.731
+       but drop the profession of it: and it yielded no fruit; it was not the means of grace; faith did not come by it, nor any other grace; nor di...
+    2. [JOHN 3:20] score=0.585
+       *For every one that doth evil, hateth the light, &c.*] Every man, the series of whose life and conversation is evil, hates Christ and his Go...
+    3. [MATTHEW 13:12] score=0.500
+       For whosoever hath, to him shall be given, &c.] Whoever has the true grace of God implanted in him, has a saving knowledge of Christ, and a ...
+    4. [MATTHEW 25:9] score=0.481
+       But the wise answered, saying, not so, &c.] A flat denial; and which sprung not from want of compassion; for the saints are taught not only ...
+    5. [MARK 8:23] score=0.447
+       *And he took the blind man by the hand, &c.*] Not for the sake of touching him, in order to heal him, as they desired, but to be his guide: ...
+
+  --- COMPARISON ---
+  overlap between before/after: ['MARK 4:7', 'MATTHEW 13:12', 'MATTHEW 25:9']
+  only-before: ['GENESIS 6:8', 'MATTHEW 20:23']
+  only-after:  ['JOHN 3:20', 'MARK 8:23']
+  baseline-notable chunks (poisoned-boost driven): ['GENESIS 6:8', 'GENESIS 9:10', 'JOHN 3:20']
+    in BEFORE result: ['GENESIS 6:8']
+    DROPPED after fix: ['GENESIS 6:8']
+
+====================================================================================================
+CASE: unmatched_narrow_typo  query='pxlusive psalmoly'
+  poisoned manifest (what BAML rejected): ['Jesus Christ', 'Apostle Paul', 'Old Testament saints']
+Searching for: pxlusive psalmoly
+Detected entities: ['Jesus Christ', 'Apostle Paul', 'Old Testament saints']
+Enhanced query for boost: pxlusive psalmoly Jesus Christ Apostle Paul Old Testament saints
+[TIMING] Embedding via LiteLLM: 0.208s
+[TIMING] Weaviate query: 0.190s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+Searching for: pxlusive psalmoly
+Detected entities: []
+[TIMING] Embedding via LiteLLM: 0.191s
+[TIMING] Weaviate query: 0.169s
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+DEBUG: Chunk keys: ['volume', 'content', 'verse_ref', 'sentence_data', 'page_number', 'lemma', 'scan_json', 'footnotes']
+
+  --- BEFORE Fix 2 (poisoned-manifest boost) ---
+    1. [MATTHEW 24:12] score=0.650
+       *And because iniquity shall abound, &c.*] Meaning either the malice and wickedness of outrageous persecutors, which should greatly increase;...
+    2. [LUKE 19:16] score=0.593
+       *Then came the first, &c.*] Who were set in the first place in the church, the apostles of Christ, and who had the greatest gifts, and labou...
+    3. [MATTHEW 26:44] score=0.560
+       And he left them, and went away again, &c.] At some little distance from them; they being so overpowered with sleep, that he could have no c...
+    4. [MARK 16:17] score=0.543
+       *And these signs shall follow them that believe,   &c.*] Not all of them, but some; and not always, only for a time; and which were necessar...
+    5. [MATTHEW 24:10] score=0.515
+       *And then shall many be offended, &c.*] That is, many who had been hearers of the apostles, and professors of the Christian religion; who we...
+
+  --- AFTER Fix 2 (entities=[], no boost) ---
+    1. [MARK 10] score=0.350
+       # CHAP. X....
+    2. [EXODUS 15:11] score=0.248
+       *Who is like unto thee, O Lord, among the gods? &c.*] For the perfections of his nature, for the blessings of his goodness, and for the work...
+    3. [MATTHEW 21:9] score=0.188
+       *And the multitudes that went before, &c.*] That is, that went before Christ; accordingly the Syriac, Arabic, Persic, and Ethiopic versions,...
+    4. [MATTHEW 10:27] score=0.170
+       What I tell you in darkness, &c.] Hence Christ proceeds to encourage his disciples to an open, plain, and faithful ministration of the Gospe...
+    5. [EXODUS 15:1] score=0.167
+       Then sang Moses and the children of Israel this song unto the Lord, &c.] Which is the first song recorded in Scripture, though no doubt befo...
+
+  --- COMPARISON ---
+  overlap between before/after: []
+  only-before: ['LUKE 19:16', 'MARK 16:17', 'MATTHEW 24:10', 'MATTHEW 24:12', 'MATTHEW 26:44']
+  only-after:  ['EXODUS 15:1', 'EXODUS 15:11', 'MARK 10', 'MATTHEW 10:27', 'MATTHEW 21:9']
+  baseline-notable chunks (poisoned-boost driven): ['JOHN 3:19', 'JOHN 5:53', 'LUKE 19:16']
+    in BEFORE result: ['LUKE 19:16']
+    DROPPED after fix: ['LUKE 19:16']
+
+====================================================================================================
+SUMMARY
+====================================================================================================
+  means_of_grace                  chunks_diverged=4  baseline_notable_dropped=1
+  unmatched_narrow_typo           chunks_diverged=10  baseline_notable_dropped=1
+
+  Raw: C:\Users\cnogr\git\goat-yard-archive\evals\e9_poisoned_manifest_probe\e9_1_boost_suppression_results.json
