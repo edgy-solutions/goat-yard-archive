@@ -477,25 +477,43 @@ async def search(request: Request, req: SearchRequest):
                 stages_capture["baml_punt_reasons"] = _punt_reasons
             raise ValueError(f"BAML output structurally punted: {_punt_reasons}")
 
-        # ADR-0013: two-pass entity lookup. BAML's `expanded_search_terms`
-        # is 18th-century-vocabulary paraphrase of the user's query — it
-        # is often much closer semantically to Gill's actual entity
-        # descriptions (e.g. 'psalm singing, musical praise' is
-        # embedding-adjacent to Hallel's "Passover hymn consisting of
-        # Psalms 113-118"; the raw query 'exclusive psalmody' is not).
-        # Re-run entity lookup on the BAML expansion and union with the
-        # raw manifest. This is the automated bridge for concept queries
-        # that no thesaurus entry can reach.
+        # ADR-0013 Part A (revised 2026-07-13 hotfix): two-pass entity
+        # lookup — GATED on thesaurus miss.
+        #
+        # Original design: always run get_relevant_entities on BAML's
+        # expansion, union with raw manifest. Rationale was semantic
+        # recall for concept queries.
+        #
+        # Observed regression: for queries where the thesaurus DID fire
+        # (any of exact/fuzzy/vector/span), the raw manifest was already
+        # anchored to concept-adjacent entities (Hallel, Book of Psalms,
+        # etc.). Running a second pass on BAML's expansion — which
+        # contains common English tokens like 'book' — surfaced
+        # substring-matched noise entities ('book of Wisdom', 'sealed
+        # book', 'authors of an edition of the book of Zohar') and
+        # unioning them into the boost diluted the load-bearing signal.
+        # Chris's 2026-07-12 evening retest showed MATTHEW 26:30 fell
+        # from top-1 (offline clean-manifest test) to past-top-6 (live
+        # trace) purely because of two-pass noise.
+        #
+        # Revised rule: only run the second pass when the thesaurus did
+        # NOT fire. If the thesaurus fired, the raw manifest is already
+        # anchored — the second pass can only dilute. If the thesaurus
+        # droughted, the raw manifest may be poor and the second pass
+        # can add semantic recall from BAML's expansion.
         second_pass_entities: list[str] = []
-        try:
-            if search_text and search_text.strip() and search_text.strip() != req.query.strip():
-                _tp0 = time.perf_counter()
-                second_pass_entities = await search_engine.get_relevant_entities(query=search_text)
-                _tp1 = time.perf_counter()
-                print(f"[TIMING] two-pass entity lookup: {_tp1-_tp0:.3f}s")
-                print(f"[TWO-PASS] baml_expansion manifest: {second_pass_entities}")
-        except Exception as _tp_err:
-            print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
+        if not expansion_matches:
+            try:
+                if search_text and search_text.strip() and search_text.strip() != req.query.strip():
+                    _tp0 = time.perf_counter()
+                    second_pass_entities = await search_engine.get_relevant_entities(query=search_text)
+                    _tp1 = time.perf_counter()
+                    print(f"[TIMING] two-pass entity lookup: {_tp1-_tp0:.3f}s")
+                    print(f"[TWO-PASS] baml_expansion manifest: {second_pass_entities}")
+            except Exception as _tp_err:
+                print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
+        else:
+            print(f"[TWO-PASS] skipped — thesaurus fired ({len(expansion_matches)} match(es)); raw manifest already anchored")
 
         # Union: BAML's picks (highest signal — the picker explicitly
         # said these fit the query) plus the semantic manifest from

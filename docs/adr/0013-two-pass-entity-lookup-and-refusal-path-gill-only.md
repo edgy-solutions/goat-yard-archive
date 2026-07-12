@@ -63,6 +63,43 @@ The choice between informative-refusal and flat-refusal is now Gill-material-onl
 - `search_gill` with the enlarged manifest still gets the same enhanced_query boost text, just with more entity names concatenated. BM25 scoring may shift for boundary cases.
 - The refusal-path constraint is prompt-level, not code-level; a future prompt refactor must preserve the Gill-only rule or the fix regresses silently. The [ADR-0011 v3 amendment](0011-query-expansion-for-narrow-reformed-vocabulary.md) documents the same class of concern for the thesaurus.
 
+## Amendment 2026-07-13 hotfix: gate two-pass on thesaurus miss
+
+### The observed regression
+
+Post-deploy of `2098be7` (v3 + two-pass + refusal-path bundle), Chris re-ran the incident query `"was gill an exclusive psalmist?"`. The v3 span-based vector match fired correctly (`matched_span: exclusive psalmist, distance: 0.102`), and the lookup query was correctly expanded to include `Hallel Passover Psalms 113 118`. The raw manifest surfaced the load-bearing entities cleanly:
+
+```
+available_entities: [Book of Psalms, Hallel, Megilla, Psalmist, הַלֵּל טָעוּן]
+```
+
+But retrieval **still** did not reach MATTHEW 26:30 (the Hallel commentary). Instead: EXODUS 10:23, EXODUS 32:32-33, LUKE 10:20, LUKE 20:42, LUKE 24:45.
+
+Root cause: the two-pass entity lookup, running on BAML's expansion `"Book of Psalms, Psalter, hymns, songs of David"`, surfaced substring-matched **noise entities** — `book of Wisdom`, `book of life`, `sealed book`, `authors of an edition of the book of Zohar` — because the token `book` (4 characters, passes the substring pass's `[A-Za-z]{4,}` filter) matches many `book of X` entities in the corpus. The union pushed those into `mapped_entities`, `search_gill` concatenated them into the BM25 boost, and the load-bearing Hallel signal was diluted enough that MATTHEW 26:30 dropped out of top-6.
+
+Offline verification confirmed the diagnosis: calling `search_gill` with the same query text and the **clean 4-entity manifest** `[Book of Psalms, Hallel, Psalmist, הַלֵּל טָעוּן]` (i.e. what would be passed without the two-pass) returned MATTHEW 26:30 at **rank 2 with score 0.648** — well within any reasonable top-N.
+
+### Revised rule
+
+**Only run the second pass when the thesaurus did NOT fire.** Formally: `if not expansion_matches: run second pass; else: skip`.
+
+- **Thesaurus fires (exact/fuzzy/vector/span)** — the raw manifest was already anchored to concept-adjacent entities via the appended anchor tokens. A second-pass on BAML's expansion can only add unanchored entities via lexical substring match, and those dilute the boost.
+- **Thesaurus droughts** — the raw manifest was built from the raw query alone, with no anchor tokens. It may be poor. The second-pass on BAML's expansion may add useful semantic-recall entities. Two-pass runs.
+
+This gating is consistent with the ADR-0013 Part A rationale as originally stated: two-pass is the **automated concept-bridge for queries no thesaurus entry can reach**. When a thesaurus entry *does* reach the query (through any tier), the bridge is already built and adding another one to it is not additive — it's dilutive.
+
+### Post-fix expected behavior for the incident query
+
+- `expand_query` fires v3 span-based match → `expansion_matches = [{term: 'exclusive psalmody', method: 'vector', ...}]`
+- Two-pass is skipped (thesaurus fired)
+- `mapped_entities` = BAML's picks from the raw (already-anchored) manifest — no substring-book noise
+- `search_gill` retrieval reaches MATTHEW 26:30 in top-N
+- Bot generates a proper answer citing Gill's Hallel commentary, not the ADR-0013 Part B refusal path.
+
+### Trade recorded
+
+The unamended Part A design still runs two-pass on queries where the thesaurus droughted (paraphrases with no matching entry). Those queries may still see the same substring-noise problem BAML expansion introduces. If real traffic surfaces that regression, the fix will be at the entity-lookup layer — tighten `_ENTITY_LOOKUP_STOPWORDS` to include common short English tokens like `book`, `word`, `name`, or restrict the substring pass to canonical keys that are word-suffix or word-prefix, not arbitrary substrings. Recorded as a follow-up rather than fixed pre-emptively because there's no evidence yet that the paraphrase-drought class is common.
+
 ## References
 
 - [ADR-0008](0008-three-zone-generation-and-voice-marked-ui.md) — three-zone taxonomy and the informative-refusal path this ADR constrains.
