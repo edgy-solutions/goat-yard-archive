@@ -92,6 +92,25 @@ function expandSentenceIdRange(id: string): string[] {
     return result;
 }
 
+// Extract every sentence-ID cited in the answer text, using the same
+// [SID] bracket + comma-separated + range-expansion logic the citation
+// pill renderer uses. Feeds the "which evidence chunk is really primary"
+// selection so the UI shows a chunk the answer actually references
+// rather than the alphabetically-first retrieved chunk (2026-07-12 fix).
+function extractCitedSids(answer: string): Set<string> {
+    const sids = new Set<string>();
+    const brackets = answer.match(/\[[A-Za-z0-9_, -]+\]/g) || [];
+    for (const bracket of brackets) {
+        const raw = bracket.replace(/^\[+|\]+$/g, '');
+        raw.split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .flatMap(expandSentenceIdRange)
+            .forEach(id => sids.add(id));
+    }
+    return sids;
+}
+
 function App() {
     const [query, setQuery] = useState("");
     const [loading, setLoading] = useState(false);
@@ -264,7 +283,22 @@ function App() {
             // Only show evidence if there are actual citations or if the answer DOESN'T indicate failure
             // If citations are empty, it usually means "I regret..." or "No info found"
             if (data.evidence && data.evidence.length > 0 && data.citations && data.citations.length > 0) {
-                setActiveEvidence(data.evidence[0]);
+                // Pick the first evidence chunk whose sentence_data contains
+                // a SID actually cited in the answer text. The evidence
+                // array isn't sorted by relevance — it can arrive in
+                // alphabetical-by-verse-ref order — so evidence[0] often
+                // isn't the chunk the model quoted from. The 2026-07-12
+                // psalmody incident showed JOHN 3:25 as "primary source
+                // evidence" while the answer cited LUKE 15:26; this fixes
+                // that class by matching on SID membership instead of
+                // array position.
+                const citedSids = extractCitedSids(data.answer);
+                const firstCited = (data.evidence as EvidenceItem[]).find(
+                    (ev: EvidenceItem) => ev.sentence_data?.some(
+                        (s: { sentence_id: string }) => s.sentence_id && citedSids.has(s.sentence_id)
+                    )
+                );
+                setActiveEvidence(firstCited || data.evidence[0]);
             } else {
                 setActiveEvidence(null);
             }
@@ -553,6 +587,22 @@ function App() {
 
                     {response && (
                         <div className="answer-pane-responsive animate-in fade-in slide-in-from-bottom-4 duration-500 custom-scrollbar">
+                            {/* User's question — echoed back so the reader can see
+                                what was asked while reading the answer. Absence of
+                                this echo caused confusion on the 2026-07-12 psalmody
+                                incident where the answer's off-topic quote sat
+                                without any anchor to the original query. */}
+                            {lastSearchedQuery && (
+                                <div className="mb-6 pb-4 border-b border-[#E5E0D8]">
+                                    <div className="text-[10px] uppercase tracking-wider text-[#8D6E63] font-ui mb-1 font-bold">
+                                        You asked
+                                    </div>
+                                    <div className="text-base text-[#5D4037] font-serif italic leading-snug">
+                                        {lastSearchedQuery}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Answer Card */}
                             <div className="relative">
                                 {/* Decorative Quote */}
