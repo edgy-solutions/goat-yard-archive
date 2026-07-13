@@ -233,7 +233,49 @@ This makes the (c) case *cleaner*, not weaker. The steelman for keeping gemma's 
 
 The drop was invisible because the entity fields lived only in `stages_capture` (debug-only responses), never in Langfuse. This is the third silent degradation found by accident (substring flood masked by the 5-cap; this drop; the dead `daily_rag_diagnostic`) — each present for months because a stage boundary logged only one side. Counter-move shipped in the same commit: `entity_lookup_count`, `entity_baml_dropped_count`, and `entity_baml_dropped` are now written to Langfuse trace metadata on **every** request, not just debug. If a future change reintroduces a subtractive path, `entity_baml_dropped_count` stops being 0 and is visible without a probe. The general rule this instance argues for: every stage boundary where one component's output feeds another's should log both sides by default.
 
-### What the earlier commits still stand on
+## Amendment 2026-07-13 (Part D): the punt path has the same disease — trust the anchored manifest
+
+### The read-the-answer moment exposed it
+
+After Part C + telemetry deployed (`a79cdbc`), the incident query `"was gill an exclusive psalmist?"` was run end-to-end and the **answer** read (not just the rank). It came back a **refusal**. The trace:
+
+- `expansion_matches`: vector match fired — thesaurus anchored the manifest.
+- `available_entities`: `[Hallel, Lord's passover, passover, passover-lamb, הַלֵּל טָעוּן]` — **Hallel present, manifest good**.
+- `baml_entities`: `[]` — **empty**.
+
+BAML punted `entities_given_none_returned` on this run (the same query took the *success* path earlier — pure gemma non-determinism), and ADR-0012 suppressed the boost entirely, discarding the anchored Hallel. Drought, refusal.
+
+Part C fixed the *success* branch. The *punt* branch had the identical disease: a stochastic signal (BAML's punt) vetoing a deterministic anchored manifest. The principle must apply consistently to both branches.
+
+### The fix
+
+Refine the ADR-0012 dispatch to branch on the **deterministic** thesaurus signal, not the unreliable punt:
+
+- **A1 — `entities_given_none_returned` AND `expansion_matches` non-empty**: the manifest was built from a thesaurus-anchored `lookup_query` and is trustworthy. BAML's punt may not veto it. Boost on the raw manifest. (fallback_kind `anchored_manifest_trusted`)
+- **A2 — `entities_given_none_returned` AND thesaurus droughted**: genuine poison risk (the `means of grace` → lexical-noise case ADR-0012 was built for). Suppress. (fallback_kind `poisoned_manifest_suppressed`, unchanged)
+
+### Verification — and an unexpected bonus
+
+Punt-path retrieval (raw query + anchored manifest boost), N=3:
+
+| Run | MATTHEW 26:30 | top-3 |
+|---|---|---|
+| 1 | **rank 1, 0.754** | MATT 26:30, LUKE 22:16, LUKE 22:7 |
+| 2 | **rank 1, 0.750** | (same) |
+| 3 | **rank 1, 0.750** | (same) |
+
+MATT 26:30 lands **rank 1**, not the rank-4 of the Part C success path — and the top-3 are all Passover/Supper chunks with **no David-crowding**. The reason: the punt path uses the *raw query* as retrieval text, while Part C's success path used BAML's expansion (`"songs of David, Davidic poetry"`), which is precisely what pulled the David chunks up. So the David-crowding recorded earlier was an artifact of using BAML's expansion as the retrieval search text — the punt path avoids it by construction.
+
+This surfaces a real question for the (c) work: **is using BAML's expansion as the retrieval `search_text` a net positive?** For this query the raw query retrieves *better* (rank 1, clean) than BAML's expansion (rank 4, David-crowded). For bare `"exclusive psalmody"`, BAML's expansion helped the embedding reach MATT 26:30. Query-dependent — folded into the (c) evaluation.
+
+### The two psalmist paths now both reach the chunk
+
+- **BAML-success path** (Part C): MATT 26:30 rank 4, some David-crowding, but present and in the bot's window.
+- **BAML-punt path** (Part D): MATT 26:30 rank 1, clean.
+
+Both deterministically reach the Hallel chunk regardless of gemma's coin-flip. The quality difference between the two paths (rank 1 vs 4) is a (c) concern; the *drought* — the failure the user saw — is closed on both.
+
+## What the earlier commits still stand on
 
 - ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.
 - ADR-0013 Part A (two-pass) is now unconditional and works because the substring bug is fixed.

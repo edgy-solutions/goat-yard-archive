@@ -570,32 +570,60 @@ async def search(request: Request, req: SearchRequest):
         print(f"BAML Optimization failed, falling back to raw query:\n{error_msg}")
         search_text = req.query
 
-        # ADR-0012 punt-reason-based fallback dispatch.
+        # ADR-0012 punt-reason-based fallback dispatch, REFINED 2026-07-13
+        # (ADR-0013 Part D) to respect the thesaurus-fired signal.
         #
-        # Case A — poisoned manifest (`entities_given_none_returned`):
-        #     BAML looked at the manifest and rejected all of it. Re-
-        #     using those entities as an entity boost injects known-
-        #     wrong signal into retrieval — the 2026-07-12 psalmody
-        #     incident showed the Aramaic/Talmudic manifest (Ben Zeta,
-        #     Megilla, Chaldee paraphrases) confidently steered
-        #     retrieval to JOHN 3:25. Suppress the entity boost entirely
-        #     here (`mapped_entities = []`), so retrieval falls back to
-        #     pure hybrid (BM25 + qwen3 vector) with no false anchor.
-        #     Degrades a wrong answer to an honest "not found in the
-        #     corpus" — the cliff becomes a slope.
+        # Case A — `entities_given_none_returned`:
+        #     BAML returned zero entities from the manifest it was handed.
+        #     ADR-0012 originally read this as "manifest is poison ->
+        #     suppress boost." But the entity-drop telemetry disconfirmed
+        #     the premise: BAML punts `entities_given_none_returned` even
+        #     on GOOD manifests (the 'exclusive psalmody' / 'exclusive
+        #     psalmist' case punts on a manifest containing Hallel,
+        #     passover, Book of Psalms). The punt is a gemma coin-flip,
+        #     not reliable evidence about manifest quality.
+        #
+        #     Dispatch on the DETERMINISTIC signal instead:
+        #       A1 — thesaurus fired (expansion_matches non-empty): the
+        #            manifest was built from an anchored lookup_query and
+        #            is trustworthy. BAML's punt may NOT veto it (same
+        #            principle as Part C: a stochastic component may not
+        #            subtract from a deterministic anchored manifest).
+        #            Boost on the raw manifest.
+        #       A2 — thesaurus droughted (expansion_matches empty) AND
+        #            BAML rejected: genuine poison risk (the 'means of
+        #            grace' -> [covenant of grace, dew of heaven, ...]
+        #            lexical-noise case). Suppress the boost, ADR-0012
+        #            behavior preserved for the case it was built for.
         #
         # Case B — other punts (empty_expansion, no_query_terms_present)
-        #     or a raw BAML exception: the manifest itself may be fine;
-        #     only the query rewrite failed. Keep the dedup-only fallback
-        #     (ADR-0008 step 2d) unchanged.
+        #     or a raw BAML exception: manifest may be fine, only the
+        #     rewrite failed. Dedup-only fallback (ADR-0008 step 2d).
         if "entities_given_none_returned" in _punt_reasons:
-            mapped_entities = []
-            fallback_kind = "poisoned_manifest_suppressed"
-            print(
-                "[BAML FALLBACK] entities_given_none_returned -> suppressing "
-                "entity boost (ADR-0012). Retrieval will run on hybrid "
-                "BM25+vector alone with no entity anchor."
-            )
+            if expansion_matches:
+                # A1 — anchored manifest, trust it despite BAML's punt.
+                _seen, _deduped = set(), []
+                for _e_name in (available_entity_names or []):
+                    _key = _e_name.strip().lower()
+                    if _key and _key not in _seen:
+                        _seen.add(_key)
+                        _deduped.append(_e_name)
+                mapped_entities = _deduped if _deduped else None
+                fallback_kind = "anchored_manifest_trusted"
+                print(
+                    "[BAML FALLBACK] entities_given_none_returned BUT thesaurus "
+                    f"fired ({len(expansion_matches)} match) -> trusting anchored "
+                    f"manifest (ADR-0013 Part D): {mapped_entities}"
+                )
+            else:
+                # A2 — genuine poison risk, suppress (ADR-0012 preserved).
+                mapped_entities = []
+                fallback_kind = "poisoned_manifest_suppressed"
+                print(
+                    "[BAML FALLBACK] entities_given_none_returned + thesaurus "
+                    "droughted -> suppressing entity boost (ADR-0012). Retrieval "
+                    "runs on hybrid BM25+vector alone with no entity anchor."
+                )
         else:
             # Dedup-only fallback (ADR-0008 step 2d). The per-query relevant
             # entity set returned by get_relevant_entities is already filtered
