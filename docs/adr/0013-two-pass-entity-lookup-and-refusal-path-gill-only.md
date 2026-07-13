@@ -141,6 +141,55 @@ For the motivating query `"was gill an exclusive psalmist?"`, retrieval was run 
 
 Honest secondary observation: the top-3 in every run are David-quotes-a-psalm verses (LUKE 20:42 "David himself saith in the book of Psalms", MATTHEW 23:43, LUKE 1:32), not the Hallel commentary. The two-pass added `David / times of David / house of David` because BAML expanded "psalmist" → "songs of David", and those entities pull David-psalm chunks above the Hallel material. The two-pass is a *net* help — without it MATTHEW 26:30 was past rank 6 (drought); with it, stable rank 4 — but it crowds the top with David-quote material. If future evidence shows the David-crowding degrades answer quality, the fix is at the BAML-expansion or the entity-boost-weighting layer, not here. Recorded as the observed baseline so a future regression has a number to be measured against.
 
+## Amendment 2026-07-13 (Part C): anchor the entity boost on the raw manifest
+
+### The bug the substring fix revealed underneath itself
+
+After the substring root fix (`04ca662`) deployed, a full-pipeline N=5 of `"was gill an exclusive psalmist?"` against the live pod showed MATTHEW 26:30 **ABSENT** in all five runs — contradicting the offline retrieval test that had it at stable rank 4. The offline test had hand-built the entity union to include the raw manifest; the deployed pipeline did not.
+
+The trace showed the divergence precisely:
+
+- **Raw manifest** (`available_entities`, surfaced by the thesaurus anchor tokens on `lookup_query`): `[Book of Psalms, Hallel, Psalmist, passover, הַלֵּל טָעוּן]` — the English `Hallel` entity is present at position 2.
+- **`baml_entities`** (what the boost actually used = BAML's `official_entities` ∪ second-pass): `[Book of Psalms, Psalmist, הַלֵּל טָעוּן]` — the English `Hallel` is **gone**.
+
+Per the E-1 entity survey, MATTHEW 26:30 is linked to the **English `Hallel`** entity `[TypeOrSymbol]` ("Passover hymn consisting of Psalms 113-118"). BAML's pick had deduplicated the English and Hebrew Hallel forms down to only the Hebrew — exactly the wrong choice for retrieval, because the English one carries the MATT 26:30 link. Without it in the boost, MATT 26:30 lost its `entities^3` boost and fell out of retrieval entirely — a drought, non-deterministically (run 2 produced a different second-pass and a refusal), on the exact query the whole thesaurus effort was built to answer.
+
+### The architectural flaw
+
+BAML's `official_entities` was the **sole source** for the entity boost (unioned with second-pass, but both post-BAML). BAML's pick is a lossy, non-deterministic filter over the candidate manifest. Anchoring the boost on it means any entity BAML fails to echo — including one the thesaurus deliberately surfaced via anchor tokens — is silently discarded. The thesaurus did its job (Hallel was in the raw manifest); BAML undid it.
+
+### The fix
+
+Union **three** sources for the entity boost, raw manifest first:
+
+```python
+for _name in (
+    list(available_entity_names or [])   # raw manifest — thesaurus-anchored, highest signal
+    + list(mapped_entities or [])        # BAML's canonicalized picks — may add canonical names
+    + list(second_pass_entities or [])   # concept recall from BAML's expansion
+):
+    dedup and preserve first-appearance order
+```
+
+No single lossy stage can now discard a load-bearing entity. All three sources are individually cap-bounded (`MANIFEST_TOTAL_CAP = 5`), so the union stays small — the psalmist query's union is 5 entities, not a return to the pre-ADR-0010 flood.
+
+### Verification
+
+Offline, holding the BAML expansion text constant, boost = current (BAML-only) vs fixed (raw-manifest-anchored):
+
+| Boost source | MATTHEW 26:30 |
+|---|---|
+| Current (BAML picks ∪ second-pass) | **ABSENT** |
+| Fixed (raw manifest ∪ BAML ∪ second-pass) | **rank 4, 0.413** |
+
+N=5 retrieval stability with the fixed union: rank 4 every run, score 0.416–0.417. Stable, not fragile.
+
+Full-pipeline N=5 against the deployed pod pending redeploy of this commit.
+
+### The general principle
+
+The entity boost is a *union of everything the retrieval system found relevant*, not the output of the last filter in the chain. Every stage that can surface an entity (thesaurus-anchored lookup, BAML canonicalization, expansion-based recall) contributes; no stage's omission is authoritative. This is the same "amplifier not foundation" lesson from the ADR-0012 poisoned-manifest work, applied to the opposite failure: there, a bad manifest was suppressed; here, a good entity must not be droppable by a downstream filter.
+
 ### What the earlier commits still stand on
 
 - ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.

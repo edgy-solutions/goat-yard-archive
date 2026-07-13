@@ -497,13 +497,35 @@ async def search(request: Request, req: SearchRequest):
         except Exception as _tp_err:
             print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
 
-        # Union: BAML's picks (highest signal — the picker explicitly
-        # said these fit the query) plus the semantic manifest from
-        # BAML's expansion (concept recall). Preserve first-appearance
-        # order so BAML's picks lead the boost text.
+        # ADR-0013 Part C (2026-07-13): anchor the entity boost on the
+        # RAW MANIFEST, not on BAML's picks.
+        #
+        # BAML's `official_entities` is a lossy, non-deterministic filter
+        # over the candidate manifest. Using it as the SOLE source for
+        # the entity boost means any entity BAML fails to echo is lost —
+        # even one the thesaurus deliberately surfaced. The 2026-07-13
+        # psalmist incident: the raw manifest correctly contained the
+        # English `Hallel` entity (which MATTHEW 26:30 is linked to,
+        # surfaced by the thesaurus anchor tokens), but BAML's pick
+        # dropped it and kept only the Hebrew form. Result: MATT 26:30
+        # lost its entities^3 boost and fell out of retrieval entirely —
+        # a drought, non-deterministically, on the exact query the
+        # thesaurus fix was built for.
+        #
+        # Fix: union THREE sources, raw manifest first (highest signal —
+        # it's what get_relevant_entities found on the thesaurus-anchored
+        # lookup_query), then BAML's canonicalized picks (may add
+        # canonical names), then second-pass concept recall. No single
+        # lossy stage can now discard a load-bearing entity. All three
+        # are individually cap-bounded (MANIFEST_TOTAL_CAP=5 each), so
+        # the union stays small — no return to the pre-ADR-0010 flood.
         _seen_union: set[str] = set()
         _union: list[str] = []
-        for _name in list(mapped_entities or []) + list(second_pass_entities or []):
+        for _name in (
+            list(available_entity_names or [])
+            + list(mapped_entities or [])
+            + list(second_pass_entities or [])
+        ):
             _key_l = (_name or "").strip().lower()
             if _key_l and _key_l not in _seen_union:
                 _seen_union.add(_key_l)
