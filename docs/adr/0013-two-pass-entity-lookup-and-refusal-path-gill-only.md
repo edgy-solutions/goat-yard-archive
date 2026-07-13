@@ -119,6 +119,28 @@ Once the substring pass is clean, the reason for gating the two-pass evaporated.
 
 The concept bridge now works on both branches for the same reason: no substring flood, no calcified workaround.
 
+### The length floor is a stopgap, not the structural fix (live follow-up)
+
+Raising the floor 4→5 closes the *observed* failures (`book`, `life`, `word`, `name`) and preserves the tokens we need (`psalms`, `wisdom`, `covenant`). But it is a proxy for the property actually wanted: **word-boundary matching on the canonical key**, not token length. Five-character common theological words exist and will re-open the class the first time a query expansion contains one — `grace`, `faith`, `blood`, `bread`, `light`, `flesh`, `glory`, `works`, `laws`. Each is a substring of legitimate compound entities (`bread` → `bread of life`; `grace` → `X of grace`) and a common English token. So the class is **narrowed, not closed**.
+
+The structural fix — the one the substring bug actually calls for — is to match query tokens against the canonical key at word boundaries rather than as arbitrary substrings: a token should match `bread of life` only if `bread` aligns with a word in the key, not if it appears anywhere inside `sealedbread...`. That is a live follow-up, not a closed one. The 4→5 floor buys time; word-boundary matching ends the story. Recorded here so nobody reads "root fix" and stops thinking — the *observed* root cause is fixed, the *structural* root cause is narrowed.
+
+### Observed retrieval margin (N=5 stability baseline)
+
+For the motivating query `"was gill an exclusive psalmist?"`, retrieval was run N=5 against the live gya-test Weaviate with the fixed clean union `[Hallel (Hebrew), Hallel, Book of Psalms, Psalmist, passover, David, times of David, house of David]`:
+
+| Run | MATTHEW 26:30 rank | score |
+|---|---|---|
+| 1 | 4 | 0.555 |
+| 2 | 4 | 0.558 |
+| 3 | 4 | 0.555 |
+| 4 | 4 | 0.555 |
+| 5 | 4 | 0.555 |
+
+**Stable rank 4, score 0.555–0.558** — the sub-0.003 variance is the embedding service round-robining across the two Ollama nodes (.179/.188) per the litellm config. It does NOT drift toward the window edge. The bot retrieves `limit=12` (main.py:577), so rank 4 sits comfortably in the middle third of the window it sees, not at the margin.
+
+Honest secondary observation: the top-3 in every run are David-quotes-a-psalm verses (LUKE 20:42 "David himself saith in the book of Psalms", MATTHEW 23:43, LUKE 1:32), not the Hallel commentary. The two-pass added `David / times of David / house of David` because BAML expanded "psalmist" → "songs of David", and those entities pull David-psalm chunks above the Hallel material. The two-pass is a *net* help — without it MATTHEW 26:30 was past rank 6 (drought); with it, stable rank 4 — but it crowds the top with David-quote material. If future evidence shows the David-crowding degrades answer quality, the fix is at the BAML-expansion or the entity-boost-weighting layer, not here. Recorded as the observed baseline so a future regression has a number to be measured against.
+
 ### What the earlier commits still stand on
 
 - ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.
