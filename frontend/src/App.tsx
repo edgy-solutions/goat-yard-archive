@@ -13,7 +13,7 @@ import Terms from './pages/Terms';
 import Footer from './components/Footer';
 import AnalyticsManager from './components/AnalyticsManager';
 import HighlightedContent from './components/HighlightedContent';
-import ReactMarkdown from 'react-markdown';
+import { TextWithVerses } from './components/TextWithVerses';
 
 // Palette removed as requested (reverting to single yellow highlight on selection)
 
@@ -498,7 +498,7 @@ function App() {
                 />
 
                 {/* Main Content Area - 50/50 split, with padding for search bar */}
-                <div className="content-wrapper-responsive flex-1 p-4 md:p-8 pb-24 flex flex-col">
+                <div className="content-wrapper-responsive flex-1 px-4 md:px-8 pt-3 md:pt-4 pb-24 flex flex-col">
 
                     {/* Empty State */}
                     {!response && !loading && !error && (
@@ -593,8 +593,8 @@ function App() {
                                 incident where the answer's off-topic quote sat
                                 without any anchor to the original query. */}
                             {lastSearchedQuery && (
-                                <div className="mb-6 pb-4 border-b border-[#E5E0D8]">
-                                    <div className="text-[10px] uppercase tracking-wider text-[#8D6E63] font-ui mb-1 font-bold">
+                                <div className="mb-3 pb-2 border-b border-[#E5E0D8]">
+                                    <div className="text-[10px] uppercase tracking-wider text-[#8D6E63] font-ui mb-0.5 font-bold">
                                         You asked
                                     </div>
                                     <div className="text-base text-[#5D4037] font-serif italic leading-snug">
@@ -605,11 +605,11 @@ function App() {
 
                             {/* Answer Card */}
                             <div className="relative">
-                                {/* Decorative Quote */}
-                                <div className="absolute -top-4 -left-2 text-6xl text-[#E5E0D8] font-serif pointer-events-none">“</div>
-
                                 <div className="relative z-10">
-                                    <div className="flex justify-end mb-2">
+                                    {/* Decorative quote sits inline with the status pill,
+                                        not floating above — trims the gap above the answer. */}
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-4xl leading-none text-[#E5E0D8] font-serif pointer-events-none select-none">“</span>
                                         {response.verified ? (
                                             <span className="flex items-center text-[10px] text-green-800 bg-green-50/80 px-2 py-1 rounded-full border border-green-100 font-bold uppercase tracking-wider font-ui backdrop-blur-sm">
                                                 ✓ Verified Source
@@ -628,7 +628,14 @@ function App() {
                                         )}
                                     </div>
                                     <div className="prose prose-lg max-w-none text-[#2C241B] leading-relaxed font-serif">
-                                        {response.answer.split('\n').map((line, i) => {
+                                        {(() => {
+                                        // Footnote definitions for the answer come from the evidence
+                                        // chunks it quotes. Merge + dedup so the answer prose can render
+                                        // `[^N]` markers as popups the same way the evidence pane does.
+                                        const answerFootnotes = Array.from(new Set(
+                                            (response.evidence || []).flatMap(ev => ev.footnotes || [])
+                                        ));
+                                        return response.answer.split('\n').map((line, i) => {
                                             // Allow `-` inside the citation pattern so range citations like
                                             // `[MATTHEW_24_45_S02-S04]` are matched (then expanded below).
                                             // Allow lowercase letters because the model occasionally produces
@@ -694,26 +701,23 @@ function App() {
                                                             }
                                                             return null;
                                                         }
-                                                        // Use ReactMarkdown for text parts to render italics/bold
-                                                        // Use span as wrapper to stay inline, but ReactMarkdown defaults to p/div blocks,
-                                                        // so we need to process it to allow inline rendering or just accept block behavior?
-                                                        // Actually, 'prose' handles paragraphs well. Let's try rendering inline components.
+                                                        // Render prose via TextWithVerses (not raw ReactMarkdown)
+                                                        // so `[^N]` footnote markers in quoted Gill text become
+                                                        // superscript popups + click-to-scroll, matching the
+                                                        // evidence pane. TextWithVerses also renders markdown
+                                                        // (italics/bold) and Gill verse refs — a superset of what
+                                                        // ReactMarkdown did here. Footnotes are merged from the
+                                                        // answer's cited evidence chunks (answerFootnotes below).
                                                         return (
                                                             <span key={partIdx}>
-                                                                <ReactMarkdown
-                                                                    components={{
-                                                                        p: ({ node, ...props }) => <span {...props} />,
-                                                                        a: ({ node, ...props }) => <span className="text-amber-800 underline" {...props} />
-                                                                    }}
-                                                                >
-                                                                    {part}
-                                                                </ReactMarkdown>
+                                                                <TextWithVerses text={part} renderMarkdown={true} footnotes={answerFootnotes} />
                                                             </span>
                                                         );
                                                     })}
                                                 </div>
                                             );
-                                        })}
+                                        });
+                                        })()}
                                     </div>
 
                                     {/*
