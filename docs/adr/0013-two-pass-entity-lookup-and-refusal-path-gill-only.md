@@ -275,6 +275,50 @@ This surfaces a real question for the (c) work: **is using BAML's expansion as t
 
 Both deterministically reach the Hallel chunk regardless of gemma's coin-flip. The quality difference between the two paths (rank 1 vs 4) is a (c) concern; the *drought* — the failure the user saw — is closed on both.
 
+## The standing architectural rule (stated once, prominently)
+
+Three fixes in this chain — Part C (anchor boost on raw manifest), the additive-only guard, Part D (trust anchored manifest on BAML punt) — are the same rule applied three times. State it once as the load-bearing principle of the retrieval layer:
+
+> **A stochastic component may never be authoritative over a deterministic one.** BAML (small, quantized, high-variance) may *contribute* to the retrieval pipeline — expand vocabulary, suggest canonical names — but it may never *veto, subtract from, or gate* the output of the deterministic components (thesaurus, vector lookup, substring, BM25). When a stochastic signal and a deterministic signal disagree about whether to keep something, the deterministic one wins. Branch decisions on deterministic signals (did the thesaurus fire?), never on stochastic ones (did gemma punt?).
+
+Every future pipeline change should be checked against this rule. The entity-drop bug, the poisoned-manifest misread, and the punt-path suppression were all violations of it.
+
+## E-10: is BAML's expansion net-positive as retrieval search text? (the (c) evidence)
+
+The read-the-answer step confirmed the chain closed (the incident query returns Gill's verified Hallel commentary, no lentil trap) AND surfaced that the success path lands MATT 26:30 at rank 10-11 while the punt path lands it at rank 1 — the difference being whether BAML's expansion is used as the retrieval `search_text`. E-10 (`evals/e10_expansion_as_search_text/`) isolated that variable across 10 queries, entity boost held constant:
+
+| Class | example | raw rank | +expansion rank | winner |
+|---|---|---|---|---|
+| narrow-inflection | was gill an exclusive psalmist? | 1 | 3 | RAW |
+| compound/named | the scapegoat ritual; the golden calf | 2, 1 | 3, 3 | RAW |
+| paraphrase-drought | should we sing only psalms in worship? | 4 | 3 | expanded |
+| plain-noun | Cain, baptism, Melchizedek, Babel, Noah | 1 | 1 | tie |
+| narrow-term (corpus gap) | monergism → ROMANS | >12 | >12 | tie |
+
+**RAW wins 3, expanded wins 1, ties 6.** `search_gill` already includes the raw query on both BM25 and embedding sides, so the "expanded" condition is really *raw + expansion*. The finding: **adding BAML's expansion on top of the raw query is net-negative-or-neutral on 9/10 query classes.** It dilutes the focused signal for narrow/compound queries (`psalmist` + `songs of David` → David-crowding) and helps only paraphrase-droughts where the raw query genuinely lacks vocabulary.
+
+The reason the expansion is now redundant-at-best: the entity boost (thesaurus anchors + two-pass) carries the concept-bridging that expansion-as-search-text used to provide. The bridge moved to the entity layer; the expansion-in-retrieval is left doing mostly harm.
+
+### The (c) decision, sharpened
+
+Not "is expansion good" but "**which consumer of the expansion is it good for**":
+
+1. **As retrieval search text** — net-negative (E-10: 9/10 raw-dominant). **Recommend: retrieve on the raw query.**
+2. **As two-pass entity-lookup input** — net-positive (the paraphrase concept bridge that fixed "should we sing only psalms in worship?"). **Recommend: keep.**
+3. **As entity-picking input** — 36% drop, 0 measured gain. **Recommend: remove; the lookup owns the manifest.**
+
+After (c), gemma's role: **expand queries to feed the entity lookup, nothing else.** Not retrieval search text, not entity picking. The scope reduction is entirely evidence-backed, and it deletes a category of machinery (the `entities_given_none_returned` punt reason, the ADR-0012 poisoned-manifest suppression, the Part D dispatch, the additive-only guard) — all of which exist only to defend against gemma's entity-role.
+
+### Not yet implemented — sequencing
+
+This is a substantial refactor and must be validated against the 28-case reference eval set (ADR-0004), not the 10 ad-hoc E-10 queries. Sequencing, one change at a time, each verified before the next:
+
+1. Switch retrieval to raw query (E-10 says dominant; confirm on the eval set no regression).
+2. Remove BAML entity-picking; lookup owns the manifest (confirm eval set).
+3. *Then, separately*, delete the now-dead ADR-0012 suppression + Part D dispatch + additive-only guard (they become unreachable once BAML no longer picks entities). Kept as a distinct commit so a wrong assumption about what depends on them is debuggable in isolation.
+
+Gated on running the eval set; not landed in this chain of commits, which closed the incident (the user's query now returns verified Hallel content).
+
 ## What the earlier commits still stand on
 
 - ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.
