@@ -186,9 +186,40 @@ N=5 retrieval stability with the fixed union: rank 4 every run, score 0.416–0.
 
 Full-pipeline N=5 against the deployed pod pending redeploy of this commit.
 
-### The general principle
+### The general principle — a stochastic component may never subtract from a deterministic one
 
-The entity boost is a *union of everything the retrieval system found relevant*, not the output of the last filter in the chain. Every stage that can surface an entity (thesaurus-anchored lookup, BAML canonicalization, expansion-based recall) contributes; no stage's omission is authoritative. This is the same "amplifier not foundation" lesson from the ADR-0012 poisoned-manifest work, applied to the opposite failure: there, a bad manifest was suppressed; here, a good entity must not be droppable by a downstream filter.
+The precise flaw is larger than the psalmody case: **the pipeline let a stochastic component veto a deterministic one.** The entity lookup — thesaurus anchor, vector tier, substring pass, all the deterministic machinery of ADR-0010/0011/0013 — surfaces the correct manifest. Then BAML, a small unreliable model whose failure modes are catalogued across ADR-0008 (empty `{}`, meta-text punts, role confusion, dropping entities it was handed), decides *which of those entities survive*, and whatever it silently omits is gone. Every upstream guarantee — deterministic thesaurus, provable no-false-bridge, grounded entries — is nullified by a downstream coin-flip.
+
+The principle that generalizes past this bug: **BAML's `official_entities` is additive, never subtractive.** BAML may *add* canonical names it maps; it may not *remove* an entity the deterministic lookup found. The boost is anchored on the raw manifest; every stage contributes; no stage's omission is authoritative. Same "amplifier not foundation" lesson as ADR-0012, applied to the opposite failure: there a bad manifest was suppressed; here a good entity must not be droppable by a downstream filter.
+
+### Telemetry — how much BAML has been dropping (the "silently since May" number)
+
+The entity fields are only in `stages_capture` (debug responses), never logged to Langfuse, so no historical organic-traffic analysis was possible — the drop has been invisible since the entity boost shipped. Measured empirically across 10 diverse queries against the deployed pod (`available_entities` vs `baml_entities`):
+
+| Query | lookup surfaced | dropped before boost | dropped entities |
+|---|---|---|---|
+| was gill an exclusive psalmist? | 5 | **3** | hallel, passover, הַלֵּל טָעוּן |
+| exclusive psalmody | 5 | **5** | (BAML punted `entities_given_none_returned` — all 5, incl. hallel) |
+| universal atonement in Christ | 5 | 0 | — |
+| is the covenant of grace monocovenantal | 5 | 0 | — |
+| what does Gill say about Cain | 3 | 2 | arabic writers, offspring of cain |
+| what does Gill say about baptism | 5 | 0 | — |
+| who was Melchizedek | 2 | 1 | wine of his love |
+| the scapegoat ritual | 5 | 3 | ruler, spiritual reign of christ, strangers |
+| what does Gill say about the Sabbath | 5 | 0 | — |
+| monergism in salvation | 5 | 2 | distinguishing grace, free grace of God |
+
+**6 of 10 queries lost at least one lookup entity. 16 of 45 total entities (36%) were dropped before the boost.** On the two psalmody phrasings the dropped set included the load-bearing `hallel`. This has been degrading retrieval on roughly a third of queries since the entity boost shipped, invisibly, because nobody compared the two fields — the same "silently damaging since May" shape as the substring bug, one layer over, now quantified rather than assumed.
+
+Part C (raw-manifest-anchored union) reduces the *net* drop to zero for the BAML-success path: every lookup entity now survives into the boost.
+
+### Open question for a follow-up (c): should BAML pick entities at all?
+
+The telemetry raises the reviewer's sharper question: what is BAML's entity *pick* for, now? The lookup already returns query-relevant entities by deterministic BM25 + vector + substring matching. BAML is being asked to re-filter a list *already filtered by relevance*, using a model that drops a load-bearing entity 36% of the time. On this evidence the pick is net-subtractive — it removes value (the dropped Hallel) more reliably than it adds it.
+
+The counter-argument — BAML's pick can *deprioritize* lookup entities that don't fit the query's actual subject — is weaker than it looks: E-6/E-8 showed the lookup's precision is better governed by thresholds and caps (which now exist) than by a small model's judgment. Part C makes BAML additive-only, which captures most of the benefit. The remaining decision is whether to remove BAML's entity-mapping role *entirely* — letting the lookup own the manifest, which would also retire the `entities_given_none_returned` punt reason and the ADR-0012 poisoned-manifest machinery as a category, and shrink the gemma prompt (already fought down for reliability). BAML would keep the job it is genuinely good at — query expansion into 18th-century vocabulary — and stop doing the job it keeps failing at.
+
+There is one wrinkle the telemetry surfaced that must be resolved first: for `"exclusive psalmody"`, BAML punted `entities_given_none_returned` on a manifest that was actually GOOD (contained hallel, book of psalms, passover). ADR-0012 currently reads that punt as "manifest is poison → suppress boost." That's the wrong reading when the thesaurus fired (a strong signal the manifest is anchored). The clean refinement: trust the raw manifest when `expansion_matches` is non-empty even if BAML punts; suppress only when the thesaurus droughted AND BAML rejected. Recorded as the (c) follow-up — not landed in this commit, which is scoped to making the success-path boost lossless.
 
 ### What the earlier commits still stand on
 
