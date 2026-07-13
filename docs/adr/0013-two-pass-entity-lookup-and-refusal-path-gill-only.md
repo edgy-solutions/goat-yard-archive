@@ -221,6 +221,18 @@ The counter-argument — BAML's pick can *deprioritize* lookup entities that don
 
 There is one wrinkle the telemetry surfaced that must be resolved first: for `"exclusive psalmody"`, BAML punted `entities_given_none_returned` on a manifest that was actually GOOD (contained hallel, book of psalms, passover). ADR-0012 currently reads that punt as "manifest is poison → suppress boost." That's the wrong reading when the thesaurus fired (a strong signal the manifest is anchored). The clean refinement: trust the raw manifest when `expansion_matches` is non-empty even if BAML punts; suppress only when the thesaurus droughted AND BAML rejected. Recorded as the (c) follow-up — not landed in this commit, which is scoped to making the success-path boost lossless.
 
+### Correction: gemma drops, it does not substitute (phantom hypothesis disconfirmed)
+
+The initial read of `avail=5 baml=6 dropped=3` was "BAML substituted — dropped 3 lookup entities and invented its own," raising the worry that the boost had been firing against hallucinated entity names not in the database. That worry was tested and **disconfirmed**. Measuring `baml_entities − available − second_pass` (pure gemma additions) across 7 queries and checking each against `TheologicalEntity`: gemma added exactly **1** entity not from the lookup, and that one was the Hebrew Hallel `הַלֵּל טָעוּן` flagged "phantom" only by a unicode-normalization mismatch in the exact-match check — it *was* in the raw manifest.
+
+The corrected mechanism: gemma's `official_entities` is a lossy **subset** of the manifest — it drops, it does not invent. The `baml=6 > avail=5` inflation came entirely from `second_pass` (which returns real DB entities by construction), not from gemma. There is no phantom-boost problem.
+
+This makes the (c) case *cleaner*, not weaker. The steelman for keeping gemma's pick was "maybe it surfaces apt entities the lookup missed." The evidence: gemma surfaces essentially nothing the lookup didn't (0 real additions across 7 queries) and drops 36% of what the lookup found. A filter that only subtracts, on a deterministic input that was already relevance-filtered. The honest conclusion is that gemma's entity-pick role adds no measured value and should be removed — the lookup owns the manifest, gemma keeps query-expansion. Part C (`5cd97ac`) is the correct floor either way: it makes the pick non-load-bearing by guaranteeing the lookup's entities survive regardless of what gemma does.
+
+### Permanent instrumentation of this boundary
+
+The drop was invisible because the entity fields lived only in `stages_capture` (debug-only responses), never in Langfuse. This is the third silent degradation found by accident (substring flood masked by the 5-cap; this drop; the dead `daily_rag_diagnostic`) — each present for months because a stage boundary logged only one side. Counter-move shipped in the same commit: `entity_lookup_count`, `entity_baml_dropped_count`, and `entity_baml_dropped` are now written to Langfuse trace metadata on **every** request, not just debug. If a future change reintroduces a subtractive path, `entity_baml_dropped_count` stops being 0 and is visible without a probe. The general rule this instance argues for: every stage boundary where one component's output feeds another's should log both sides by default.
+
 ### What the earlier commits still stand on
 
 - ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.

@@ -444,6 +444,14 @@ async def search(request: Request, req: SearchRequest):
     # dispatch on which sentinel signal fired (ADR-0012 poisoned-manifest
     # suppression vs dedup-only fallback).
     _punt_reasons: list[str] = []
+    # Entity-boost telemetry, populated in the BAML-success path. Defaults
+    # cover the punt/exception paths where BAML produced no usable pick.
+    entity_boost_telemetry: dict = {
+        "entity_lookup_count": len(available_entity_names or []),
+        "entity_baml_pick_count": 0,
+        "entity_baml_dropped_count": 0,
+        "entity_baml_dropped": [],
+    }
     try:
         t3 = time.perf_counter()
         optimized_query = await b.OptimizeSearchQuery(
@@ -519,6 +527,25 @@ async def search(request: Request, req: SearchRequest):
         # lossy stage can now discard a load-bearing entity. All three
         # are individually cap-bounded (MANIFEST_TOTAL_CAP=5 each), so
         # the union stays small — no return to the pre-ADR-0010 flood.
+        # Telemetry: capture what BAML's raw pick would have dropped from
+        # the deterministic manifest, BEFORE the Part C union recovers it.
+        # Logged to Langfuse on every request (not just debug) so this
+        # stage boundary is permanently visible — the counter-move to the
+        # "invisible since May" pattern (substring flood, this drop, the
+        # dead rag-diagnostic were all silent because a boundary logged
+        # only one side). If a future change reintroduces a subtractive
+        # path, entity_baml_dropped_count stops being 0 and shows up.
+        _baml_raw_pick = set((n or "").strip().lower() for n in (mapped_entities or []))
+        _lookup_set = set((n or "").strip().lower() for n in (available_entity_names or []))
+        _sp_set = set((n or "").strip().lower() for n in (second_pass_entities or []))
+        _dropped_by_baml = _lookup_set - _baml_raw_pick - _sp_set
+        entity_boost_telemetry = {
+            "entity_lookup_count": len(_lookup_set),
+            "entity_baml_pick_count": len(_baml_raw_pick),
+            "entity_baml_dropped_count": len(_dropped_by_baml),
+            "entity_baml_dropped": sorted(_dropped_by_baml),
+        }
+
         _seen_union: set[str] = set()
         _union: list[str] = []
         for _name in (
@@ -536,6 +563,7 @@ async def search(request: Request, req: SearchRequest):
             stages_capture["baml_expansion"] = search_text
             stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
             stages_capture["second_pass_entities"] = sorted(second_pass_entities) if second_pass_entities else []
+            stages_capture["entity_boost_telemetry"] = entity_boost_telemetry
     except Exception as e:
         import traceback
         error_msg = traceback.format_exc()
@@ -723,6 +751,14 @@ async def search(request: Request, req: SearchRequest):
                                 "commit_sha": os.getenv("COMMIT_SHA", "unknown"),
                                 "query_expansion_matches": expansion_matches,
                                 "query_expansion_near_misses": expansion_near_misses,
+                                # Entity-boost boundary telemetry (ADR-0013).
+                                # entity_baml_dropped_count > 0 means BAML's
+                                # pick dropped a lookup entity that Part C
+                                # then recovered — a live count of how often
+                                # the lossy filter fires, visible per trace.
+                                "entity_lookup_count": entity_boost_telemetry["entity_lookup_count"],
+                                "entity_baml_dropped_count": entity_boost_telemetry["entity_baml_dropped_count"],
+                                "entity_baml_dropped": entity_boost_telemetry["entity_baml_dropped"],
                             },
                         )
                 else:
