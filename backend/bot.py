@@ -1071,22 +1071,52 @@ class GroundedGillBot(dspy.Module):
         # If the answer is detailed (> 100 chars) but has no citations, it's a hallucination.
         
         if not citations_list:
-            # Define what a "Refusal" looks like based on your System Prompt
-            is_refusal = (
-                "does not appear" in pred.answer.lower() or 
-                "not address" in pred.answer.lower() or
-                "silent on this" in pred.answer.lower() or
-                "regret that" in pred.answer.lower()
+            # No-Free-Lunch guard (ADR-0013 amendment 2026-07-26, interim).
+            #
+            # The guard's real concern is STRUCTURAL, not lexical: an answer
+            # that asserts Gill's words — a verbatim-style quoted span — while
+            # carrying zero citations has no quote-SID pair to verify. That is
+            # the hallucination the guard exists to catch. Branch on that
+            # deterministic condition, NOT on whether the prose happens to
+            # match an enumerated refusal phrase.
+            #
+            # The old check accepted a no-citation answer only if the prose
+            # contained one of four hardcoded phrases ("does not appear", "not
+            # address", "silent on this", "regret that"). Part B's
+            # informative-refusal path produces "The indexed corpus does not
+            # contain..." — not in that list — so a *valid* refusal was
+            # misclassified as an uncited hallucination and replaced with an
+            # error screen. Same family as the trailing-prose bookend check:
+            # branch on the deterministic signal, never on a lexical guess
+            # about stochastic output.
+            #
+            # A refusal — flat OR gap-statement informative — that quotes
+            # nothing verbatim asserts nothing to verify and is legitimate,
+            # whatever words it uses. Scaffolding ADR-0009 demolishes: under the
+            # typed schema `refusal.mode` is a declared field and the guard
+            # never inspects prose. Kept deliberately minimal until then.
+            asserts_uncited_quote = bool(
+                re.search(r'["“”]([^"“”]{40,})["“”]', pred.answer)
             )
-            
-            if len(pred.answer) > 100 and not is_refusal:
-                # Manual Failure (dspy.Suggest missing)
-                return dspy.Prediction(
-                    answer="Verification Failed: Detailed answer provided without citations. Please retry query.",
-                    citations=[]
+
+            if asserts_uncited_quote:
+                # LAST rung only. The answer surfaced a verbatim-style quote
+                # with no citation, so the quote cannot be authenticated —
+                # degrade to a clean flat refusal. Never an error screen, never
+                # uncited asserted content. (This is the fallback of last
+                # resort: it discards the informative content, so it must NOT be
+                # the primary path — the structural guarantee that informative
+                # refusals carry their SIDs is ADR-0009's typed-schema job.)
+                flat_refusal = (
+                    "I regret that the provided extracts from the Doctor's writings "
+                    "do not appear to address this specific inquiry. Could it be that "
+                    f"you are looking for something not in the library ({available_books})?"
                 )
-            
-            # If it IS a refusal, we let it pass (Verified Negative)
+                return dspy.Prediction(answer=flat_refusal, citations=[], raw_answer=pred.answer)
+
+            # No uncited verbatim assertion → a legitimate refusal (flat or
+            # gap-statement informative). Pass it through verbatim as a Verified
+            # Negative, regardless of prose wording.
             return dspy.Prediction(answer=pred.answer, citations=[], raw_answer=pred.answer)
 
         # ---------------------------------------------------------
