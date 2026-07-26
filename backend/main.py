@@ -419,7 +419,7 @@ async def search(request: Request, req: SearchRequest):
     #     paraphrases traffic actually uses can be promoted to explicit
     #     thesaurus entries over time. The expanded form is used ONLY for
     #     entity lookup; BAML still sees the raw user query.
-    lookup_query, expansion_matches, expansion_near_misses = await expand_query(
+    lookup_query, expansion_matches, expansion_near_misses, _thesaurus_vector_degraded = await expand_query(
         req.query,
         embed_fn=search_engine._get_embedding if search_engine is not None else None,
     )
@@ -437,6 +437,15 @@ async def search(request: Request, req: SearchRequest):
     available_entity_names, entity_lookup_mode = await search_engine.get_relevant_entities(query=lookup_query)
     t2 = time.perf_counter()
     print(f"[TIMING] get_relevant_entities: {t2-t1:.3f}s")
+    # ADR-0014: fold thesaurus vector-tier degradation into the overall
+    # mode. The thesaurus and entity vector tiers share the litellm
+    # dependency; either degrading means the manifest was built without
+    # full vector anchoring, so the boost must be suppressed. Catches the
+    # transient-blip case where the thesaurus embed failed but the entity
+    # embed succeeded (entity mode would read "full" on its own).
+    if _thesaurus_vector_degraded and entity_lookup_mode == "full":
+        entity_lookup_mode = "degraded_no_vector"
+        print("[ENTITY LOOKUP] thesaurus vector tier degraded -> marking request degraded (ADR-0014)")
     if entity_lookup_mode != "full":
         print(f"[ENTITY LOOKUP] mode={entity_lookup_mode} — entity boost will be suppressed (ADR-0014 fail-anchored)")
     if stages_capture is not None:

@@ -72,10 +72,15 @@ Anchored degradation is the same policy as ADR-0012's poisoned-manifest suppress
 - Sampler wiring verified: `aggregate` counts degraded samples; `format_slack_blocks` renders the ⚠️ line at >0, healthy line at 0.
 - The change is **inert under healthy operation** — when `mode == "full"` the gate never fires and behavior is byte-identical, so it cannot regress the eval under normal litellm health. Under degradation it replaces bad-boost with no-boost, which E-9 established is ≥. Safe by construction.
 
+## Closed in the completion commit (same law, two more violations)
+
+Both items originally filed here as follow-ups were closed immediately rather than left as someday-reviews — the law is only a law if known violations get shut while they're cheap:
+
+- **The hardcoded empty-lookup default (fifth "fail different"), removed.** `get_relevant_entities` used to inject `["Jesus Christ", "Apostle Paul", "Old Testament saints"]` when no tier matched — a *fabricated* manifest that then boosted retrieval toward Jesus/Paul chunks precisely on the drought case, when the honest signal was "no entity anchor exists." Its fingerprint was visible in the pre-fix `pxlusive psalmoly` trace (Jesus/Paul apocalyptic material at the top). Now: empty lookup → empty manifest → no boost, same E-9 logic. The caller retrieves on the raw + expansion floor.
+- **The thesaurus vector tier, made loud.** `expand_query` (ADR-0011 v3) shares the litellm dependency and silently emptied its vector/span tier on embed failure — a "fail different" the entity-mode gate misses in the transient-blip case where the thesaurus embed fails but `get_relevant_entities`' succeeds. Now `expand_query` returns `vector_degraded`, and main.py folds it into `entity_lookup_mode`: *either* vector tier degrading marks the request degraded and suppresses the boost. The exact/fuzzy tiers (pure string-matching, litellm-independent) still fire, so a well-spelled query is unaffected. With both closed, **the law has zero known open violations.**
+
 ## What this ADR does NOT solve
 
-- The hardcoded empty-lookup default `["Jesus Christ", "Apostle Paul", "Old Testament saints"]` (gill_search.py) is itself a mild "fail different" candidate — a routing hint injected when no tier matched. Left as-is pending its own review; it now at least travels with the mode.
-- The **thesaurus's own vector tier** (`query_expansion.py`, ADR-0011 v3) also depends on litellm and can degrade independently. Its exact/fuzzy tiers are pure string-matching and unaffected; the vector/span tier silently empties like the entity tier did. Same treatment should be applied there — filed as a follow-up under this law.
 - Retroactive caveat: **any committed probe evidence whose result depends on manifest composition is mode-ambiguous** — E-6b manifests, E-9 verifications, and the E-11 sweep each ran in whatever litellm health dictated that hour, unrecorded. E-11's `atonement` "no hijack" verdict is explicitly conditional on a healthy tier. Those evidence sections should carry a one-line note: *"manifest-dependent; predates mode instrumentation — re-run with mode recorded before treating as unconditional."*
 
 ## Consequences

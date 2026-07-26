@@ -83,7 +83,7 @@ async def main():
 
     print("\n[2] Chris's original UI query — the incident case")
     print("-" * 100)
-    expanded, matches, near_misses = await expand_query(CHRIS_UI_QUERY, embed_fn=embed)
+    expanded, matches, near_misses, _degraded = await expand_query(CHRIS_UI_QUERY, embed_fn=embed)
     print(f"  query:         {CHRIS_UI_QUERY!r}")
     print(f"  matches:       {matches}")
     print(f"  near_misses:   {near_misses}")
@@ -98,7 +98,7 @@ async def main():
     smatch_total = 0
     for q, expected_method in SHOULD_MATCH:
         smatch_total += 1
-        expanded, matches, near = await expand_query(q, embed_fn=embed)
+        expanded, matches, near, _degraded = await expand_query(q, embed_fn=embed)
         # Did we get any match?
         got_match = bool(matches)
         method = matches[0]["method"] if matches else "-"
@@ -115,7 +115,7 @@ async def main():
     print(f"  {'query':50} {'fired?':>8} {'near-misses':>50}")
     snot_pass = 0
     for q in SHOULD_NOT_MATCH:
-        expanded, matches, near = await expand_query(q, embed_fn=embed)
+        expanded, matches, near, _degraded = await expand_query(q, embed_fn=embed)
         fired = bool(matches)
         near_str = ", ".join(f"{n['term']}={n['distance']:.3f}" for n in near) or "(none)"
         print(f"  {q[:50]:50} {'YES' if fired else 'no':>8} {near_str[:50]:>50}")

@@ -545,13 +545,17 @@ class GillSearchEngine:
         mode = "full" if vector_tier_ok else "degraded_no_vector"
 
         combined = vector_names + substring_names + bm25_names
-        if not combined:
-            # Legitimately-empty lookup (no tier matched) — NOT an infra
-            # failure. The hardcoded default is a last-resort routing hint;
-            # the caller still sees the mode and can decide. (This default
-            # predates the mode work and is itself a mild "fail different"
-            # candidate; left as-is pending its own review.)
-            return (["Jesus Christ", "Apostle Paul", "Old Testament saints"], mode)
+        # ADR-0014 (fifth "fail different", closed): when NO tier matched,
+        # the honest signal is "no entity anchor exists for this query."
+        # The old behavior injected a fabricated manifest
+        # (["Jesus Christ", "Apostle Paul", "Old Testament saints"]) which
+        # then boosted retrieval toward Jesus/Paul-anchored chunks exactly
+        # when the system knew least — a synthetic boost on the drought
+        # case. Its fingerprint was visible in the pre-fix 'pxlusive
+        # psalmoly' trace (Jesus/Paul apocalyptic material at the top).
+        # Same law, same E-9 logic: empty lookup -> empty manifest -> no
+        # boost, not fake boost. The caller retrieves on the raw query +
+        # expansion floor.
         return (combined[:total_cap], mode)
 
 if __name__ == "__main__":

@@ -321,14 +321,24 @@ async def expand_query(
 
     # ---- Tier 3: VECTOR (whole query + 2-3 word spans) ----
     # Also collects observation-only near-misses on the same embedding.
+    #
+    # ADR-0014: this tier shares the litellm dependency with the entity
+    # vector tier. When embed_fn raises, the tier silently empties — the
+    # same "fail different" the entity tier had, and NOT caught by the
+    # entity-lookup-mode gate in the transient-blip case where this embed
+    # fails but get_relevant_entities' succeeds. So report degradation via
+    # `vector_degraded`; the caller folds it into the overall mode and
+    # suppresses the boost, keeping the law consistent across both tiers.
     near_misses: list[dict] = []
+    vector_degraded = False
     if _KEY_EMBEDDINGS and embed_fn is not None:
         # First: whole query.
         try:
             query_vec = await embed_fn(raw_query)
         except Exception as e:
-            print(f"[EXPANSION] vector tier skipped — embed_fn failed: {e}")
+            print(f"[EXPANSION] vector tier degraded — embed_fn failed: {e}")
             query_vec = None
+            vector_degraded = True
 
         if query_vec is not None:
             for term, key_vec in _KEY_EMBEDDINGS.items():
@@ -357,6 +367,7 @@ async def expand_query(
                         span_vec = await embed_fn(span)
                     except Exception as e:
                         print(f"[EXPANSION] span embed failed for {span!r}: {e}")
+                        vector_degraded = True
                         continue
                     for term in list(unmatched_terms):
                         if term in matched_terms:
@@ -378,8 +389,8 @@ async def expand_query(
 
     # Assemble expanded query.
     if not matches:
-        return raw_query, [], near_misses
+        return raw_query, [], near_misses, vector_degraded
     tokens_to_append: list[str] = []
     for m in matches:
         tokens_to_append.extend(THEOLOGICAL_THESAURUS[m["term"]]["anchor_tokens"])
-    return f"{raw_query} {' '.join(tokens_to_append)}", matches, near_misses
+    return f"{raw_query} {' '.join(tokens_to_append)}", matches, near_misses, vector_degraded
