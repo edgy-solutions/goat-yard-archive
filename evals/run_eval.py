@@ -420,6 +420,14 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR),
                         help="Directory to write per-question results, summary.json, report.md.")
     parser.add_argument("--ids", nargs="*", help="Run only these question IDs.")
+    parser.add_argument("--runs", type=int, default=1,
+                        help="Run each question N times and report per-question stability. "
+                             "The eval binary carries +-several-question run-to-run noise from "
+                             "generation nondeterminism at the verbatim-verification/paraphrase "
+                             "boundary (ADR-0014 meta-finding). With --runs > 1 a question is "
+                             "classified STABLE-PASS (N/N), STABLE-FAIL (0/N), or FLAKY (mixed). "
+                             "Regression claims should be made only on STABLE questions; FLAKY is "
+                             "the noise band. Use N=3 to gate a code change.")
     parser.add_argument("--baseline", help="Path to baseline summary JSON for regression comparison.")
     parser.add_argument("--timeout", type=float, default=120.0, help="Per-question timeout in seconds.")
     parser.add_argument("--regression-threshold", type=float, default=5.0,
@@ -438,40 +446,90 @@ def main(argv: Optional[list] = None) -> int:
     print(f"Questions : {len(questions)}")
     print(f"Output dir: {out_dir}\n")
 
+    n_runs = max(1, args.runs)
     results: List[QuestionResult] = []
+    # Per-question pass ledger across runs, for stability classification.
+    pass_ledger: Dict[str, List[bool]] = {}
     for i, q in enumerate(questions, 1):
         print(f"[{i:2d}/{len(questions)}] {q['id']}: {q['question'][:70]}...", flush=True)
-        t0 = time.perf_counter()
-        response = call_endpoint(args.endpoint, q["question"], args.auth_token, args.timeout)
-        elapsed = time.perf_counter() - t0
-        r = score(q, response, elapsed)
-        results.append(r)
+        run_passes: List[bool] = []
+        last_r = None
+        last_response = None
+        for run_idx in range(n_runs):
+            t0 = time.perf_counter()
+            response = call_endpoint(args.endpoint, q["question"], args.auth_token, args.timeout)
+            elapsed = time.perf_counter() - t0
+            r = score(q, response, elapsed)
+            run_passes.append(bool(r.overall_pass))
+            last_r, last_response = r, response
+            if n_runs > 1:
+                print(f"     run {run_idx+1}/{n_runs}: {'PASS' if r.overall_pass else 'FAIL'}"
+                      + (f" (error: {r.error})" if r.error else ""), flush=True)
+        pass_ledger[q["id"]] = run_passes
+        # Keep the last run's score as the representative row (summary/report
+        # use single-run semantics; stability is reported separately).
+        results.append(last_r)
 
-        # Per-question raw response (for debugging)
+        # Per-question raw response (for debugging) — last run.
         (out_dir / f"{q['id']}.json").write_text(
-            json.dumps({"question": q, "response": response, "score": asdict(r)}, indent=2, ensure_ascii=False),
+            json.dumps({"question": q, "response": last_response, "score": asdict(last_r),
+                        "run_passes": run_passes}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
-        status = "PASS" if r.overall_pass else "FAIL"
-        if r.error:
-            print(f"   [{status}] error: {r.error}")
+        if n_runs > 1:
+            n_pass = sum(run_passes)
+            label = ("STABLE-PASS" if n_pass == n_runs else
+                     "STABLE-FAIL" if n_pass == 0 else "FLAKY")
+            print(f"   [{label}] {n_pass}/{n_runs} passed")
         else:
-            print(
-                f"   [{status}] refusal_ok={r.refusal_correct}  "
-                f"must_cite={r.must_cite_recall:.0%}  "
-                f"should_cite={r.should_cite_recall:.0%}  "
-                f"latency={r.elapsed_s}s"
-                + (f"  must_not_cite_HIT={r.must_not_cite_hits}" if r.must_not_cite_violated else "")
-            )
+            status = "PASS" if last_r.overall_pass else "FAIL"
+            if last_r.error:
+                print(f"   [{status}] error: {last_r.error}")
+            else:
+                print(
+                    f"   [{status}] refusal_ok={last_r.refusal_correct}  "
+                    f"must_cite={last_r.must_cite_recall:.0%}  "
+                    f"should_cite={last_r.should_cite_recall:.0%}  "
+                    f"latency={last_r.elapsed_s}s"
+                    + (f"  must_not_cite_HIT={last_r.must_not_cite_hits}" if last_r.must_not_cite_violated else "")
+                )
 
     summary = summarize(results, args.endpoint)
+    # ADR-0014 stability block: classify each question across the N runs so
+    # a code change is gated on STABLE flips (the path touched), not on the
+    # noisy total. FLAKY questions are the run-to-run noise band and must
+    # not be counted as regressions.
+    if n_runs > 1:
+        stable_pass = [qid for qid, p in pass_ledger.items() if all(p)]
+        stable_fail = [qid for qid, p in pass_ledger.items() if not any(p)]
+        flaky = [(qid, sum(p), len(p)) for qid, p in pass_ledger.items()
+                 if any(p) and not all(p)]
+        summary["runs_per_question"] = n_runs
+        summary["stability"] = {
+            "stable_pass": len(stable_pass),
+            "stable_fail": len(stable_fail),
+            "flaky": len(flaky),
+            "flaky_detail": {qid: f"{np}/{tot}" for qid, np, tot in flaky},
+            "stable_fail_ids": sorted(stable_fail),
+        }
 
     print(f"\n{'='*70}\nSUMMARY\n{'='*70}")
     print(f"Pass rate                : {summary['passed']}/{summary['total']} ({summary['pass_pct']:.1f}%)")
     print(f"Refusal correctness      : {summary['refusal_correct']}/{summary['total']}")
     print(f"must_not_cite violations : {summary['must_not_cite_violations']}")
     print(f"Errors                   : {summary['errors']}")
+    if n_runs > 1:
+        st = summary["stability"]
+        print(f"\nStability (N={n_runs} runs/question):")
+        print(f"  STABLE-PASS : {st['stable_pass']}")
+        print(f"  STABLE-FAIL : {st['stable_fail']}")
+        print(f"  FLAKY       : {st['flaky']}  <- run-to-run noise band; NOT regressions")
+        if st["flaky_detail"]:
+            for qid, ratio in sorted(st["flaky_detail"].items()):
+                print(f"      {qid:40} {ratio}")
+        print("  Gate a code change on STABLE-PASS->STABLE-FAIL flips (the path "
+              "touched), not on the pass-rate total.")
     print(f"\nBy category:")
     for cat, stats in sorted(summary["by_category"].items()):
         print(f"  {cat:30s}  {stats['pass']}/{stats['total']}  ({stats['pct']:.0f}%)")
