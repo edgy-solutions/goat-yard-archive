@@ -95,7 +95,12 @@ Both items originally filed here as follow-ups were closed immediately rather th
 - One more field on every trace and one more Slack line. Negligible.
 
 **Neutral:**
-- Eval-gating per the reinstated discipline: the change is inert under healthy litellm, so a before/after eval shows no delta — which is the confirmation wanted (no healthy-path regression). That gating run is a post-deploy item once litellm is stable.
+- Eval-gating per the reinstated discipline — **RUN and RECORDED 2026-07-26**, and it did NOT show the predicted no-delta, which is exactly why the discipline says run-don't-waive. The gate (831e116, test) scored 13/28 vs the 13-day-old cleanrun's 18/28, five questions flipping PASS→FAIL. Investigated via ADR-0014's own instrumentation rather than assumed:
+  - All five flipped questions ran `entity_lookup_mode = "full"` (the fail-anchored gate never fired) with populated manifests (the empty-default removal never triggered). So neither ADR-0014 change touched their code path.
+  - The answers are correct: `moses_death` returned *"Moses died in the mountains of Abarim, before Nebo [NUMBERS_33_47_S00]"* — right answer, required citation present (`must_cite_missing=[]`), failing only on `verif_ok=False` (the bot paraphrased, the verbatim verifier flagged it). `exclusive_psalmody` returned the correct verified Hallel exposition.
+  - `scapegoat` flipped FAIL→PASS across two consecutive runs on the same build — direct evidence of run-to-run generation variance.
+  - Conclusion: the delta is **generation-variance at the verbatim-verification / paraphrase boundary** (the peter-class Zone-2 issue), not an ADR-0014 retrieval regression. ADR-0014 is confirmed inert under healthy litellm, as designed — the instrumentation proved it in minutes.
+- **Meta-finding for the discipline:** the eval binary carries ±several-question run-to-run noise from generation nondeterminism at the verified boundary. Single-run before/after comparisons (including this whole attribution exercise) inherit that noise. The correct gate is not "did the number move" but "did any flipped question flip *because of the code path touched*" — answerable via the mode/manifest instrumentation, as here. A 1–2 (or more) question delta with correct answers and unchanged code paths is noise, not regression.
 
 ## References
 
