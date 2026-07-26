@@ -86,6 +86,12 @@ class AnswerSample:
     trailing_prose_excised: int = 0
     disclaimer_preserved: int = 0
     other_excised: int = 0
+    # ADR-0014 entity-lookup mode ("full" | "degraded_no_vector"). A
+    # degraded reading means the entity vector tier (litellm enrichment)
+    # was down for that request and the boost was suppressed. A non-zero
+    # daily count = a litellm blip that morning, surfaced instead of
+    # silently reshaping retrieval.
+    entity_lookup_mode: str = "full"
     # N=3 judge results
     verdicts: List[str] = field(default_factory=list)  # ["none"|"supported"|"unsupported", ...]
     reasoning_samples: List[str] = field(default_factory=list)
@@ -118,7 +124,12 @@ class DailyReport:
     total_disclaimer_preserved: int
     total_other_excised: int
     judge_error_count: int
-    commit_sha_summary_line: str
+    # ADR-0014: count of sampled answers served in degraded entity-lookup
+    # mode (vector tier / litellm enrichment down, boost suppressed).
+    # Non-zero => an infra blip that window; surfaced in Slack so it
+    # announces itself the same morning.
+    entity_lookup_degraded_count: int = 0
+    commit_sha_summary_line: str = ""
     # Two supported-rate flavors reported side-by-side per the 2026-07-06
     # review correction. The gap between them IS the visible measure of
     # judge marginal-noise on the class the supported rate is meant to
@@ -259,6 +270,7 @@ def extract_answer_samples(traces: List[Any]) -> List[AnswerSample]:
                 trailing_prose_excised=int(gen_md.get("zone3_trailing_prose_excised", 0) or 0),
                 disclaimer_preserved=int(gen_md.get("zone3_disclaimer_preserved", 0) or 0),
                 other_excised=int(gen_md.get("zone3_other_excised", 0) or 0),
+                entity_lookup_mode=str(gen_md.get("entity_lookup_mode", "full") or "full"),
             ))
         except Exception as e:
             print(f"[SAMPLER] skipping trace due to extraction error: {e}")
@@ -374,6 +386,9 @@ def aggregate(samples: List[AnswerSample], window_start: str, window_end: str) -
         total_disclaimer_preserved=total_disclaimer,
         total_other_excised=total_other,
         judge_error_count=judge_error_count,
+        entity_lookup_degraded_count=sum(
+            1 for s in samples if s.entity_lookup_mode != "full"
+        ),
         commit_sha_summary_line=commit_sha_summary,
         majority_supported_rate=majority_rate,
         any_flag_supported_rate=any_flag_rate,
@@ -446,6 +461,26 @@ def format_slack_blocks(report: DailyReport) -> List[Dict[str, Any]]:
                 f"  • trailing_prose_excised: `{report.total_trailing_prose_excised}`\n"
                 f"  • disclaimer_preserved (compound but-thesis): `{report.total_disclaimer_preserved}`\n"
                 f"  • other zone3 excisions: `{report.total_other_excised}`"
+            ),
+        },
+    })
+
+    # ADR-0014 — entity-lookup degraded mode. Non-zero means litellm (the
+    # entity vector tier's enrichment infra) blipped this window and the
+    # boost was suppressed to hold determinism. An outage announces itself
+    # the same morning instead of surfacing as a theological error weeks
+    # later. A ⚠️ is used at >0 so it reads at a glance.
+    _deg = report.entity_lookup_degraded_count
+    _deg_icon = "⚠️ " if _deg > 0 else ""
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": (
+                f"*{_deg_icon}Entity-lookup mode (ADR-0014 fail-anchored):*\n"
+                f"  • degraded_no_vector answers this window: `{_deg}` / `{report.total_answers_sampled}`"
+                + ("  — litellm/vector-tier blip; boost suppressed, retrieval on deterministic floor"
+                   if _deg > 0 else "  — vector tier healthy all window")
             ),
         },
     })

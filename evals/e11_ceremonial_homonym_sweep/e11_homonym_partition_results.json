@@ -1,0 +1,295 @@
+[
+  {
+    "term": "atonement",
+    "manifest": [
+      "preachers of the everlasting Gospel",
+      "preaching of the Gospel",
+      "faithful preachers of the Gospel",
+      "legal preacher",
+      "Universal History"
+    ],
+    "normal_cer": 1,
+    "normal_gos": 11,
+    "normal_refs": [
+      "LUKE 4:19",
+      "MATTHEW 24:14",
+      "MATTHEW 7:19",
+      "JOHN 8:31",
+      "MATTHEW 7:21",
+      "MARK 28:1",
+      "MARK 13:10",
+      "MATTHEW 9:38",
+      "LUKE 8:11",
+      "EXODUS 25:31",
+      "MATTHEW 24:10",
+      "MARK 6:30"
+    ],
+    "doctrinal_cer": 1,
+    "doctrinal_gos": 11,
+    "doctrinal_refs": [
+      "MARK 13:20",
+      "MARK 13:22",
+      "MARK 13:27",
+      "LUKE 10:6",
+      "JOHN 3:17",
+      "EXODUS 4:11",
+      "LUKE 15:27",
+      "LUKE 18:7",
+      "JOHN 6:37",
+      "LUKE 12:36",
+      "LUKE 19:41",
+      "MATTHEW 18:7"
+    ],
+    "verse_refs": [
+      "MATTHEW 20:28"
+    ],
+    "verdict": "no hijack"
+  },
+  {
+    "term": "redemption",
+    "manifest": [
+      "particular redemption",
+      "Redemption of the first-born",
+      "redemption by Christ",
+      "Redemption of Israel from Egypt",
+      "eternal redemption"
+    ],
+    "normal_cer": 2,
+    "normal_gos": 8,
+    "normal_refs": [
+      "LUKE 2:38",
+      "EXODUS 8:23",
+      "MARK 7:33",
+      "JOHN 8:47",
+      "MARK 3:19",
+      "LUKE 24:31",
+      "MATTHEW 24:50",
+      "LEVITICUS 25:52",
+      "GENESIS 22:17",
+      "LUKE 2:13",
+      "GENESIS 28:14",
+      "LUKE 1:54"
+    ],
+    "doctrinal_cer": 3,
+    "doctrinal_gos": 9,
+    "doctrinal_refs": [
+      "LEVITICUS 25:52",
+      "EXODUS 8:23",
+      "LUKE 1:54",
+      "LUKE 1:68",
+      "LUKE 2:38",
+      "LUKE 1:72",
+      "MATTHEW 26:28",
+      "MARK 7:33",
+      "JOHN 4:34",
+      "NUMBERS 23:9",
+      "LUKE 10:33",
+      "JOHN 6:53"
+    ],
+    "verse_refs": [
+      "MATTHEW 20:28"
+    ],
+    "verdict": "no hijack"
+  },
+  {
+    "term": "sacrifice",
+    "manifest": [
+      "sacrifices",
+      "Skin of the sacrifice",
+      "sweet-smelling sacrifice of Christ",
+      "sacrifice of peace-offerings",
+      "Third day sacrifice"
+    ],
+    "normal_cer": 7,
+    "normal_gos": 5,
+    "normal_refs": [
+      "LEVITICUS 3:16",
+      "LEVITICUS 7:17",
+      "MARK 9:49",
+      "LEVITICUS 4:26",
+      "LEVITICUS 9 End",
+      "MATTHEW 27:46",
+      "LEVITICUS 9:1",
+      "EXODUS 30:5",
+      "LEVITICUS 7:16",
+      "MARK 13:24",
+      "JOHN 1:39",
+      "MATTHEW 18:27"
+    ],
+    "doctrinal_cer": 11,
+    "doctrinal_gos": 1,
+    "doctrinal_refs": [
+      "LEVITICUS 4:26",
+      "NUMBERS 15:25",
+      "LEVITICUS 19:22",
+      "EXODUS 29:36",
+      "LEVITICUS 6:7",
+      "JOHN 1:29",
+      "NUMBERS 15:28",
+      "LEVITICUS 15:30",
+      "NUMBERS 35:33",
+      "LEVITICUS 9:2",
+      "LEVITICUS 5:10",
+      "LEVITICUS 15:15"
+    ],
+    "verse_refs": [
+      "JOHN 1:29"
+    ],
+    "verdict": "CASE A (ranking - fixable now)"
+  },
+  {
+    "term": "propitiation",
+    "manifest": [
+      "propitiation",
+      "Chaldee paraphrases",
+      "created angel"
+    ],
+    "normal_cer": 8,
+    "normal_gos": 4,
+    "normal_refs": [
+      "LEVITICUS 4:26",
+      "NUMBERS 15:25",
+      "LEVITICUS 5:10",
+      "EXODUS 34:7",
+      "EXODUS 25:17",
+      "NUMBERS 20:6",
+      "LUKE 13:2",
+      "JOHN 1:41",
+      "NUMBERS 5:16",
+      "MATTHEW 9:13",
+      "EXODUS 34:9",
+      "MATTHEW 5:23"
+    ],
+    "doctrinal_cer": 8,
+    "doctrinal_gos": 4,
+    "doctrinal_refs": [
+      "NUMBERS 15:25",
+      "LEVITICUS 4:26",
+      "EXODUS 25:17",
+      "LEVITICUS 5:10",
+      "EXODUS 34:7",
+      "NUMBERS 35:33",
+      "JOHN 1:29",
+      "MARK 2:7",
+      "NUMBERS 15:28",
+      "LEVITICUS 19:22",
+      "MARK 15:28",
+      "LUKE 1:78"
+    ],
+    "verse_refs": [
+      "JOHN 2:2"
+    ],
+    "verdict": "CASE A (ranking - fixable now)"
+  },
+  {
+    "term": "sanctification",
+    "manifest": [
+      "sanctification of the spirit",
+      "sanctification",
+      "internal sanctification",
+      "running water"
+    ],
+    "normal_cer": 6,
+    "normal_gos": 6,
+    "normal_refs": [
+      "LEVITICUS 20:7",
+      "LEVITICUS 14:5",
+      "EXODUS 30:29",
+      "EXODUS 19:14",
+      "MARK 4:28",
+      "MATTHEW 15:14",
+      "JOHN 3:6",
+      "EXODUS 29:21",
+      "JOHN 3:11",
+      "JOHN 6:27",
+      "EXODUS 28:36",
+      "LUKE 1:49"
+    ],
+    "doctrinal_cer": 2,
+    "doctrinal_gos": 10,
+    "doctrinal_refs": [
+      "EXODUS 30:29",
+      "JOHN 3:6",
+      "LUKE 11:13",
+      "LUKE 23:46",
+      "JOHN 3:33",
+      "JOHN 6:63",
+      "MATTHEW 10:20",
+      "JOHN 8:32",
+      "LUKE 2:40",
+      "LUKE 2:52",
+      "LUKE 10:21",
+      "EXODUS 29:36"
+    ],
+    "verse_refs": [
+      "MATTHEW 10:7",
+      "LUKE 1:76",
+      "MARK 1:11",
+      "JOHN 2:13",
+      "LUKE 19:4",
+      "LUKE 7:18",
+      "LUKE 7:32",
+      "LUKE 16:2",
+      "MATTHEW 11:14",
+      "MATTHEW 14:4",
+      "MATTHEW 3:6",
+      "LUKE 3:19"
+    ],
+    "verdict": "CASE A (ranking - fixable now)"
+  },
+  {
+    "term": "cleansing",
+    "manifest": [
+      "fountain of his blood",
+      "Clemens of Alexandria",
+      "Tor"
+    ],
+    "normal_cer": 10,
+    "normal_gos": 2,
+    "normal_refs": [
+      "LEVITICUS 15:13",
+      "EXODUS 28:34",
+      "EXODUS 3:10",
+      "EXODUS 20:4",
+      "EXODUS 13:21",
+      "LEVITICUS 14:8",
+      "LEVITICUS 15:30",
+      "LEVITICUS 13:54",
+      "MARK 5:29",
+      "MARK 5:26",
+      "LEVITICUS 13:58",
+      "NUMBERS 19:8"
+    ],
+    "doctrinal_cer": 8,
+    "doctrinal_gos": 4,
+    "doctrinal_refs": [
+      "LEVITICUS 15:13",
+      "NUMBERS 19:12",
+      "LEVITICUS 14:14",
+      "MATTHEW 26:28",
+      "JOHN 1:13",
+      "LEVITICUS 9:9",
+      "LEVITICUS 13:54",
+      "NUMBERS 19:8",
+      "NUMBERS 35:33",
+      "EXODUS 30:18",
+      "MATTHEW 18:27",
+      "MARK 2:7"
+    ],
+    "verse_refs": [
+      "MARK 28",
+      "LUKE 7:18",
+      "MARK 1:9",
+      "LUKE 19:4",
+      "LUKE 3:12",
+      "MATTHEW 14:4",
+      "LUKE 13:33",
+      "LUKE 3:7",
+      "LUKE 20:4",
+      "MARK 2:18",
+      "MATTHEW 3:14",
+      "MATTHEW 3:6"
+    ],
+    "verdict": "CASE A (ranking - fixable now)"
+  }
+]

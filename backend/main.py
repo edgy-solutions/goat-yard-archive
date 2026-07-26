@@ -434,11 +434,14 @@ async def search(request: Request, req: SearchRequest):
         stages_capture["lookup_query"] = lookup_query
 
     t1 = time.perf_counter()
-    available_entity_names = await search_engine.get_relevant_entities(query=lookup_query)
+    available_entity_names, entity_lookup_mode = await search_engine.get_relevant_entities(query=lookup_query)
     t2 = time.perf_counter()
     print(f"[TIMING] get_relevant_entities: {t2-t1:.3f}s")
+    if entity_lookup_mode != "full":
+        print(f"[ENTITY LOOKUP] mode={entity_lookup_mode} — entity boost will be suppressed (ADR-0014 fail-anchored)")
     if stages_capture is not None:
         stages_capture["available_entities"] = sorted(available_entity_names) if available_entity_names else []
+        stages_capture["entity_lookup_mode"] = entity_lookup_mode
     
     # Track punt reasons across the try/except so the fallback can
     # dispatch on which sentinel signal fired (ADR-0012 poisoned-manifest
@@ -498,10 +501,13 @@ async def search(request: Request, req: SearchRequest):
         try:
             if search_text and search_text.strip() and search_text.strip() != req.query.strip():
                 _tp0 = time.perf_counter()
-                second_pass_entities = await search_engine.get_relevant_entities(query=search_text)
+                second_pass_entities, _second_pass_mode = await search_engine.get_relevant_entities(query=search_text)
                 _tp1 = time.perf_counter()
                 print(f"[TIMING] two-pass entity lookup: {_tp1-_tp0:.3f}s")
                 print(f"[TWO-PASS] baml_expansion manifest: {second_pass_entities}")
+                # If EITHER lookup degraded, the whole manifest is untrustworthy.
+                if _second_pass_mode != "full":
+                    entity_lookup_mode = _second_pass_mode
         except Exception as _tp_err:
             print(f"[TWO-PASS] second-pass entity lookup failed: {_tp_err}")
 
@@ -646,6 +652,28 @@ async def search(request: Request, req: SearchRequest):
             stages_capture["baml_error"] = str(e)
             stages_capture["baml_fallback"] = fallback_kind
 
+    # ADR-0014 fail-anchored gate. If the entity lookup degraded (vector
+    # tier / litellm enrichment infra down for that call), the manifest —
+    # whatever Part C/D/ADR-0012 produced from it — is untrustworthy: it is
+    # the substring/BM25-only manifest that E-9/E-11 proved is materially
+    # different and worse (ceremonial-homonym collapse). Design law: never
+    # fail different. Suppress the entity boost entirely and retrieve on the
+    # deterministic floor (raw query + BAML expansion hybrid, no entity
+    # anchor). This OVERRIDES every upstream boost decision because they all
+    # trusted a manifest built by a tier that wasn't running.
+    #
+    # Note: a FULL litellm outage fails the request closed one line below,
+    # because search_gill's own query embedding is load-bearing and raises.
+    # This gate only affects the transient-blip window where the entity-tier
+    # embedding failed but search_gill's succeeds — exactly the window that
+    # produced the 2026-07 manifest bimodality.
+    if entity_lookup_mode != "full":
+        mapped_entities = []
+        if stages_capture is not None:
+            stages_capture["baml_fallback"] = "vector_tier_degraded_suppressed"
+        print("[ADR-0014] entity lookup degraded -> entity boost suppressed; "
+              "retrieval on deterministic floor (raw + expansion, no boost).")
+
     # 2. Retrieve Evidence
     t5 = time.perf_counter()
     retrieval_debug: dict = {}
@@ -787,6 +815,13 @@ async def search(request: Request, req: SearchRequest):
                                 "entity_lookup_count": entity_boost_telemetry["entity_lookup_count"],
                                 "entity_baml_dropped_count": entity_boost_telemetry["entity_baml_dropped_count"],
                                 "entity_baml_dropped": entity_boost_telemetry["entity_baml_dropped"],
+                                # ADR-0014 fail-anchored mode. "full" on a
+                                # healthy request; "degraded_no_vector" when
+                                # the entity vector tier's embedding failed
+                                # (litellm enrichment blip) and the boost was
+                                # suppressed. Surfaced in the daily Slack
+                                # count so an infra blip announces itself.
+                                "entity_lookup_mode": entity_lookup_mode,
                             },
                         )
                 else:

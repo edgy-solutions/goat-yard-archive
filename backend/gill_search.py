@@ -410,33 +410,53 @@ class GillSearchEngine:
     VECTOR_TIER_CAP = 3
     MANIFEST_TOTAL_CAP = 5
 
-    async def get_relevant_entities(self, query: str, limit: int | None = None) -> List[str]:
+    async def get_relevant_entities(
+        self, query: str, limit: int | None = None
+    ) -> tuple[List[str], str]:
         """
-        Fetch a list of relevant entities for query routing.
+        Fetch relevant entities for query routing, and report the lookup MODE.
+
+        Returns (names, mode) where mode is one of:
+          "full"                — the vector tier (Tier 1) executed. The
+                                  manifest reflects the full three-tier
+                                  lookup and is trustworthy.
+          "degraded_no_vector"  — the vector-tier embedding failed (litellm
+                                  enrichment infra unavailable for this
+                                  call). Tiers 2/3 (substring/BM25) still
+                                  ran, but the manifest is NOT the same
+                                  algorithm — it is missing the concept-
+                                  disambiguation the vector tier provides,
+                                  and E-9/E-11 established this degraded
+                                  manifest is materially different and
+                                  worse (the 2026-07 ceremonial-homonym
+                                  collapse: 'atonement' -> Leviticus ritual
+                                  because the vector tier that would have
+                                  found gospel-preaching entities was down).
+
+        The mode exists to obey the ADR-0014 design law: fail loud or fail
+        closed, never fail different. The vector tier is ENRICHMENT infra
+        (unlike Weaviate + the query embedding in search_gill, which are
+        LOAD-BEARING and fail the request closed). When enrichment degrades,
+        the caller must degrade to the deterministic floor (suppress the
+        entity boost) rather than silently boosting on a different-worse
+        manifest. The mode carries that decision to the caller and into the
+        trace, so an infra blip announces itself instead of surfacing as a
+        theological error weeks later.
 
         Three tiers merged in confidence order (ADR-0010):
 
           Tier 1 — near_vector on qwen3-embedding, distance <= 0.25, cap 3.
-                   Bridges concept synonyms (e.g. 'universal atonement in
-                   Christ' -> 'atonement' Doctrine entity). Silent when the
-                   vector isn't confident; does NOT solve the vocabulary-
-                   bridge case (e.g. 'exclusive psalmody' -> 'Hallel'),
-                   which is a separate query-expansion work item.
-
           Tier 2 — Substring canonical-key match (ADR-0005 Phase 4).
-                   Bridges casing/punctuation ('scapegoat' -> 'scape-goat').
-
-          Tier 3 — BM25 name-token match. Belt-and-suspenders for
-                   proper-noun hits the vector misses.
+          Tier 3 — BM25 name-token match.
 
         Total union capped at MANIFEST_TOTAL_CAP after dedup. `limit`, when
-        provided, overrides the total cap (used by enumeration-path callers
-        that need broader manifests).
+        provided, overrides the total cap.
         """
         total_cap = limit if limit is not None else self.MANIFEST_TOTAL_CAP
 
-        # Tier 1 — confident vector.
+        # Tier 1 — confident vector. Its success/failure IS the mode signal.
         vector_names: List[str] = []
+        vector_tier_ok = True
         try:
             query_vec = await self._get_embedding(query)
             resp = await self.entities.query.near_vector(
@@ -451,7 +471,13 @@ class GillSearchEngine:
                 if obj.properties.get("name")
             ]
         except Exception as e:
-            print(f"Entity vector lookup failed: {e}")
+            # Distinguish "vector engine offline" (enrichment infra down ->
+            # degraded mode) from a Weaviate near_vector error. Both leave
+            # vector_names empty, but only the embedding failure means the
+            # lookup ran a different algorithm. _get_embedding raises the
+            # sentinel string "Theology Vector Engine is currently offline".
+            vector_tier_ok = False
+            print(f"[ENTITY LOOKUP] vector tier degraded (mode=degraded_no_vector): {e}")
 
         # Tier 2 — substring canonical-key.
         #
@@ -516,10 +542,17 @@ class GillSearchEngine:
         except Exception as e:
             print(f"Error fetching entities (BM25): {e}")
 
+        mode = "full" if vector_tier_ok else "degraded_no_vector"
+
         combined = vector_names + substring_names + bm25_names
         if not combined:
-            return ["Jesus Christ", "Apostle Paul", "Old Testament saints"]
-        return combined[:total_cap]
+            # Legitimately-empty lookup (no tier matched) — NOT an infra
+            # failure. The hardcoded default is a last-resort routing hint;
+            # the caller still sees the mode and can decide. (This default
+            # predates the mode work and is itself a mild "fail different"
+            # candidate; left as-is pending its own review.)
+            return (["Jesus Christ", "Apostle Paul", "Old Testament saints"], mode)
+        return (combined[:total_cap], mode)
 
 if __name__ == "__main__":
     # Test
