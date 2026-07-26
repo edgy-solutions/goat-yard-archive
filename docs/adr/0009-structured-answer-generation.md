@@ -165,6 +165,25 @@ The Step 5 semantic judge is being spec'd as a **three-way classifier** reportin
 
 That instrument survives into the structured schema world unchanged. Under structure, the *unsupported-characterization-rate* stays roughly what it is now (the framing fields are still free strings that can technically house unsupported claims). The *supported-characterization-rate* drops materially — the schema's field descriptions actively teach the model that framing is orienting-only, so much of what today lands as "supported characterization in prose" gets structurally routed either into a quote (Zone 2) or into `zone3_notes` (the log-only sinkhole, if the release-valve A/B favors it). The two-rate reporting stays honest across the migration; the numbers move for interpretable reasons.
 
+### Additional forcing evidence (2026-07-26): the fourth keyword-classifier caught stale
+
+The `imprecatory_psalms` regression closed the ADR-0011→0014 attribution exercise, and its root cause is a *third distinct subsystem* doing keyword-classification of free prose — the same failure mode as the run-2 covenant Zone-3 leak, wearing a refusal costume.
+
+The "No-Free-Lunch" hallucination guard ([bot.py](../../backend/bot.py), ~line 1073) classifies a no-citation answer as a refusal only if the prose contains one of four enumerated phrases (`"does not appear"`, `"not address"`, `"silent on this"`, `"regret that"`). The refusal *prompt* evolved (ADR-0008/0013 informative refusals now say *"The indexed corpus does not contain..."*), and the *detector* did not — so a valid informative refusal (which the improved retrieval made *better*: it surfaced Psalm 69 / John 2:17, a genuine imprecatory psalm Gill ties to Christ) gets misclassified as an uncited hallucination and replaced with a `"Verification Failed: retry"` error. Same-weaviate N=3 confirmed it: pre-chain STABLE-PASS 3/3, post-chain STABLE-FAIL 0/3, code not data.
+
+**Three subsystems are now caught guessing a *type* from surface text**, each going stale independently whenever the prompt evolves:
+1. The Zone-3 lexical sweep (ADR-0008, explicitly labeled shallow).
+2. The No-Free-Lunch refusal detector (just caught stale, above).
+3. The eval's own refusal-shape scoring (e.g. `gill_aquinas` scored on "refusal-shape" assertions).
+
+All three divine `answer | informative_refusal | flat_refusal | characterization` from prose. This ADR's schema makes the type a **declared field** — `refusal.mode`, the `phrases[]`/`refusal` shape — so the classification is emitted by the generator, not pattern-matched after the fact. Three detector subsystems collapse into typed dispatch. This is the **fourth independent justification** for this ADR, alongside answer quality, streaming/UI enablement, and measurement-integrity (the verbatim/paraphrase boundary that gives the eval its ±several-question run-to-run noise, ADR-0014).
+
+**Interim fix (the last keyword patch).** Until the schema lands, the No-Free-Lunch guard is fixed *structurally*, not by growing its keyword list (that is the treadmill this project refuses): the guard should trigger on the deterministic condition **"zero verified quote-SID pairs while asserting content"**, not on prose keywords; and the informative-refusal prompt must *guarantee* its adjacent material carries citations (the run-to-run citation-omission is the actual bug — an informative refusal that names adjacent material must cite it, the standing lentil-trap rule). Degrading to a flat refusal is only the *final* rung, when both still trip — it must not be the primary fix, because it discards the good informative refusal the improved retrieval produced. Any such patch is scaffolding this schema demolishes; keep it minimal. Documented in ADR-0013's refusal-path amendment.
+
+### Priority (2026-07-26)
+
+Every road this month leads here. The forcing evidence is now four independent lines, and **nothing joins the queue ahead of this ADR.** The sequencing note below still holds — build after promotion, N-run eval, and the corpus ingestion so the baseline regenerates once — but every keyword-ish fix written between now and then (including the interim one above) should be authored knowing the typed distinction arrives with this schema, and kept deliberately minimal.
+
 ### Sequencing
 
 Sequencing is load-bearing: do NOT swap the output architecture mid-Phase-1. Steps 4–6 complete on the current architecture; the lexical backstop and semantic judge are still needed in the structured world (structure shrinks the surface, does not eliminate it); nothing built during Phase 1 becomes wasted. This ADR files the design; Phase 2 executes it.

@@ -319,11 +319,26 @@ This is a substantial refactor and must be validated against the 28-case referen
 
 Gated on running the eval set; not landed in this chain of commits, which closed the incident (the user's query now returns verified Hallel content).
 
+## Amendment 2026-07-26: the No-Free-Lunch refusal detector is stale (filed, not yet fixed)
+
+The `imprecatory_psalms` regression (confirmed real code, not data, via same-weaviate N=3: pre-chain STABLE-PASS 3/3, post-chain STABLE-FAIL 0/3 — see ADR-0014 and ADR-0009's forcing-evidence section) traces to this ADR's own Part B path, and it's the same failure class as the run-2 covenant leak: a **keyword scan on free prose guessing intent, gone stale as the prompt evolved.**
+
+**The bug.** The "No-Free-Lunch" hallucination guard ([backend/bot.py](../../backend/bot.py), ~line 1073) accepts a no-citation answer as a legitimate refusal only if the prose contains one of four enumerated phrases: `"does not appear"`, `"not address"`, `"silent on this"`, `"regret that"`. Part B's informative-refusal prompt produces *"The indexed corpus does not contain..."* — not in the list. So a valid informative refusal, when the bot omits its citation, is misclassified as an uncited hallucination and replaced with `"Verification Failed: retry"`. The improved retrieval made this *more* likely by surfacing genuinely-relevant adjacent material (Psalm 69 / John 2:17) that the bot writes an informative refusal about.
+
+**The interim fix (structural, not another keyword — the last keyword patch before ADR-0009).** Three moves, in order of importance:
+1. **Guarantee citations in informative refusals.** The run-to-run citation-omission *is* the actual bug. An informative refusal that names adjacent material must cite it — the standing lentil-trap rule (Part B). Tighten the prompt so `gap_statement + adjacent material` always carries its SIDs. This makes the answer pass the zero-citations check *legitimately*.
+2. **Trigger the guard on the deterministic condition, not keywords.** No-Free-Lunch's real concern is "asserting content with zero verified quote-SID pairs." Check *that structural condition* (count verified citations), not whether the prose matches a refusal phrase. Same family as the trailing-prose bookend check — branch on the deterministic signal, never on a lexical guess about stochastic output.
+3. **Flat-refusal degradation is the LAST rung only.** When (1) and (2) still leave an uncited, unrecognized output, degrade to a clean flat refusal (better than an error screen). This must NOT be the primary fix — on its own it discards the good informative refusal the improved retrieval produced, and the eval still fails (a flat refusal won't cite JOHN 2:17 either).
+
+**Eval-gate N=3 before/after** (per the ADR-0014 standard), with specific regression attention on the *other* informative-refusal queries — `gill_aquinas`, `exclusive_psalmody` — since the guard change touches their path too.
+
+This is scaffolding [ADR-0009](0009-structured-answer-generation.md) demolishes: under the typed schema, `refusal.mode` is a declared field and the guard never pattern-matches prose. Keep the interim patch minimal and say so in its commit.
+
 ## What the earlier commits still stand on
 
 - ADR-0011 v3 (span-based vector match) is unchanged and load-bearing for morphological variants like `psalmist`.
 - ADR-0013 Part A (two-pass) is now unconditional and works because the substring bug is fixed.
-- ADR-0013 Part B (refusal-path Gill-only) is unchanged and shipped correctly.
+- ADR-0013 Part B (refusal-path Gill-only) is unchanged and shipped correctly — but its interaction with the stale No-Free-Lunch detector is the open item above.
 - ADR-0012 (poisoned-manifest suppression) is unchanged and still the honest floor.
 
 ## References
