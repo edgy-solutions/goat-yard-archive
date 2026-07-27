@@ -1,0 +1,1495 @@
+{
+  "generated": "2026-07-27T01:14:00Z",
+  "n": 8,
+  "models": [
+    "deepseek/deepseek-chat",
+    "deepseek/deepseek-v3.2",
+    "deepseek/deepseek-v4-pro"
+  ],
+  "summary": {
+    "deepseek/deepseek-chat": {
+      "A_multiphrase": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 8,
+        "verbatim_ok": "5/8",
+        "zone3_leak": 8
+      },
+      "B_informative_refusal": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 0,
+        "verbatim_ok": "n/a",
+        "zone3_leak": 0
+      },
+      "C_flat_refusal": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 8,
+        "verbatim_ok": "n/a",
+        "zone3_leak": 0
+      },
+      "D_zone1_bridge": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 0,
+        "verbatim_ok": "2/2",
+        "zone3_leak": 0
+      },
+      "E_hebrew_quote": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 6,
+        "verbatim_ok": "8/8",
+        "zone3_leak": 0
+      }
+    },
+    "deepseek/deepseek-v3.2": {
+      "A_multiphrase": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 8,
+        "verbatim_ok": "8/8",
+        "zone3_leak": 8
+      },
+      "B_informative_refusal": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 0,
+        "verbatim_ok": "n/a",
+        "zone3_leak": 0
+      },
+      "C_flat_refusal": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 8,
+        "verbatim_ok": "n/a",
+        "zone3_leak": 0
+      },
+      "D_zone1_bridge": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 0,
+        "verbatim_ok": "2/2",
+        "zone3_leak": 0
+      },
+      "E_hebrew_quote": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 7,
+        "verbatim_ok": "7/7",
+        "zone3_leak": 0
+      }
+    },
+    "deepseek/deepseek-v4-pro": {
+      "A_multiphrase": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 8,
+        "verbatim_ok": "7/8",
+        "zone3_leak": 5
+      },
+      "B_informative_refusal": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 0,
+        "verbatim_ok": "n/a",
+        "zone3_leak": 0
+      },
+      "C_flat_refusal": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 8,
+        "verbatim_ok": "n/a",
+        "zone3_leak": 0
+      },
+      "D_zone1_bridge": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 1,
+        "verbatim_ok": "3/3",
+        "zone3_leak": 0
+      },
+      "E_hebrew_quote": {
+        "n": 8,
+        "parse": 8,
+        "schema_valid": 8,
+        "field_ok": 6,
+        "verbatim_ok": "7/7",
+        "zone3_leak": 0
+      }
+    }
+  },
+  "raw": {
+    "deepseek/deepseek-chat": {
+      "A_multiphrase": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": false,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant with Noah from the covenan"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": false,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": false,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        }
+      ],
+      "B_informative_refusal": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "C_flat_refusal": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "D_zone1_bridge": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "E_hebrew_quote": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ]
+    },
+    "deepseek/deepseek-v3.2": {
+      "A_multiphrase": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant made with Noah from the co"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant made with Noah from the co"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant made with Noah from the co"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "covenant with Noah, Gill distinguishes it from the covenant of grace. He reite"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant with Noah from the covenan"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant with Noah from the covenan"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "covenant with Noah, Gill distinguishes it from the covenant of grace. He reite"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant with Noah from the covenan"
+        }
+      ],
+      "B_informative_refusal": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "C_flat_refusal": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "D_zone1_bridge": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "E_hebrew_quote": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ]
+    },
+    "deepseek/deepseek-v4-pro": {
+      "A_multiphrase": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from other covena"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": false,
+          "leak": true,
+          "err": null,
+          "leak_text": "Gill distinguishes the covenant of grace from the covenant"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "ary on Genesis 9:9, Gill distinguishes the Noahic covenant from the covenant o"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "In Genesis 9:10, Gill distinguishes the covenant of grace from a covenant o"
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": true,
+          "err": null,
+          "leak_text": "ry on Genesis 9:10, Gill distinguishes the covenant with Noah from the covenan"
+        }
+      ],
+      "B_informative_refusal": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "C_flat_refusal": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "D_zone1_bridge": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ],
+      "E_hebrew_quote": [
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": null,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": true,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        },
+        {
+          "ok_http": true,
+          "mode": "json_schema",
+          "parse": true,
+          "schema_valid": true,
+          "field_ok": false,
+          "verbatim_ok": true,
+          "leak": false,
+          "err": null,
+          "leak_text": null
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# E-12 Q4 zone-3 leaks — characterization that reached a framing field
+
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant with Noah from the covenan`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-chat** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `Gill distinguishes the covenant made with Noah from the co`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `Gill distinguishes the covenant made with Noah from the co`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `Gill distinguishes the covenant made with Noah from the co`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `covenant with Noah, Gill distinguishes it from the covenant of grace. He reite`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `Gill distinguishes the covenant with Noah from the covenan`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `Gill distinguishes the covenant with Noah from the covenan`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `covenant with Noah, Gill distinguishes it from the covenant of grace. He reite`
+- **deepseek/deepseek-v3.2** / A_multiphrase: `Gill distinguishes the covenant with Noah from the covenan`
+- **deepseek/deepseek-v4-pro** / A_multiphrase: `Gill distinguishes the covenant of grace from other covena`
+- **deepseek/deepseek-v4-pro** / A_multiphrase: `Gill distinguishes the covenant of grace from the covenant`
+- **deepseek/deepseek-v4-pro** / A_multiphrase: `ary on Genesis 9:9, Gill distinguishes the Noahic covenant from the covenant o`
+- **deepseek/deepseek-v4-pro** / A_multiphrase: `In Genesis 9:10, Gill distinguishes the covenant of grace from a covenant o`
+- **deepseek/deepseek-v4-pro** / A_multiphrase: `ry on Genesis 9:10, Gill distinguishes the covenant with Noah from the covenan`
