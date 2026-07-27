@@ -102,9 +102,19 @@ The `zone3_notes` field is the schema-safe version of the ADR-0008 release valve
 
 ## Implementation Sketch
 
-### Phase 2.1 — DeepSeek compliance smoke (feasibility gate)
+### Phase 2.1 — DeepSeek compliance smoke (feasibility gate) — **RUN 2026-07-26 (E-12): GO**
 
-Before writing the migration, verify DeepSeek reliably emits the schema. One-shot compliance test against 10 diverse queries (mix of clean-answer, informative-refusal, flat-refusal shapes). Pass = 10/10 structurally valid JSON with populated required fields.
+Before writing the migration, verify DeepSeek reliably emits the schema. Pulled forward and run early (the ingestion weeks are the free window) as `evals/e12_adr9_compliance_smoke/` — draft three-zone schema, 5 hard shapes (multi-phrase, informative refusal, flat refusal, Zone-1 bridge, Hebrew-in-quote), N=8, current-vs-latest DeepSeek (`deepseek-chat` / `v3.2` / `v4-pro`). Findings ([`FINDINGS.md`](../../evals/e12_adr9_compliance_smoke/FINDINGS.md)):
+
+- **Schema-holding: STRONG GO** — **120/120 parseable + schema-valid**, all three models, enforced `json_schema`. The riskiest question is a clean pass. (Caveat: `deepseek-chat`'s `json_schema` support routes inconsistently on OpenRouter → treat `json_object` + parse/repair, the BAML path, as the contract; raw compliance is the conservative floor.)
+- **Two design inputs that must land IN the schema, not after it:**
+  1. **The typed schema does NOT starve Zone 3.** Free-text `framing` absorbs "Gill distinguishes/argues…" (chat 8/8, v3.2 8/8, v4-pro 5/8 on substantive answers). This **validates the release-valve line (Phase 2.4)** — constrain `framing`, keep the post-assembly Zone-3 sweep, or ship the valve; the schema alone is insufficient.
+  2. **The slots don't carry the behavior — the field descriptions do.** Under a minimal schema prompt all models collapsed informative→flat (B: 0/24) and only v4-pro once produced the `zone1_bridge` (D: 1/8); the rest bare-refused. So the "pre-draft the field descriptions during ingestion" work is **load-bearing**: the schema ships with strong descriptions + likely few-shot, not bare fields.
+- **Fidelity in fields: positive, model-dependent** — v3.2 8/8, v4-pro 7/8, chat 5/8 verbatim on the multi-phrase body; Hebrew preserved 7–8/8. Supports the measurement-integrity payoff and a model bump.
+- **Fluency: no disqualifier** — reassembled prose reads as natural exposition (Q3 samples), so Phase 2.2 starts without a red flag.
+- **Model bump: recommend carrying `v4-pro` into the migration's single revalidation pass** — ≥ chat on compliance+fidelity, leaks Zone-3 least, only model to bridge unprompted. Per the pre-committed rule (newer wins only if ≥ compliance+fidelity, ~fluency), it qualifies.
+
+The original 10/10-structurally-valid bar is **met and exceeded**; the go/no-go is GO, and Phase 2.1's residual work is now the field-description authoring + Zone-3-in-`framing` strategy, both of which E-12 scoped concretely.
 
 ### Phase 2.2 — John 6:37 fluency A/B
 

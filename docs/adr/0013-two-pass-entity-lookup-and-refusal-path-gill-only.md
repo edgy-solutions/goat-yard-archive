@@ -319,7 +319,7 @@ This is a substantial refactor and must be validated against the 28-case referen
 
 Gated on running the eval set; not landed in this chain of commits, which closed the incident (the user's query now returns verified Hallel content).
 
-## Amendment 2026-07-26: the No-Free-Lunch refusal detector is stale (filed, not yet fixed)
+## Amendment 2026-07-26: the No-Free-Lunch refusal detector is stale (filed; interim guard-only fix landed)
 
 The `imprecatory_psalms` regression (confirmed real code, not data, via same-weaviate N=3: pre-chain STABLE-PASS 3/3, post-chain STABLE-FAIL 0/3 — see ADR-0014 and ADR-0009's forcing-evidence section) traces to this ADR's own Part B path, and it's the same failure class as the run-2 covenant leak: a **keyword scan on free prose guessing intent, gone stale as the prompt evolved.**
 
@@ -333,6 +333,17 @@ The `imprecatory_psalms` regression (confirmed real code, not data, via same-wea
 **Eval-gate N=3 before/after** (per the ADR-0014 standard), with specific regression attention on the *other* informative-refusal queries — `gill_aquinas`, `exclusive_psalmody` — since the guard change touches their path too.
 
 This is scaffolding [ADR-0009](0009-structured-answer-generation.md) demolishes: under the typed schema, `refusal.mode` is a declared field and the guard never pattern-matches prose. Keep the interim patch minimal and say so in its commit.
+
+### Resolution 2026-07-26 (interim, guard-only — `0904978`)
+
+Move 2 + Move 3 landed; **Move 1 was dropped after it caused a regression**. The final scope, and why:
+
+- **Move 2 (deterministic condition) + Move 3 (last-rung flat degradation) — shipped (`0904978`).** The zero-citation branch now fires only on the structural condition the guard exists for — an uncited verbatim-style quoted span (`>=40` chars): Gill's words asserted with no quote-SID pair to verify. On that, degrade to a clean flat refusal (never the `"Verification Failed: retry"` error screen). Any refusal — flat OR gap-statement informative — that quotes nothing verbatim asserts nothing to verify and passes, whatever prose it uses. The four hardcoded phrases are gone.
+- **Move 1 (prompt-guaranteed citations + canonical gap phrasing) — dropped.** Eval-gated N=6 on the same test weaviate, it flipped `singing_psalms` **STABLE-PASS 6/6 → STABLE-FAIL 0/6** — not on missing content (Hallel was expressed, MATT 26:30 cited) but on `verified=False`: the prompt edit shifted generation toward fragmented interleaved quoting that trips the verbatim verifier. Isolation confirmed it (guard-only, zero prompt delta, restores 6/6; the guard branch is provably inert on any citation-bearing answer). It also failed its own target (exclusive_psalmody still phrased the gap as "the term is modern"). Lesson, third time this class has appeared: **guaranteeing a structural property by prompt-coaxing a stochastic model doesn't hold and re-rolls the noisy verbatim boundary** — citation-guarantee is a *schema* property, deferred to ADR-0009's typed `gill_quote`+`ref` fields, not the interim patch.
+
+**Eval-gate (N=6, same test weaviate, only variable = code):** `singing_psalms` 6/6 → 6/6 (no regression); no `"Verification Failed"` screen in any run; `aquinas`/`exclusive_psalmody` unchanged (they carry citations, never enter the guard branch — their failures are not this guard's).
+
+**Companion eval-semantics batch (`f0ecbaa`)** re-asserted three stale refusal-path cases against verified ground truth (`imprecatory_psalms` → informative-refusal shape, now STABLE-PASS; `gill_aquinas` premise **corrected** — footnote-verified that Thomas Aquinas IS in the corpus at JOHN 7:27, so the guard shifts from a fact-claim to a characterization-claim; `exclusive_psalmody` documented KNOWN-RED → ADR-0009). Meta-lesson recorded: corpus-fact assertions must be grep-verified against the corpus, not derived from a prior answer's content. Baseline regenerated at the settled commit (`65aba8f`): 20/28 STABLE-PASS, N=3.
 
 ## What the earlier commits still stand on
 
