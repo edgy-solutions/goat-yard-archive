@@ -368,7 +368,11 @@ function App() {
             pages.push({
                 vol: vol,
                 page: p,
-                url: `/scans/vol${vol}_page${p}_image1.png`,
+                // Suffix is the volume number, not an image index — extract_images.py
+                // writes page{N}_image{volume}.png, which setup_minio.py uploads as
+                // vol{volume}_page{N}_image{volume}.png. Hardcoding _image1 only ever
+                // worked while volume 1 was the sole volume.
+                url: `/scans/vol${vol}_page${p}_image${vol}.png`,
                 boxes: h ? h.boxes : []
             });
         }
