@@ -23,11 +23,31 @@ bereshit→case-1, mishpechoteihem→biblical, vol7 case-1==0):
 1. **Structural census — free text checks, no model calls.** Letter-sequence gaps in note
    blocks, text-marker↔note-count mismatches, continuation-page flags, orphaned anchors →
    per-volume structural error rates + sized repair queue.
-2. **Ten-page CV-presplit probe — TARGET vol1 (see refinement B).** deskew → CV rule-line
-   split → CV column-split + vertical concat → 2× footnote upscale (with a 1×/2× compare) →
-   current-model per-region transcription → marker match → diff vs stored.
+   **CONSTRAINT (D):** markers are lowercase letters REUSED across paragraphs on a page, so
+   gap-detection must operate **per anchor-scope, not per page**, or it reports phantom gaps
+   and phantom duplicates everywhere. **Verify the actual 1766 convention first** on a few
+   pages — restart per page? per column? per paragraph? — that answer sets the scope for
+   both this census and the probe's marker-matcher (pass 4).
+2. **Ten-page CV-presplit probe — TARGET vol1 (refinement B) — THREE-WAY matrix (E).**
+   deskew → CV rule-line split → CV column-split + vertical concat → 2× footnote upscale
+   (1×/2× compare) → per-region transcription → marker match → diff vs stored. Run the
+   transcription pass as a **3-way**: (a) current **qwen3-vl** (the operative model, local
+   Ollama) on the presplit inputs, (b) a **frontier model** on the same inputs, (c) the
+   **stored output** (old single-call architecture). This separates the two conflated
+   variables — *architecture* (overloading) vs *model capability* (vintage/size). Because
+   the pipeline is decomposed, each pass diffs separately, so you see WHICH pass the old
+   architecture failed (region-find vs transcription vs marker-link), not one entangled diff.
+   Also test the **hint-quality lever (F)**: per-region Tesseract on the cropped strips gives
+   the model an aligned word-hint, vs today's scrambled full-page hint — plausibly a bigger
+   lever than resolution, so measure it alongside 1×/2×.
 3. **Gate — Chris reads structural rates + probe diffs together → one decision:** repair the
-   apparatus span-by-span, or re-extract the footnote layer wholesale. Finalizes V2's sample.
+   apparatus span-by-span, or re-extract the footnote layer wholesale. **Tilt: toward
+   re-extract** — there is no tuned footnote-detection stage to repair (the presplit is the
+   *first existence* of one; today's 500px Y-gap is a text-space confession, not a mechanism).
+   Repair can only fix what was captured; the probe measures re-extraction quality directly.
+   If qwen3-vl-on-solved-layout ≈ frontier, Psalms stays **local + free** with the presplit
+   doing the work — a materially different cost picture than routing apparatus through a
+   frontier API; V3 prices whichever the probe shows.
 4. Then V2 → V3 (cost/model-tier, apparatus possibly its own tier) → V4 (review queue +
    provenance) → ADR-0015 + the model-tier ADR, written from evidence.
 
@@ -62,7 +82,11 @@ The current footnote path is a **single overloaded VLM call** (`ExtractTextFromI
 multilingual transcription at once on the full page; `get_md.py` is layout-naïve (single
 page-center split, no rule-line) and injects a **one-verse** Hebrew reference
 (`get_hebrew_verse`); `fixup_ocr.py` separates footnotes post-hoc by text-alignment + a magic
-500px Y-gap. The CV-presplit design removes the layout burden from the model deterministically
+500px Y-gap. Note the `ocr_text` hint the VLM receives is Tesseract's **layout-naïve** output,
+which splits the footnote block at the **body's** center line — so in exactly the region where
+the model most needs help, its hint is systematically scrambled (footnote columns interleaved
+at the wrong boundary). Per-region Tesseract on presplit strips fixes this for free (lever F).
+The CV-presplit design removes the layout burden from the model deterministically
 — which is why re-extraction (footnote regions only, body untouched) is a live gate option.
 Psalms ingests through the decomposed multi-pass design + wide reference window from day one,
 regardless of the existing-corpus decision.
