@@ -35,11 +35,7 @@ def transcribe(strip_img, profile, host):
     return (d.get("response", "") or ""), d.get("done_reason")
 
 def _body_before_defs(md):
-    out = []
-    for ln in md.splitlines():
-        if re.match(r"^\s*(?:\[\^[a-z]\]:|\^[a-z]\b\s)", ln): break
-        out.append(ln)
-    return "\n".join(out)
+    return A.split_body_defs(md)[0]     # robust body/def split (all zoo def formats)
 
 def extract_page(image_path, profile, host, body_md=None):
     up = profile["transcription"].get("apparatus_upscale", 2)

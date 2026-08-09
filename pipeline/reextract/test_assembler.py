@@ -148,6 +148,28 @@ def test_anchor_match_p473_partial_loss_flags_gaps_no_misshift():
     assert [u["expected_letter"] for u in r["unanchored"]] == ["b", "d", "g", "h", "m", "n"]
     assert [l["anchor_letter"] for l in r["links"]] == ["a", "c", "e", "f", "i", "k", "l", "o"]
 
+def test_bodydef_split_recognizes_caret_defs_no_anchor_double_count():
+    # BUG the truth set caught (p150): caret-format def lines leaked into "body" and doubled anchors.
+    md = "text with ^d^ ref and ^c^ ref.\n^d^ Works, vol. 1. p. 718.\n^c^ ibid. p. 719."
+    body, defs = A.split_body_defs(md)
+    assert A.detect_body_anchors(body) == ["d", "c"]          # not ["d","c","d","c"]
+    assert "Works, vol. 1" in defs
+
+def test_anchor_match_p150_countmatch_nonincreasing_letters_ok():
+    # p150: 6 anchors (d,c,f,g,h,i — per-column reset, NOT increasing) == 6 notes -> position wins -> OK
+    body = " ".join(f"w^{c}^" for c in ["d","c","f","g","h","i"])
+    r = A.match_notes_to_anchors(_notes(6), body, PROFILE)
+    assert r["status"] == "OK" and len(r["links"]) == 6 and not r["unanchored"]
+
+def test_anchor_match_p97_reconciliation_failed_no_false_gaps():
+    # BUG the truth set caught (p97): anchors o,p,q (start mid-alphabet) vs 14 notes. Must NOT
+    # emit 13 phantom gaps with 'a,b,c' expected letters — flag the PAGE, no false per-note guesses.
+    body = " ".join(f"w^[{c}]" for c in ["o", "p", "q"])
+    r = A.match_notes_to_anchors(_notes(14), body, PROFILE)
+    assert r["status"] == "FLAGGED" and r["links"] == [] and r["anchor_letters"] == ["o", "p", "q"]
+    assert all(u["reason"] == "page_reconciliation_failed" for u in r["unanchored"])
+    assert all("expected_letter" not in u for u in r["unanchored"])   # NO garbage expected letters
+
 def test_anchor_match_never_guesses():
     # a note with no matching anchor in its window is FLAGGED, never assigned a wrong letter
     body = "only ^[a] here"

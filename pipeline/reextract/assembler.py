@@ -34,6 +34,17 @@ def strip_marker(line):
     m = _MARKER.match(line)
     return (m.group(1).lower(), m.group(2)) if m else (None, line.strip())
 
+# body/definition split — a def line is a LINE-LEADING marker in ANY zoo format ([^a]: | ^[a] |
+# ^a^ | ^a text). Recognizing only bracket defs leaks caret-format def lines into "body" and
+# double-counts anchors (surfaced by p150 in the truth-set run).
+_DEF_LINE = re.compile(r"^\s*(?:\[\^[a-z]\]:|\^\[[a-z]\]|\^[a-z]\^?)(?=\s|:)")
+def split_body_defs(md):
+    lines = md.splitlines()
+    for i, ln in enumerate(lines):
+        if _DEF_LINE.match(ln):
+            return "\n".join(lines[:i]), "\n".join(lines[i:])
+    return md, ""
+
 def is_furniture(line, profile):
     f = profile["furniture"]; s = line.strip()
     if not s: return True
@@ -80,6 +91,13 @@ def advance_letter(ch, skips):
 def letter_run(start, count, profile):
     skips = effective_skips(profile); out = [start]; cur = start
     for _ in range(count - 1):
+        cur = advance_letter(cur, skips); out.append(cur)
+    return out
+
+def _fill_run(anchors, profile):
+    """The printer run from anchors[0] to anchors[-1] (j/v skipped) — fills the letters between."""
+    skips = effective_skips(profile); out = [anchors[0]]; cur = anchors[0]
+    while cur != anchors[-1] and len(out) < 60:
         cur = advance_letter(cur, skips); out.append(cur)
     return out
 
@@ -139,19 +157,29 @@ def match_notes_to_anchors(notes, body_text, profile, scope_start="a"):
                 unanchored.append({"marker": f"[^{i+1}]", "text": notes[i]["text"], "reason": "ibid_overflow"})
         status = "OK" if not unanchored else "FLAGGED"
     else:
-        # counts disagree -> LETTER within the printer scope reveals which notes lost their anchor;
-        # flag the gaps, never shift position onto the wrong note.
-        expected = letter_run(scope_start, nn, profile)
-        ai = 0
-        for i in range(nn):
-            exp = expected[i] if i < len(expected) else None
-            if ai < na and anchors[ai] == exp:
-                links.append({"marker": f"[^{i+1}]", "text": notes[i]["text"], "anchor_letter": anchors[ai]})
-                ai += 1
-            else:
-                unanchored.append({"marker": f"[^{i+1}]", "text": notes[i]["text"],
-                                   "reason": "anchor_missing_in_body", "expected_letter": exp})
-        status = "FLAGGED"
+        # counts disagree. Derive the scope from the DETECTED anchors, not a hardcoded 'a' (that
+        # false-flagged p97, whose anchors start at 'o'). ONLY pinpoint gaps when the anchors form a
+        # clean strictly-increasing run whose filled span EXACTLY covers the note count — then the
+        # missing letters are the notes that lost their body anchor. Otherwise the page can't be
+        # reconciled without scope info: flag the whole page for review, no false per-note guesses.
+        increasing = all(b > a for a, b in zip(anchors, anchors[1:])) if len(anchors) > 1 else bool(anchors)
+        filled = _fill_run(anchors, profile) if anchors and increasing else None
+        if filled and len(filled) == nn:
+            aset = set(anchors)
+            for i in range(nn):
+                L = filled[i]
+                if L in aset:
+                    links.append({"marker": f"[^{i+1}]", "text": notes[i]["text"], "anchor_letter": L})
+                else:
+                    unanchored.append({"marker": f"[^{i+1}]", "text": notes[i]["text"],
+                                       "reason": "anchor_missing_in_body", "expected_letter": L})
+            return {"links": links, "unanchored": unanchored, "status": "FLAGGED", "n_anchors": na,
+                    "n_notes": nn, "anchor_letters": anchors, "gap_letters": [u["expected_letter"] for u in unanchored]}
+        # cannot reconcile (partial loss + unknown scope, e.g. p97 o,p,q vs 14 notes) -> page flag
+        unanchored = [{"marker": f"[^{i+1}]", "text": notes[i]["text"], "reason": "page_reconciliation_failed"}
+                      for i in range(nn)]
+        return {"links": [], "unanchored": unanchored, "status": "FLAGGED", "n_anchors": na,
+                "n_notes": nn, "anchor_letters": anchors, "gap_letters": []}
     return {"links": links, "unanchored": unanchored, "status": status, "n_anchors": na, "n_notes": nn}
 
 def assert_no_text_split(notes, profile):
