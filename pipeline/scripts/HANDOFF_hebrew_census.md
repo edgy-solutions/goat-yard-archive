@@ -110,6 +110,10 @@ citation-filter + Gill-grounded typology block (with dedup/antitype guard) — t
 hardened local vs deepseek vs grok, and only then eval-gate a swap (ADR-0010 constants re-derived,
 N-run). Scripts: scratchpad `entity_probe.py` / `typology_variant.py` (probe harness + local
 backend; fold `call_local` into the committed benchmark when the hardened pass is built).
+- **Re-probe candidate set (add for the hardened run — not yet tested):** `gemma4:31b` (also
+  `:12b`/`:e4b`), and `gpt-oss:120b` on .169 (text-heavyweight — expect SLOW, likely CPU-spill at
+  the sample's context; run it last / low-priority). Entity extraction is TEXT-only, so any strong
+  local text model is a fair candidate, not just the VL ones — widen the field when re-probing.
 - **Hold the re-extraction trigger** to body-text conservatism — entities are a retrieval
   substrate; swapping = full eval-gate. Only on proven gains, never a drive-by.
 - **Symbolics = extraction-of-what-Gill-SAYS** (probe-confirmed viable), NOT a Reformed typology
