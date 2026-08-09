@@ -93,13 +93,19 @@ Chinese ceiling).
   emitted as entities, in an invented `ScriptureReference` category + dumped in `Unknown`). It also
   MISSED abstract doctrine grok caught (`determinate counsel`, `mediator`, `two natures in Christ`)
   and under-tagged `OriginalWord` (2 vs grok 11).
-- **The two flaws are the standing law, code-fixable — not model deficiencies:** (a) valid JSON is
-  a deterministic property → **`format:"json"`** (Ollama) removed all parse failures immediately;
-  (b) category ∈ the 12-enum is deterministic → **structured-output schema constraint** makes
-  `ScriptureReference` *unrepresentable*; (c) "a scripture citation is not an entity" is a
+- **The two flaws are the standing law, code-fixable — not model deficiencies. Do this in BAML,
+  not raw Ollama `format:"json"`** (the probe used raw calls for speed; production belongs in BAML
+  like the rest of the pipeline): (a) valid JSON — `format:"json"` handled it in the probe, BAML
+  gives it for free; (b) category ∈ the 12-enum is deterministic → a **BAML enum-typed `category`**
+  makes `ScriptureReference` *unrepresentable at the type layer* AND validates-and-retries —
+  strictly stronger than `format:"json"`, which only guarantees parseable JSON (an invalid enum
+  would still slip through and need a post-filter); (c) "a scripture citation is not an entity" is a
   deterministic pattern → a **regex citation-filter** strips the ~26 pollutants (same move as
   marker-identity in the footnote build). With those three guards, local's real gain (coverage +
   2× grounded typology, cross-page drift already ≤ grok, free) stands clean.
+  **Also:** the re-extraction transcription (currently raw Ollama note-lines in `extract_apparatus.py`,
+  a probe convenience) should become a **BAML function returning `Note[]`** for production —
+  consistent with the rest of the pipeline and hands the assembler a typed list, not parsed lines.
 - **deepseek-v3 is the disciplined turnkey alt:** zero invalids, best consistency (name-drift 0),
   solid typology (19), 10/10 reliable, cheap Chinese cloud — the low-effort option if local
   hardening stalls. grok (incumbent) is reliable but weakest on typology.
