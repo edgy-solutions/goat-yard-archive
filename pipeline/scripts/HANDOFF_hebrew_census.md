@@ -275,6 +275,33 @@ the scars are densest — doing it after = the work twice). Harvested paid-for e
    affordable; the truth set calibrates the assertions. A 200-page truth set nobody reviews is the
    exact ADR-0015 failure mode.
 
+## TRUTH-SET RAN 2026-08-09 — reframed acceptance + a GATE-RELEVANT scope finding
+27-page stratified run against the frozen config (`build_truthset.py` → `render_adjudication.py`;
+Artifact console published). It first did its calibration job — caught **2 matcher bugs** (caret-def
+body-split doubling; `scope_start='a'` phantom gaps) → fixed, 18 tests (`9c19bf5`). Then the honest
+result separated into **two axes** the raw "70% flagged" headline had conflated:
+- **AXIS 1 — new apparatus quality (the gate's target): STRONG.** 22/27 note-counts match the stored
+  def counts (apparatus complete); 15 Hebrew spans closed by the recrop; and on flagged pages the
+  re-extraction **beats stored** — p702 fixes OCR errors (`Mechossre→Mechosre`, `Erubin→Eruvin`,
+  `Gersom→Gerson`, `sect. 1, a→1, 2`), p550 **recovers Hebrew** `שורש` (stored had garbage `191ו`)
+  and **drops stored's 2 duplicate notes**. Clean canonical `[^N]` where stored had colliding letters.
+- **AXIS 2 — linkage: 8/27 linkable, 19 "flagged" = OLD-BODY in-text anchor loss.** Confirmed NOT a
+  detection bug and NOT a re-extraction failure: the old body genuinely dropped 70%+ of its in-text
+  superscript markers (p550 has 1 inline anchor for 7 notes; p702 has 2 for 8), while keeping the
+  definitions. The correct new notes have nowhere to attach.
+
+**GATE-RELEVANT SCOPE FINDING (needs Chris):** re-extracting the footnote DEFINITIONS is **not
+enough for a LINKED apparatus** — the body's IN-TEXT ANCHOR MARKERS are a heavily-degraded body-layer
+defect (the census's "127 lost anchors", now seen to be pervasive). Two options:
+  (a) **Expand scope: in-text anchor RE-DETECTION** — re-detect the small superscript positions from
+      the IMAGE and re-insert them (body PROSE still untouched; only the anchor glyphs re-extracted).
+  (b) **Ship notes present-but-unanchored** now (already better than stored: correct, deduped,
+      Hebrew-recovered) and queue (a) as a follow-on.
+This also **refines Q1 body-tiering**: "body PROSE suspected-fine" still holds, but "body IN-TEXT
+ANCHORS" are now KNOWN-degraded — a caveat to record before V2 leans on them.
+Adjudication console (Axis-1 note quality is what Chris grades from the side-by-side; Axis-2 is
+labeled a body-layer property, not a re-extraction verdict): the published Artifact.
+
 **BUILD-DOCS LAW — probe/production split:** raw `httpx`→Ollama/OpenRouter for PROBES (fast
 experimentation, no codegen); **BAML for anything the pipeline DEPENDS on** (typed output,
 unrepresentable bad states, validate-and-retry). Keep the raw-probe scripts as-is — they're the
