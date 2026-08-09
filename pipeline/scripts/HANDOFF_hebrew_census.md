@@ -256,13 +256,40 @@ the scars are densest — doing it after = the work twice). Harvested paid-for e
    superscript genuinely can't be found in its window → **flagged UNANCHORED, fail-loud, NOT a
    guessed placement** (a mis-anchored citation is worse than an honestly-orphaned one — Aquinas-class
    IDs ride on anchors being RIGHT, not merely present).
-3. **Stratified acceptance truth set = review-bandwidth spend (ADR-0015), NOT exhaustive.** Strata:
+3. **Per-region Hebrew hi-res crop — DONE ✔ (`c8da667`+ next commit), CONFIG NOW FROZEN.** Built
+   `hebrew_recrop.py`; validated end-to-end on p473: `סגר עליה` (6/7) → `סגר עליהם` (7/7). **Config-
+   shaping measurement (recorded so it isn't re-litigated):** full-strip upscale does NOT close the
+   Hebrew (6× AND 8× full-strip both stuck at 6/7 — the VL encoder downscales the big strip, so
+   pixels-per-glyph doesn't rise); a CONCENTRATED band crop of the note's line does. Two gotchas
+   found by measuring: (a) crop from a **MODERATE base (2×)** and upscale the band ONCE — cropping
+   the 4× display strip compounds to 12× and DEGRADES the glyph (first attempt gave a *different*
+   6/7, `עליו`); (b) **pad_frac ≥ 0.03** required — too-tight bands cut context and mis-read. With
+   2× base + pad 0.04 + ×3 it reads 7/7 across 4 band configs. Mechanism: Tesseract locates the
+   Hebrew note's line via its Latin anchor ("clausit viam illis"), crop+upscale that band,
+   re-transcribe, splice. The truth set now grades THIS frozen config.
+4. **Stratified acceptance truth set = review-bandwidth spend (ADR-0015), NOT exhaustive.** Strata:
    the 3 ground-truth pages + 6 whitelist-artifact pages + p571-class collision pages + 2 split-IN
    pages + a Hebrew-dense sample + a random balance — sized to what Chris adjudicates at ṭaʿun-grade.
    The REST of vol1 is validated by the ASSERTIONS (marker-scope, count reconciliation w/ ibid,
-   stitch guard), not by eyes. Assertions make full-corpus confidence affordable; the truth set
-   calibrates the assertions. A 200-page truth set nobody reviews is the exact ADR-0015 failure mode.
-   Also do the per-region Hebrew hi-res crop here (closes `סגר עליה` → `סגר עליהם`).
+   stitch guard, anchor-match status), not by eyes. Assertions make full-corpus confidence
+   affordable; the truth set calibrates the assertions. A 200-page truth set nobody reviews is the
+   exact ADR-0015 failure mode.
+
+**BUILD-DOCS LAW — probe/production split:** raw `httpx`→Ollama/OpenRouter for PROBES (fast
+experimentation, no codegen); **BAML for anything the pipeline DEPENDS on** (typed output,
+unrepresentable bad states, validate-and-retry). Keep the raw-probe scripts as-is — they're the
+fast path. The next probe shouldn't get over-engineered into BAML; the next production seam
+shouldn't stay raw. Three-layer division of every component: **BAML wraps the model-calling seam ·
+the assembler stays pure code · deterministic filters (citation, furniture) stay code** — which is
+what keeps the standing law enforceable at the TYPE layer, not the prompt layer.
+
+**RE-EXTRACTION ADR exhibit pair (the BUILD's, alongside the PROBE's frontier-inversion + p100
+renumbering):** **p571-dissolved / p473-flagged** — the same fail-loud-or-fail-closed-never-
+fail-*different* architecture on real pages in one commit (`c8da667`). p571's 3 anchor collisions
+(a probe damning-exhibit) **ceased to exist** once anchors resolved by position within letter-scope
+(dissolved by structure, like the bookend closer becoming unrepresentable and the stitch pass
+evaporating); p473's 5 lost anchors (census-unrecoverable, dropped in-text markers) were **flagged
+unanchored, not guessed**. Collisions dissolved + losses flagged = the whole law in one pair.
 
 Loose ends unchanged: corpus sync + fingerprint FIRST (Dagster now definitely coming, since
 re-extraction runs through it), PuritanBoard after.

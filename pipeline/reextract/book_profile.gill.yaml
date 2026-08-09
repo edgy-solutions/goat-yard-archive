@@ -65,7 +65,13 @@ transcription:
   think: false                     # transcription needs no reasoning; runaway thinking blows ctx
   output: note_lines               # one footnote per line (assembler parses lines); structured-JSON is a hardening option
   num_ctx: 16384
-  apparatus_upscale: 4             # HI-RES BY DEFAULT (resolution closes the Hebrew, not a bigger model)
+  apparatus_upscale: 4             # full-strip transcription (structure); does NOT close the Hebrew alone
+  # per-region non-Latin RE-CROP (MEASURED p473): full-strip upscale does not close the Hebrew (VL
+  # encoder downscales the big strip); a concentrated band crop does. Crop from a MODERATE base and
+  # upscale ONCE (cropping the 4× strip compounds to 12× and degrades). pad_frac >= 0.03 required.
+  recrop_base_upscale: 2
+  recrop_pad_frac: 0.04
+  recrop_scale: 3
 
 # --- OUTPUT (the assembler owns this; a 2nd target = a 2nd assembler, passes unchanged) ---
 output:

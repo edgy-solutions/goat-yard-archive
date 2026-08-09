@@ -50,6 +50,10 @@ def extract_page(image_path, profile, host, body_md=None):
         return {"page": page, "status": "no_apparatus", "notes": [], "info": info}
     resp, done = transcribe(strip, profile, host)
     r = A.canonicalize_page(resp.splitlines(), profile)
+    recrop_changes = []
+    if profile["transcription"].get("recrop_base_upscale"):
+        import hebrew_recrop as hr        # per-region non-Latin re-crop (resolution lever)
+        recrop_changes = hr.recrop_nonlatin(image_path, r["notes"], profile, host)
     viol = A.assert_no_text_split(r["notes"], profile)
     md = "\n".join(f"{n['marker']}: {n['text']}" for n in r["notes"])
     status = "STITCH_VIOLATION" if viol else "OK"
@@ -60,7 +64,7 @@ def extract_page(image_path, profile, host, body_md=None):
             status = f"ANCHOR_{match['status']}"     # e.g. ANCHOR_FLAGGED: notes with no body anchor
     return {"page": page, "status": status, "done_reason": done, "n_notes": len(r["notes"]),
             "violations": viol, "dropped_furniture": r["dropped_furniture"], "notes": r["notes"],
-            "markdown": md, "presplit_info": info, "anchor_match": match}
+            "markdown": md, "presplit_info": info, "anchor_match": match, "recrop_changes": recrop_changes}
 
 def main():
     ap = argparse.ArgumentParser()
@@ -80,6 +84,7 @@ def main():
         print(f"\n{'='*66}\np{res['page']}: {res['status']}  notes={res.get('n_notes')} "
               f"done={res.get('done_reason')}  dropped_furniture={len(res.get('dropped_furniture',[]))}")
         if res.get("violations"): print("  !! STITCH VIOLATIONS:", res["violations"])
+        if res.get("recrop_changes"): print("  hi-res recrop:", [f"{c['old']}→{c['new']}" for c in res["recrop_changes"]])
         m = res.get("anchor_match")
         if m: print(f"  anchor-match: {m['status']}  links={len(m['links'])} anchors={m['n_anchors']} "
                     f"unanchored={len(m['unanchored'])}"
