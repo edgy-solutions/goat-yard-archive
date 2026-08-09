@@ -181,9 +181,50 @@ Not irony — the correct, durable split: **frontier intelligence at DESIGN time
 nothing could and fix the structure so a 35b on local hardware beats a 235b in the cloud. Every
 added book inherits the trade: pay for thinking once, extraction runs free forever.
 
-**Next session opens on the re-extraction build — stitching first** (profile file created same
-day, single entry). Loose ends unchanged: corpus sync + fingerprint FIRST (Dagster now definitely
-coming, since re-extraction runs through it), PuritanBoard after.
+## BUILD REDIRECT 2026-08-09 — assembler-first, NOT stitching-first (measured)
+Measured the continuation population before building the stitch pass (`measure_continuations.py`,
+871 vol1 pages, base letter layer): **cross-page TEXT-split = 0 real cases.** candidate split-OUT
+(last note not terminal-punctuated) = 6, all artifacts (signature marks `Y y`/`5 D 2`, Hebrew-word
+endings, OCR-dropped periods); candidate split-IN (first note opens lowercase) = 2, both Latin
+lexicographer glosses; **0 adjacent OUT/IN pairs.** Undercount worry closes: a spilled note shows
+as a lowercase-opening leading note on the RECEIVING page (fires regardless of whether page N's
+tail was dropped) — that signal fired twice in 871 pages, neither a cut sentence. Re-extracted
+transcriptions of the 5 flagged continuation pages also all showed complete notes both sides.
+
+⇒ The "333 continuation notes" are **sequence-continuation** (letter run spans pages, notes
+complete = an *assembler marker-scope* job), NOT text-joining. **Chris confirmed the redirect:**
+- **First work item = the core per-page pipeline + assembler:** presplit → transcribe (local
+  qwen3.6, think:false, `format:"json"`) → **assembler assigns canonical `[^N]` by position** +
+  cross-page marker-scope for sequence-continuation + body-anchor match → fail-loud note-count/
+  anchor assertion.
+- **Text-stitch = a fail-loud assertion + a profile-aware guarded branch** (near-empty for Gill;
+  available for future library books with long footnotes) — NOT a standalone first pass. The
+  assertion detects BOTH signals permanently: split-IN (leading note opens lowercase mid-sentence)
+  AND split-OUT (trailing note not terminal-punctuated) NOT explained by the artifact whitelist
+  (the 6 classified cases: signature marks, Hebrew-final, citation-final, OCR-dropped period).
+  A genuine split anywhere ⇒ pipeline STOPS and says so (fail-loud makes building-nothing safe).
+  Profile flag: `cross_page_text_splits: none_observed` (Gill vol1) — scoped to THIS book's
+  measured reality, not baked into the pipeline for the next book to inherit blind.
+- **The assembler is BORN TESTED** — it concentrates the most deterministic jobs (canonical
+  markers, position-based identity, sequence-scope across pages, output format, later the typst
+  backend), so it carries the most correctness weight and gets its test suite FIRST: the p100
+  renumbering fixture (model letters discarded, position wins), marker-scope conventions (per-page
+  vs per-paragraph restart, j/u-v skips), sequence-continuation pages as fixtures.
+
+**Pattern worth naming (2nd occurrence):** a dreaded work item evaporated under measurement — the
+census keeps converting "build a mechanism for X" into "X doesn't exist here; add an assertion"
+(1st was the matres loosening dissolving once the population was split correctly). The hard-sounding
+cross-page problem was never joining; it's *scoping*, which the assembler owns anyway under the
+markers-by-position law. Measure the population before building the mechanism.
+- **When finalizing LAYOUT RULES (Chris):** scan the existing pipeline (`get_md.py`, `fixup_ocr.py`,
+  `read_images_baml.py`, `normalize_markdown.py`, census scripts) for corner-case tricks the
+  10-page sample won't surface (chapter-spanning headers, j/u-v skips, hyphenation, page furniture)
+  — inherit those lessons into `book_profile.yaml`, don't rediscover them.
+
+Build lives in `pipeline/reextract/` (`book_profile.gill.yaml` day-one + `extract_apparatus.py`).
+
+Loose ends unchanged: corpus sync + fingerprint FIRST (Dagster now definitely coming, since
+re-extraction runs through it), PuritanBoard after.
 
 ## Current state (trustworthy)
 Three tiers + apparatus + garbage, four control jaws passing (ṭaʿun→extra-biblical,

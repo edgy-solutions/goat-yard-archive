@@ -1,0 +1,94 @@
+# book_profile — Gill's Exposition, volume 1 (Genesis…). FIRST BOOK OF A LIBRARY.
+# Every BOOK-SPECIFIC FACT lives here and is FORBIDDEN from pass code (deskew, rule-line,
+# column-split, transcribe, assemble). The passes are generic; this file makes them Gill-specific.
+# A second book = a second profile (+ a second assembler backend), passes unchanged.
+# See pipeline/scripts/HANDOFF_hebrew_census.md (library / profile-discipline).
+book:
+  id: gill_vol1
+  title: "Gill's Exposition of the Old and New Testament — Vol. 1"
+  edition_year: 1766
+  testament: OldTestament          # vol7 = NewTestament (its own profile)
+
+# --- LAYOUT (verified by the CV-presplit probe; see PROBE_footnote_presplit.md) ---
+layout:
+  columns: 2
+  center_vertical_rule: true       # gutter/rule splits page into L/R columns
+  # within EACH column a (often SHORT, partial-width) horizontal rule separates body from its
+  # own footnotes; footnote strip = below that rule. reading order = left-strip then right-strip.
+  per_column_body_footnote_rule: true
+  footnote_marker: lowercase_letter        # a, b, c … (NOT the canonical output marker)
+  marker_scope: per_column                 # letters RESTART per column/paragraph, not per page
+  marker_skips: [j]                        # 1766 convention: j skipped in the run
+  uv_interchange: true                     # u/v treated as interchangeable in the run
+  # cross-page: only the LETTER SEQUENCE carries over (sequence-continuation); note TEXTS finish
+  # on their page. Measured over 871 pages -> see below.
+  cross_page_text_splits: none_observed    # measure_continuations.py: 0 real / 871 pages
+  cross_page_letter_scope: true            # a carried note belongs to prev page's anchor scope
+
+# --- PAGE FURNITURE to strip (NOT notes). Finalize against get_md.py / fixup_ocr.py /
+#     normalize_markdown.py before production — they paid for corner cases a 10-page sample misses.
+furniture:
+  running_head_regexes:
+    - '^\s*VOL\.\s*[IVXLC]+\.\s*[—-]\s*(OLD|NEW)\s+TEST\.?\s*$'
+    - '^\s*(GENESIS|EXODUS|LEVITICUS|NUMBERS|DEUTERONOMY)\s*$'
+    - '^\s*CH(AP)?\.\s*[IVXLC]+\.?\s*V\.\s*[0-9,\-—.]+\s*$'
+  signature_mark_regex: '^\s*[0-9]?\s*[A-Za-z]\s?[a-z]?\s*[0-9]?\s*$'   # "3 D", "Y y", "5 D 2", "3 Q 2"
+  page_number_regex: '^\s*[0-9]{1,4}\s*$'
+
+# --- STITCH-ASSERTION WHITELIST: trailing-note endings that look like split-OUT but are NOT
+#     (the 6 artifacts classified in measure_continuations.py — this is the assertion's citation) ---
+stitch_whitelist:
+  hebrew_final: true               # note ends in a Hebrew word (no Latin period) — complete
+  citation_final_no_period: true   # "Nat. Hist. l. 36. c. 5" / authority list — OCR dropped '.'
+  signature_mark_final: true       # "…Aben dana. 5 D 2" — signature swept in
+  latin_gloss_lowercase_open: true # split-IN lookalike: "contracta, Junius & Tremellius…"
+
+# --- REFERENCE TEXTS (bridge machinery; wide window, NOT one verse) ---
+references:
+  bible_version: KJV
+  hebrew_source: WLC               # Westminster Leningrad Codex / BHS-class
+  window: wide                     # NOT the single commented verse (old pipeline's error)
+
+# --- SCRIPTS expected in the apparatus (drives transcription + validation) ---
+scripts: [latin, english, hebrew, greek, arabic]
+
+# --- TRANSCRIPTION (model choice is book-influenced: needs Hebrew-capable local VL; host is infra) ---
+transcription:
+  model: "qwen3.6:35b"             # probe: newest local VL >= frontier on Gill's Hebrew apparatus
+  think: false                     # transcription needs no reasoning; runaway thinking blows ctx
+  output: note_lines               # one footnote per line (assembler parses lines); structured-JSON is a hardening option
+  num_ctx: 16384
+  apparatus_upscale: 4             # HI-RES BY DEFAULT (resolution closes the Hebrew, not a bigger model)
+
+# --- OUTPUT (the assembler owns this; a 2nd target = a 2nd assembler, passes unchanged) ---
+output:
+  target: sid_chunked_markdown
+  canonical_marker: "[^N]"         # assembler assigns by POSITION; model's letters discarded
+
+# --- ENTITY LAYER (profile territory per grounding-register: enum = indexing taxonomy; Bunyan
+#     would carry AllegoricalCharacter, Defoe would drop TypeOrSymbol) ---
+entities:
+  category_enum:
+    - Doctrine
+    - Heresy
+    - TypeOrSymbol
+    - BiblicalFigure
+    - HistoricalFigure
+    - CitedAuthority
+    - PeopleGroup
+    - Location
+    - TimePeriod
+    - OriginalWord
+    - ManuscriptOrVersion
+    - Unknown
+  # category DEFINITIONS grounded in the corpus's OWN language (not a modern systematic):
+  typology_grounding_cues:         # a TypeOrSymbol only where Gill signals it explicitly
+    - "a type of"
+    - "typical of"
+    - "a figure of"
+    - "an emblem of"
+    - "a shadow of"
+    - "represents"
+    - "signifies"
+    - "prefigured"
+    - "pointed to"
