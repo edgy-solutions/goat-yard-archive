@@ -65,20 +65,55 @@ Do NOT regenerate load-bearing layers without evidence re-extraction beats repai
 Current entities = older **xAI Grok**, ungrounded (E-11: LLM-assigned categories, no provenance,
 "boost maybe / gate never") AND load-bearing (ADR-0010 derived constants, thesaurus bridges, eval
 baseline all anchor to the current entity set). So: **probe, not migration.**
-- **Probe (queued, ready):** same 10 diverse pages → entity extraction via qwen3.6 + one frontier
-  ceiling call → diff vs stored Grok entities (coverage, description quality, dupes, category
-  sanity). Same rhythm/discipline as the footnote probe; cheap. If new strictly dominates (finds
-  Hallel-class entities Grok missed, better bridging descriptions, fewer dupes) → evidenced case;
-  if a wash → keep the working layer.
-- **Hold the re-extraction trigger** to the same conservatism as body text — entities are a
-  retrieval substrate; swapping = full eval-gate, N-run, ADR-0010 constants re-derived. Only on
-  proven gains, never a drive-by.
-- **Symbolics/typology = extraction-of-what-Gill-SAYS, not a symbol-ontology.** Ground in Gill's
-  own stated typology (he says "a type of Christ" constantly) per the bridge/thesaurus law — an
-  entity layer asserting links Gill didn't draw is Zone-3 baked into the index. Deliverable: a
-  TypeOrSymbol pass (prompt change, probe-able on 10 pages), described by Gill's naming — NOT a
-  Reformed typology knowledge graph (that's a semester). Test the model upgrade AND the
-  Gill-grounded typology prompt in the SAME run: one experiment, three questions.
+
+### Probe RAN 2026-08-09 — verdict: **gain is real, but NO clean model swap; harden then re-probe**
+Reused `evals/entity_extraction_benchmark.py` (same prompt/schema/10-page fragmentation sample,
+same within-page + cross-page analysis) + added a local-Ollama backend. Three backends on 10
+pages: grok-4.20 (baseline=current approach), local qwen3.6:35b (candidate), deepseek-v3 (cheap
+Chinese ceiling).
+
+| metric (10 pages) | grok(base) | qwen3.6 local | deepseek-v3 |
+|---|--:|--:|--:|
+| entities | 196 | **301** | 201 |
+| TypeOrSymbol | 12 | **24** | 19 |
+| invalid categories | 0 | **13 (invented `ScriptureReference`)** | 0 |
+| citations-as-entities | ~0 | **~26** | 0 |
+| reliability | 10/10 | 9/10 (JSON) | 10/10 |
+| cross-page cat-drift / name-drift | 5 / 3 | 3 / 3 | 3 / **0** |
+
+- **"Beef up symbolics" VALIDATED:** both newer models ~2× grok's typology (24/19 vs 12). And the
+  **Gill-grounded typology prompt** (anchor TypeOrSymbol to Gill's explicit "a type of / figure of
+  / prefigured" language, antitype→description) improved PRECISION (dropped non-types: `Calphi` a
+  name, loose `darkness`/`light`) AND completeness on type-rich pages (p720 1→3 incl. `blood of
+  Christ`, p886 +`red cow`). Rough edges: once promoted the *antitype* (`Christ`) to a type, and
+  duplicated — needs a dedup + antitype-in-description guard. Direction is exactly the bridge law.
+- **But local qwen3.6 is high-recall / lower-discipline, NOT a clean win:** its +53% entities are
+  ~half real (grok missed `atonement`, `divine/human nature`, `holy of holies`, `high-priest`,
+  `tabernacle`) and ~half **scripture-citation pollution** (`Acts ii. 23`, `Leviticus ver. 7` …
+  emitted as entities, in an invented `ScriptureReference` category + dumped in `Unknown`). It also
+  MISSED abstract doctrine grok caught (`determinate counsel`, `mediator`, `two natures in Christ`)
+  and under-tagged `OriginalWord` (2 vs grok 11).
+- **The two flaws are the standing law, code-fixable — not model deficiencies:** (a) valid JSON is
+  a deterministic property → **`format:"json"`** (Ollama) removed all parse failures immediately;
+  (b) category ∈ the 12-enum is deterministic → **structured-output schema constraint** makes
+  `ScriptureReference` *unrepresentable*; (c) "a scripture citation is not an entity" is a
+  deterministic pattern → a **regex citation-filter** strips the ~26 pollutants (same move as
+  marker-identity in the footnote build). With those three guards, local's real gain (coverage +
+  2× grounded typology, cross-page drift already ≤ grok, free) stands clean.
+- **deepseek-v3 is the disciplined turnkey alt:** zero invalids, best consistency (name-drift 0),
+  solid typology (19), 10/10 reliable, cheap Chinese cloud — the low-effort option if local
+  hardening stalls. grok (incumbent) is reliable but weakest on typology.
+
+**Decision (regenerate-on-diffs-not-vibes): do NOT swap the entity layer now.** The evidenced next
+step is a **hardened entity-extraction pass** — enum-constrained structured output + deterministic
+citation-filter + Gill-grounded typology block (with dedup/antitype guard) — then **re-probe** the
+hardened local vs deepseek vs grok, and only then eval-gate a swap (ADR-0010 constants re-derived,
+N-run). Scripts: scratchpad `entity_probe.py` / `typology_variant.py` (probe harness + local
+backend; fold `call_local` into the committed benchmark when the hardened pass is built).
+- **Hold the re-extraction trigger** to body-text conservatism — entities are a retrieval
+  substrate; swapping = full eval-gate. Only on proven gains, never a drive-by.
+- **Symbolics = extraction-of-what-Gill-SAYS** (probe-confirmed viable), NOT a Reformed typology
+  knowledge graph (a semester); the deliverable is the Gill-grounded TypeOrSymbol block above.
 
 **Next session opens on the re-extraction build — stitching first.** Loose ends unchanged:
 corpus sync + fingerprint FIRST (Dagster now definitely coming, since re-extraction runs through
