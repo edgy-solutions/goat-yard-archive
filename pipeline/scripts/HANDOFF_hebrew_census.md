@@ -51,6 +51,55 @@ bereshit→case-1, mishpechoteihem→biblical, vol7 case-1==0):
 4. Then V2 → V3 (cost/model-tier, apparatus possibly its own tier) → V4 (review queue +
    provenance) → ADR-0015 + the model-tier ADR, written from evidence.
 
+## Post-structural-census additions (banked 2026-08 — probe + gate + design law)
+
+**Structural census ran (`footnote_structural_census.py`). Headline: the apparatus has NO
+consistent marker convention** — ≥3 syntaxes (`[^a]:` 64%, `^a^` 32%, `[^a^]:`/hybrid ~4%,
+12 pages ref-syntax≠def-syntax). 349 apparatus pages, **60% structurally broken** (repair
+queue); damage floor 56 lost note-text + 71 lost anchors + 26 large anomalies; **333
+continuation notes** cross page boundaries. Caveat: small letter-gaps (132) overlap the 1766
+printer's j/u-v skips → NOT counted as damage (only orphan_ref/def + big_gap are clean).
+
+**G. Repair is closed on STRUCTURAL grounds, not just the numbers.** Repair presupposes a
+target convention to conform to; there isn't one — the VLM invented format per call, so a
+"repair" would first have to *impose* a standard on 349 pages of freeform output = re-extraction
+with worse provenance. Even at half the damage numbers, "no stable structure to repair against"
+holds. The format lottery also infects every future consumer (S2 comparison page,
+footnote-anchored retrieval, provenance) — re-extraction retires the lottery, not just the spans.
+
+**H. The gate is THREE-outcome, not two.** This artifact establishes *repair is not viable*; it
+does NOT establish *re-extraction is viable* — that's the probe's half, genuinely open. Outcomes:
+**repair / re-extract / defer-as-images** (S-plan already renders footnotes as scans, so
+"apparatus stays image-only until model capability catches up" is a legitimate result). The
+probe's bar is therefore **"good enough to trust," not "better than the dead alternative."**
+
+**I. Probe page-selection MUST include ≥2 continuation-note page-pairs.** The current pipeline
+is per-page with zero cross-page awareness, so the 333 continuation notes are stored as
+disconnected fragments (and pollute orphan counts on both sides). The decomposed pipeline needs
+a **cross-page stitching pass**: detect continuation-in (footnote block opens with no marker
+letter) and continuation-out (note ends mid-sentence at strip bottom), join across the boundary.
+If the ten vol1 probe pages contain no continuation pair, the probe validates a pipeline that
+handles the easy 60% and silently fails the hardest structural case — the exact validation gap
+this project keeps catching.
+
+**J. FORMAT IS A PROPERTY OF ASSEMBLY, NOT MODEL OUTPUT (the corrected design).** In the
+decomposed pipeline the model never chooses a format at all: pass 3 transcribes note *text*
+from a solved layout, pass 4 matches markers↔anchors, and **the pipeline CODE assembles output,
+emitting canonical `[^N]:` itself.** Format becomes unbreakable by construction (same move as the
+schema making Zone-3 closers unrepresentable), and the transcription prompts get *shorter* —
+honoring the original overload concern more fully than either existing pass. **Do NOT build a
+deterministic canonicalizer for the EXISTING corpus now** — the gate tilts hard to re-extract,
+which produces a clean layer natively; the census parser is already format-agnostic for interim
+readers. Canonicalizer logic lives once, in the new pipeline's assembler. (Revisit only if the
+gate lands on defer-as-images.)
+
+**STANDING LAW (this session's, Chris's):** *is this job's output a deterministic property?
+Then a model may not own it, and an assertion must watch it.* Marker syntax is deterministic;
+it was assigned to a text model (normalize_markdown) and never asserted → 349 pages of drift,
+silent until the census parser whipsawed 2,542→96→stable trying to read it. Sixth appearance of
+the one-sided-boundary pattern (assumed output contract, never asserted). Every pipeline stage
+gets this test.
+
 ## Three refinements to carry in (from the census read)
 
 **A. Matres-rejection is a validated PATTERN, not a one-off.** Twice this session a proposed
