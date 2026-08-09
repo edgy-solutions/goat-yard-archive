@@ -395,7 +395,14 @@ at the wrong boundary). Per-region Tesseract on presplit strips fixes this for f
 The CV-presplit design removes the layout burden from the model deterministically
 — which is why re-extraction (footnote regions only, body untouched) is a live gate option.
 Psalms ingests through the decomposed multi-pass design + wide reference window from day one,
-regardless of the existing-corpus decision.
+regardless of the existing-corpus decision. **Reference-window ledger (see
+`reextract/FOSSIL_SCARS.md` + `IDEAS.md`):** the one-verse injection is the reference trick (give
+the transcriber ground truth for predictable text) aimed one aperture too narrow. Widened: it
+**self-fills from Gill's OWN citations** (parse the page's scripture refs — the `cross_references`
+the entity pass already extracts — → fetch those verses' Hebrew → inject), covering case-1 + cross-ref
+(~55%). It becomes the **DOMINANT correction mechanism in Psalms** (verse-by-verse Hebrew — the tier
+that's a rounding error in vol1/zero in vol7). Extra-biblical tier: hi-res crops now, Talmud
+tractate/folio window someday (IDEAS, per the bridge law).
 
 ## Parallel / loose ends
 - **Parallel, no dependency:** ADR-0009 **B1 schema commit** (migration long pole) — landable cold.
