@@ -64,10 +64,10 @@ def card(r, strip_dir):
     </div>
   </div>
   {fl}
-  <div class="verdict"><span class="vlabel">Notes verdict</span>
-    <label><input type="radio" name="v{p}"> correct (≥ stored)</label>
-    <label><input type="radio" name="v{p}"> minor error</label>
-    <label><input type="radio" name="v{p}"> wrong</label>
+  <div class="verdict" data-page="{p}"><span class="vlabel">Notes verdict</span>
+    <label><input type="radio" name="v{p}" value="correct"> correct (≥ stored)</label>
+    <label><input type="radio" name="v{p}" value="minor"> minor error</label>
+    <label><input type="radio" name="v{p}" value="wrong"> wrong</label>
     <input class="reason" type="text" placeholder="reason / note — provenance record">
   </div>
 </article>'''
@@ -98,6 +98,12 @@ def build(results, strip_dir):
     return f'''<style>{CSS}</style>
 <title>Apparatus re-extraction — adjudication</title>
 <div class="wrap">
+  <div class="toolbar">
+    <span id="savest" class="savest">verdicts autosave in this browser</span>
+    <button class="tb" type="button" onclick="exportJSON()">⬇ Export verdicts (file)</button>
+    <label class="tb">⬆ Import<input type="file" accept="application/json" onchange="importJSON(event)" hidden></label>
+    <span class="tbnote">Your work saves automatically as you go — and Export keeps a file you control.</span>
+  </div>
   <header class="masthead">
     <div class="kicker">Gill vol.1 · re-extraction acceptance</div>
     <h1>Apparatus adjudication</h1>
@@ -120,7 +126,8 @@ def build(results, strip_dir):
   </header>
   {sections}
   <footer class="foot">Adjudicate by stratum · verdicts are the provenance record · doubles as V2 apparatus ground truth + re-extraction ADR evidence.</footer>
-</div>'''
+</div>
+<script>{JS}</script>'''
 
 CSS = r'''
 :root{
@@ -138,6 +145,15 @@ CSS = r'''
 :root[data-theme="dark"]{--paper:#17150f;--panel:#201d16;--ink:#ece7dd;--muted:#9a9082;--line:#332e24;--accent:#d98a6a;--ok:#7fb98a;--warn:#d6a84e;--crit:#e08a7f;}
 *{box-sizing:border-box}
 body{margin:0}
+.toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;
+  background:var(--panel);border-bottom:1px solid var(--line);
+  padding:.6rem clamp(1rem,4vw,3rem);font-size:.82rem}
+.savest{font-family:var(--mono);color:var(--ok);font-weight:600;min-width:14rem}
+.tb{font:inherit;font-size:.82rem;background:var(--paper);color:var(--ink);border:1px solid var(--accent);
+  border-radius:7px;padding:.35rem .8rem;cursor:pointer}
+.tb:hover{background:color-mix(in srgb,var(--accent) 12%,var(--paper))}
+.tb:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.tbnote{color:var(--muted)}
 .wrap{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5;
   padding:clamp(1rem,4vw,3rem);min-height:100vh}
 .masthead{max-width:70rem;margin:0 auto 2.5rem}
@@ -187,6 +203,40 @@ h1{font-family:var(--serif);font-size:clamp(2rem,5vw,3rem);margin:.2em 0 .3em;te
 .foot{max-width:70rem;margin:2rem auto 0;color:var(--muted);font-size:.8rem;border-top:1px solid var(--line);padding-top:1rem}
 @media (max-width:720px){.cbody{grid-template-columns:1fr}.cmp{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+'''
+
+JS = r'''
+var KEY='gill_apparatus_adjudication_v1';
+function collect(){var d={};document.querySelectorAll('.verdict').forEach(function(v){
+  var p=v.dataset.page;var r=v.querySelector('input[type=radio]:checked');
+  var reason=v.querySelector('.reason').value;
+  if(r||reason)d[p]={verdict:r?r.value:null,reason:reason};});return d;}
+function stamp(msg){var s=document.getElementById('savest');if(s)s.textContent=msg;}
+var dirty=false;
+function save(){try{localStorage.setItem(KEY,JSON.stringify(collect()));
+  stamp('saved ✓ '+new Date().toLocaleTimeString());dirty=false;}
+  catch(e){stamp('⚠ autosave blocked here — use Export to keep your work');}}
+function restore(){var d;try{d=JSON.parse(localStorage.getItem(KEY)||'{}');}catch(e){return;}
+  Object.keys(d).forEach(function(p){var vd=document.querySelector('.verdict[data-page="'+p+'"]');
+    if(!vd)return;var v=d[p];
+    if(v.verdict){var r=vd.querySelector('input[value="'+v.verdict+'"]');if(r)r.checked=true;}
+    if(v.reason)vd.querySelector('.reason').value=v.reason;});}
+document.addEventListener('input',function(e){if(e.target.closest('.verdict')){dirty=true;save();}});
+document.addEventListener('change',function(e){if(e.target.closest('.verdict')){dirty=true;save();}});
+window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue='';}});
+function exportJSON(){var payload={when:new Date().toISOString(),verdicts:collect()};
+  var blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='gill_apparatus_verdicts.json';document.body.appendChild(a);a.click();a.remove();
+  dirty=false;stamp('exported ✓ '+new Date().toLocaleTimeString());}
+function importJSON(ev){var f=ev.target.files[0];if(!f)return;var rd=new FileReader();
+  rd.onload=function(){try{var d=JSON.parse(rd.result);var v=d.verdicts||d;
+    try{localStorage.setItem(KEY,JSON.stringify(v));}catch(e){}
+    Object.keys(v).forEach(function(p){var vd=document.querySelector('.verdict[data-page="'+p+'"]');
+      if(!vd)return;var x=v[p];if(x.verdict){var r=vd.querySelector('input[value="'+x.verdict+'"]');if(r)r.checked=true;}
+      if(x.reason)vd.querySelector('.reason').value=x.reason;});
+    stamp('imported ✓');}catch(e){stamp('⚠ could not read that file');}};rd.readAsText(f);}
+restore();save();
 '''
 
 def main():
