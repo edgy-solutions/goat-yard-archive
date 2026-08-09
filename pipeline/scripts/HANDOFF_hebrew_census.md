@@ -1,8 +1,88 @@
 # Hebrew-span census → V2 validation: handoff roadmap
 
 Read this before resuming. The V1 detector (`hebrew_span_census.py`) is committed and
-controls-validated; the gate is set. Everything below inherits its shape from two cheap
-measurements that haven't run yet.
+controls-validated. **Both gate measurements have now RUN and the gate is CLOSED** — see the
+GATE CLOSED banner immediately below; the older "Pre-V2 sequence (the gate)" section is retained
+as the record of how the decision was reached.
+
+## GATE CLOSED — 2026-08-09 → **RE-EXTRACT (local, decomposed, free)**
+Both gate artifacts are in hand and committed:
+- **#1 repair census** (`footnote_structural_census.py`): closed **repair** — no consistent marker
+  convention to conform to (≥3 syntaxes, 60% of apparatus pages broken, 127+ items unrecoverable
+  from the text layer).
+- **#2 CV-presplit probe** (`cv_footnote_presplit.py` + `PROBE_footnote_presplit.md`): opened and
+  settled **re-extract** — deterministic presplit solves layout; local **qwen3.6:35b** on the
+  strips strictly dominates the stored overloaded layer on every ground-truth page (recovers
+  dropped notes, kills anchor collisions, fixes digits); reads the hardest Hebrew apparatus **at
+  or above frontier**; residual closes with resolution. Cost ≈ 0.
+
+Three-outcome collapse: **repair dead, defer-as-images unnecessary, re-extract wins.** The same
+verdict IS the Psalms ingestion architecture — the gate decision and the new-volume pipeline
+design merged into one build.
+
+**Two exhibits to quote in the re-extraction ADR (evidence beats rule-statements):**
+1. **Frontier-inversion / pixels-not-parameters.** On the hardest span (p473 note `n`, truth
+   `סגר עליהם`) a 235b frontier VL read it *worse* than the local 35b; the SAME local 35b went
+   `סגר עליה` (6/7, 2×) → `סגר עליהם` (7/7, ~6×). A 7× model buying nothing = the failure was on
+   the INPUT axis, not capability — the mem was in the scan, the pipeline never delivered enough
+   of it. Lever is resolution, not parameters or dollars. Same mechanism as the ṭaʿun find: the
+   edition's hardest problems resolve at the pixel layer.
+2. **Marker-identity dissociation (standing law, in the wild).** qwen3.6 transcribed p100's 9/9
+   note *texts* flawlessly while *inventing* the marker letters (`q–u`→`a–i`, prompt-biased). The
+   model's job (text) it did; the deterministic positional property (marker) it hallucinated →
+   the assembler owns markers by position, the model's letters are discardable.
+
+**Named limits → BUILD SPECS (not caveats) for the re-extraction pass:**
+- Scored on 3 pixel-verified pages → the build's acceptance run scores a **larger truth set**,
+  assembled ONCE during re-extraction validation and **doubling as V2's apparatus ground truth**
+  (truth-set assembly is itself review-bandwidth spend — do it once).
+- Cross-page **stitching is the FIRST work item** (measured population: 333 continuation notes;
+  pairs p558→559, p600→601→602 presplit cleanly): continuation-in = strip opens with no marker;
+  continuation-out = note ends mid-sentence at strip bottom; join across the boundary.
+- Hebrew resolution is a **default policy, not an escalation branch**: apparatus strips render
+  high-res by default (disk + seconds, free locally) — no 2×-then-6× logic nobody needs.
+- Pipeline shape: presplit → local qwen3.6 (`think:false`) → **code-assembled canonical markers**
+  + anchor-match → **fail-loud note-count/anchor assertion** (deterministic property → assertion
+  watches it). No frontier API in the hot path. Model tier settled by evidence: latest local Qwen
+  VL, NOT frontier, NOT older qwen3-vl/glm-ocr.
+
+## Layer-tiering resolution (Chris's Q1: "fix the other ingestions?") — 2026-08-09
+Do NOT regenerate load-bearing layers without evidence re-extraction beats repair. Tiering:
+- **Apparatus (vol1+vol7 footnotes) = known-broken → re-extract now** (this IS the gate verdict;
+  "fix the other ingestion" is already underway).
+- **Body text = suspected-fine → VERIFY, don't re-extract.** Damage concentrated in the small-type
+  footnote region; body is the large type in the simple layout. V2's in-line extra-biblical sample
+  (785 spans) measures the body hit-rate — and specifically **disambiguates the case-1 collapse
+  (1,001→18)**, which is currently ambiguous between "Gill rarely quotes the passage verse in
+  Hebrew" (style) and "loss" — the structural census measured the apparatus only, so body-Hebrew
+  damage is *unmeasured directly*. Re-extracting the body would produce a DIFFERENT text →
+  invalidates every SID, chunk boundary, entity anchor, eval assertion. Only earns a case if the
+  in-line sample comes back ugly, WITH numbers.
+- **vol3 = never processed → new pipeline natively** (Psalms-era queue).
+- Sequencing: apparatus re-extraction ∥ V2 in-line sample (different layers), both before Psalms.
+
+## Entity-layer resolution (Chris's Q2: "test entity models + add symbolics?") — 2026-08-09
+Current entities = older **xAI Grok**, ungrounded (E-11: LLM-assigned categories, no provenance,
+"boost maybe / gate never") AND load-bearing (ADR-0010 derived constants, thesaurus bridges, eval
+baseline all anchor to the current entity set). So: **probe, not migration.**
+- **Probe (queued, ready):** same 10 diverse pages → entity extraction via qwen3.6 + one frontier
+  ceiling call → diff vs stored Grok entities (coverage, description quality, dupes, category
+  sanity). Same rhythm/discipline as the footnote probe; cheap. If new strictly dominates (finds
+  Hallel-class entities Grok missed, better bridging descriptions, fewer dupes) → evidenced case;
+  if a wash → keep the working layer.
+- **Hold the re-extraction trigger** to the same conservatism as body text — entities are a
+  retrieval substrate; swapping = full eval-gate, N-run, ADR-0010 constants re-derived. Only on
+  proven gains, never a drive-by.
+- **Symbolics/typology = extraction-of-what-Gill-SAYS, not a symbol-ontology.** Ground in Gill's
+  own stated typology (he says "a type of Christ" constantly) per the bridge/thesaurus law — an
+  entity layer asserting links Gill didn't draw is Zone-3 baked into the index. Deliverable: a
+  TypeOrSymbol pass (prompt change, probe-able on 10 pages), described by Gill's naming — NOT a
+  Reformed typology knowledge graph (that's a semester). Test the model upgrade AND the
+  Gill-grounded typology prompt in the SAME run: one experiment, three questions.
+
+**Next session opens on the re-extraction build — stitching first.** Loose ends unchanged:
+corpus sync + fingerprint FIRST (Dagster now definitely coming, since re-extraction runs through
+it), PuritanBoard after.
 
 ## Current state (trustworthy)
 Three tiers + apparatus + garbage, four control jaws passing (ṭaʿun→extra-biblical,
