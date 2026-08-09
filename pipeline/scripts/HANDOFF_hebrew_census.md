@@ -110,18 +110,73 @@ citation-filter + Gill-grounded typology block (with dedup/antitype guard) — t
 hardened local vs deepseek vs grok, and only then eval-gate a swap (ADR-0010 constants re-derived,
 N-run). Scripts: scratchpad `entity_probe.py` / `typology_variant.py` (probe harness + local
 backend; fold `call_local` into the committed benchmark when the hardened pass is built).
-- **Re-probe candidate set (add for the hardened run — not yet tested):** `gemma4:31b` (also
-  `:12b`/`:e4b`), and `gpt-oss:120b` on .169 (text-heavyweight — expect SLOW, likely CPU-spill at
-  the sample's context; run it last / low-priority). Entity extraction is TEXT-only, so any strong
-  local text model is a fair candidate, not just the VL ones — widen the field when re-probing.
+- **Re-probe candidate set (add for the hardened run — not yet tested):** `gemma4:31b` AND
+  `gemma4:26b` (compare the two directly — 31b can be slower than `gpt-oss:120b` while 26b may be
+  ~as accurate), also `:12b`/`:e4b`; and `gpt-oss:120b` on .169 (text-heavyweight — expect SLOW,
+  likely CPU-spill at the sample's context; run last / low-priority). Entity extraction is
+  TEXT-only, so any strong local text model is a fair candidate, not just the VL ones.
 - **Hold the re-extraction trigger** to body-text conservatism — entities are a retrieval
   substrate; swapping = full eval-gate. Only on proven gains, never a drive-by.
 - **Symbolics = extraction-of-what-Gill-SAYS** (probe-confirmed viable), NOT a Reformed typology
   knowledge graph (a semester); the deliverable is the Gill-grounded TypeOrSymbol block above.
 
-**Next session opens on the re-extraction build — stitching first.** Loose ends unchanged:
-corpus sync + fingerprint FIRST (Dagster now definitely coming, since re-extraction runs through
-it), PuritanBoard after.
+## Library / profile-discipline — build spec (2026-08-09, before the re-extraction build)
+The re-extraction pipeline is the **first book of a library**, not a Gill tool. Build it generic
+**by discipline, NOT by framework** — no plugin architecture for hypothetical books (the
+abstractions invented before the second book arrives are reliably wrong).
+- **`book_profile.yaml` exists from day one, with a single entry.** Every book-specific FACT is
+  quarantined there and **forbidden from pass code**: layout convention (horizontal rule,
+  two-column apparatus, lowercase-letter markers, j-skip/u-v), reference texts + window (KJV +
+  Hebrew Bible, wide), expected scripts (Hebrew/Greek/Arabic), output target, **entity category
+  enum + typology grounding-language cues**. The passes (deskew → rule-line → column-split →
+  region-transcribe → marker-match → assemble) contain NO book-specific facts. Generic by refusing
+  to hardcode = a code-review rule, not an engineering project.
+- **The assembler owns the output format** (already law): the model never knows if it's emitting
+  SID-chunked markdown or typst. A second output target = a second assembler; extraction passes
+  don't change. Proof-of-generic = running a Gill page and a Defoe/Bunyan chapter with only
+  **profile + assembler swapped** (daughter's Bunyan/Defoe→typst work is the ideal second book:
+  no Hebrew, no verse apparatus, different typography, different output). Until that second book
+  runs, "generic" is a design discipline, not a claim — the diff proves it, not the intention.
+- **The moat is the verification apparatus traveling with every book** — scan-beside-text,
+  per-correction provenance, "check my work". Each author inherits the trust model, not just the
+  extraction. That is what ad-wrapped text dumps cannot follow you into.
+
+## Three-layer grounding — each matched to what the layer CLAIMS (2026-08-09)
+Resolving Chris's "do we ground the category enum in a doctrinal dictionary?" — **no; the enum and
+the thesaurus are different objects with different grounding registers.** Do not fuse them.
+1. **Category enum = indexing taxonomy → grounded in the CENSUS (evidence), profile-scoped.** The
+   12 labels assert what *kinds of things retrieval must distinguish*, not theology. Test is "do
+   these carve the corpus at joints retrieval uses," which a scholarly source cannot answer
+   (Muller organizes concepts for scholars; the enum organizes entities for a boost function).
+   Grafting a systematic's loci (Soteriology/Eschatology…) = citable but useless discriminators =
+   **grounding-theater** — especially since category is already "boost maybe, gate never"
+   (ceremonial-homonym test), so no decision rides on it. The enum's grounding instrument IS the
+   entity probe: which categories get used, which drift (cat-drift metric), which collapse, which
+   absorb garbage (Unknown). A category models can't apply consistently isn't a real joint — the
+   drift number is the citation. And the enum lives in `book_profile.yaml` (Bunyan carries
+   `AllegoricalCharacter`; Defoe drops `TypeOrSymbol`) — a per-book list can't be grounded in one
+   dictionary anyway.
+2. **Category DEFINITIONS (per category) → grounded in the corpus's OWN language.** Where a source
+   helps is *inside* a category's boundary rule, not the list. `TypeOrSymbol` = "what Gill names a
+   type — anchored to his 'a type of / prefigured' language; antitype→description" (the
+   probe-validated Gill-grounded prompt). Source = Gill's usage, better than Muller here: the
+   corpus grounds its own hardest category. Same pattern if `Heresy` ever needs a boundary ("what
+   Gill calls error," not a modern tradition's classification — else you leak tradition-judgments
+   into the index, the answer-wall violation).
+3. **Thesaurus (modern-term → Gill-vocabulary bridge) → grounded in CITED scholarship.**
+   Muller-class *Dictionary of Latin and Greek Theological Terms*, per the bridge law (bridge may
+   be built from anything citable). Still the queued follow-up; unchanged.
+Each of the three now has a named provenance story; none is "the model felt like it."
+
+## The durable division of labor (the library's economics)
+Not irony — the correct, durable split: **frontier intelligence at DESIGN time, deterministic code
++ free local models at RUN time.** Claude's job was never to read the Hebrew; it was to find why
+nothing could and fix the structure so a 35b on local hardware beats a 235b in the cloud. Every
+added book inherits the trade: pay for thinking once, extraction runs free forever.
+
+**Next session opens on the re-extraction build — stitching first** (profile file created same
+day, single entry). Loose ends unchanged: corpus sync + fingerprint FIRST (Dagster now definitely
+coming, since re-extraction runs through it), PuritanBoard after.
 
 ## Current state (trustworthy)
 Three tiers + apparatus + garbage, four control jaws passing (ṭaʿun→extra-biblical,
