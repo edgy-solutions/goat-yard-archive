@@ -110,11 +110,18 @@ citation-filter + Gill-grounded typology block (with dedup/antitype guard) — t
 hardened local vs deepseek vs grok, and only then eval-gate a swap (ADR-0010 constants re-derived,
 N-run). Scripts: scratchpad `entity_probe.py` / `typology_variant.py` (probe harness + local
 backend; fold `call_local` into the committed benchmark when the hardened pass is built).
-- **Re-probe candidate set (add for the hardened run — not yet tested):** `gemma4:31b` AND
-  `gemma4:26b` (compare the two directly — 31b can be slower than `gpt-oss:120b` while 26b may be
-  ~as accurate), also `:12b`/`:e4b`; and `gpt-oss:120b` on .169 (text-heavyweight — expect SLOW,
-  likely CPU-spill at the sample's context; run last / low-priority). Entity extraction is
-  TEXT-only, so any strong local text model is a fair candidate, not just the VL ones.
+- **Re-probe candidate set (add for the hardened run — not yet tested):** `gemma4:31b`,
+  `gemma4:26b` (also `:12b`/`:e4b`), `gpt-oss:120b` on .169. Entity extraction is TEXT-only, so any
+  strong local text model is a fair candidate, not just the VL ones.
+- **Re-probe discipline (inherit from the two probes just run — regenerate-on-diffs applies to
+  MODEL SELECTION too):** same 10 pages, same ground truth, per-model rows in the SAME table
+  (coverage / TypeOrSymbol / invalid-categories / citation-pollution / cross-page drift /
+  reliability). **Speed is a REPORTED COLUMN, never a disqualifier** — the footnote probe's lesson
+  was the newest local model won on *accuracy* and speed was a bonus. Do NOT pre-eliminate a model
+  on a speed prior ("31b may be slower than gpt-oss:120b", "26b may be ~as accurate as 31b" are
+  HYPOTHESES the table tests, not selection inputs). If 26b lands ~as accurate as 31b, that's a
+  *result the diff shows*, not a prior the selection encodes. gpt-oss:120b may be slow / CPU-spill
+  at the sample's context — measure it and report it; don't skip it.
 - **Hold the re-extraction trigger** to body-text conservatism — entities are a retrieval
   substrate; swapping = full eval-gate. Only on proven gains, never a drive-by.
 - **Symbolics = extraction-of-what-Gill-SAYS** (probe-confirmed viable), NOT a Reformed typology
