@@ -67,6 +67,22 @@ def test_intra_strip_linewrap_is_rejoined_not_a_new_note():
     assert r["notes"][1]["text"].endswith("Vatablus.")           # Va- + tablus -> Vatablus
     assert [n["marker"] for n in r["notes"]] == ["[^1]", "[^2]", "[^3]"]
 
+def test_mined_wordbreak_dash_variants_hyphen_join():
+    # FOSSIL (get_md.py normalizes dashes before hyphen processing): a word-break may be a
+    # soft-hyphen / non-breaking-hyphen / figure-dash, not just '-'. All must hyphen-join.
+    for dash in ["-", "­", "‑", "‒"]:
+        r = A.canonicalize_page(["a One" + dash, "two.", "b Next, Drusius."], PROFILE)
+        assert r["notes"][0]["text"] == "Onetwo.", f"dash {dash!r} not joined: {r['notes'][0]['text']!r}"
+    # em/en dash are PUNCTUATION, not word-breaks -> NOT joined (kept with a space)
+    r = A.canonicalize_page(["a Ends with em—", "dash.", "b Next."], PROFILE)
+    assert r["notes"][0]["text"] == "Ends with em— dash."
+
+def test_mined_non_latin_final_covers_greek_not_just_hebrew():
+    # FOSSIL (repair_non_latin_footnotes covers Hebrew+Greek+Syriac): a note ending in Greek is
+    # complete, must not trip the split-OUT guard.
+    r = A.canonicalize_page(["a Foo.", "b Vid. Aristot. λόγος"], PROFILE)
+    assert A.assert_no_text_split(r["notes"], PROFILE) == []
+
 def test_signature_final_line_is_furniture_not_a_split():
     # p433 "Y y" / p843 "5 D 2": a bare signature line is FURNITURE (dropped), so the last real
     # note stays terminal — it must not be parsed as a mid-sentence note.

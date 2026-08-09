@@ -20,6 +20,10 @@ layout:
   marker_scope: per_column                 # letters RESTART per column/paragraph, not per page
   marker_skips: [j]                        # 1766 convention: j skipped in the run
   uv_interchange: true                     # u/v treated as interchangeable in the run
+  # FOSSIL (FOSSIL_SCARS #A): BODY anchor glyphs are a zoo, NOT just [a-z] — the anchor-matcher
+  # must recognize all of these as in-text references (superscript letters/digits + symbols):
+  body_anchor_glyphs: ["^a^", "ᵃ", "*", "†", "‡", "°", "δ", "<sup>", "[^b]", "¹²³⁴⁵⁶⁷⁸⁹⁰"]
+  ibid_merge: true                         # FOSSIL #B: ib/ibid/idem/id refs may merge -> count tolerance
   # cross-page: only the LETTER SEQUENCE carries over (sequence-continuation); note TEXTS finish
   # on their page. Measured over 871 pages -> see below.
   cross_page_text_splits: none_observed    # measure_continuations.py: 0 real / 871 pages
@@ -28,10 +32,12 @@ layout:
 # --- PAGE FURNITURE to strip (NOT notes). Finalize against get_md.py / fixup_ocr.py /
 #     normalize_markdown.py before production — they paid for corner cases a 10-page sample misses.
 furniture:
+  header_region_top_fraction: 0.03         # FOSSIL #4: header words live in the top ~3% of the page
+  chapter_heading_only_at_start: true      # FOSSIL #5: a "# Chapter N" after body content is an artifact
   running_head_regexes:
     - '^\s*VOL\.\s*[IVXLC]+\.\s*[—-]\s*(OLD|NEW)\s+TEST\.?\s*$'
     - '^\s*(GENESIS|EXODUS|LEVITICUS|NUMBERS|DEUTERONOMY)\s*$'
-    - '^\s*CH(AP)?\.\s*[IVXLC]+\.?\s*V\.\s*[0-9,\-—.]+\s*$'
+    - '^\s*CH(AP)?\.\s*[IVXLCDM]+\.?\s*V\.\s*[0-9,\-—.]+\s*$'   # FOSSIL #6: roman may exceed X (Gen 50 = L)
   signature_mark_regex: '^\s*[0-9]?\s*[A-Za-z]\s?[a-z]?\s*[0-9]?\s*$'   # "3 D", "Y y", "5 D 2", "3 Q 2"
   page_number_regex: '^\s*[0-9]{1,4}\s*$'
 
@@ -50,7 +56,8 @@ references:
   window: wide                     # NOT the single commented verse (old pipeline's error)
 
 # --- SCRIPTS expected in the apparatus (drives transcription + validation) ---
-scripts: [latin, english, hebrew, greek, arabic]
+# FOSSIL #3: repair_non_latin_footnotes covered Hebrew+Greek+Syriac -> syriac IS present.
+scripts: [latin, english, hebrew, greek, arabic, syriac]
 
 # --- TRANSCRIPTION (model choice is book-influenced: needs Hebrew-capable local VL; host is infra) ---
 transcription:

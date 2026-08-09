@@ -223,6 +223,41 @@ markers-by-position law. Measure the population before building the mechanism.
 
 Build lives in `pipeline/reextract/` (`book_profile.gill.yaml` day-one + `extract_apparatus.py`).
 
+## FOSSIL MINING done 2026-08-09 (Chris: highest-leverage move, do it FIRST) → `reextract/FOSSIL_SCARS.md`
+The old pipeline is a fossil record of every corner case the corpus threw. Mined
+`get_md/fixup_ocr/normalize_markdown.py` + `main.baml` BEFORE building the anchor-matcher (where
+the scars are densest — doing it after = the work twice). Harvested paid-for experience into:
+- **Folded NOW (fixtures + profile):** dash-variant word-break join (soft/non-breaking/figure dash,
+  not just `-`); non-Latin-final covers Greek+Syriac (not just Hebrew); header region top-3%;
+  chapter-heading-only-at-start; roman chapters exceed X (Gen 50 = L). assembler suite now **10
+  passing**.
+- **Anchor-matcher REQUIREMENTS (build to these next):** (A) body anchor glyphs are a ZOO
+  (`^a^ ᵃ * † ‡ ° δ <sup> ¹..⁹`), not `[a-z]` — in `profile.layout.body_anchor_glyphs`; (B)
+  **ibid-merge**: `ib/ibid/idem/id` refs legitimately merge → count assertion tolerates
+  `body == def + ibid_count`, not every mismatch is damage; (C) the count assertion itself (old
+  `verify_normalization` had it — re-home to code); (D) tolerate OCR word-fusion, fuzzy ≥60;
+  (E) resolve anchors WITHIN letter-scope windows (search_range ~30–50), not whole-page scan.
+- **Explicitly REJECTED (with reason):** the 500px Y-gap (CV presplit replaces it); one-verse Hebrew
+  injection (wide window); running a text-normalizer over Hebrew (its `repair_non_latin_footnotes`
+  existed only to undo its OWN corruption — proof the stage shouldn't exist).
+
+## NEXT-SESSION PLAN (Chris-ordered): fossils✔ → anchors → stratified truth set
+1. **Fossils mined ✔** (above).
+2. **Body-anchor matching** — link notes to body superscripts. Fixtures ALREADY EXIST: **p571's 3
+   anchor collisions** (stored layer mis-anchored the right column) are the known-failure fixtures,
+   go in the born-tested suite like p100's renumbering did. Anchors resolve WITHIN letter-scope
+   windows (turns "find this superscript on the page" into "find it between anchors l and n"). If a
+   superscript genuinely can't be found in its window → **flagged UNANCHORED, fail-loud, NOT a
+   guessed placement** (a mis-anchored citation is worse than an honestly-orphaned one — Aquinas-class
+   IDs ride on anchors being RIGHT, not merely present).
+3. **Stratified acceptance truth set = review-bandwidth spend (ADR-0015), NOT exhaustive.** Strata:
+   the 3 ground-truth pages + 6 whitelist-artifact pages + p571-class collision pages + 2 split-IN
+   pages + a Hebrew-dense sample + a random balance — sized to what Chris adjudicates at ṭaʿun-grade.
+   The REST of vol1 is validated by the ASSERTIONS (marker-scope, count reconciliation w/ ibid,
+   stitch guard), not by eyes. Assertions make full-corpus confidence affordable; the truth set
+   calibrates the assertions. A 200-page truth set nobody reviews is the exact ADR-0015 failure mode.
+   Also do the per-region Hebrew hi-res crop here (closes `סגר עליה` → `סגר עליהם`).
+
 Loose ends unchanged: corpus sync + fingerprint FIRST (Dagster now definitely coming, since
 re-extraction runs through it), PuritanBoard after.
 

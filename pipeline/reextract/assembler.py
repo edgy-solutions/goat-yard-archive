@@ -10,7 +10,18 @@ true by STOPPING if a real split ever appears — fail-loud makes building-nothi
 import re
 from pathlib import Path
 
-def _hebrew(ch): return "֐" <= ch <= "׿"
+# non-Latin scripts in the apparatus (fossil: normalize_markdown.repair_non_latin_footnotes covered
+# Hebrew+Greek+Syriac — LLMs corrupt all non-Latin, and a note ENDING in any of them is complete).
+def _non_latin(ch):
+    return ("֐" <= ch <= "׿" or   # Hebrew
+            "Ͱ" <= ch <= "Ͽ" or   # Greek
+            "܀" <= ch <= "ݏ" or   # Syriac
+            "؀" <= ch <= "ۿ")     # Arabic
+_hebrew = _non_latin   # back-compat alias
+
+# word-break dashes (fossil: get_md.py normalizes "various dash characters to standard hyphen"
+# BEFORE hyphen processing). em/en dash are punctuation, NOT word-breaks — excluded on purpose.
+_WORDBREAK_DASH = ("-", "­", "‑", "‒")   # hyphen-minus, soft, non-breaking, figure
 
 def load_profile(path):
     import yaml
@@ -46,7 +57,7 @@ def canonicalize_page(raw_lines, profile):
             # "Vatablus"). A marker-less FIRST line is left as its own note so the stitch guard
             # sees the split-IN signal.
             prev = notes[-1]["text"]
-            notes[-1]["text"] = (prev[:-1] + text) if prev.endswith("-") else (prev + " " + text)
+            notes[-1]["text"] = (prev[:-1] + text) if prev.endswith(_WORDBREAK_DASH) else (prev + " " + text)
             continue
         notes.append({"model_letter": letter, "text": text})
     for i, n in enumerate(notes, 1):
@@ -75,8 +86,9 @@ def letter_run(start, count, profile):
 # --- stitch assertion: TWO signals, whitelist-gated. Returns [] when clean; violations => STOP ---
 _TERMINAL = (".", "!", "?", ")", "]", "’", '"', ";")
 def _ends_terminal(t): return t.rstrip().endswith(_TERMINAL)
-def _ends_hebrew(t):
-    t = t.rstrip(); return bool(t) and _hebrew(t[-1])
+def _ends_non_latin(t):
+    t = t.rstrip(); return bool(t) and _non_latin(t[-1])
+_ends_hebrew = _ends_non_latin   # whitelist key stays `hebrew_final`; now covers Greek/Syriac/Arabic too
 def _citation_tail(t):
     t = t.rstrip().rstrip(".,")
     if re.search(r"\b(l|c|p|sect|fol|vol|ib|cap|v|tom|lib)\.?\s*[0-9ivxlcd]+$", t, re.I): return True
