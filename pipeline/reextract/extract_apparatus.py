@@ -34,7 +34,14 @@ def transcribe(strip_img, profile, host):
     d = r.json()
     return (d.get("response", "") or ""), d.get("done_reason")
 
-def extract_page(image_path, profile, host):
+def _body_before_defs(md):
+    out = []
+    for ln in md.splitlines():
+        if re.match(r"^\s*(?:\[\^[a-z]\]:|\^[a-z]\b\s)", ln): break
+        out.append(ln)
+    return "\n".join(out)
+
+def extract_page(image_path, profile, host, body_md=None):
     up = profile["transcription"].get("apparatus_upscale", 2)
     strip, info = presplit.presplit(str(image_path), upscale=up)
     page = re.search(r"page(\d+)", Path(image_path).name)
@@ -45,25 +52,38 @@ def extract_page(image_path, profile, host):
     r = A.canonicalize_page(resp.splitlines(), profile)
     viol = A.assert_no_text_split(r["notes"], profile)
     md = "\n".join(f"{n['marker']}: {n['text']}" for n in r["notes"])
-    return {"page": page, "status": "OK" if not viol else "STITCH_VIOLATION",
-            "done_reason": done, "n_notes": len(r["notes"]), "violations": viol,
-            "dropped_furniture": r["dropped_furniture"], "notes": r["notes"], "markdown": md,
-            "presplit_info": info}
+    status = "STITCH_VIOLATION" if viol else "OK"
+    match = None
+    if body_md and Path(body_md).exists():
+        match = A.match_notes_to_anchors(r["notes"], _body_before_defs(Path(body_md).read_text(encoding="utf-8")), profile)
+        if match["status"] != "OK" and status == "OK":
+            status = f"ANCHOR_{match['status']}"     # e.g. ANCHOR_FLAGGED: notes with no body anchor
+    return {"page": page, "status": status, "done_reason": done, "n_notes": len(r["notes"]),
+            "violations": viol, "dropped_furniture": r["dropped_furniture"], "notes": r["notes"],
+            "markdown": md, "presplit_info": info, "anchor_match": match}
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("images", nargs="+", help="page image path(s)")
     ap.add_argument("--profile", default=str(Path(__file__).parent / "book_profile.gill.yaml"))
     ap.add_argument("--host", default=os.getenv("OLLAMA_HOST", "192.168.1.179"))
+    ap.add_argument("--body-dir", default="", help="dir of body .md files (for anchor matching)")
     a = ap.parse_args()
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
     profile = A.load_profile(a.profile)
     for img in a.images:
-        res = extract_page(img, profile, a.host)
+        body_md = ""
+        if a.body_dir:
+            body_md = str(Path(a.body_dir) / (Path(img).stem + ".md"))
+        res = extract_page(img, profile, a.host, body_md=body_md or None)
         print(f"\n{'='*66}\np{res['page']}: {res['status']}  notes={res.get('n_notes')} "
               f"done={res.get('done_reason')}  dropped_furniture={len(res.get('dropped_furniture',[]))}")
         if res.get("violations"): print("  !! STITCH VIOLATIONS:", res["violations"])
+        m = res.get("anchor_match")
+        if m: print(f"  anchor-match: {m['status']}  links={len(m['links'])} anchors={m['n_anchors']} "
+                    f"unanchored={len(m['unanchored'])}"
+                    + (f"  gaps={[u.get('expected_letter') for u in m['unanchored']]}" if m['unanchored'] else ""))
         print("-" * 66); print(res.get("markdown", ""))
 
 if __name__ == "__main__":

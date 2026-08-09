@@ -102,6 +102,58 @@ def _latin_gloss(t):
     return _opens_lower_latin(t) and (("&" in t) or bool(re.search(r",\s*[A-ZÀ-Þ][a-z]+", t))
                                       or "version" in t.lower())
 
+# --- body-anchor matching -------------------------------------------------------------------
+# Link re-extracted NOTES (reading order) to the body's inline anchors. The letters on BOTH sides
+# are unreliable (p100 re-lettered q-u→a-e; p571 right column re-lettered n-t→a-g → duplicate
+# c/f/g), so POSITION wins when counts agree (same law as note markers). The glyph is a ZOO
+# (FOSSIL #A): [^a] | ^[a] | ^a^ | ^a (caret-prefix). Fail-loud (Chris): a note with no confident
+# anchor is FLAGGED unanchored, never guessed — a mis-anchored citation is worse than an orphaned one.
+_ANCHOR_RE = re.compile(r"\[\^([a-z])\]|\^\[([a-z])\]|\^([a-z])\^|\^([a-z])")
+_IBID_RE = re.compile(r"^\s*(ib|ibid|idem|id)\.?\b", re.I)
+
+def detect_body_anchors(body_text):
+    """Ordered list of inline-anchor letters in the body, covering the marker zoo (non-overlapping,
+    most-specific alternative first)."""
+    out = []
+    for m in _ANCHOR_RE.finditer(body_text):
+        out.append(next(g for g in m.groups() if g))
+    return out
+
+def _ibid_count(notes):
+    return sum(1 for n in notes if _IBID_RE.match(n["text"]))
+
+def match_notes_to_anchors(notes, body_text, profile, scope_start="a"):
+    """Returns {links, unanchored, status, n_anchors, n_notes}. status OK only when every note is
+    confidently anchored. FOSSIL #B: ibid refs may merge, so a count diff within the ibid count is
+    tolerated for position-matching."""
+    anchors = detect_body_anchors(body_text)
+    na, nn = len(anchors), len(notes)
+    ibid = _ibid_count(notes) if profile.get("layout", {}).get("ibid_merge") else 0
+    links, unanchored = [], []
+    if na == nn or abs(na - nn) <= ibid:
+        # counts agree -> POSITION wins (dissolves p571's duplicate-letter collisions)
+        for i in range(nn):
+            if i < na:
+                links.append({"marker": f"[^{i+1}]", "text": notes[i]["text"], "anchor_letter": anchors[i]})
+            else:
+                unanchored.append({"marker": f"[^{i+1}]", "text": notes[i]["text"], "reason": "ibid_overflow"})
+        status = "OK" if not unanchored else "FLAGGED"
+    else:
+        # counts disagree -> LETTER within the printer scope reveals which notes lost their anchor;
+        # flag the gaps, never shift position onto the wrong note.
+        expected = letter_run(scope_start, nn, profile)
+        ai = 0
+        for i in range(nn):
+            exp = expected[i] if i < len(expected) else None
+            if ai < na and anchors[ai] == exp:
+                links.append({"marker": f"[^{i+1}]", "text": notes[i]["text"], "anchor_letter": anchors[ai]})
+                ai += 1
+            else:
+                unanchored.append({"marker": f"[^{i+1}]", "text": notes[i]["text"],
+                                   "reason": "anchor_missing_in_body", "expected_letter": exp})
+        status = "FLAGGED"
+    return {"links": links, "unanchored": unanchored, "status": status, "n_anchors": na, "n_notes": nn}
+
 def assert_no_text_split(notes, profile):
     """Fail-loud guard. Whitelist = the 6 artifact classes measured in measure_continuations.py
     (0 real splits / 871 vol1 pages). A signal NOT explained by the whitelist => a genuine split

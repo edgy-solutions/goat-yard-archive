@@ -113,6 +113,49 @@ def test_hebrew_note_preserved_and_not_a_split():
     assert "סגר עליהם" in r["notes"][1]["text"]
     assert A.assert_no_text_split(r["notes"], PROFILE) == []
 
+def _notes(n):  # helper: n placeholder notes
+    return [{"text": f"Note {i+1}, Drusius.", "marker": f"[^{i+1}]"} for i in range(n)]
+
+def test_anchor_zoo_detected_all_three_formats():
+    # real formats across pages: p100 [^a], p571 ^a (caret-prefix), p473 ^[a] (caret-bracket)
+    assert A.detect_body_anchors("x[^a]y and[^b]z") == ["a", "b"]
+    assert A.detect_body_anchors("Ruzeus^g is and^h so") == ["g", "h"]
+    assert A.detect_body_anchors("says^[a], Etham^[c] and^[e]") == ["a", "c", "e"]
+    assert A.detect_body_anchors("mix ^a^ then [^b] then ^c") == ["a", "b", "c"]
+
+def test_anchor_match_p100_clean_position():
+    body = " ".join(f"word[^{c}]" for c in "abcdewxyz")   # 9 anchors, reading order
+    r = A.match_notes_to_anchors(_notes(9), body, PROFILE)
+    assert r["status"] == "OK" and r["n_anchors"] == 9 and not r["unanchored"]
+    assert [l["marker"] for l in r["links"]] == [f"[^{i}]" for i in range(1, 10)]
+
+def test_anchor_match_p571_collision_dissolved_by_position():
+    # p571 REAL body letters: left col c-m, right col re-lettered a-g -> c,f,g appear TWICE.
+    # position-matching must link all 15 with UNIQUE canonical markers (collision dissolved).
+    body = " ".join(f"w^{c}" for c in ["c","f","g","h","i","k","l","m","a","b","c","d","e","f","g"])
+    r = A.match_notes_to_anchors(_notes(15), body, PROFILE)
+    assert r["status"] == "OK" and r["n_anchors"] == 15 and not r["unanchored"]
+    markers = [l["marker"] for l in r["links"]]
+    assert len(markers) == len(set(markers)) == 15          # NO duplicate canonical markers
+
+def test_anchor_match_p473_partial_loss_flags_gaps_no_misshift():
+    # p473 REAL: body has 8 anchors (a,c,e,f,i,k,l,o) but 14 notes -> 6 lost in body.
+    # letter-within-scope must flag exactly b,d,g,h,m,n unanchored, and NOT shift positions.
+    body = " ".join(f"w^[{c}]" for c in ["a","c","e","f","i","k","l","o"])
+    r = A.match_notes_to_anchors(_notes(14), body, PROFILE)
+    assert r["status"] == "FLAGGED"
+    assert len(r["links"]) == 8 and len(r["unanchored"]) == 6
+    assert [u["expected_letter"] for u in r["unanchored"]] == ["b", "d", "g", "h", "m", "n"]
+    assert [l["anchor_letter"] for l in r["links"]] == ["a", "c", "e", "f", "i", "k", "l", "o"]
+
+def test_anchor_match_never_guesses():
+    # a note with no matching anchor in its window is FLAGGED, never assigned a wrong letter
+    body = "only ^[a] here"
+    r = A.match_notes_to_anchors(_notes(3), body, PROFILE)
+    assert r["status"] == "FLAGGED"
+    for u in r["unanchored"]:
+        assert "anchor_letter" not in u          # unanchored notes carry no guessed anchor
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
