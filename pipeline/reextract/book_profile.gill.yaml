@@ -86,6 +86,42 @@ output:
   target: sid_chunked_markdown
   canonical_marker: "[^N]"         # assembler assigns by POSITION; model's letters discarded
 
+# --- AUTHORITY LIST (stage-3 safety net): Gill's citation universe. A transcribed name that
+#     FUZZY-matches one of these but isn't exact is a candidate misread (Gerson->Gersom) -> flag to
+#     review queue. Book-specific fact; SEED list (grow from the corpus's CitedAuthority entities).
+authorities:
+  - Pagninus
+  - Vatablus
+  - Montanus
+  - Drusius
+  - Junius
+  - Tremellius
+  - Piscator
+  - Jarchi
+  - Kimchi
+  - Maimonides
+  - Bartenora
+  - Gersom
+  - Ainsworth
+  - Bochart
+  - Cocceius
+  - Munster
+  - Schmidt
+  - Buxtorf
+  - Mercer
+  - Fagius
+  - Cartwright
+  - Abarbinel
+  - Onkelos
+  - Jonathan
+  - Josephus
+  - Herodotus
+  - Strabo
+  - Suidas
+  - Eusebius
+  - Hottinger
+  - Scheuchzer
+
 # --- ENTITY LAYER (profile territory per grounding-register: enum = indexing taxonomy; Bunyan
 #     would carry AllegoricalCharacter, Defoe would drop TypeOrSymbol) ---
 entities:
