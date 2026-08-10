@@ -28,6 +28,18 @@ as the record of how the decision was reached.
   need an eyeball. **Proposed eyeball sample (Hebrew-oversampled):** 109,188,230,286,379,458,520,619,
   750,831,4,100,323,593,761.
 
+## GATE-NIKUD AUDIT — PASSED at corpus scale (2026-08-10, `nikud_audit_run.py`)
+Re-ran the 375 recrop-active pages capturing change-texts (the counts-only vol1 run couldn't audit).
+**0 gate failures across 279 accepted changes / 0 errors** — no accepted change contains nikud. The
+ADR claim upgrades from "gate held on 27 pages" to "gate held on the CORPUS." Bonus visibility into
+accepted changes (mostly genuine corrections beyond final-letters): `רָקִיעַ→רקיע` (strips nikud toward
+printed form — the gate's intent), `κ χαο→רקיע` / `Χαο→רקיע` (base misread Hebrew as Greek garbage;
+recrop fixed it), `אור→מאור`, `מקר→מקום` (letter recovery). **SCOPE CAVEAT the audit surfaced:** the
+gate is a NIKUD+TRUNCATION guard, NOT full-correctness — same-length consonant SUBSTITUTIONS pass it
+(`אלה→ברא`, plausibly a real Gen-1 correction but UNVERIFIED). Not a gate failure; these land in the
+right net (two-model flagging + escalation tier catch the uncertain ones). Recrop-audit data:
+`recrop_audit.jsonl`.
+
 ## ANCHOR RE-DETECTION — DECIDED (census-forced) + DESIGN: STANDOFF LINKAGE (2026-08-10)
 The census (609/851 apparatus pages anchor-barren) converts "ship present-but-unanchored" from partial
 to NEAR-TOTAL unlinkage → in-text anchor re-detection is NECESSARY. **Design decision (Chris): STANDOFF
