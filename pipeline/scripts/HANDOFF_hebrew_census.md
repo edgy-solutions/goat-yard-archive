@@ -397,8 +397,18 @@ what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a 
      earlier geometric regression on p692 is GONE. Residual: p692 `כהות→כהת` (dropped vav, one glyph,
      still 4 notes) — a Hebrew reading-edge miss, now in the stage-4 bucket, not a structural break.
      Full 27-page re-run in flight to confirm no broad regression from the split-x change.
-   - **stage-2 Hebrew SCRIPT-CENSUS** (+ run RETROACTIVELY over base-only to measure invisible-Hebrew-
-     loss — "1/6 strict" may have a wrong denominator if the base floor silently dropped spans).
+   - **stage-2 SCRIPT-CENSUS — built (`script_census.py`), instrument NOISY, needs DUAL-OCR.** Per the
+     fossil (get_md.py ran Tesseract `heb+grc+ara`) + Chris's pointer (he ran BOTH eng-only AND multi
+     for exactly this reason). Findings, each validated against image-known pages (validate the
+     instrument before trusting it): heb-only ≥2-char is 7/8 on KNOWN pages, but **false-positives on
+     UNKNOWN Latin-heavy pages** — p674 flagged +2 but its strip is ALL Latin (the "Hebrew" is
+     transliterated names `Maacolot Asurot`/`Pirush` in LATIN letters); the VLM correctly had 0.
+     Adding grc+ara made it WORSE (p100/p702 false-pos). **⇒ the census can't answer the denominator
+     question yet.** The FIX (Chris's fossil technique) = **DUAL-OCR disambiguation**: a line is real
+     non-Latin only if multi-lang finds it AND eng-only does NOT read it as high-confidence Latin
+     (a real Hebrew line yields eng-only GARBAGE/low-conf; a Latin line misread as Hebrew yields
+     eng-only HIGH-conf Latin → reject). Build that, re-validate on p674(→0) + 473/546/336(→≥1), THEN
+     size the population. Instrument also false-NEGATIVES (missed p550 שורש) → lower bound.
    - **box_sanity gate.**
    Rationale: p546 is a stage-1 failure MASKING that page's stage-3/4 behavior — fix the cut, the page
    goes green or reveals its next defect, attribution stays clean.
