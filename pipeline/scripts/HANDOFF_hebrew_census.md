@@ -28,6 +28,28 @@ as the record of how the decision was reached.
   need an eyeball. **Proposed eyeball sample (Hebrew-oversampled):** 109,188,230,286,379,458,520,619,
   750,831,4,100,323,593,761.
 
+## ANCHOR RE-DETECTION — DECIDED (census-forced) + DESIGN: STANDOFF LINKAGE (2026-08-10)
+The census (609/851 apparatus pages anchor-barren) converts "ship present-but-unanchored" from partial
+to NEAR-TOTAL unlinkage → in-text anchor re-detection is NECESSARY. **Design decision (Chris): STANDOFF
+linkage, NOT inline re-insertion.** The body text is load-bearing (SIDs, chunk boundaries, verifier
+difflib targets, every eval assertion hang off its exact bytes); re-inserting superscripts INTO it
+mutates the substrate for zero retrieval gain. Instead: anchors live in a SEPARATE annotation layer —
+note N of page P attaches at body-position X (char offset OR phrase anchor, version-robust like the
+alignment JSONs' start/end phrases) — **body text stays byte-identical.** The linkage layer carries
+per-anchor provenance + confidence (`found-by-CV` / `placed-by-window-constraint` / `unfound-flagged`).
+Visible superscripts, if ever wanted, compose at DISPLAY time from the standoff layer. The CV sub-build
+proceeds as queued (localize superscripts in hi-res body strips, letter-scope windows constrain where
+each anchor can fall, fail-loud on unfindable) — but emits standoff records, never edits the body. This
+is the minimal-invasiveness rule (that protected the body from re-extraction) applied to its one defect.
+
+## PAGE-COUNT RECONCILIATION (2026-08-10, fail-loud membership rule — one explanation, not two counts):
+the vol1 run walked **958 IMAGES**; the span census walked **871 base-`.md`** (858 `_normalized`). The run
+is a SUPERSET: **87 pages are image-only (old pipeline never OCR'd them)** — of those, **36 HAVE APPARATUS
+the old corpus lacks ENTIRELY** (a bonus: re-extraction recovers content that never existed in the old
+layer), 51 are genuine no-apparatus (front-matter/plates/blanks). 0 base-`.md` pages are absent from the
+run. So the two instruments don't disagree — the run is images, the census was markdown, and the delta is
+the un-OCR'd image tail.
+
 ## GATE CLOSED — 2026-08-09 → **RE-EXTRACT (local, decomposed, free)**
 Both gate artifacts are in hand and committed:
 - **#1 repair census** (`footnote_structural_census.py`): closed **repair** — no consistent marker
