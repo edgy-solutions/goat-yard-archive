@@ -66,9 +66,17 @@ transcription:
   output: note_lines               # one footnote per line (assembler parses lines); structured-JSON is a hardening option
   num_ctx: 16384
   apparatus_upscale: 4             # full-strip transcription (structure); does NOT close the Hebrew alone
-  # per-region non-Latin RE-CROP (MEASURED p473): full-strip upscale does not close the Hebrew (VL
-  # encoder downscales the big strip); a concentrated band crop does. Crop from a MODERATE base and
-  # upscale ONCE (cropping the 4× strip compounds to 12× and degrades). pad_frac >= 0.03 required.
+  # per-region non-Latin RE-CROP — DISABLED (truth-set adjudication, 2026-08-09). It was CONTEXT
+  # AMPUTATION: a naked hi-res band with no surroundings, so the model's PRIOR filled the vacuum —
+  # added nikud not in the (unpointed) source (וכי→וְכִי, אל לבו→אֵל לְבֹו) and on p336 hallucinated a
+  # different phrase (הקדשה→הַמְּקוֹמוֹת שֶׁלָּהּ). Net-negative: it DOWNGRADED 336/692/150 (base was
+  # correct) to win only 473. Resolution helps when pixels are MISSING; it hurts when the model fills
+  # the extra clarity with expectations. The base pass (full context, moderate res) is the Hebrew floor.
+  recrop_enabled: false
+  # WHEN IT RETURNS (stage-4 redesign): full note-strip image + scaled section TOGETHER (context
+  # restored), and GATED — a recrop result may ONLY replace base when it REDUCES toward the printed
+  # consonantal form (drops a spurious char / recovers a final letter), NEVER when it adds marks.
+  # Regression fixtures: 336/692/150 must stop corrupting, 473 must keep its win.
   recrop_base_upscale: 2
   recrop_pad_frac: 0.04
   recrop_scale: 3

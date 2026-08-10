@@ -47,8 +47,8 @@ def extract_page(image_path, profile, host, body_md=None):
     resp, done = transcribe(strip, profile, host)
     r = A.canonicalize_page(resp.splitlines(), profile)
     recrop_changes = []
-    if profile["transcription"].get("recrop_base_upscale"):
-        import hebrew_recrop as hr        # per-region non-Latin re-crop (resolution lever)
+    if profile["transcription"].get("recrop_enabled"):   # DISABLED: net-negative (context amputation)
+        import hebrew_recrop as hr
         recrop_changes = hr.recrop_nonlatin(image_path, r["notes"], profile, host)
     viol = A.assert_no_text_split(r["notes"], profile)
     md = "\n".join(f"{n['marker']}: {n['text']}" for n in r["notes"])

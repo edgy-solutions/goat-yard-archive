@@ -280,11 +280,70 @@ the scars are densest — doing it after = the work twice). Harvested paid-for e
 Artifact console published). It first did its calibration job — caught **2 matcher bugs** (caret-def
 body-split doubling; `scope_start='a'` phantom gaps) → fixed, 18 tests (`9c19bf5`). Then the honest
 result separated into **two axes** the raw "70% flagged" headline had conflated:
-- **AXIS 1 — new apparatus quality (the gate's target): STRONG.** 22/27 note-counts match the stored
-  def counts (apparatus complete); 15 Hebrew spans closed by the recrop; and on flagged pages the
-  re-extraction **beats stored** — p702 fixes OCR errors (`Mechossre→Mechosre`, `Erubin→Eruvin`,
-  `Gersom→Gerson`, `sect. 1, a→1, 2`), p550 **recovers Hebrew** `שורש` (stored had garbage `191ו`)
-  and **drops stored's 2 duplicate notes**. Clean canonical `[^N]` where stored had colliding letters.
+- **AXIS 1 — new apparatus quality: MIXED (Chris adjudicated — supersedes my rosy automated framing).**
+  Verdicts (`truthset_out/verdicts.json`): **14 correct / 7 minor / 6 wrong** — 13/27 have real issues.
+  My "22/27 complete / beats stored" was a WEAK PROXY (count-matches-*stored*, but stored was
+  sometimes right where new is wrong: 336/343 counts; and my p702 showcase was WRONG — Chris found
+  its `Gerson` wrong + `Negáim` accent spurious). Real defect patterns:
+  1. **Hebrew = dominant defect, and the recrop FIRES BUT DOESN'T RELIABLY FIX IT** — 150/269/336/347/
+     692/843 all recropped and Hebrew still wrong; 692 (`וְכִי γ`) the recrop may INTRODUCE error
+     (spurious points / stray Greek). p473 `סגר עליהם` was NOT representative — resolution closes some
+     spans, not the class. (Revises `[[pixels-not-parameters]]`: held for one span, not broadly.)
+  2. **Note SEGMENTATION wrong on 5 pages, stored sometimes right:** under-seg 336(2/3) 343(1/2)
+     740(3/4) 757(1/3); over-seg 602(2/1).
+  3. **Symbol/Greek markers unhandled → missed notes + marker leakage:** 740 `γ De Abstinent` note
+     missed + `*` leaked; 343/757 markers left inside note text. Zoo handled letters/caret, not
+     `* γ` as note BOUNDARIES.
+  Plus Latin slips (546 `Pagnin nus`), dropped Arabic (264). Structure IS better (dedup, canonical
+  markers) but accuracy is NOT yet a clear win over stored.
+  **⇒ Reorders the build: note-quality fixes (Hebrew reliability, segmentation, symbol-markers) come
+  BEFORE the in-text-anchor scope question — no point linking notes that are themselves wrong.**
+
+### FAILURE MAP by pipeline stage (image-verified 2026-08-09) + Chris's fix plan
+Five defect classes, FOUR stages, no single villain — decomposition making every error attributable:
+- **Stage 1 CV presplit** (no models): `p546 Pagnin nus` = a FULL-WIDTH note (spans both columns, as
+  the 1766 printer occasionally sets) sliced through `Pagni|nus` by the column cut → broken image
+  downstream. **Fix = detect-and-REROUTE, not predict:** the split-IN/split-OUT signal pair (already
+  in the stitch guard) fires at the INTRA-page column seam (left col ends mid-word no-terminal, right
+  col opens lowercase mid-word) → re-process the page with the footnote strip UNCUT (full-width mode).
+  Profile: `full_width_notes: reroute_uncut`; whitelist discipline as with the 6 stitch artifacts.
+- **Stage 2 Tesseract** (demoted to hint + Latin-anchor LOCATOR): the Latin-anchor trick sometimes
+  misses Hebrew → recrop never fires, and if the base pass also dropped it, the span is INVISIBLE to
+  every text-side instrument (the plausible-omission class). **Fix = deterministic SCRIPT-CENSUS:**
+  CV/Tesseract script-detection counts Hebrew-shaped RTL regions per footnote strip; the extraction's
+  Hebrew-span count must RECONCILE against it → mismatch = fail-loud (same shape as the marker-count
+  assertion). Locator stays for positioning; it stops being the only witness Hebrew exists.
+- **Stage 3 main VLM pass (qwen3.6, FULL strip = full context):** `p702 Gersom→Gerson` — context was
+  ON the page and the model still let its PRIOR win (Jean Gerson ≫ Gersonides' Gersom in training) on
+  the ambiguous final letter; `p150 הניחח→הניח` (dropped final chet); segmentation misses (336 short
+  Hebrew-only note; 740 `γ`-marked note) + `* γ` markers not known as note BOUNDARIES. **Fixes:**
+  (a) **authority-list** deterministic check vs Gill's citation universe (Gersom, Pagninus, Vatablus,
+  Jarchi, Kimchi…) — settles the prior-substitution class WITHOUT a model; (b) **two-model FLAGGING**
+  (qwen3.6 + gemma4, free): disagreement → review/authority-list, NOT voting (shared priors → shared
+  hallucinations; agreement lowers priority, never closes); (c) **note-scoped body-context** = the
+  reference-window trick aimed at the apparatus (feed the anchor's surrounding SENTENCES — names the
+  cited author/verse/topic — scoped to the note, not the whole page); (d) symbol markers `* † ‡ γ` in
+  the zoo as note boundaries.
+- **Stage 4 Hebrew recrop — PULLED (net-negative).** Context amputation: naked hi-res band → prior
+  fills the vacuum with nikud (`וכי→וְכִי`) / hallucination (`הקדשה→הַמְּקוֹמוֹת שֶׁלָּהּ`, p336).
+  DOWNGRADED 336/692/150 to win only 473. **Redesign (stage-4 v2):** FULL note-strip image + scaled
+  section TOGETHER (context restored, pixels kept) — image-context beats text-context (text-anchor
+  launders base's errors through a "confirming" pass; independent verification was the goal). GATED:
+  a recrop result may ONLY replace base when it REDUCES toward the printed consonantal form (drops a
+  spurious char / recovers a final letter), NEVER adds marks. Regression fixtures: 336/692/150 stop
+  corrupting, 473 keeps its win.
+- **Stage 5 assembler/anchor-matcher** (pure code): not implicated in quality findings.
+
+### ACCEPTANCE HARNESS (Chris adjudicated ONCE; now self-tested) — `ground_truth_vol1.json` + `score_truth.py`
+Image-verified answers are fixtures; the pipeline is scored automatically, no re-adjudication. Base-only
+floor = **1/6** on strict fixtures (473 needs the stage-4 redesign; 692 passes base-only; 702/546/336/150
+are the stage-3/1 fixes). Re-score after each fix; pass-count is the acceptance signal. Grows as pages verify.
+
+### BUILD ORDER (Chris-settled):
+1. **base-only re-run** (recrop pulled — DONE, scored). The honest Hebrew floor.
+2. **stage-4 combined-context gated recrop** vs the 4 fixtures (336/692/150 stop corrupting, 473 keeps win).
+3. **stage-1 reroute + stage-2 script-census** (parallel deterministic additions).
+4. **stage-3 two-model flagging + note-scoped body-context + authority-list** (last; additive not corrective).
 - **AXIS 2 — linkage: 8/27 linkable, 19 "flagged" = OLD-BODY in-text anchor loss.** Confirmed NOT a
   detection bug and NOT a re-extraction failure: the old body genuinely dropped 70%+ of its in-text
   superscript markers (p550 has 1 inline anchor for 7 notes; p702 has 2 for 8), while keeping the
