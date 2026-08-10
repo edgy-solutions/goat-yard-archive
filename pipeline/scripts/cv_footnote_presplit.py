@@ -35,52 +35,51 @@ def find_hrule(dark, x0, x1, floor=350):
             return y
     return None
 
-def footnote_is_full_width(dark, xdiv, y_top):
-    """Stage-1 REROUTE detector (FOSSIL: p546 `Pagnin nus`): a full-width footnote (spans both
-    columns, as the 1766 printer occasionally sets) FILLS the gutter in the footnote region where a
-    two-column page has a gap. Column-splitting such a page slices a note mid-word. Deterministic,
-    image-level (no wasted transcription). Compares gutter darkness to the column-centre darkness in
-    the footnote region only."""
+def find_footnote_gutter(dark, y_top):
+    """The FOOTNOTE region's OWN gutter (NOT the body gutter — that was the stage-1 unsoundness).
+    Returns (x, depth): x = deepest-gap column in the footnote region; depth = how empty it is vs the
+    column centres (1=clean gap→two-column, <=0=filled/no gutter→full-width note spanning both cols).
+    Measured separator: p546 full-width = -1.38; every two-column page = 0.57..0.94."""
     H, W = dark.shape
-    if y_top is None or y_top >= H - 10: return False
-    reg = dark[y_top:H]
-    col = reg.sum(axis=0)
-    gut = col[max(0, xdiv-20):xdiv+20].mean()
-    left = col[int(W*0.18):int(W*0.34)].mean(); right = col[int(W*0.66):int(W*0.82)].mean()
+    reg = dark[y_top:H]; col = reg.sum(axis=0)
+    b0, b1 = int(W*0.33), int(W*0.67)
+    xg = int(np.argmin(col[b0:b1])) + b0
+    gut = col[xg-15:xg+15].mean()
+    left = col[int(W*0.12):int(W*0.40)].mean(); right = col[int(W*0.60):int(W*0.88)].mean()
     colmean = (left + right) / 2.0
-    return colmean > 1.0 and gut > 0.45 * colmean     # gutter not a clear gap -> text crosses it
+    depth = 1.0 - gut / max(colmean, 1.0)
+    return xg, depth
 
 def _trim_strip(strip):
     sd=_dark(strip); rows=np.where(sd.sum(axis=1)>sd.shape[1]*3)[0]
     return strip.crop((0,0,strip.size[0],int(rows[-1])+8)) if len(rows) else strip
 
-def presplit(path, upscale=2, allow_full_width=False):
+def presplit(path, upscale=2, full_width_depth=0.30):
     im=Image.open(path); W,H=im.size
     dark=_dark(im)
-    xdiv=find_vertical_divider(dark)
+    xdiv=find_vertical_divider(dark)                  # body gutter — for rule finding only
     info={"xdiv":xdiv,"rules":[],"mode":"two_column"}
-    # find the topmost rule across the two columns (= footnote region top)
     rule_l=find_hrule(dark, int(W*0.03), xdiv-int(W*0.02))
     rule_r=find_hrule(dark, xdiv+int(W*0.02), W-int(W*0.03))
     info["rules"]=[rule_l,rule_r]
     y_top=min([r for r in (rule_l,rule_r) if r is not None], default=None)
-    # STAGE-1 REROUTE (GATED OFF by default): geometric full-width detection is UNSOUND — the
-    # body-gutter isn't the footnote-gutter, so it false-positives (p692: two-column worked, full-width
-    # regressed it 4->3 notes + γ). Needs the TEXT-SIGNAL detector (reroute only when two-column
-    # produces a broken word at the seam). p692 is the guard fixture. See HANDOFF.
-    if allow_full_width and y_top is not None and footnote_is_full_width(dark, xdiv, y_top):
+    if y_top is None: return None, info
+    # STAGE-1 REROUTE (sound): split at the FOOTNOTE region's own gutter; if it has no real gap
+    # (depth < threshold) the footnotes are FULL-WIDTH -> crop UNCUT so a spanning note isn't sliced
+    # (fixes p546 `Pagnin nus`); a real gutter -> two-column split AT xg (fixes the body!=footnote
+    # gutter unsoundness that regressed p692).
+    xg, depth = find_footnote_gutter(dark, y_top)
+    info["fn_gutter"]=[xg, round(float(depth),2)]
+    if depth < full_width_depth:
         info["mode"]="full_width"
         strip=_trim_strip(im.crop((0, y_top+6, W, H)).convert("L"))
         if upscale and upscale!=1:
             strip=strip.resize((strip.size[0]*upscale, strip.size[1]*upscale), Image.LANCZOS)
         return strip, info
-    cols=[(0,xdiv),(xdiv,W)]
     strips=[]
-    for i,(x0,x1) in enumerate(cols):
-        yr=(rule_l,rule_r)[i]
-        if yr is None: continue                 # no footnotes in this column
-        strip=_trim_strip(im.crop((x0, yr+6, x1, H)).convert("L"))
-        strips.append(strip)
+    for (x0,x1),yr in (((0,xg),rule_l),((xg,W),rule_r)):
+        if yr is None: continue
+        strips.append(_trim_strip(im.crop((x0, yr+6, x1, H)).convert("L")))
     if not strips: return None, info
     # vertical concat (left strip above right strip) = linear reading order
     tw=max(s.size[0] for s in strips); th=sum(s.size[1] for s in strips)+20*(len(strips)-1)

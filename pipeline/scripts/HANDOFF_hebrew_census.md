@@ -388,17 +388,15 @@ what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a 
 1. **base-only re-run** (recrop pulled — DONE, scored per-class: seg 5/6, hebrew 6/8, transcription 0/4).
 2. **DETERMINISTIC BATCH (pure geometry, no models, deterministic acceptance — goes FIRST so every
    stochastic experiment downstream inherits a clean substrate & the failure map stays honest):**
-   - **stage-1 full-width REROUTE — ATTEMPTED, gated OFF (`allow_full_width=False`), needs the
-     TEXT-SIGNAL detector.** A GEOMETRIC detector (footnote-region gutter fill) is UNSOUND: the
-     `find_vertical_divider` gutter is the BODY gutter, not the footnote gutter, so it false-positives
-     — full-width ON scored 2/6 (fixed p546 `Pagninus` + p336 missed-note) but REGRESSED p692 (4→3
-     notes + γ; two-column read it right). Won't trade a regression for 2 wins. The two wins have
-     DISTINCT causes: p546 = a broken WORD at the column seam (Chris's split-signal applies); p336 = a
-     short note DROPPED by the column crop (a coverage, not a seam, problem). So stage-1 v2 = (a)
-     reroute-to-uncut only when two-column produces a broken word at the seam (text-signal, never
-     regresses a clean page); (b) separately, robust column-crop coverage so short/edge notes aren't
-     dropped. **p692 is the guard fixture** (must stay two-column, 4 notes, no γ). Geometric
-     `footnote_is_full_width` kept but gated; `presplit(allow_full_width=True)` opts in.
+   - **stage-1 — SOUND FIX LANDED (footnote gutter, not body gutter). 1/6 → 3/6 fixtures; seg 6/6,
+     transcription 4/4 (both perfect).** The unsoundness was using `find_vertical_divider`'s BODY
+     gutter for the footnote split. Fix: `find_footnote_gutter` measures the footnote region's OWN
+     gutter depth — clean separator (p546 full-width = −1.38; every two-column page = 0.57..0.94);
+     `depth<0.30` ⇒ full-width UNCUT (fixes p546 `Pagninus`), else two-column split AT the footnote
+     gutter xg (fixes p336 missed-note AND p702 `Gersom` — the cleaner crop beat the prior). The
+     earlier geometric regression on p692 is GONE. Residual: p692 `כהות→כהת` (dropped vav, one glyph,
+     still 4 notes) — a Hebrew reading-edge miss, now in the stage-4 bucket, not a structural break.
+     Full 27-page re-run in flight to confirm no broad regression from the split-x change.
    - **stage-2 Hebrew SCRIPT-CENSUS** (+ run RETROACTIVELY over base-only to measure invisible-Hebrew-
      loss — "1/6 strict" may have a wrong denominator if the base floor silently dropped spans).
    - **box_sanity gate.**
