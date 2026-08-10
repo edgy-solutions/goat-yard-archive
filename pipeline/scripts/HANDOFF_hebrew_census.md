@@ -407,12 +407,29 @@ what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a 
      question yet.** The FIX (Chris's fossil technique) = **DUAL-OCR disambiguation**: a line is real
      non-Latin only if multi-lang finds it AND eng-only does NOT read it as high-confidence Latin
      (a real Hebrew line yields eng-only GARBAGE/low-conf; a Latin line misread as Hebrew yields
-     eng-only HIGH-conf Latin → reject). Build that, re-validate on p674(→0) + 473/546/336(→≥1), THEN
-     size the population. Instrument also false-NEGATIVES (missed p550 שורש) → lower bound.
+     eng-only HIGH-conf Latin → reject). Instrument also false-NEGATIVES (p550 שורש) → lower bound.
+     **UPDATE — dual-OCR ALSO FAILS (DEAD-END for Tesseract here).** Apparatus lines are MIXED
+     Hebrew+Latin (Hebrew word + Latin gloss on ONE line), so eng-only reads the Latin confidently and
+     rejects the whole line even with real Hebrew (p473 `סגר עליה clausit viam illis` → rejected),
+     while worn Latin (p674) reads low-conf and is kept. Best dual-OCR 3/8 < heb-only 7/8. ⇒ Tesseract
+     (single OR dual) cannot cleanly census non-Latin on this corpus; the invisible-loss DENOMINATOR
+     stays OPEN. A different instrument is needed: (a) CV glyph-shape detection (Hebrew is blocky, no
+     asc/desc), or (b) a TARGETED VLM presence-check ("how many footnotes contain Hebrew?"). Not built.
+     `script_census.py` kept as a WEAK heb-only flag (7/8 on knowns), not a count.
    - **box_sanity gate.**
    Rationale: p546 is a stage-1 failure MASKING that page's stage-3/4 behavior — fix the cut, the page
    goes green or reveals its next defect, attribution stays clean.
-3. **stage-4 combined-context gated recrop** vs fixtures 336/692/150/473 — on the clean substrate.
+3. **stage-4 combined-context gated recrop — DONE (3/6 → 4/6).** Recrop re-enabled but GATED. v2 =
+   (a) COMBINED CONTEXT: model gets the full note-strip + the magnified region together (context
+   restored, pixels kept) with a consonants-only prompt; (b) GATE (`_gate_accept`): a recrop result
+   replaces base ONLY if it adds NO nikud, introduces NO stray non-Hebrew (γ), and is a SMALL edit
+   (|Δlen|≤2 — a final-letter recovery / spurious-char drop, NOT truncation or replacement). On the
+   4 fixtures the gate is exactly right: p692 `כהת→כהות` ACCEPTED (fixed); p546 `→כִּי יְהִיהָ`
+   gated-OUT (nikud); p150 `→הארץ` gated-OUT (truncation); p336 `→מקמה` gated-OUT (replacement). The
+   recrop-corruption class is structurally prevented; safe corpus-wide. RESIDUAL: 473 (`עליה`, needs
+   final `ם`) + 150 note-e (`הניח`, needs final `ח`) — single FINAL-LETTER reading-edge misses that
+   context+resolution do NOT recover = the genuine pixels-not-parameters floor (candidates for the
+   authority-list / review, not more pixels).
 4. **stage-3 authority-list + two-model flagging + note-scoped body-context + symbol markers** (last;
    additive not corrective).
 - **AXIS 2 — linkage: 8/27 linkable, 19 "flagged" = OLD-BODY in-text anchor loss.** Confirmed NOT a

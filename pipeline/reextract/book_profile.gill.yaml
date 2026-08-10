@@ -72,7 +72,7 @@ transcription:
   # different phrase (הקדשה→הַמְּקוֹמוֹת שֶׁלָּהּ). Net-negative: it DOWNGRADED 336/692/150 (base was
   # correct) to win only 473. Resolution helps when pixels are MISSING; it hurts when the model fills
   # the extra clarity with expectations. The base pass (full context, moderate res) is the Hebrew floor.
-  recrop_enabled: false
+  recrop_enabled: true    # stage-4 v2: combined-context (full strip + region) + nikud-reject GATE
   # WHEN IT RETURNS (stage-4 redesign): full note-strip image + scaled section TOGETHER (context
   # restored), and GATED — a recrop result may ONLY replace base when it REDUCES toward the printed
   # consonantal form (drops a spurious char / recovers a final letter), NEVER when it adds marks.

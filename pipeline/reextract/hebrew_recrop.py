@@ -20,16 +20,36 @@ def _nonlatin_span(text):
     m = re.search(r"[\u0590-\u05FF\u0370-\u03FF\u0700-\u074F][\u0590-\u05FF\u0370-\u03FF\u0700-\u074F \u05B0-\u05C7]*", text)
     return m.group(0).strip() if m else None
 
-def _transcribe(img, model, host, num_ctx):
-    buf = io.BytesIO(); img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    prompt = ("Transcribe this cropped line from a 1766 commentary footnote VERBATIM. It contains "
-              "Hebrew (and/or Greek) followed by a Latin gloss. Output the Hebrew in Hebrew script "
-              "exactly as printed, then the Latin. Do not translate or invent.")
+_NIKUD = re.compile(r"[֑-ׇ]")
+_HEB = re.compile(r"[֐-׿]")
+_B64 = lambda img: base64.b64encode((lambda b: (img.save(b, format="PNG"), b.getvalue())[1])(io.BytesIO())).decode()
+
+# Stage-4 v2 prompt: COMBINED CONTEXT (full strip + magnified region) + consonants-only instruction.
+# The recrop's disease was context amputation; the full strip restores it while the crop keeps pixels.
+_RECROP_PROMPT = (
+    "Image 1 is a full footnote strip from a 1766 Bible commentary. Image 2 is a MAGNIFIED region "
+    "from it containing a Hebrew word (usually followed by a Latin gloss). Using image 1 for full "
+    "context, transcribe ONLY the Hebrew word shown magnified in image 2. Output the Hebrew "
+    "CONSONANTS exactly as printed — the source is UNPOINTED, so do NOT add any vowel points (nikud). "
+    "Output only the Hebrew word, nothing else.")
+
+def _transcribe_combined(full_strip, region, model, host, num_ctx):
     r = httpx.post(f"http://{host}:11434/api/generate",
-                   json={"model": model, "prompt": prompt, "images": [b64], "think": False,
-                         "stream": False, "options": {"num_ctx": num_ctx, "temperature": 0}}, timeout=900)
+                   json={"model": model, "prompt": _RECROP_PROMPT, "images": [_B64(full_strip), _B64(region)],
+                         "think": False, "stream": False,
+                         "options": {"num_ctx": num_ctx, "temperature": 0}}, timeout=900)
     return r.json().get("response", "") or ""
+
+def _gate_accept(new, old):
+    """The recrop may ONLY reduce toward the printed CONSONANTAL form — never add marks. Rejects the
+    corruptions (p150/p692 added nikud; p336 hallucinated a pointed phrase); accepts consonant
+    recovery (p473 עליה->עליהם). stochastic-never-authoritative between two passes of one model."""
+    if not new or not _HEB.search(new): return False
+    if _NIKUD.search(new): return False                       # never add vowel points
+    if re.search(r"[^֐-׿\s]", new): return False     # no stray non-Hebrew (e.g. γ)
+    old_cons = _NIKUD.sub("", old)
+    if abs(len(new) - len(old_cons)) > 2: return False        # small edit only (recover/drop a char), NOT truncation/replace
+    return new != old
 
 def _line_boxes(strip):
     """Tesseract line boxes: [(text, y0, y1)] over the strip."""
@@ -72,8 +92,10 @@ def recrop_nonlatin(image_path, notes, profile, host):
         band = _best_line(n["text"], boxes)
         if not band: continue
         pad = int(H * pad_frac); y0 = max(0, band[0] - pad); y1 = min(H, band[1] + pad)
-        crop = strip.crop((0, y0, W, y1)).resize(((W) * scale, (y1 - y0) * scale), Image.LANCZOS)
-        new = _nonlatin_span(_transcribe(crop, model, host, num_ctx))
-        if new and new != old:
-            n["text"] = n["text"].replace(old, new); changes.append({"marker": n.get("marker"), "old": old, "new": new})
+        crop = strip.crop((0, y0, W, y1)).resize((W * scale, (y1 - y0) * scale), Image.LANCZOS)
+        new = _nonlatin_span(_transcribe_combined(strip, crop, model, host, num_ctx))
+        if _gate_accept(new, old):                # GATE: only a consonant-ward correction, never adds marks
+            n["text"] = n["text"].replace(old, new); changes.append({"marker": n.get("marker"), "old": old, "new": new, "accepted": True})
+        elif new and new != old:
+            changes.append({"marker": n.get("marker"), "old": old, "new": new, "accepted": False})  # gated OUT
     return changes
