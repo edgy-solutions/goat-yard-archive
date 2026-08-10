@@ -457,9 +457,21 @@ over-correction. Result: p473 → `סגר עליהם` (all 4, `ם` from illis=pl
 `ח` from odorem quietis). **The pixels-not-parameters "floor" has a shelf above it: PHILOLOGY** — the
 note's own Latin gloss is the reference text that adjudicates the final letter. With the tier disposing
 the 2 residuals, fixtures are effectively **6/6**.
+**PRECONDITION (the actual thing validated — do NOT let 8/8 calcify into "frontier fixes Hebrew"):**
+the tier works because the note **GLOSSES ITSELF** — `illis` grammatically forced `ם`, `odorem quietis`
+semantically forced `הניחח`. The models out-REASONED the local 35b over evidence *sitting in the note*;
+they did NOT out-SEE it (the frontier-inversion STILL STANDS). So the tier's precondition is NOT
+"expensive model" — it is **"the note contains adjudicating material" (Latin gloss / citation /
+parallel)**. Mechanized INTAKE GATE: *does this span's note contain adjudicating material?* YES →
+escalate WITH it; NO → honest review-queue, NO panel (philology without a text to reason from is just
+prior-voting at higher price). **Unanimity is a confidence signal ONLY when the models reason over
+shared EVIDENCE, not shared PRIORS** — four models agreeing on a dictionary-form normalization would
+look exactly like 8/8 and be exactly WRONG (that was p150 before the constraint). ⇒ **PERMANENT CLAUSE
+(not a session fix):** the faithfulness instruction "reproduce the PRINTED form, do NOT normalize to the
+dictionary" is a fixed part of the tier prompt.
 **Verdict:** a near-ORACLE for the grammatically/philologically-adjudicable final-letter class (given
-the faithfulness constraint + strong models + unanimity as the confidence signal), NOT for orthographic
-detail the Latin can't reach. Economics trivial (cents corpus-wide; free batched async off the Max plan). **COST UNIT (measured
+the intake gate + faithfulness clause + strong models + evidence-grounded unanimity), NOT for
+orthographic detail the Latin can't reach, and NOT for spans with no internal evidence at all. Economics trivial (cents corpus-wide; free batched async off the Max plan). **COST UNIT (measured
 2026-08-09):** OpenRouter-billed models — opus-5 $0.0045/span, deepseek-v4-pro $0.0025/span.
 **gpt-5.6-luna-pro + gemini-3.6-flash showed $0.00 in OpenRouter usage because Chris has BYOK for
 OpenAI/Google — they bill UPSTREAM to his own accounts, NOT free** (their true cost is in the provider
