@@ -430,8 +430,22 @@ what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a 
    final `ם`) + 150 note-e (`הניח`, needs final `ח`) — single FINAL-LETTER reading-edge misses that
    context+resolution do NOT recover = the genuine pixels-not-parameters floor (candidates for the
    authority-list / review, not more pixels).
-4. **stage-3 authority-list + two-model flagging + note-scoped body-context + symbol markers** (last;
-   additive not corrective). **File the 2 final-letter residuals (473 `עליהם`, 150 `הניחח`) as
+4. **stage-3 — BATCH DONE (2026-08-09 overnight).** All named pieces built + validated:
+   - **symbol-marker split** (`assembler.split_note_line`): superscript/symbol markers (`² ᵃ ᵇ ¹ * † ‡`)
+     mid-line merged notes; now split. p343→2, p757→2 (NOT crop-fixed — real work; re-scored per Chris,
+     not closed on p740's evidence). 19 assembler tests. `0bde7a7`.
+   - **escalation tier COMPONENT** (`escalation_tier.py`): intake gate (self-glossing) in code, faithfulness
+     clause, provenance class, dual cost-logging, unanimity→auto-acceptable. `c3bfda7`.
+   - **authority-list** (`authority_list.py` + profile seed): citation-misread safety net; Gerson~Gersom
+     (0.83), Pagnin~Pagninus (0.86); exact clean. Proposals not auto-corrections. `a8323e5`.
+   - **review-queue** (`review_queue.py`): aggregates unanchored / gated-recrop / stitch / citation flags
+     as pending items w/ provenance; gates the escalation tier to self-glossing Hebrew. `a8323e5`.
+   - **two-model flagging** (`two_model_flag.py`): qwen3.6 vs gemma4, disagreement = DATA (never a vote;
+     agreement lowers priority, never closes). Validated: p473 flagged עליו-vs-עליהם (gemma4=truth) → the
+     span the tier adjudicates; p550 flagged 2-vs-9 + Physi-vs-Physic. `37769c0`.
+   **note-scoped body-context** (reference-window aimed at the apparatus) = the one un-built stage-3 idea;
+   the note's OWN Latin gloss already supplies the escalation tier's evidence, so external body-context is
+   a lower-priority enhancement. **File the 2 final-letter residuals (473 `עליהם`, 150 `הניחח`) as
    REVIEW-FLAGS + reference-window EXHIBITS:** they fail context+resolution together = the empirical
    case that the reference-window's next shelf (the note's own Latin gloss / Talmud-window, IDEAS.md)
    is the only remaining lever for a measured class — 2 named exhibits for Psalms-era planning.
