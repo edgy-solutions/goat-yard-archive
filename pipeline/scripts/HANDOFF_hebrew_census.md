@@ -431,7 +431,41 @@ what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a 
    context+resolution do NOT recover = the genuine pixels-not-parameters floor (candidates for the
    authority-list / review, not more pixels).
 4. **stage-3 authority-list + two-model flagging + note-scoped body-context + symbol markers** (last;
-   additive not corrective).
+   additive not corrective). **File the 2 final-letter residuals (473 `עליהם`, 150 `הניחח`) as
+   REVIEW-FLAGS + reference-window EXHIBITS:** they fail context+resolution together = the empirical
+   case that the reference-window's next shelf (the note's own Latin gloss / Talmud-window, IDEAS.md)
+   is the only remaining lever for a measured class — 2 named exhibits for Psalms-era planning.
+
+### FRONTIER ESCALATION TIER — PROBED 2026-08-09 (Chris's idea, reframed): escalate ADJUDICATION not
+transcription. The frontier-inversion says bubbling the CROP up buys nothing (235b/72b read it worse
+than local 35b). So the tier sends an EVIDENCE PACKAGE (base reading + candidates + the note's own
+**Latin gloss**, which self-adjudicates: `clausit viam illis` → *illis* plural → `עליהם` over `עליה`)
+and asks a bilingual-philology VERIFICATION question. **Probe on the 2 known-answer spans (~$0.005):**
+- p473: **deepseek RECOVERED `סגר עליהם`** (from illis=plural); gpt-4o-mini got plural but wrong gender
+  (`עליהן`). The Latin fixes NUMBER, not GENDER (`ם`/`ן`) → models DISAGREE → that disagreement IS the
+  flag. Tier NARROWS "unknown final letter" → "plural, `ם` or `ן`, + reasoning" = a rich review item.
+- p150: both **OVER-CORRECTED to the dictionary form** (`ניחוח`/`הניחו`) not the PRINTED `הניחח` — the
+  gloss `odorem quietis` fixes the LEMMA, not the SPELLING. **Philology-vs-faithfulness:** divergence
+  from the printed form is a DEFECT not a fix → confirms the tier must be **propose-into-review, NEVER
+  auto-accept**, and p150 is genuinely at the pixels floor.
+**Verdict:** validated as a review-queue ENRICHER for grammatically-adjudicable endings, NOT a
+transcription oracle. Economics trivial (cents corpus-wide; free batched async off the Max plan).
+Governance (ADR-0015): provenance class `adjudicated-by-frontier-with-bilingual-context` ≠
+`Chris-verified-against-scan`; model-disagreement + print-divergence are its fail-loud flags. Slots
+into stage-3 as the disposition path for what the authority-list + two-model flag can't settle.
+
+### CENSUS SCOPE-HONESTY (rides into the acceptance claim): the invisible-Hebrew-loss denominator is a
+KNOWN-UNKNOWN — this class trips no text-side tripwire by definition. Full-vol1 acceptance language MUST
+carry it explicitly: **"Hebrew-span completeness UNVERIFIED pending a non-Tesseract witness."** The
+random-unflagged eyeball sample OVERSAMPLES Hebrew-dense pages (where the invisible class hides). CV
+glyph-shape witness (Hebrew letterform stats, no Tesseract) stays ON THE LIST — don't let "dead-end"
+become "dropped".
+
+### ADR THROUGH-LINE (the session's actual product, one sentence): the adjudication-derived harness
+caught THREE wrong conclusions before they shipped (geometric full-width regression, census over-count,
+recrop corruption) — one hour of Chris's eyes, converted into permanent instrumentation, out-prevented
+the old pipeline's two volumes of serial discovery. ADR-0015's thesis (expert review is the scarce
+resource) proven from the other side: spend it once, instrument it, it multiplies.
 - **AXIS 2 — linkage: 8/27 linkable, 19 "flagged" = OLD-BODY in-text anchor loss.** Confirmed NOT a
   detection bug and NOT a re-extraction failure: the old body genuinely dropped 70%+ of its in-text
   superscript markers (p550 has 1 inline anchor for 7 notes; p702 has 2 for 8), while keeping the
