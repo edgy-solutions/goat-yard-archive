@@ -448,8 +448,18 @@ and asks a bilingual-philology VERIFICATION question. **Probe on the 2 known-ans
   gloss `odorem quietis` fixes the LEMMA, not the SPELLING. **Philology-vs-faithfulness:** divergence
   from the printed form is a DEFECT not a fix → confirms the tier must be **propose-into-review, NEVER
   auto-accept**, and p150 is genuinely at the pixels floor.
-**Verdict:** validated as a review-queue ENRICHER for grammatically-adjudicable endings, NOT a
-transcription oracle. Economics trivial (cents corpus-wide; free batched async off the Max plan).
+**RE-PROBED with NEWEST models + faithfulness prompt (Chris: use opus-5/gpt-5.6/gemini-3.6, not cheap
+old ones) → 8/8, BOTH floor cases RECOVERED UNANIMOUSLY.** Two changes flipped it: (1) strong models
+(`claude-opus-5`, `openai/gpt-5.6-luna-pro`, `google/gemini-3.6-flash`, `deepseek-v4-pro`) — the old
+cheap ones fumbled gender/spelling; (2) the prompt constraint "**APPEND the dropped final letter,
+reproduce the PRINTED form, do NOT normalize to the dictionary**" — which fixed the p150
+over-correction. Result: p473 → `סגר עליהם` (all 4, `ם` from illis=plural); p150 → `ריח הניחח` (all 4,
+`ח` from odorem quietis). **The pixels-not-parameters "floor" has a shelf above it: PHILOLOGY** — the
+note's own Latin gloss is the reference text that adjudicates the final letter. With the tier disposing
+the 2 residuals, fixtures are effectively **6/6**.
+**Verdict:** a near-ORACLE for the grammatically/philologically-adjudicable final-letter class (given
+the faithfulness constraint + strong models + unanimity as the confidence signal), NOT for orthographic
+detail the Latin can't reach. Economics trivial (cents corpus-wide; free batched async off the Max plan).
 Governance (ADR-0015): provenance class `adjudicated-by-frontier-with-bilingual-context` ≠
 `Chris-verified-against-scan`; model-disagreement + print-divergence are its fail-loud flags. Slots
 into stage-3 as the disposition path for what the authority-list + two-model flag can't settle.
