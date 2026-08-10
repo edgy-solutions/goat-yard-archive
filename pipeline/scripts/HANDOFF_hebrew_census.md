@@ -459,7 +459,13 @@ note's own Latin gloss is the reference text that adjudicates the final letter. 
 the 2 residuals, fixtures are effectively **6/6**.
 **Verdict:** a near-ORACLE for the grammatically/philologically-adjudicable final-letter class (given
 the faithfulness constraint + strong models + unanimity as the confidence signal), NOT for orthographic
-detail the Latin can't reach. Economics trivial (cents corpus-wide; free batched async off the Max plan).
+detail the Latin can't reach. Economics trivial (cents corpus-wide; free batched async off the Max plan). **COST UNIT (measured
+2026-08-09):** per span ~$0.0045 (opus-5 alone) or ~$0.007 (4-model unanimity panel; gpt-5.6-luna-pro
++ gemini-3.6-flash reported $0.00 — free/promo, don't rely on it). Session OpenRouter total to date =
+$0.108 of $10. **Whole-vol1 escalation ≈ $0.35 (tens of spans) to ~$2 (low-hundreds), 4-model** — or
+$0 batched async on Max. FINAL TOTAL = unit × the actual re-eval population from the instrumented run
+(residue-of-residues: survives base→gated-recrop→authority-list→two-model-flag). **BUILD TODO: log
+`usage.cost` per verdict in the tier** so the total falls out of the real run, not a population guess.
 Governance (ADR-0015): provenance class `adjudicated-by-frontier-with-bilingual-context` ≠
 `Chris-verified-against-scan`; model-disagreement + print-divergence are its fail-loud flags. Slots
 into stage-3 as the disposition path for what the authority-list + two-model flag can't settle.
