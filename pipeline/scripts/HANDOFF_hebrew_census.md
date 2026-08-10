@@ -460,12 +460,17 @@ the 2 residuals, fixtures are effectively **6/6**.
 **Verdict:** a near-ORACLE for the grammatically/philologically-adjudicable final-letter class (given
 the faithfulness constraint + strong models + unanimity as the confidence signal), NOT for orthographic
 detail the Latin can't reach. Economics trivial (cents corpus-wide; free batched async off the Max plan). **COST UNIT (measured
-2026-08-09):** per span ~$0.0045 (opus-5 alone) or ~$0.007 (4-model unanimity panel; gpt-5.6-luna-pro
-+ gemini-3.6-flash reported $0.00 — free/promo, don't rely on it). Session OpenRouter total to date =
-$0.108 of $10. **Whole-vol1 escalation ≈ $0.35 (tens of spans) to ~$2 (low-hundreds), 4-model** — or
-$0 batched async on Max. FINAL TOTAL = unit × the actual re-eval population from the instrumented run
-(residue-of-residues: survives base→gated-recrop→authority-list→two-model-flag). **BUILD TODO: log
-`usage.cost` per verdict in the tier** so the total falls out of the real run, not a population guess.
+2026-08-09):** OpenRouter-billed models — opus-5 $0.0045/span, deepseek-v4-pro $0.0025/span.
+**gpt-5.6-luna-pro + gemini-3.6-flash showed $0.00 in OpenRouter usage because Chris has BYOK for
+OpenAI/Google — they bill UPSTREAM to his own accounts, NOT free** (their true cost is in the provider
+billing, priceable from the token counts OpenRouter still returns). Session OpenRouter-key total =
+$0.108 of $10 (opus/deepseek/earlier-Chinese only; BYOK spend is separate & small). **Whole-vol1
+escalation ≈ $0.35 (tens of spans) to ~$2 (low-hundreds) if routed through opus-5/deepseek**; near-$0
+if routed through the BYOK models or batched on Max. FINAL TOTAL = unit × the actual re-eval population
+from the instrumented run (residue-of-residues: base→gated-recrop→authority-list→two-model-flag).
+**BUILD TODO: log per verdict both `usage.cost` AND token counts** — cost covers OpenRouter-billed
+models; tokens×published-rate prices the BYOK models whose OpenRouter cost reads $0. So the total is
+exact across both billing paths, not a guess.
 Governance (ADR-0015): provenance class `adjudicated-by-frontier-with-bilingual-context` ≠
 `Chris-verified-against-scan`; model-disagreement + print-divergence are its fail-loud flags. Slots
 into stage-3 as the disposition path for what the authority-list + two-model flag can't settle.
