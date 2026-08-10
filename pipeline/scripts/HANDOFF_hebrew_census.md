@@ -339,11 +339,63 @@ Image-verified answers are fixtures; the pipeline is scored automatically, no re
 floor = **1/6** on strict fixtures (473 needs the stage-4 redesign; 692 passes base-only; 702/546/336/150
 are the stage-3/1 fixes). Re-score after each fix; pass-count is the acceptance signal. Grows as pages verify.
 
-### BUILD ORDER (Chris-settled):
-1. **base-only re-run** (recrop pulled — DONE, scored). The honest Hebrew floor.
-2. **stage-4 combined-context gated recrop** vs the 4 fixtures (336/692/150 stop corrupting, 473 keeps win).
-3. **stage-1 reroute + stage-2 script-census** (parallel deterministic additions).
-4. **stage-3 two-model flagging + note-scoped body-context + authority-list** (last; additive not corrective).
+### BOUNDING BOXES = the ALIGNMENT problem, not Tesseract geometry (Chris, 2026-08-09)
+Nonsensical boxes (cross the gutter into the other column, bleed into footnotes/title, few-chars-wide)
+are NOT Tesseract failing at geometry — they're the **cross-modal ALIGNMENT** layer failing at
+CORRESPONDENCE then deriving geometry from wrong matches. Old pipeline: match Tesseract's text ↔ the
+VLM's (or normalized-VLM's) text to give each VLM word a box — two DIFFERENT transcriptions of a 2D
+page, serialized to 1D strings (Tesseract reading-order vs VLM merged-column narrative), matched
+page-globally with **no shared coordinate system and no spatial invariants** → matches jump columns,
+into footnotes, even across pages; box faithfully reports the location of the WRONG text. (This is
+what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a different hat.)
+- **The NEW pipeline barely has this problem — alignment was a symptom of the old architecture's
+  shape.** It REGIONALIZES before either model reads (per-strip Tesseract + per-strip VLM), so any
+  alignment happens WITHIN a region (one column of one page's footnote block) — cross-column/-page
+  spillover is structurally impossible (the other column isn't in the input). Alignment shrinks to a
+  scale where simple methods work: within a strip both texts are short, share reading order by
+  construction, **anchor-first** (distinctive tokens: citations, names, the Latin the locator uses),
+  **monotonic** (matches proceed in order, no long jumps), with the **box-sanity geometry gate as the
+  output check** (a derived box violating region bounds ⇒ the match was wrong ⇒ reject).
+- **Alignment CONFIDENCE is a first-class output** (the rule the old matcher lacked): where no
+  anchor-quality match exists (Hebrew, where Tesseract's text is garbage), the honest answer is **"no
+  box for this span" — fail-loud, never a forced best-match.** The Hebrew locator already does this in
+  spirit (locates via adjacent Latin); make it the general policy: locate what's matchable, flag what
+  isn't, never force.
+- **box_sanity.py gate** between Tesseract and every consumer: each box vs region geometry (falls in
+  exactly ONE region: body-L, body-R, footnote-strip, title; no straddling gutter/rule past tolerance)
+  + line-width/height distributional bounds; disposition **clip / reject / flag** (many bad boxes ⇒
+  page geometry suspect ⇒ reroute/review). Never consumed raw. **Upstream of stages 2/3/4** (bad boxes
+  scramble the base-pass hint and mis-place the locator's recrop band — a candidate mechanism for the
+  stage-2 "Hebrew in image not in text"). Slots into the stage-1/2 deterministic batch. Instrumented
+  run gets a per-page box-violation column; high-violation pages are where the old silent smearing
+  concentrated → oversample them in the random stratum.
+- **THREE fallouts:** (a) NEW build — small constrained alignment layer + confidence (above);
+  (b) EXISTING corpus — stored boxes may carry wrong-correspondence geometry (internally plausible,
+  wrong text) → **un-repairable by geometry validation alone**; spot-check IF anything user-facing draws
+  them; the alignment JSONs used start/end PHRASES (text-anchored) so likely DODGED this → damage
+  contained to the dead pipeline, just note it; (c) RE-EXTRACTION outputs — **DECISION (Chris):** does
+  the new corpus carry boxes? Needed only for the locator (per-strip, ephemeral) and, someday,
+  quote-on-scan highlighting (an S-plan upgrade). If highlighting is on the roadmap, record it in the
+  profile NOW and let the transcription pass emit per-strip word boxes AT EXTRACTION TIME (the reliable
+  direction — from the pass that read the text, with the confidence flag) — never reconstruct by
+  post-hoc alignment. Recommendation: defer boxes-as-corpus-output until highlighting is committed;
+  the per-strip ephemeral locator boxes suffice now.
+- **LAW (record):** *cross-modal correspondence is a STOCHASTIC product — it gets confidence scores,
+  spatial invariants, and fail-loud gaps, and never runs unconstrained across region boundaries.* The
+  old matcher broke all four clauses at once; the new architecture makes three of them nearly free.
+
+### BUILD ORDER (Chris-settled, REORDERED to deterministic-first 2026-08-09):
+1. **base-only re-run** (recrop pulled — DONE, scored per-class: seg 5/6, hebrew 6/8, transcription 0/4).
+2. **DETERMINISTIC BATCH (pure geometry, no models, deterministic acceptance — goes FIRST so every
+   stochastic experiment downstream inherits a clean substrate & the failure map stays honest):**
+   stage-1 full-width-note REROUTE (intra-page stitch signal → re-presplit uncut); stage-2 Hebrew
+   SCRIPT-CENSUS (+ run RETROACTIVELY over base-only to measure the invisible-Hebrew-loss population —
+   "1/6 strict" may have a wrong denominator if the base floor silently dropped spans); box_sanity gate.
+   Rationale: p546 is a stage-1 failure MASKING that page's stage-3/4 behavior — fix the cut, the page
+   goes green or reveals its next defect, attribution stays clean.
+3. **stage-4 combined-context gated recrop** vs fixtures 336/692/150/473 — on the clean substrate.
+4. **stage-3 authority-list + two-model flagging + note-scoped body-context + symbol markers** (last;
+   additive not corrective).
 - **AXIS 2 — linkage: 8/27 linkable, 19 "flagged" = OLD-BODY in-text anchor loss.** Confirmed NOT a
   detection bug and NOT a re-extraction failure: the old body genuinely dropped 70%+ of its in-text
   superscript markers (p550 has 1 inline anchor for 7 notes; p702 has 2 for 8), while keeping the
