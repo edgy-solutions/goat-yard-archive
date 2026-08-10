@@ -5,6 +5,29 @@ controls-validated. **Both gate measurements have now RUN and the gate is CLOSED
 GATE CLOSED banner immediately below; the older "Pre-V2 sequence (the gate)" section is retained
 as the record of how the decision was reached.
 
+## ★ VOL1 INSTRUMENTED RUN — 958 pages, 2026-08-10 (the first corpus-scale look; the two-volume-dread answer)
+**0 ERRORS across 958 pages** — the pipeline ran the whole corpus without a single crash. Status:
+`no_apparatus 107` · `OK 215` · `ANCHOR_FLAGGED 611` · `STITCH_VIOLATION 25`. Of 851 apparatus pages:
+25% clean, 75% flagged — **but the tail is ONE KNOWN CLASS, not unknown-unknowns:**
+- **ANCHOR-LOSS dominates (620 pages, 3332 notes) — and 609 of 620 are FULLY unanchored (the old body
+  has ZERO in-text anchors), only 11 partial.** This is the old-body defect measured at scale: the
+  body layer dropped its in-text superscript markers ENTIRELY on ~72% of apparatus pages. The
+  re-extracted notes are correct but have nowhere to attach. ⇒ **DECIDES Chris's deferred scope Q:
+  in-text anchor RE-DETECTION is now NECESSARY, not optional** — "body untouched" can't yield a linked
+  apparatus when 609 pages are anchor-barren.
+- **STITCH_VIOLATION = 25 pages (2.6%), a small BOUNDED novel class** — 10 are full_width-mode artifacts,
+  15 two-column (spot-check owed: real intra-page splits vs artifacts; base-md census said 0 cross-page).
+- geometry: `two_column 724 / full_width 127 / no_apparatus 107`; recrop `279 accepted / 268 gated`;
+  high-note-count (≥20) 12 pages (dense apparatus or over-seg — spot-check p171=29/p161=27).
+- **TAIL VERDICT: the declining curve, not the monster.** ~98% of flags are ONE characterized class
+  (anchor-barrenness) with a KNOWN disposition (in-text anchor re-detect); the novel residue is 25
+  pages. The fail-loud architecture made the whole tail ATTRIBUTABLE — exactly what it was built for.
+- **TWO OWED AUDITS (instrumentation gaps, honest):** (1) the gate-nikud audit couldn't run — `run_vol1`
+  logged recrop COUNTS not change-texts, so "0 nikud accepted" is proven on the 27-page run but NOT
+  audited across 958; re-run with change-text logging to close it. (2) the 15 two-column stitch pages
+  need an eyeball. **Proposed eyeball sample (Hebrew-oversampled):** 109,188,230,286,379,458,520,619,
+  750,831,4,100,323,593,761.
+
 ## GATE CLOSED — 2026-08-09 → **RE-EXTRACT (local, decomposed, free)**
 Both gate artifacts are in hand and committed:
 - **#1 repair census** (`footnote_structural_census.py`): closed **repair** — no consistent marker
