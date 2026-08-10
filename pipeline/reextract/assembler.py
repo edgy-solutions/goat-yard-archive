@@ -30,9 +30,33 @@ def load_profile(path):
 # --- marker handling: the model emits a leading letter (a/[^a]/^a^, maybe with , . )). It is
 #     DISCARDABLE — position assigns the canonical marker. We keep it only for diagnostics. ---
 _MARKER = re.compile(r"^\s*(?:\[\^)?([a-zA-Z])(?:\^?\])?[.,)]?\s+(.*\S)\s*$")
+# superscript/symbol note markers (FOSSIL zoo): ¹²³⁰⁴-⁹, superscript-latin ᵃ-ᶻ, and * † ‡ §
+_SUP = "¹²³⁰⁴⁵⁶⁷⁸⁹ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ*†‡§"
+_LEADSUP = re.compile(r"^\s*[" + _SUP + r"]\s*(.*\S)\s*$")
+# a mid-line marker that STARTS a new note (superscript/symbol/bracket/caret); used to split merged lines
+_NOTE_MARKER = re.compile(r"\[\^[a-z]\]|\^\[[a-z]\]|\^[a-z]\^|[" + _SUP + r"]")
+
 def strip_marker(line):
     m = _MARKER.match(line)
-    return (m.group(1).lower(), m.group(2)) if m else (None, line.strip())
+    if m: return m.group(1).lower(), m.group(2)
+    m2 = _LEADSUP.match(line)                 # superscript/symbol marker -> letter unknown ("?"), text kept
+    if m2: return "?", m2.group(1)
+    return None, line.strip()
+
+def split_note_line(line):
+    """Split a line carrying MULTIPLE note markers into one segment per note (p343/p757: the model
+    merged `² Nunc, Drusius. ᵃ Euterpe...` onto one line). Letter-marked notes have no _NOTE_MARKER
+    hit and pass through unchanged, so this never touches the clean letter-marker pages."""
+    pos = [m.start() for m in _NOTE_MARKER.finditer(line)]
+    if len(pos) <= 1: return [line]
+    segs = []
+    pre = line[:pos[0]].strip()               # text before the first marker = continuation of prior note
+    for i, p in enumerate(pos):
+        end = pos[i + 1] if i + 1 < len(pos) else len(line)
+        s = line[p:end].strip()
+        if s: segs.append(s)
+    if pre and segs: segs[0] = pre + " " + segs[0]
+    return segs
 
 # body/definition split — a def line is a LINE-LEADING marker in ANY zoo format ([^a]: | ^[a] |
 # ^a^ | ^a text). Recognizing only bracket defs leaks caret-format def lines into "body" and
@@ -57,7 +81,8 @@ def canonicalize_page(raw_lines, profile):
     """raw_lines -> {'notes':[{marker,text,model_letter}], 'dropped_furniture':[...]}.
     Markers assigned [^1..N] BY POSITION; the model's letters are recorded, never trusted."""
     notes, dropped = [], []
-    for line in raw_lines:
+    lines = [seg for line in raw_lines for seg in split_note_line(line)]   # split merged multi-marker lines
+    for line in lines:
         if not line.strip(): continue
         if is_furniture(line, profile): dropped.append(line.strip()); continue
         letter, text = strip_marker(line)

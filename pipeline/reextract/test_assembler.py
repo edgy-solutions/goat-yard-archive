@@ -170,6 +170,16 @@ def test_anchor_match_p97_reconciliation_failed_no_false_gaps():
     assert all(u["reason"] == "page_reconciliation_failed" for u in r["unanchored"])
     assert all("expected_letter" not in u for u in r["unanchored"])   # NO garbage expected letters
 
+def test_symbol_marker_splits_merged_notes():
+    # p343/p757: superscript/symbol markers mid-line merged two notes into one; must split.
+    r = A.canonicalize_page(["² Nunc, Drusius. ᵃ Euterpe sive, l. 2. c. 37,"], PROFILE)
+    assert len(r["notes"]) == 2, [n["text"] for n in r["notes"]]
+    assert r["notes"][0]["text"].startswith("Nunc") and r["notes"][1]["text"].startswith("Euterpe")
+    assert [n["marker"] for n in r["notes"]] == ["[^1]", "[^2]"]
+    # a normal letter-marked page is UNTOUCHED (no superscript markers -> no split)
+    r2 = A.canonicalize_page(["a In Cosmopœiam, p. 2841", "b Hyde Hist. vet. Pers."], PROFILE)
+    assert len(r2["notes"]) == 2 and r2["notes"][0]["text"].startswith("In Cosmop")
+
 def test_anchor_match_never_guesses():
     # a note with no matching anchor in its window is FLAGGED, never assigned a wrong letter
     body = "only ^[a] here"
