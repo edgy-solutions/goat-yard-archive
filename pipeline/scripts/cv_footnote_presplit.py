@@ -35,22 +35,51 @@ def find_hrule(dark, x0, x1, floor=350):
             return y
     return None
 
-def presplit(path, upscale=2):
+def footnote_is_full_width(dark, xdiv, y_top):
+    """Stage-1 REROUTE detector (FOSSIL: p546 `Pagnin nus`): a full-width footnote (spans both
+    columns, as the 1766 printer occasionally sets) FILLS the gutter in the footnote region where a
+    two-column page has a gap. Column-splitting such a page slices a note mid-word. Deterministic,
+    image-level (no wasted transcription). Compares gutter darkness to the column-centre darkness in
+    the footnote region only."""
+    H, W = dark.shape
+    if y_top is None or y_top >= H - 10: return False
+    reg = dark[y_top:H]
+    col = reg.sum(axis=0)
+    gut = col[max(0, xdiv-20):xdiv+20].mean()
+    left = col[int(W*0.18):int(W*0.34)].mean(); right = col[int(W*0.66):int(W*0.82)].mean()
+    colmean = (left + right) / 2.0
+    return colmean > 1.0 and gut > 0.45 * colmean     # gutter not a clear gap -> text crosses it
+
+def _trim_strip(strip):
+    sd=_dark(strip); rows=np.where(sd.sum(axis=1)>sd.shape[1]*3)[0]
+    return strip.crop((0,0,strip.size[0],int(rows[-1])+8)) if len(rows) else strip
+
+def presplit(path, upscale=2, allow_full_width=False):
     im=Image.open(path); W,H=im.size
     dark=_dark(im)
     xdiv=find_vertical_divider(dark)
+    info={"xdiv":xdiv,"rules":[],"mode":"two_column"}
+    # find the topmost rule across the two columns (= footnote region top)
+    rule_l=find_hrule(dark, int(W*0.03), xdiv-int(W*0.02))
+    rule_r=find_hrule(dark, xdiv+int(W*0.02), W-int(W*0.03))
+    info["rules"]=[rule_l,rule_r]
+    y_top=min([r for r in (rule_l,rule_r) if r is not None], default=None)
+    # STAGE-1 REROUTE (GATED OFF by default): geometric full-width detection is UNSOUND — the
+    # body-gutter isn't the footnote-gutter, so it false-positives (p692: two-column worked, full-width
+    # regressed it 4->3 notes + γ). Needs the TEXT-SIGNAL detector (reroute only when two-column
+    # produces a broken word at the seam). p692 is the guard fixture. See HANDOFF.
+    if allow_full_width and y_top is not None and footnote_is_full_width(dark, xdiv, y_top):
+        info["mode"]="full_width"
+        strip=_trim_strip(im.crop((0, y_top+6, W, H)).convert("L"))
+        if upscale and upscale!=1:
+            strip=strip.resize((strip.size[0]*upscale, strip.size[1]*upscale), Image.LANCZOS)
+        return strip, info
     cols=[(0,xdiv),(xdiv,W)]
     strips=[]
-    info={"xdiv":xdiv,"rules":[]}
-    for (x0,x1) in cols:
-        yr=find_hrule(dark, x0+int((x1-x0)*0.03), x1-int((x1-x0)*0.03))
-        info["rules"].append(yr)
+    for i,(x0,x1) in enumerate(cols):
+        yr=(rule_l,rule_r)[i]
         if yr is None: continue                 # no footnotes in this column
-        # footnote strip: below the rule to the page bottom (trim a few px past the rule)
-        strip=im.crop((x0, yr+6, x1, H)).convert("L")
-        # trim trailing all-white rows
-        sd=_dark(strip); rows=np.where(sd.sum(axis=1)>sd.shape[1]*3)[0]
-        if len(rows): strip=strip.crop((0,0,strip.size[0],int(rows[-1])+8))
+        strip=_trim_strip(im.crop((x0, yr+6, x1, H)).convert("L"))
         strips.append(strip)
     if not strips: return None, info
     # vertical concat (left strip above right strip) = linear reading order

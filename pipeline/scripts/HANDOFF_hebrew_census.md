@@ -388,9 +388,20 @@ what `fixup_ocr`'s 500px Y-gap actually was — the same alignment problem in a 
 1. **base-only re-run** (recrop pulled — DONE, scored per-class: seg 5/6, hebrew 6/8, transcription 0/4).
 2. **DETERMINISTIC BATCH (pure geometry, no models, deterministic acceptance — goes FIRST so every
    stochastic experiment downstream inherits a clean substrate & the failure map stays honest):**
-   stage-1 full-width-note REROUTE (intra-page stitch signal → re-presplit uncut); stage-2 Hebrew
-   SCRIPT-CENSUS (+ run RETROACTIVELY over base-only to measure the invisible-Hebrew-loss population —
-   "1/6 strict" may have a wrong denominator if the base floor silently dropped spans); box_sanity gate.
+   - **stage-1 full-width REROUTE — ATTEMPTED, gated OFF (`allow_full_width=False`), needs the
+     TEXT-SIGNAL detector.** A GEOMETRIC detector (footnote-region gutter fill) is UNSOUND: the
+     `find_vertical_divider` gutter is the BODY gutter, not the footnote gutter, so it false-positives
+     — full-width ON scored 2/6 (fixed p546 `Pagninus` + p336 missed-note) but REGRESSED p692 (4→3
+     notes + γ; two-column read it right). Won't trade a regression for 2 wins. The two wins have
+     DISTINCT causes: p546 = a broken WORD at the column seam (Chris's split-signal applies); p336 = a
+     short note DROPPED by the column crop (a coverage, not a seam, problem). So stage-1 v2 = (a)
+     reroute-to-uncut only when two-column produces a broken word at the seam (text-signal, never
+     regresses a clean page); (b) separately, robust column-crop coverage so short/edge notes aren't
+     dropped. **p692 is the guard fixture** (must stay two-column, 4 notes, no γ). Geometric
+     `footnote_is_full_width` kept but gated; `presplit(allow_full_width=True)` opts in.
+   - **stage-2 Hebrew SCRIPT-CENSUS** (+ run RETROACTIVELY over base-only to measure invisible-Hebrew-
+     loss — "1/6 strict" may have a wrong denominator if the base floor silently dropped spans).
+   - **box_sanity gate.**
    Rationale: p546 is a stage-1 failure MASKING that page's stage-3/4 behavior — fix the cut, the page
    goes green or reveals its next defect, attribution stays clean.
 3. **stage-4 combined-context gated recrop** vs fixtures 336/692/150/473 — on the clean substrate.
