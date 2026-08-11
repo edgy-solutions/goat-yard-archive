@@ -63,6 +63,22 @@ year`); p550 (barren) → 9 `unfound-flagged` `needs: cv-superscript-redetection
 body strip (above the footnote rule), constrained by letter-scope windows, fail-loud unfindable; it
 FEEDS positions into the built linkage layer. Careful validated build (same discipline as the glyph-witness).
 
+**VALIDATION DESIGN (Chris — this build's ground truth is genuinely SCARCE, unlike every prior one):**
+the 609 barren pages have NO stored layer to diff against, and the marks are the smallest glyphs on the
+page (sometimes genuinely ABSENT — worn type / inking failures — not merely undetected). So:
+- **Validate on the ~240 ANCHORED pages (where the old body DID keep markers): score detection precision/
+  recall against those KNOWN positions** — free ground truth. Then barren-page deployment INHERITS the
+  measured rates, and the per-anchor confidence classes MEAN something. Validate where truth exists,
+  deploy where it doesn't (same jaw-discipline as everywhere).
+- **Letter-scope WINDOWS do half the work:** each note's anchor MUST fall between its sequence-neighbors'
+  positions → the ordering constraint converts weak detections into strong placements. The detector only
+  needs to be GOOD, not perfect.
+- **HONEST ASYMMETRY (expect + record, don't fight):** some barren pages have markers the SCAN itself
+  cannot carry (1766 press inconsistency + worn type at that size). Those notes stay `unfound-flagged`
+  PERMANENTLY — a CORRECT terminal state (a note whose anchor the physical page can't yield is honestly
+  unanchored; the standoff provenance says so). **ACCEPTANCE BAR = "every RECOVERABLE anchor recovered,
+  every UNRECOVERABLE one flagged" — NOT "609 pages linked."**
+
 ## ★ ADR RESULTS-TABLE LINE (its own claim, not "corrected content"): RECOVERED CONTENT.
 The re-extraction produced apparatus on **36 pages the old corpus had NONE** (image-only pages the
 overloaded pipeline never OCR'd; see reconciliation). "Recovered content" ≠ "corrected content" — it is
