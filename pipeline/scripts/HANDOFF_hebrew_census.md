@@ -54,6 +54,21 @@ proceeds as queued (localize superscripts in hi-res body strips, letter-scope wi
 each anchor can fall, fail-loud on unfindable) — but emits standoff records, never edits the body. This
 is the minimal-invasiveness rule (that protected the body from re-extraction) applied to its one defect.
 
+**LINKAGE CORE BUILT (`standoff.py`, 2026-08-10).** `link_page(notes, body_text, profile, page)` →
+standoff records with `body_char_offset` + version-robust `phrase_anchor` (the ~6 preceding words) +
+provenance (`old-body-anchor` .95 / `unfound-flagged` 0) + `body_bytes_touched: 0` (invariant). Validated:
+p100 (old body has anchors) → 9 linked, phrase-anchors exact (`[^1]`←`…Picherellus`, `[^2]`←`…a full
+year`); p550 (barren) → 9 `unfound-flagged` `needs: cv-superscript-redetection`, body untouched. **REMAINING
+(the hard sub-piece): CV SUPERSCRIPT RE-DETECTION** — localize the tiny raised markers in the hi-res
+body strip (above the footnote rule), constrained by letter-scope windows, fail-loud unfindable; it
+FEEDS positions into the built linkage layer. Careful validated build (same discipline as the glyph-witness).
+
+## ★ ADR RESULTS-TABLE LINE (its own claim, not "corrected content"): RECOVERED CONTENT.
+The re-extraction produced apparatus on **36 pages the old corpus had NONE** (image-only pages the
+overloaded pipeline never OCR'd; see reconciliation). "Recovered content" ≠ "corrected content" — it is
+corpus that did not exist before, and it is the line the library thesis ultimately rests on. Put it in
+the ADR results table as its own row.
+
 ## PAGE-COUNT RECONCILIATION (2026-08-10, fail-loud membership rule — one explanation, not two counts):
 the vol1 run walked **958 IMAGES**; the span census walked **871 base-`.md`** (858 `_normalized`). The run
 is a SUPERSET: **87 pages are image-only (old pipeline never OCR'd them)** — of those, **36 HAVE APPARATUS
