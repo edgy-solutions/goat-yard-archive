@@ -28,6 +28,14 @@ layout:
   # on their page. Measured over 871 pages -> see below.
   cross_page_text_splits: none_observed    # measure_continuations.py: 0 real / 871 pages
   cross_page_letter_scope: true            # a carried note belongs to prev page's anchor scope
+  # FRONT-MATTER BOUNDARY (the "nothing here" channel at the volume level): images before this have
+  # NO footnote apparatus (frontispiece, publisher's foreword, memoir, historical essays) — running
+  # them through apparatus extraction manufactures footnotes from body prose (35 front-matter false-
+  # positives, 24 shipped silently as OK). SCAN-VERIFIED, not stored-layer-derived: image p89 is the
+  # Genesis opening ("FIRST BOOK OF MOSES", sig. B) WITH real apparatus (a Leviath. / b Introduct.) —
+  # the stored layer MISSED p89's footnotes (its first defs are p90), so trusting stored would have
+  # suppressed a genuine page. Provenance: pixels of p86(memoir)/p88(blank)/p89(Genesis)/p90 read 2026-08.
+  commentary_start_page: 89                # images 1..88 => no_apparatus without extraction
 
 # --- PAGE FURNITURE to strip (NOT notes). Finalize against get_md.py / fixup_ocr.py /
 #     normalize_markdown.py before production — they paid for corner cases a 10-page sample misses.

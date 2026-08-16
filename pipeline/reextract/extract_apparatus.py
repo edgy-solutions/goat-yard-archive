@@ -38,10 +38,16 @@ def _body_before_defs(md):
     return A.split_body_defs(md)[0]     # robust body/def split (all zoo def formats)
 
 def extract_page(image_path, profile, host, body_md=None):
-    up = profile["transcription"].get("apparatus_upscale", 2)
-    strip, info = presplit.presplit(str(image_path), upscale=up)
     page = re.search(r"page(\d+)", Path(image_path).name)
     page = page.group(1) if page else "?"
+    # FRONT-MATTER BOUNDARY (book fact): images before commentary_start_page have no apparatus —
+    # skip extraction entirely so body prose is never manufactured into footnotes (see profile).
+    csp = profile.get("layout", {}).get("commentary_start_page")
+    if csp and page != "?" and int(page) < int(csp):
+        return {"page": page, "status": "no_apparatus", "notes": [], "n_notes": 0,
+                "reason": "front_matter", "presplit_info": None}
+    up = profile["transcription"].get("apparatus_upscale", 2)
+    strip, info = presplit.presplit(str(image_path), upscale=up)
     if strip is None:
         return {"page": page, "status": "no_apparatus", "notes": [], "info": info}
     resp, done = transcribe(strip, profile, host)
@@ -50,6 +56,17 @@ def extract_page(image_path, profile, host, body_md=None):
     if profile["transcription"].get("recrop_enabled"):   # DISABLED: net-negative (context amputation)
         import hebrew_recrop as hr
         recrop_changes = hr.recrop_nonlatin(image_path, r["notes"], profile, host)
+    # CROP GATE (before stitch/anchor): the "nothing here" channel. A blank crop with notes is
+    # FABRICATION (p86 front-matter -> 18 confabulated); ink-but-no-notes is a MISS. Fail-loud, and
+    # runs BEFORE the stitch/anchor passes (which assume real notes). See crop_gate.py.
+    import crop_gate
+    floor = profile["transcription"].get("crop_content_floor", crop_gate.DEFAULT_FLOOR)
+    kept, gate_status, gate_flag = crop_gate.gate_notes(strip, r["notes"], floor)
+    if gate_status != "ok":
+        return {"page": page, "status": gate_status, "done_reason": done, "n_notes": len(kept),
+                "violations": [], "dropped_furniture": r.get("dropped_furniture", []), "notes": kept,
+                "markdown": "", "presplit_info": info, "anchor_match": None,
+                "recrop_changes": recrop_changes, "crop_gate": gate_flag}
     viol = A.assert_no_text_split(r["notes"], profile)
     md = "\n".join(f"{n['marker']}: {n['text']}" for n in r["notes"])
     status = "STITCH_VIOLATION" if viol else "OK"

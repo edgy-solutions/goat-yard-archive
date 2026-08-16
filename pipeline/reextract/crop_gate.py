@@ -11,7 +11,9 @@ front-matter edge, but a silent-fabrication edge, and the guard is cheap.
 (deterministic-property-not-a-model), so CODE decides it, the model is never the last word on
 whether it 'read' something off blank paper. And it's FAIL-LOUD, not silent:
 
-  dark >= floor                -> 'ok'                  (trust the crop; the model read real ink)
+  dark >= floor AND notes>0    -> 'ok'                  (trust the crop; the model read real ink)
+  dark >= floor AND notes==0   -> 'miss_suspect'        (INVERSE error: crop HAS ink but model
+                                    returned nothing — real apparatus possibly MISSED; FLAG, review)
   dark <  floor AND notes>0    -> 'fabrication_suspect' (blank crop but model returned notes:
                                     DROP the notes, FLAG — do NOT emit hallucinated apparatus)
   dark <  floor AND notes==0   -> 'no_apparatus'        (blank crop, model agrees: correctly empty)
@@ -35,20 +37,26 @@ def crop_darkness(strip):
     return float((a < 128).mean())
 
 def check(strip, n_notes, floor=DEFAULT_FLOOR):
-    """(verdict, dark). verdict in {'ok','fabrication_suspect','no_apparatus'}. See module doc."""
+    """(verdict, dark). verdict in {'ok','miss_suspect','fabrication_suspect','no_apparatus'}. See doc."""
     dark = crop_darkness(strip)
+    has_notes = (n_notes or 0) > 0
     if dark >= floor:
-        return "ok", dark
-    return ("fabrication_suspect" if (n_notes or 0) > 0 else "no_apparatus"), dark
+        return ("ok" if has_notes else "miss_suspect"), dark
+    return ("fabrication_suspect" if has_notes else "no_apparatus"), dark
 
 def gate_notes(strip, notes, floor=DEFAULT_FLOOR):
     """Apply the gate to an extracted-notes list. Returns (kept_notes, status, flag_or_None).
-    On a fabrication_suspect the notes are DROPPED and a flag record is returned for the queue."""
+    On fabrication_suspect the notes are DROPPED (+flag); on miss_suspect the (empty) notes stay
+    empty but the page is FLAGGED (inverse error — real apparatus possibly missed)."""
     verdict, dark = check(strip, len(notes or []), floor)
     if verdict == "fabrication_suspect":
         return [], "FABRICATION_SUSPECT", {
             "reason": "blank crop, model returned notes — apparatus fabricated or presplit mis-cropped",
             "cropdark": round(dark, 4), "n_dropped": len(notes or [])}
+    if verdict == "miss_suspect":
+        return [], "MISS_SUSPECT", {
+            "reason": "crop has ink but model returned no notes — real apparatus possibly missed",
+            "cropdark": round(dark, 4)}
     if verdict == "no_apparatus":
         return [], "no_apparatus", None
     return notes, "ok", None
@@ -66,5 +74,6 @@ if __name__ == "__main__":
     print("blank+18notes ->", check(blank, 18), "(want fabrication_suspect)")
     print("blank+0notes  ->", check(blank, 0),  "(want no_apparatus)")
     print("inked+18notes ->", check(inked, 18), "(want ok)")
+    print("inked+0notes  ->", check(inked, 0),  "(want miss_suspect)")
     kept, st, flag = gate_notes(blank, [{"marker": f"[^{i}]"} for i in range(1, 19)])
     print("gate p86-like:", st, "| kept", len(kept), "| flag:", flag)

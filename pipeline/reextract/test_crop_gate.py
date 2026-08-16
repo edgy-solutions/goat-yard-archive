@@ -19,6 +19,14 @@ def test_blank_without_notes_is_no_apparatus():
 def test_inked_is_ok():
     assert G.check(_inked(0.2), 18)[0] == "ok"
 
+def test_inked_but_no_notes_is_miss_suspect():
+    # INVERSE error: crop has ink, model returned nothing -> real apparatus possibly missed
+    assert G.check(_inked(0.2), 0)[0] == "miss_suspect"
+
+def test_gate_notes_miss_flags_but_keeps_empty():
+    kept, st, flag = G.gate_notes(_inked(0.2), [])
+    assert kept == [] and st == "MISS_SUSPECT" and flag and "missed" in flag["reason"]
+
 def test_none_strip_treated_as_blank():
     assert G.check(None, 5)[0] == "fabrication_suspect"
     assert G.check(None, 0)[0] == "no_apparatus"
