@@ -70,10 +70,17 @@ def main():
             "dropped_furniture": res.get("dropped_furniture", []),
         }
         results.append(rec)
-        # save the presplit strip for the interface
+        # save the presplit strip for the interface; if presplit blanks (misdetected rule /
+        # anomalous layout, e.g. p86), fall back to the FULL PAGE so the reviewer never sees white
         import cv_footnote_presplit as ps
+        import numpy as np
+        from PIL import Image
         strip, _ = ps.presplit(str(img), upscale=2)
-        if strip is not None: strip.convert("L").save(out / f"strip_{page}.png")
+        blank = strip is None or (np.asarray(strip.convert("L")) < 128).mean() < 0.002
+        if blank:
+            strip = Image.open(img)  # full page — anomalous geometry, show everything
+            print(f"  p{page}: presplit strip blank -> full-page fallback", flush=True)
+        strip.convert("L").save(out / f"strip_{page}.png")
         print(f"p{page} [{rec['stratum']}]: {rec['status']} notes={rec['n_notes']} heb={heb} "
               f"flagged={len(rec['anchor']['unanchored'])} recrop={len(rec['recrop_changes'])}", flush=True)
     (out / "truthset_results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
