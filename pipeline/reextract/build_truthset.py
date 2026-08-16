@@ -41,12 +41,14 @@ def main():
     ap.add_argument("--profile", default=str(Path(__file__).parent / "book_profile.gill.yaml"))
     ap.add_argument("--host", default=os.getenv("OLLAMA_HOST", "192.168.1.179"))
     ap.add_argument("--out", default=str(Path(__file__).parent / "truthset_out"))
+    ap.add_argument("--strata-json", default="", help="override STRATA with a {stratum: [pages]} JSON file (leaves the canonical set untouched)")
     a = ap.parse_args()
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
     profile = A.load_profile(a.profile)
     out = Path(a.out); out.mkdir(exist_ok=True)
-    page2stratum = {p: s for s, ps in STRATA.items() for p in ps}
+    strata = json.loads(Path(a.strata_json).read_text(encoding="utf-8")) if a.strata_json else STRATA
+    page2stratum = {p: s for s, ps in strata.items() for p in ps}
     results = []
     for page in sorted(page2stratum):
         img = Path(a.img_dir) / f"page{page}_image1.png"

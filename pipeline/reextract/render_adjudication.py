@@ -10,6 +10,9 @@ from pathlib import Path
 
 HEBREW = re.compile(r"[֐-׿Ͱ-Ͽ܀-ݏ][֐-׿Ͱ-Ͽ܀-ݏְ-ׇ ]*")
 STRATUM_META = {
+    "collapse":           ("Model-collapse outliers", "Two-model run: one reader returned ~1 marker while the other read many (1-vs-N). One model whiffed the whole page — read the strip and decide whose count is real. p86 is ALSO a stitch violation."),
+    "stitch":             ("Stitch violations (all 25)", "The stitch guard fired (two-signal, whitelist-gated). measure_continuations found 0 REAL text-splits on vol1, so these are expected to be whitelist-adjacent furniture, not lost text — confirm the guard stayed correct. (Handoff said 15; the full run flags 25 — all loaded, none dropped.)"),
+    "acceptance":         ("Acceptance sample (Hebrew-oversampled)", "Balance stratum, oversampled for apparatus Hebrew — licenses 'the ordinary pages are fine too' and stresses the per-region recrop reading edge."),
     "ground_truth":       ("Ground truth", "Pixel-verified pages — the matcher and recrop must be exactly right here."),
     "whitelist_artifact": ("Whitelist artifacts", "The 6 split-OUT / 2 split-IN artifact classes — the stitch guard must stay silent (no false split)."),
     "collision":          ("Anchor collisions", "Pages the old layer mis-anchored (duplicate letters) — position-matching must dissolve them."),
