@@ -80,6 +80,11 @@ transcription:
   recrop_base_upscale: 2
   recrop_pad_frac: 0.04
   recrop_scale: 3
+  # CROP CONTENT GATE (crop_gate.py): a crop with ink-fraction below this floor cannot hold an
+  # apparatus, so notes returned over it are FABRICATION (p86: blank front-matter crop -> VLM
+  # confabulated 18 Genesis footnotes). Floor 0.01 separates p86 (0.000) from vol1's sparsest real
+  # note-bearing crop (~0.025). Corpus signature: 1/958 pages. Verdict is fail-loud (flag, not drop-silent).
+  crop_content_floor: 0.01
 
 # --- OUTPUT (the assembler owns this; a 2nd target = a 2nd assembler, passes unchanged) ---
 output:
