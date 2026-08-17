@@ -44,19 +44,19 @@ def _is_note_start(band, marker_w, gap_min, min_text):
     if (g - e) < gap_min: return False              # no indent gap -> not a marker+indent
     return col[g:].sum() >= min_text                # real text follows the gap
 
-def count_notes(strip, marker_w=32, gap_min=3, min_text=25, ink_thresh=110):
+def count_notes(strip, marker_w=32, gap_min=3, min_text=25, ink_thresh=110, upscale=1):
     """DETERMINISTIC footnote counter from the compositor's hanging indent. Returns
     (count, [y0 of each note-start], confident). count = number of note-start lines (marker-column
     lines) — the compositor encoded the count in the left edge; this reads it off, no model involved.
 
-    `confident` is False when the strip lacks the expected hanging-indent structure — no note-start
-    detected at all (full-width notes / p546 class / ambiguous geometry). Per Chris's honesty caveat:
-    FLAG the ambiguous strip (route it) rather than forcing a count. A count without confidence is a
-    reroute signal, not a number to trust. (Slight undercount where tight spacing merges a note with
-    its wrap is safe — it never collapses toward 1, the signal that matters.)"""
+    THRESHOLDS ARE CALIBRATED FOR upscale=1. Pass the strip's actual `upscale` and the pixel thresholds
+    scale with it (a 4x strip has 4x-wide markers and gaps) — otherwise the counter undercounts badly
+    on an upscaled strip. `confident` is False when the strip lacks hanging-indent structure (no note-
+    start detected — full-width / p546 / ambiguous): FLAG and route rather than force a count."""
+    mw, gm, mt = marker_w * upscale, gap_min * upscale, min_text * upscale
     a = np.asarray(strip.convert("L")) < ink_thresh
     lines = _text_lines(a)
-    starts = [y0 for (y0, y1) in lines if _is_note_start(a[y0:y1], marker_w, gap_min, min_text)]
+    starts = [y0 for (y0, y1) in lines if _is_note_start(a[y0:y1], mw, gm, mt)]
     confident = len(lines) >= 2 and len(starts) >= 1     # structure present -> trust the count
     return len(starts), starts, confident
 

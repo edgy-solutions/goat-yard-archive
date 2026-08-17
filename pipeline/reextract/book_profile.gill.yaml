@@ -35,6 +35,8 @@ layout:
   # Genesis opening ("FIRST BOOK OF MOSES", sig. B) WITH real apparatus (a Leviath. / b Introduct.) —
   # the stored layer MISSED p89's footnotes (its first defs are p90), so trusting stored would have
   # suppressed a genuine page. Provenance: pixels of p86(memoir)/p88(blank)/p89(Genesis)/p90 read 2026-08.
+  # DO NOT revert to 90: 90 was the STORED-LAYER INFERENCE (first stored def); 89 is the SCAN TRUTH
+  # (p89 carries apparatus the stored layer dropped). The scan wins over the stored layer, by rule.
   commentary_start_page: 89                # images 1..88 => no_apparatus without extraction
 
 # --- COMPOSITOR CONVENTIONS (the 1766 printer's grammar, read off the scans). Each observed rule
