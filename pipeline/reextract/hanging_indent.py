@@ -45,14 +45,20 @@ def _is_note_start(band, marker_w, gap_min, min_text):
     return col[g:].sum() >= min_text                # real text follows the gap
 
 def count_notes(strip, marker_w=32, gap_min=3, min_text=25, ink_thresh=110):
-    """Detect note-starts in a presplit footnote strip. Returns (count, [y0 of each note-start]).
-    A deterministic segmentation PRIOR / collapse trigger — not exact ground truth: pure-CV on 1766
-    print undercounts slightly where tight line-spacing merges a note with its wrap (that error is
-    safe — it never collapses toward 1, which is the signal that matters). The transcriber+assembler
-    still own final segmentation; this gates the many->one collapse and can seed note boundaries."""
+    """DETERMINISTIC footnote counter from the compositor's hanging indent. Returns
+    (count, [y0 of each note-start], confident). count = number of note-start lines (marker-column
+    lines) — the compositor encoded the count in the left edge; this reads it off, no model involved.
+
+    `confident` is False when the strip lacks the expected hanging-indent structure — no note-start
+    detected at all (full-width notes / p546 class / ambiguous geometry). Per Chris's honesty caveat:
+    FLAG the ambiguous strip (route it) rather than forcing a count. A count without confidence is a
+    reroute signal, not a number to trust. (Slight undercount where tight spacing merges a note with
+    its wrap is safe — it never collapses toward 1, the signal that matters.)"""
     a = np.asarray(strip.convert("L")) < ink_thresh
-    starts = [y0 for (y0, y1) in _text_lines(a) if _is_note_start(a[y0:y1], marker_w, gap_min, min_text)]
-    return len(starts), starts
+    lines = _text_lines(a)
+    starts = [y0 for (y0, y1) in lines if _is_note_start(a[y0:y1], marker_w, gap_min, min_text)]
+    confident = len(lines) >= 2 and len(starts) >= 1     # structure present -> trust the count
+    return len(starts), starts, confident
 
 def count_notes_for(strip, profile):
     """count_notes with thresholds read from the book profile (compositor_conventions), not hardcoded —
@@ -75,7 +81,7 @@ if __name__ == "__main__":
     tot_err = 0
     for pg, exp in EXPECT.items():
         strip, _ = ps.presplit(f"{IMG}/page{pg}_image1.png", upscale=1)
-        n, _ys = count_notes(strip)
+        n, _ys, _c = count_notes(strip)
         err = n - exp; tot_err += abs(err)
         print(f"{pg:>5} {exp:>7} {n:>7}  {err:>+4}")
     print(f"\ntotal abs error over 8 fixtures: {tot_err}")

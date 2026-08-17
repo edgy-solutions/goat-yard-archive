@@ -21,17 +21,19 @@ def _synthetic():
     return Image.fromarray(a)
 
 def test_synthetic_counts_markers_only():
-    n, ys = hi.count_notes(_synthetic())
+    n, ys, conf = hi.count_notes(_synthetic())
     assert n == 3, f"expected 3 note-starts, got {n} ({ys})"
+    assert conf is True                                    # clear hanging-indent structure
 
 def test_synthetic_deterministic():
     s = _synthetic()
     assert hi.count_notes(s)[0] == hi.count_notes(s)[0]
 
 def test_continuation_not_flagged():
-    # a single flowing line (no marker+gap) must not read as a note-start
+    # a single flowing line (no marker+gap) must not read as a note-start, and is NOT confident
     a = np.full((60, 400), 255, np.uint8); a[20:46, 12:380] = 0
-    assert hi.count_notes(Image.fromarray(a))[0] == 0
+    n, _, conf = hi.count_notes(Image.fromarray(a))
+    assert n == 0 and conf is False                        # no structure -> flag, don't force a count
 
 def test_fixtures_never_collapse_and_track_count():
     """The 8 many->one fixtures: detector must never collapse (>=3) and land within tolerance of the
@@ -45,7 +47,8 @@ def test_fixtures_never_collapse_and_track_count():
     EXPECT = {129: 13, 146: 13, 163: 18, 226: 20, 393: 8, 625: 3, 725: 9, 784: 7}
     for pg, exp in EXPECT.items():
         strip, _ = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
-        n, _ = hi.count_notes(strip)
+        n, _, conf = hi.count_notes(strip)
+        assert conf is True, f"p{pg}: not confident"                   # structure present on all fixtures
         assert n >= 3, f"p{pg}: collapsed ({n})"                       # the signal that matters
         tol = max(4, round(0.35 * exp))
         assert abs(n - exp) <= tol, f"p{pg}: {n} vs {exp} (tol {tol})"  # tracks the count

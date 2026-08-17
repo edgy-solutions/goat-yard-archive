@@ -41,6 +41,23 @@ def test_dropped_lemma_helper():
     dl = AL.dropped_lemma_notes(gemma, qwen)
     assert len(dl) == 1 and dl[0]["note"] == 0 and dl[0]["dropped"] == ["hebrew"]
 
+def test_rung0_adjudicates_disagreement():
+    # qwen collapsed to 1, gemma got 9, CV counted 9 -> CV adjudicates toward gemma (b)
+    r = AL.adjudicate_count(1, 9, 9, True)
+    assert r["verdict"] == "adjudicated" and r["winner"] == "b"
+
+def test_rung0_catches_correlated_collapse():
+    # BOTH models say 7, CV says 13 -> the hole dual-witness can't see
+    r = AL.adjudicate_count(7, 7, 13, True)
+    assert r["verdict"] == "correlated-collapse" and r["winner"] == "cv" and r["models"] == 7
+
+def test_rung0_agree_when_all_match():
+    assert AL.adjudicate_count(12, 13, 13, True)["verdict"] == "agree"
+
+def test_rung0_defers_when_cv_unsure():
+    # CV not confident (full-width/ambiguous) -> do not let it referee
+    assert AL.adjudicate_count(1, 9, 9, False)["verdict"] == "cv-unsure"
+
 def test_dropped_lemma_empty_on_count_mismatch():
     # rung-1 gate: no per-note comparison when counts differ
     assert AL.dropped_lemma_notes(["חום a", "b"], ["a"]) == []

@@ -72,6 +72,25 @@ def ladder(notes_a, notes_b, text_overlap_min=0.5):
     return {"rung": rung, "count": (len(a), len(b)),
             "script_diffs": [], "text_diffs": text_diffs, "agree": not text_diffs}
 
+def adjudicate_count(n_a, n_b, cv_count, cv_confident, tol=2):
+    """RUNG ZERO — the deterministic CV footnote count (hanging_indent) as an independent NON-MODEL
+    third witness at the count level. Model-vs-model count agreement can't catch CORRELATED collapse
+    (both models folding the same way); a witness that isn't a model can. Returns a verdict:
+      'agree'               both models match CV.
+      'adjudicated'         models DISAGREE; CV picks the closer ('winner': 'a'|'b').
+      'correlated-collapse' models AGREE with each other but BOTH diverge from CV — the hole dual-
+                            witness alone is blind to (e.g. both say 7, CV says 13). winner='cv'.
+      'cv-unsure'           CV not confident (full-width/ambiguous) -> fall back to model-vs-model.
+    Stochastic-never-authoritative: CV (deterministic) is the referee only when it is confident."""
+    if not cv_confident:
+        return {"verdict": "cv-unsure", "winner": None, "cv": cv_count}
+    da, db = abs(n_a - cv_count), abs(n_b - cv_count)
+    if da <= tol and db <= tol:
+        return {"verdict": "agree", "winner": None, "cv": cv_count}
+    if n_a == n_b:                                   # models corroborate each other but miss CV
+        return {"verdict": "correlated-collapse", "winner": "cv", "cv": cv_count, "models": n_a}
+    return {"verdict": "adjudicated", "winner": "a" if da < db else "b", "cv": cv_count}
+
 def dropped_lemma_notes(notes_a, notes_b):
     """The dropped-lemma signal specifically: aligned notes where one reading has a non-Latin script
     the other lacks. Empty if counts differ (rung-1 gate) or no script disagreement."""
