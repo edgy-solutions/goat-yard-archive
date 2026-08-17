@@ -38,6 +38,28 @@ The 1766 marker+gap+text convention encodes the note count in the left edge. `ha
 - **qwen3.8 fallback** on a measured collapse signature (8/8 segmentation, exact where others undershoot). Dispatch on the CV signature, never a page list — vol2 routes itself.
 - Residual disagreement → **blind-retry** on localized crops (independence preserved), converge→ship, diverge→escalation with the note's gloss; hold/fold only as escalation metadata, never a shipping gate.
 
+### 4. The dispute-resolution ladder (one artifact)
+
+Every rung is cheaper and more deterministic than the one above it; each rung's leftovers are the next rung's intake; the expensive minds — frontier and human — touch only the residue that genuinely requires judgment.
+
+| Rung | Mechanism | Cost | Nature |
+|---|---|---|---|
+| 0 | **CV count** (`hanging_indent`) | free | deterministic referee — the compositor's left-edge geometry |
+| 1 | **dual-witness agreement** (two local models, independent) | free | correlated-collapse caught by rung 0 |
+| 2 | **blind localized retry** (per-note crops, still local) | free | independence preserved; converge → ship |
+| 3 | **text-based frontier adjudication** (`adjudicate_candidates`) | ~$0.0045/span | judge, not witness; **gated on internal evidence**, **verdict-only output** |
+| 4 | **review queue** (human) | the scarce resource | only what nothing below could settle |
+
+The compositor's geometry sits at the top of this column, free forever.
+
+### Economics: judgment over text is cheap; perception at the frontier is where the tokens and the errors both live
+
+A vision escalation ships the crop (~1,500–2,500 input tokens) and spends frontier capacity on perception it is *measurably worse at* than the local 35b. The text adjudication ships ~300–500 tokens — two candidate spans, the gloss, the citation, the question — and, by schema rule, returns a **verdict, not a transcription**: `{chosen: A|B|neither, disputed_span_correction, rationale, confidence}`, ~50 output tokens, never re-emitting the note. Measured unit cost ≈ **$0.0045/span** (opus), an order below what vision escalation would run. The verdict-only rule is not only cheaper — it is *safer*: a model that never re-transcribes **cannot introduce a third reading with its own fresh errors** (the tie-breaker-becomes-third-witness failure). Output constrained to a choice-plus-minimal-correction structurally cannot fabricate at length.
+
+### The boundary that cannot be softened
+
+A text-only judge can adjudicate only what the *text* determines. The self-glossing class — where the Latin, the grammar, the citation force the answer (`illis` is plural → final `ם`) — is its jurisdiction, and the intake gate (`has_adjudicating_material`) enforces exactly that. A dispute with **no** internal evidence (two spellings of a proper name, no gloss, no parallel, no citation) hands a text judge nothing but its priors — and a frontier prior confidently picking between `עליה` and `עליהם` with no `illis` to reason from is the Gerson failure wearing a robe. Those spans get the **review queue**, or one more perception attempt at the **local** layer (per-note crop, different model) — never a frontier guess dressed as adjudication. This gate does not soften when the queue gets long.
+
 ### The two meta-conclusions (verbatim)
 
 **The Hebrew competence perimeter.** Of the six defects a fast human pass missed, five were Hebrew, and the worst — p379's fabrication — was one the reviewer *structurally could not catch*, because he does not read Hebrew. This is ADR-0015's scarce-resource rule discovering its own boundary: expert review is the scarce resource, and it has a **competence perimeter**. Hebrew fidelity therefore rides on the pixel-grounded validator fleet, not on human eyes, and the review process now routes around both the bandwidth limit and the competence limit.

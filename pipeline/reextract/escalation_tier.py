@@ -33,6 +33,55 @@ def has_adjudicating_material(note_text, hebrew_span):
     tail = note_text[i + len(hebrew_span):] if i >= 0 else note_text
     return bool(LATIN.search(tail))
 
+# --- A-vs-B verdict adjudication (the blind_retry divergence -> tier handoff) ---------------------
+# The tier is a JUDGE, not a witness: text-based (frontier out-reasons, doesn't out-see), and the
+# output is a VERDICT, never a re-transcription. Constraining output to choice+minimal-correction has
+# a SAFETY payoff beyond cost — a model that never re-transcribes cannot introduce a THIRD reading with
+# its own fresh errors (the tie-breaker-becomes-third-witness failure). And the gate is load-bearing:
+# a dispute with NO internal evidence (two name spellings, no gloss/parallel/citation) hands a text
+# judge nothing but its priors — a confident frontier pick there is the Gerson failure in a robe — so
+# it goes to the review queue or one more LOCAL perception attempt, NEVER a frontier guess as adjudication.
+_ADJUDICATE_PROMPT = (
+    "Two OCR readings of ONE span in a 1766 Hebrew-lexicographer commentary footnote DISAGREE. The "
+    "Hebrew is UNPOINTED 1766 spelling — reproduce what was PRINTED, do NOT normalize to the modern "
+    "form. Decide which reading is correct using ONLY the note's OWN evidence (its Latin gloss, the "
+    "grammar it forces, the citation) — never from prior knowledge of the word. If the note contains no "
+    "evidence that determines it, answer \"neither\".\nReading A: {a}\nReading B: {b}\nFootnote: {note}\n"
+    "Reply ONLY JSON: {{\"chosen\":\"A|B|neither\",\"disputed_span_correction\":\"<correct span, or empty>\","
+    "\"rationale\":\"one sentence citing the note's evidence\",\"confidence\":0.0}}\n"
+    "Do NOT re-transcribe the whole footnote — return only the choice and the corrected span.")
+
+def _call_adjudicator(a, b, note, key, model="anthropic/claude-opus-5"):
+    r = httpx.post("https://openrouter.ai/api/v1/chat/completions",
+                   headers={"Authorization": f"Bearer {key}"},
+                   json={"model": model, "temperature": 0,
+                         "messages": [{"role": "user", "content": _ADJUDICATE_PROMPT.format(a=a, b=b, note=note)}]},
+                   timeout=180).json()
+    if "error" in r: return {"error": str(r["error"])[:120]}
+    c = r["choices"][0]["message"]["content"]; c = c[c.find("{"):c.rfind("}") + 1]
+    d = json.loads(c); u = r.get("usage", {})
+    return {"chosen": d.get("chosen"), "disputed_span_correction": d.get("disputed_span_correction", ""),
+            "rationale": d.get("rationale", ""), "confidence": d.get("confidence"), "cost": u.get("cost", 0.0)}
+
+def adjudicate_candidates(cand_a, cand_b, note_text, key=None, hspan=None, caller=None):
+    """Verdict-ONLY adjudication of two divergent candidate span-readings. Returns a VERDICT dict
+    (never a re-transcription). GATED: with no adjudicating material -> review queue, no frontier call.
+    `caller(a,b,note,key)` is injected for testing; defaults to the real OpenRouter adjudicator."""
+    span = hspan or cand_a
+    if not has_adjudicating_material(note_text, span):
+        return {"chosen": "neither", "escalated": False, "auto_acceptable": False,
+                "provenance": "review-queue-no-adjudicating-material"}
+    v = (caller or _call_adjudicator)(cand_a, cand_b, note_text, key)
+    if v.get("error"):
+        return {"chosen": "neither", "escalated": True, "auto_acceptable": False, "error": v["error"]}
+    chosen = v.get("chosen")
+    correction = v.get("disputed_span_correction") or (
+        cand_a if chosen == "A" else cand_b if chosen == "B" else "")
+    conf = v.get("confidence") or 0.0
+    return {"chosen": chosen, "correction": correction, "rationale": v.get("rationale"),
+            "confidence": conf, "escalated": True, "provenance": "adjudicated-verdict-only",
+            "auto_acceptable": chosen in ("A", "B") and conf >= 0.8, "cost": v.get("cost", 0.0)}
+
 def _call(model, base, note, key):
     r = httpx.post("https://openrouter.ai/api/v1/chat/completions",
                    headers={"Authorization": f"Bearer {key}"},
