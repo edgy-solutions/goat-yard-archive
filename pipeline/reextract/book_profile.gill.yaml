@@ -37,6 +37,21 @@ layout:
   # suppressed a genuine page. Provenance: pixels of p86(memoir)/p88(blank)/p89(Genesis)/p90 read 2026-08.
   commentary_start_page: 89                # images 1..88 => no_apparatus without extraction
 
+# --- COMPOSITOR CONVENTIONS (the 1766 printer's grammar, read off the scans). Each observed rule
+#     lands here WITH a scan example so it accumulates as a DETECTOR INPUT, not conversation lore.
+#     Book-specific: Bunyan's printer will differ — the detector reads its expectations from here. ---
+compositor_conventions:
+  note_layout: hanging_indent      # each footnote = narrow superscript marker + whitespace GAP + text;
+                                   # continuation lines flow/outdent WITHOUT that marker+gap signature.
+  # hanging_indent.count_notes thresholds (px @ presplit native upscale=1), tuned on collapse fixtures:
+  note_start_detection:
+    marker_max_width: 32           # a wider first ink-run => running text, not a marker
+    gap_min: 3                     # whitespace after marker (top-block gaps ~24px, bottom-block ~5px)
+    min_text: 25                   # real text must follow the gap
+  # SCAN EXAMPLES (measured note-start geometry): p226=20 notes in two stacked blocks (marker cols
+  # ~22px and ~471px, split by an internal rule); p163=18; p393=8. Detector is a segmentation PRIOR /
+  # many->one collapse trigger — never collapses toward 1; transcriber+assembler own final boundaries.
+
 # --- PAGE FURNITURE to strip (NOT notes). Finalize against get_md.py / fixup_ocr.py /
 #     normalize_markdown.py before production — they paid for corner cases a 10-page sample misses.
 furniture:
