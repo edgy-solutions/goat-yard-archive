@@ -22,13 +22,35 @@ TRANSCRIBE_PROMPT = (
     "Hebrew script (right-to-left). Do NOT translate, summarize, renumber, or invent. Omit running "
     "page-headers and signature marks. Output only the footnote lines.")
 
+# few-shot layout note, appended when the profile declares the compositor's convention. This is the
+# BELT to the CV note-start detector's suspenders (hanging_indent.py): it discourages the two model
+# slips the fixtures showed — merging several marked footnotes into one line (segmentation-collapse),
+# and pulling a page-signature into a note (furniture leak). Validating its EFFECT on extraction is a
+# separate N>=6 gate (prompt-changes-shift-verbatim-boundary); this only assembles it from the profile.
+def build_transcribe_prompt(profile):
+    p = TRANSCRIBE_PROMPT
+    cc = profile.get("compositor_conventions") or {}
+    if cc.get("note_layout") == "hanging_indent":
+        p += ("\n\nLAYOUT — the notes are set as a HANGING INDENT: a raised marker at the left, then "
+              "the note text; a long note's continuation lines wrap WITHOUT a marker. EVERY marker "
+              "begins a NEW footnote — never merge two marked footnotes onto one line, and never split "
+              "one footnote across output lines. Example:\n"
+              "  a First note, long enough that it\n"
+              "    wraps to a line with no marker.\n"
+              "  b Second note.")
+    furn = profile.get("furniture") or {}
+    sig = furn.get("signature_example") or "VOL. I.—OLD TEST. 4 D"
+    p += (f"\n\nNEVER emit page furniture as a note: running headers, catchwords at the very bottom, "
+          f"or printer signature marks (e.g. \"{sig}\") are NOT footnotes.")
+    return p
+
 def _b64_png(img):
     buf = io.BytesIO(); img.save(buf, format="PNG"); return base64.b64encode(buf.getvalue()).decode()
 
 def transcribe(strip_img, profile, host):
     t = profile["transcription"]
     r = httpx.post(f"http://{host}:11434/api/generate",
-        json={"model": t["model"], "prompt": TRANSCRIBE_PROMPT, "images": [_b64_png(strip_img)],
+        json={"model": t["model"], "prompt": build_transcribe_prompt(profile), "images": [_b64_png(strip_img)],
               "think": t.get("think", False), "stream": False,
               "options": {"num_ctx": t.get("num_ctx", 16384), "temperature": 0}}, timeout=900)
     d = r.json()
