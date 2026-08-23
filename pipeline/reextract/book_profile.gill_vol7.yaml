@@ -1,0 +1,172 @@
+# book_profile — Gill's Exposition, volume 1 (Genesis…). FIRST BOOK OF A LIBRARY.
+# Every BOOK-SPECIFIC FACT lives here and is FORBIDDEN from pass code (deskew, rule-line,
+# column-split, transcribe, assemble). The passes are generic; this file makes them Gill-specific.
+# A second book = a second profile (+ a second assembler backend), passes unchanged.
+# See pipeline/scripts/HANDOFF_hebrew_census.md (library / profile-discipline).
+book:
+  id: gill_vol7  # MEASUREMENT profile — vol7 (NT); markers differ (digit/symbol not a-z), front matter shorter
+  title: "Gill's Exposition of the Old and New Testament — Vol. 1"
+  edition_year: 1766
+  testament: OldTestament          # vol7 = NewTestament (its own profile)
+
+# --- LAYOUT (verified by the CV-presplit probe; see PROBE_footnote_presplit.md) ---
+layout:
+  columns: 2
+  center_vertical_rule: true       # gutter/rule splits page into L/R columns
+  # within EACH column a (often SHORT, partial-width) horizontal rule separates body from its
+  # own footnotes; footnote strip = below that rule. reading order = left-strip then right-strip.
+  per_column_body_footnote_rule: true
+  footnote_marker: lowercase_letter        # a, b, c … (NOT the canonical output marker)
+  marker_scope: per_column                 # letters RESTART per column/paragraph, not per page
+  marker_skips: [j]                        # 1766 convention: j skipped in the run
+  uv_interchange: true                     # u/v treated as interchangeable in the run
+  # FOSSIL (FOSSIL_SCARS #A): BODY anchor glyphs are a zoo, NOT just [a-z] — the anchor-matcher
+  # must recognize all of these as in-text references (superscript letters/digits + symbols):
+  body_anchor_glyphs: ["^a^", "ᵃ", "*", "†", "‡", "°", "δ", "<sup>", "[^b]", "¹²³⁴⁵⁶⁷⁸⁹⁰"]
+  ibid_merge: true                         # FOSSIL #B: ib/ibid/idem/id refs may merge -> count tolerance
+  # cross-page: only the LETTER SEQUENCE carries over (sequence-continuation); note TEXTS finish
+  # on their page. Measured over 871 pages -> see below.
+  cross_page_text_splits: none_observed    # measure_continuations.py: 0 real / 871 pages
+  cross_page_letter_scope: true            # a carried note belongs to prev page's anchor scope
+  # commentary_start_page: OMITTED for vol7 measurement (front-matter length not yet scan-verified)
+
+# --- COMPOSITOR CONVENTIONS (the 1766 printer's grammar, read off the scans). Each observed rule
+#     lands here WITH a scan example so it accumulates as a DETECTOR INPUT, not conversation lore.
+#     Book-specific: Bunyan's printer will differ — the detector reads its expectations from here. ---
+compositor_conventions:
+  note_layout: hanging_indent      # each footnote = narrow superscript marker + whitespace GAP + text;
+                                   # continuation lines flow/outdent WITHOUT that marker+gap signature.
+  # hanging_indent.count_notes thresholds (px @ presplit native upscale=1), tuned on collapse fixtures:
+  note_start_detection:
+    marker_max_width: 32           # a wider first ink-run => running text, not a marker
+    gap_min: 3                     # whitespace after marker (top-block gaps ~24px, bottom-block ~5px)
+    min_text: 25                   # real text must follow the gap
+  # SCAN EXAMPLES (measured note-start geometry): p226=20 notes in two stacked blocks (marker cols
+  # ~22px and ~471px, split by an internal rule); p163=18; p393=8. Detector is a segmentation PRIOR /
+  # many->one collapse trigger — never collapses toward 1; transcriber+assembler own final boundaries.
+
+# --- PAGE FURNITURE to strip (NOT notes). Finalize against get_md.py / fixup_ocr.py /
+#     normalize_markdown.py before production — they paid for corner cases a 10-page sample misses.
+furniture:
+  header_region_top_fraction: 0.03         # FOSSIL #4: header words live in the top ~3% of the page
+  chapter_heading_only_at_start: true      # FOSSIL #5: a "# Chapter N" after body content is an artifact
+  running_head_regexes:
+    - '^\s*VOL\.\s*[IVXLC]+\.\s*[—-]\s*(OLD|NEW)\s+TEST\.?\s*$'
+    - '^\s*(GENESIS|EXODUS|LEVITICUS|NUMBERS|DEUTERONOMY)\s*$'
+    - '^\s*CH(AP)?\.\s*[IVXLCDM]+\.?\s*V\.\s*[0-9,\-—.]+\s*$'   # FOSSIL #6: roman may exceed X (Gen 50 = L)
+  signature_mark_regex: '^\s*[0-9]?\s*[A-Za-z]\s?[a-z]?\s*[0-9]?\s*$'   # "3 D", "Y y", "5 D 2", "3 Q 2"
+  page_number_regex: '^\s*[0-9]{1,4}\s*$'
+
+# --- STITCH-ASSERTION WHITELIST: trailing-note endings that look like split-OUT but are NOT
+#     (the 6 artifacts classified in measure_continuations.py — this is the assertion's citation) ---
+stitch_whitelist:
+  hebrew_final: true               # note ends in a Hebrew word (no Latin period) — complete
+  citation_final_no_period: true   # "Nat. Hist. l. 36. c. 5" / authority list — OCR dropped '.'
+  signature_mark_final: true       # "…Aben dana. 5 D 2" — signature swept in
+  latin_gloss_lowercase_open: true # split-IN lookalike: "contracta, Junius & Tremellius…"
+
+# --- REFERENCE TEXTS (bridge machinery; wide window, NOT one verse) ---
+references:
+  bible_version: KJV
+  hebrew_source: WLC               # Westminster Leningrad Codex / BHS-class
+  window: wide                     # NOT the single commented verse (old pipeline's error)
+
+# --- SCRIPTS expected in the apparatus (drives transcription + validation) ---
+# FOSSIL #3: repair_non_latin_footnotes covered Hebrew+Greek+Syriac -> syriac IS present.
+scripts: [latin, english, hebrew, greek, arabic, syriac]
+
+# --- TRANSCRIPTION (model choice is book-influenced: needs Hebrew-capable local VL; host is infra) ---
+transcription:
+  model: "qwen3.6:35b"             # probe: newest local VL >= frontier on Gill's Hebrew apparatus
+  think: false                     # transcription needs no reasoning; runaway thinking blows ctx
+  output: note_lines               # one footnote per line (assembler parses lines); structured-JSON is a hardening option
+  num_ctx: 16384
+  apparatus_upscale: 4             # full-strip transcription (structure); does NOT close the Hebrew alone
+  # per-region non-Latin RE-CROP — DISABLED (truth-set adjudication, 2026-08-09). It was CONTEXT
+  # AMPUTATION: a naked hi-res band with no surroundings, so the model's PRIOR filled the vacuum —
+  # added nikud not in the (unpointed) source (וכי→וְכִי, אל לבו→אֵל לְבֹו) and on p336 hallucinated a
+  # different phrase (הקדשה→הַמְּקוֹמוֹת שֶׁלָּהּ). Net-negative: it DOWNGRADED 336/692/150 (base was
+  # correct) to win only 473. Resolution helps when pixels are MISSING; it hurts when the model fills
+  # the extra clarity with expectations. The base pass (full context, moderate res) is the Hebrew floor.
+  recrop_enabled: true    # stage-4 v2: combined-context (full strip + region) + nikud-reject GATE
+  # WHEN IT RETURNS (stage-4 redesign): full note-strip image + scaled section TOGETHER (context
+  # restored), and GATED — a recrop result may ONLY replace base when it REDUCES toward the printed
+  # consonantal form (drops a spurious char / recovers a final letter), NEVER when it adds marks.
+  # Regression fixtures: 336/692/150 must stop corrupting, 473 must keep its win.
+  recrop_base_upscale: 2
+  recrop_pad_frac: 0.04
+  recrop_scale: 3
+  # CROP CONTENT GATE (crop_gate.py): a crop with ink-fraction below this floor cannot hold an
+  # apparatus, so notes returned over it are FABRICATION (p86: blank front-matter crop -> VLM
+  # confabulated 18 Genesis footnotes). Floor 0.01 separates p86 (0.000) from vol1's sparsest real
+  # note-bearing crop (~0.025). Corpus signature: 1/958 pages. Verdict is fail-loud (flag, not drop-silent).
+  crop_content_floor: 0.01
+
+# --- OUTPUT (the assembler owns this; a 2nd target = a 2nd assembler, passes unchanged) ---
+output:
+  target: sid_chunked_markdown
+  canonical_marker: "[^N]"         # assembler assigns by POSITION; model's letters discarded
+
+# --- AUTHORITY LIST (stage-3 safety net): Gill's citation universe. A transcribed name that
+#     FUZZY-matches one of these but isn't exact is a candidate misread (Gerson->Gersom) -> flag to
+#     review queue. Book-specific fact; SEED list (grow from the corpus's CitedAuthority entities).
+authorities:
+  - Pagninus
+  - Vatablus
+  - Montanus
+  - Drusius
+  - Junius
+  - Tremellius
+  - Piscator
+  - Jarchi
+  - Kimchi
+  - Maimonides
+  - Bartenora
+  - Gersom
+  - Ainsworth
+  - Bochart
+  - Cocceius
+  - Munster
+  - Schmidt
+  - Buxtorf
+  - Mercer
+  - Fagius
+  - Cartwright
+  - Abarbinel
+  - Onkelos
+  - Jonathan
+  - Josephus
+  - Herodotus
+  - Strabo
+  - Suidas
+  - Eusebius
+  - Hottinger
+  - Scheuchzer
+
+# --- ENTITY LAYER (profile territory per grounding-register: enum = indexing taxonomy; Bunyan
+#     would carry AllegoricalCharacter, Defoe would drop TypeOrSymbol) ---
+entities:
+  category_enum:
+    - Doctrine
+    - Heresy
+    - TypeOrSymbol
+    - BiblicalFigure
+    - HistoricalFigure
+    - CitedAuthority
+    - PeopleGroup
+    - Location
+    - TimePeriod
+    - OriginalWord
+    - ManuscriptOrVersion
+    - Unknown
+  # category DEFINITIONS grounded in the corpus's OWN language (not a modern systematic):
+  typology_grounding_cues:         # a TypeOrSymbol only where Gill signals it explicitly
+    - "a type of"
+    - "typical of"
+    - "a figure of"
+    - "an emblem of"
+    - "a shadow of"
+    - "represents"
+    - "signifies"
+    - "prefigured"
+    - "pointed to"

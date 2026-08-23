@@ -10,6 +10,7 @@ from pathlib import Path
 
 HEBREW = re.compile(r"[֐-׿Ͱ-Ͽ܀-ݏ][֐-׿Ͱ-Ͽ܀-ݏְ-ׇ ]*")
 STRATUM_META = {
+    "vol7_sample":        ("Vol7 (NT) apparatus — measurement glance", "vol7's mostly-GREEK apparatus run through the vol1-tuned pipeline. Ingests on MEASUREMENT, not architecture-similarity: markers differ (digit/symbol), front matter is shorter, script is Greek. Read the strips — where does it hold, where does vol7 need its own profile facts?"),
     "collapse":           ("Model-collapse outliers", "Two-model run: one reader returned ~1 marker while the other read many (1-vs-N). One model whiffed the whole page — read the strip and decide whose count is real. p86 is ALSO a stitch violation."),
     "stitch":             ("Stitch violations (all 25)", "The stitch guard fired (two-signal, whitelist-gated). measure_continuations found 0 REAL text-splits on vol1, so these are expected to be whitelist-adjacent furniture, not lost text — confirm the guard stayed correct. (Handoff said 15; the full run flags 25 — all loaded, none dropped.)"),
     "acceptance":         ("Acceptance sample (Hebrew-oversampled)", "Balance stratum, oversampled for apparatus Hebrew — licenses 'the ordinary pages are fine too' and stresses the per-region recrop reading edge."),
