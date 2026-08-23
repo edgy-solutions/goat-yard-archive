@@ -12,6 +12,7 @@ import copy, re
 import httpx
 import hanging_indent as hi
 import blind_retry as BR
+import crop_quality as CQ
 import assembler as A
 from extract_apparatus import transcribe, _b64_png
 
@@ -35,16 +36,25 @@ def per_note_read(strip, host, profile, model, reader=None, upscale=1):
     `upscale` = the strip's presplit scale (thresholds scale with it — pass apparatus_upscale in prod)."""
     p = copy.deepcopy(profile); p["transcription"]["model"] = model; p["transcription"]["recrop_enabled"] = False
     count, starts, conf = hi.count_notes(strip, upscale=upscale)
-    if not conf or count < 2:
+    # GUARD 1 (positions): a layout-invalid position set (starts < one line-height apart) is unreliable
+    # -> whole-strip fallback (strip is the floor). Free, no model call.
+    lh = CQ.line_height(strip)
+    if not conf or count < 2 or not CQ.positions_valid(starts, lh):
         resp, _ = transcribe(strip, p, host)
         return A.canonicalize_page(resp.splitlines(), p)["notes"], "whole-strip"
     rd = reader or (lambda crop: _transcribe_one(crop, p, host))
     notes = []
     for k in range(count):
-        text = re.sub(r"\s+", " ", rd(BR.crop_note(strip, starts, k))).strip()
-        if text:
-            notes.append({"marker": f"[^{k + 1}]", "text": text})
-    return notes, "per-note"
+        crop = BR.crop_note(strip, starts, k)
+        # GUARD 2 (crop content): a starved sliver is NOT sent to the model (gate, not filter — it would
+        # confabulate, p219). Flag it text-empty; reconcile() takes the strip-floor reading for that note.
+        if not CQ.crop_has_line(crop):
+            notes.append({"marker": f"[^{k + 1}]", "text": "", "starved": True}); continue
+        text = re.sub(r"\s+", " ", rd(crop)).strip()
+        notes.append({"marker": f"[^{k + 1}]", "text": text} if text else
+                     {"marker": f"[^{k + 1}]", "text": "", "starved": True})
+    mode = "per-note-guarded" if any(n.get("starved") for n in notes) else "per-note"
+    return notes, mode
 
 if __name__ == "__main__":
     import sys

@@ -34,11 +34,14 @@ def test_per_note_markers_are_canonical_sequence():
     notes, _ = PN.per_note_read(_confident_strip(), "x", MINI, "gemma4:31b", reader=lambda c: "t")
     assert [n["marker"] for n in notes] == ["[^1]", "[^2]", "[^3]"]
 
-def test_empty_crops_dropped():
-    # a reader that returns "" for a crop -> that note is dropped (no phantom empty notes)
+def test_empty_crop_flagged_starved_for_strip_floor():
+    # a reader that returns "" -> that note is FLAGGED starved (kept, index-aligned with strip), NOT
+    # dropped — reconcile() takes the strip-floor reading for it. (Guard change: never lose the slot.)
     seq = iter(["note a", "", "note c"])
-    notes, _ = PN.per_note_read(_confident_strip(), "x", MINI, "gemma4:31b", reader=lambda c: next(seq))
-    assert len(notes) == 2 and all(n["text"] for n in notes)
+    notes, mode = PN.per_note_read(_confident_strip(), "x", MINI, "gemma4:31b", reader=lambda c: next(seq))
+    assert len(notes) == 3                                        # slot preserved for reconcile alignment
+    assert notes[1]["starved"] is True and notes[1]["text"] == ""
+    assert mode == "per-note-guarded"
 
 def test_whitespace_normalized():
     notes, _ = PN.per_note_read(_confident_strip(), "x", MINI, "gemma4:31b",
