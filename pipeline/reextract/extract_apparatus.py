@@ -74,6 +74,14 @@ def extract_page(image_path, profile, host, body_md=None):
         return {"page": page, "status": "no_apparatus", "notes": [], "info": info}
     resp, done = transcribe(strip, profile, host)
     r = A.canonicalize_page(resp.splitlines(), profile)
+    # REFUSAL-HONOR (3rd sibling of the "nothing here" law): the model's own "no footnotes here" is a
+    # no_apparatus SIGNAL, not note content — else its honesty ships as a fabricated note (p4).
+    import refusal_guard
+    is_ref, phrase = refusal_guard.check_notes(r["notes"])
+    if is_ref:
+        return {"page": page, "status": "no_apparatus", "notes": [], "n_notes": 0,
+                "reason": "model-refusal", "refusal_phrase": phrase, "done_reason": done,
+                "presplit_info": info}
     recrop_changes = []
     if profile["transcription"].get("recrop_enabled"):   # DISABLED: net-negative (context amputation)
         import hebrew_recrop as hr
