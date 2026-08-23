@@ -681,6 +681,20 @@ def daily_rag_diagnostic(context: AssetExecutionContext):
         {"type": "divider"}
     ]
 
+    # Corpus fingerprint gate (read-only): prod≡test in-sync + content hash + ingestion SHA. Wrapped so
+    # a fingerprint hiccup can never break the daily audit; surfaces DRIFT loudly if the two ever diverge.
+    try:
+        from backend import fingerprint_rest as _fr
+        _health = _fr.corpus_health(ingestion_sha=os.getenv("INGESTION_SHA"))
+        slack_blocks.append(_fr.slack_block(_health))
+        slack_blocks.append({"type": "divider"})
+        context.log.info(f"corpus fingerprint: identical={_health['identical']} "
+                         f"sha={(_health['prod']['content_sha'] or '')[:12]}")
+    except Exception as _e:
+        slack_blocks.append({"type": "section", "text": {"type": "mrkdwn",
+                             "content": f"⚠️ *Corpus fingerprint check failed:* `{str(_e)[:140]}`"}})
+        slack_blocks.append({"type": "divider"})
+
     for item in reports_data:
         slack_blocks.append({
             "type": "section",

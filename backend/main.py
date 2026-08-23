@@ -1028,6 +1028,10 @@ async def search(request: Request, req: SearchRequest):
                                     "volume_context": "all",
                                     "baml_expanded_query": search_text,
                                     "baml_mapped_entities": mapped_entities,
+                                    # corpus fingerprint: which corpus version served this trace. The
+                                    # ingestion SHA is the cheap per-request marker; the full content hash
+                                    # + prod/test in-sync check ride the daily Slack report (fingerprint_rest).
+                                    "corpus_ingestion_sha": os.getenv("INGESTION_SHA", "unstamped"),
                                 },
                                 tags=[env_tag, "v7_launch"],
                             )
