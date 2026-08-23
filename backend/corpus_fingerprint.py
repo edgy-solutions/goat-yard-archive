@@ -13,39 +13,76 @@ never blind. This module gives you the diff to make that decision on.
 """
 import os, json, hashlib
 
-CHUNK_FIELDS = ("content", "verse_ref", "page_number", "volume", "footnotes", "lemma")  # stable identity fields
+CHUNK_FIELDS = ("content", "verse_ref", "page_number", "volume", "footnotes", "lemma")  # full identity fields
+# BODY = the load-bearing prose the standoff decision keeps BYTE-IDENTICAL (SIDs, chunk boundaries,
+# verifier difflib targets, eval assertions all hang off these exact bytes). EXCLUDES footnotes/lemma:
+# the apparatus/standoff layer legitimately updates those, the body must never change.
+BODY_FIELDS = ("content", "verse_ref", "page_number", "volume")
 COLLECTIONS = ("CommentaryChunk", "TheologicalEntity")
 
+def _body_digest(props):
+    slim = {k: props.get(k) for k in BODY_FIELDS if k in props}
+    return hashlib.sha256(json.dumps(slim, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+
+def body_content_sha(iter_objects):
+    """Order-independent hash over the BODY prose only (content + identity, NOT footnotes). The number the
+    body-untouched assertion watches: it must be byte-stable across any apparatus/standoff ingestion."""
+    return content_hash([_body_digest(_split(o)[0]) for o in iter_objects])
+
+UNKNOWN_SHA = "unknown-pre-instrumentation"   # explicit sentinel: corpus predates ingestion-SHA stamping
+
 def _obj_digest(props):
-    """Stable per-object digest over identity fields (JSON-canonical, sorted keys)."""
+    """Stable per-object TEXT digest over identity fields (JSON-canonical, sorted keys)."""
     slim = {k: props.get(k) for k in CHUNK_FIELDS if k in props}
     return hashlib.sha256(json.dumps(slim, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
+def _vec_digest(vector, precision=6):
+    """Stable per-object VECTOR digest — the embedding rounded to `precision` decimals (tolerates float
+    noise while flipping on any real re-embed). None if the object carries no vector."""
+    if not vector:
+        return None
+    return hashlib.sha256(json.dumps([round(float(x), precision) for x in vector]).encode()).hexdigest()
+
 def content_hash(object_digests):
-    """Order-INDEPENDENT corpus content hash: XOR-fold of per-object digests, then hash. Two corpora with
-    the same objects in any ingestion order produce the same hash; a single changed/added/dropped object
-    flips it. (XOR-fold is commutative, so no sort needed over millions of rows.)"""
+    """Order-INDEPENDENT corpus hash: XOR-fold of per-object digests, then hash. Two corpora with the same
+    objects in any ingestion order produce the same hash; a single changed/added/dropped object flips it.
+    (XOR-fold is commutative, so no sort needed over millions of rows.)"""
     acc = 0
     for d in object_digests:
         acc ^= int(d, 16)
     return hashlib.sha256(hex(acc).encode()).hexdigest()
 
-def fingerprint(iter_objects, counts, ingestion_sha=None):
-    """Build a fingerprint from an iterator of object property-dicts + per-collection counts. READ-ONLY.
-    `iter_objects` yields CommentaryChunk property dicts; `counts` is {collection: n}."""
-    digests = [_obj_digest(p) for p in iter_objects]
+def _split(item):
+    """Accept either a (props, vector) tuple or a bare props dict (vector under '_vector' or absent)."""
+    if isinstance(item, tuple):
+        return item[0], item[1]
+    return item, (item.get("_vector") if isinstance(item, dict) else None)
+
+def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
+    """Fingerprint from an iterator of CommentaryChunk objects + per-collection counts. READ-ONLY.
+    Each item is a (props, vector) tuple or a props dict. Hashes TEXT identity AND VECTOR identity
+    separately (text-identity was proven; vector-identity was assumed — this closes it)."""
+    text_digests, vec_digests = [], []
+    for item in iter_objects:
+        props, vector = _split(item)
+        text_digests.append(_obj_digest(props))
+        vd = _vec_digest(vector)
+        if vd is not None:
+            vec_digests.append(vd)
     return {
         "counts": dict(counts),
         "chunk_count": counts.get("CommentaryChunk", 0),
-        "content_sha256": content_hash(digests),
+        "content_sha256": content_hash(text_digests),
+        "vector_sha256": content_hash(vec_digests) if vec_digests else None,
+        "n_hashed": len(text_digests),
+        "n_vectors_hashed": len(vec_digests),
         "ingestion_sha": ingestion_sha,
-        "n_hashed": len(digests),
     }
 
 def compare(fp_a, fp_b):
-    """READ-ONLY. Returns the diff between two fingerprints + whether they are identical."""
+    """READ-ONLY. Diff between two fingerprints + whether they are identical (text AND vector AND SHA)."""
     diffs = {}
-    for k in ("counts", "content_sha256", "ingestion_sha"):
+    for k in ("counts", "content_sha256", "vector_sha256", "ingestion_sha"):
         if fp_a.get(k) != fp_b.get(k):
             diffs[k] = {"a": fp_a.get(k), "b": fp_b.get(k)}
     return {"identical": not diffs, "diffs": diffs}

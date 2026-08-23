@@ -426,9 +426,37 @@ def verify_db_ingestion_global(context: AssetExecutionContext):
     Hits the local Weaviate DB and asserts that chunks aren't lingering with unresolved footnotes or format issues.
     """
     cmd = ["python", os.path.join(SCRIPTS_DIR, "verify_ingestion_test.py")]
-    
+
     # Weaviate testing script runs fast
     run_cli_script(context, cmd)
+
+
+@asset(deps=[AssetDep("ingest", partition_mapping=AllPartitionMapping())])
+def assert_body_untouched(context: AssetExecutionContext):
+    """
+    Scope: Global — the STANDOFF body-untouched decision ENFORCED IN CODE (fail-loud, hard).
+    The body PROSE (content + verse_ref + volume + page_number — NOT footnotes) must be BYTE-IDENTICAL
+    post-ingest: SIDs, chunk boundaries, verifier difflib targets, and every eval assertion hang off
+    these exact bytes. The apparatus/standoff layer may ADD annotations; it must NEVER write the body.
+    Any drift from the pinned baseline RAISES and fails the run — anything that wrote where nothing
+    should is caught here. (Baseline is updated DELIBERATELY only when the body legitimately changes —
+    e.g. a new volume — never during an apparatus/standoff ingestion.)
+    """
+    from backend import fingerprint_rest as _fr
+    from backend import corpus_fingerprint as _cf
+    host = os.getenv("WEAVIATE_PROD_HOST", "weaviate.gya-backend")
+    baseline = os.getenv("BODY_BASELINE_SHA",
+                         "d6891bb76c38a39a62bc38412820dd9f97c44ca121fe3074b5eda64ef2358d1b")
+    body_sha = _cf.body_content_sha(_fr.stream_chunks(host, include_vector=False))
+    context.log.info(f"body content_sha = {body_sha} (baseline {baseline})")
+    if body_sha != baseline:
+        raise Exception(
+            f"BODY-UNTOUCHED VIOLATED: body content_sha {body_sha} != baseline {baseline}. Something "
+            f"wrote to the body prose during ingestion — the standoff byte-identical invariant is broken. "
+            f"If this body change is INTENTIONAL (e.g. a new volume), update BODY_BASELINE_SHA deliberately."
+        )
+    return MaterializeResult(metadata={"body_untouched": "✅ byte-identical",
+                                       "body_content_sha": body_sha[:16], "baseline": baseline[:16]})
 
 
 @asset(deps=[AssetDep("get_md", partition_mapping=AllPartitionMapping())])

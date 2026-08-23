@@ -4,17 +4,37 @@ hash. No writes. Usage: python fingerprint_rest.py <name> <ip>"""
 import sys, json, httpx
 import corpus_fingerprint as CF
 
-def stream_chunks(ip):
+def stream_chunks(ip, include_vector=True, gentle=0.0):
+    """Cursor-page CommentaryChunk objects, yielding (props, vector) tuples. include=vector fetches the
+    embedding so the fingerprint can hash vector-identity too (READ-ONLY). Page size is small for
+    4096-dim vectors; `gentle` adds an inter-page sleep to avoid loading a PRODUCTION instance serving
+    live traffic (test is idle; prod is not)."""
+    import time as _t
     after = None
-    props = ",".join(CF.CHUNK_FIELDS)
+    inc = "&include=vector" if include_vector else ""
+    limit = 20 if include_vector else 100
     while True:
-        url = f"http://{ip}/v1/objects?class=CommentaryChunk&limit=100"
+        url = f"http://{ip}/v1/objects?class=CommentaryChunk&limit={limit}{inc}"
         if after: url += f"&after={after}"
-        r = httpx.get(url, timeout=30).json()
+        r = None
+        for attempt in range(5):                     # transient truncation / empty body under load -> backoff
+            try:
+                resp = httpx.get(url, timeout=120)
+                if not resp.text.strip(): raise ValueError("empty body")
+                r = resp.json(); break
+            except Exception:
+                if attempt == 4: raise
+                _t.sleep(0.5 * (attempt + 1))
         objs = r.get("objects", [])
         if not objs: break
+        if gentle: _t.sleep(gentle)
         for o in objs:
-            yield o.get("properties", {})
+            vec = o.get("vector")
+            if vec is None and o.get("vectors"):        # named-vector schema (newer engines)
+                vv = o["vectors"]; vec = vv.get("default") or next(iter(vv.values()), None)
+            if isinstance(vec, dict):
+                vec = vec.get("default") or next(iter(vec.values()), None)
+            yield o.get("properties", {}), vec
         after = objs[-1]["id"]
 
 def counts(ip):

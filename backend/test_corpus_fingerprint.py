@@ -37,6 +37,36 @@ def test_compare_detects_ingestion_sha_drift():
     r = CF.compare(_fp(CHUNKS_A, sha="v1"), _fp(CHUNKS_A, sha="v2"))
     assert r["identical"] is False and r["diffs"]["ingestion_sha"] == {"a": "v1", "b": "v2"}
 
+def test_ingestion_sha_defaults_to_explicit_sentinel():
+    # blank is not left blank — the corpus that predates stamping says so explicitly
+    fp = CF.fingerprint(iter(CHUNKS_A), {"CommentaryChunk": 2})
+    assert fp["ingestion_sha"] == "unknown-pre-instrumentation"
+
+def test_vector_hash_present_and_change_sensitive():
+    a = [(CHUNKS_A[0], [0.1, 0.2, 0.3]), (CHUNKS_A[1], [0.4, 0.5, 0.6])]
+    b = [(CHUNKS_A[0], [0.1, 0.2, 0.3]), (CHUNKS_A[1], [0.4, 0.5, 0.999])]  # one vector value changed
+    fpa = CF.fingerprint(iter(a), {"CommentaryChunk": 2})
+    fpb = CF.fingerprint(iter(b), {"CommentaryChunk": 2})
+    assert fpa["vector_sha256"] and fpa["n_vectors_hashed"] == 2
+    assert fpa["vector_sha256"] != fpb["vector_sha256"]                    # vector-identity now checked
+
+def test_vector_identity_with_same_text_differs():
+    # SAME text, DIFFERENT vectors -> content_sha matches but vector_sha differs (the gap we're closing)
+    a = [(CHUNKS_A[0], [0.1, 0.2]), (CHUNKS_A[1], [0.3, 0.4])]
+    b = [(CHUNKS_A[0], [0.9, 0.9]), (CHUNKS_A[1], [0.3, 0.4])]
+    fpa, fpb = CF.fingerprint(iter(a), {}), CF.fingerprint(iter(b), {})
+    assert fpa["content_sha256"] == fpb["content_sha256"]                  # text identical
+    assert fpa["vector_sha256"] != fpb["vector_sha256"]                    # vectors differ -> caught now
+    assert CF.compare(fpa, fpb)["identical"] is False                     # compare flags vector drift
+
+def test_vector_hash_none_when_no_vectors():
+    fp = CF.fingerprint(iter(CHUNKS_A), {"CommentaryChunk": 2})            # bare dicts, no vectors
+    assert fp["vector_sha256"] is None and fp["n_vectors_hashed"] == 0
+
+def test_vector_rounding_tolerates_float_noise():
+    a = [(CHUNKS_A[0], [0.1234567])]; b = [(CHUNKS_A[0], [0.12345671])]     # differ past 6 decimals
+    assert CF.fingerprint(iter(a), {})["vector_sha256"] == CF.fingerprint(iter(b), {})["vector_sha256"]
+
 def test_reconcile_plan_none_when_identical():
     p = CF.reconcile_plan(_fp(CHUNKS_A), _fp(CHUNKS_A))
     assert p["action"] == "none" and p["identical"] is True
