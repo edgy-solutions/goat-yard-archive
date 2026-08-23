@@ -40,10 +40,14 @@ def main():
             "recrop_changes": res.get("recrop_changes", []), "dropped_furniture": res.get("dropped_furniture", []),
         })
         strip, _ = ps.presplit(img, upscale=2)
-        if strip is not None:
-            s = strip.convert("L")
-            if s.size[0] > 1600: s = s.resize((1600, int(s.size[1]*1600/s.size[0])))
-            s.save(out / f"strip_{pg}.png")
+        import numpy as np
+        from PIL import Image
+        blank = strip is None or (np.asarray(strip.convert("L")) < 128).mean() < 0.002
+        if blank:                                  # no apparatus -> show the full page, not a blank box
+            strip = Image.open(img)
+        s = strip.convert("L")
+        if s.size[0] > 1600: s = s.resize((1600, int(s.size[1]*1600/s.size[0])))
+        s.save(out / f"strip_{pg}.png")
         print(f"p{pg}: {res['status']} notes={res.get('n_notes')} greek={grk} heb={heb} "
               f"reason={res.get('reason','-')}", flush=True)
     (out / "truthset_results.json").write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
