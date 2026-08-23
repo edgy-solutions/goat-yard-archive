@@ -15,7 +15,12 @@ straight from these records. Prose reports are derived-only, checkable against t
 import hashlib, json
 from pathlib import Path
 
-DOORS = ("adjudicated-by-frontier-via-api", "audited-by-agent-in-session")
+DOORS = ("adjudicated-by-frontier-via-api", "audited-by-agent-in-session",
+         # rung 5 of the dispute ladder — the human review queue. A real door, not a courtesy: when the
+         # cheaper rungs leave a span disputed it lands on a person, and that verdict needs the same
+         # pinned-input record as the other two. session_freshness is not load-bearing here (a human is
+         # not a context window) but stays present so every record is structurally one shape.
+         "adjudicated-by-human-review")
 VERDICT_FIELDS = ("span_id", "chosen", "disputed_span_correction", "rationale", "confidence")
 
 def _sha16(path):
