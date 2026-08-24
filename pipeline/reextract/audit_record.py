@@ -64,10 +64,13 @@ def append_verdict(jsonl_path, record):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return record
 
-def sitting_manifest(spans, sampling_rule, date, door):
+def sitting_manifest(spans, sampling_rule, date, door, *, sitting=None, session_freshness="cold-context"):
     """Per-sitting batch manifest so coverage is auditable — 'sampled 200 agreed spans' is a checkable
-    list, not a sentence."""
-    return {"kind": "sitting_manifest", "date": date, "door": door, "sampling_rule": sampling_rule,
+    list, not a sentence. Emits `sitting` and `session_freshness` because `verify_sitting_export.py`
+    reads them for its header — the builder and the reader must agree on the manifest's shape (a live
+    audit found them disagreeing: the verifier printed `?` and the auditor had to hand-populate)."""
+    return {"kind": "sitting_manifest", "sitting": sitting, "date": date, "door": door,
+            "session_freshness": session_freshness, "sampling_rule": sampling_rule,
             "n_spans": len(spans), "span_ids": list(spans)}
 
 def load_verdicts(jsonl_path):

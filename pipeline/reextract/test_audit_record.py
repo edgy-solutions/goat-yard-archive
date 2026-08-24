@@ -57,6 +57,14 @@ def test_manifest_is_checkable_list():
     m = AR.sitting_manifest(["s1", "s2", "s3"], "random-200-agreed", "2026-08-16", "audited-by-agent-in-session")
     assert m["n_spans"] == 3 and m["span_ids"] == ["s1", "s2", "s3"]      # coverage is a list, not a sentence
 
+def test_manifest_emits_keys_the_verifier_reads():
+    # builder/reader agreement: verify_sitting_export.py's header reads `sitting` + `session_freshness`.
+    # A live audit found the builder NOT emitting them (verifier printed `?`); lock it so it can't drift.
+    m = AR.sitting_manifest(["s1"], "rule", "2026-08-23", "audited-by-agent-in-session",
+                            sitting="span-adjudication / agreed-sample", session_freshness="cold-context")
+    assert m["sitting"] == "span-adjudication / agreed-sample"
+    assert m["session_freshness"] == "cold-context"
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
