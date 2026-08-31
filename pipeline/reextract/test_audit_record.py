@@ -6,11 +6,14 @@ import audit_record as AR
 
 CROP = __file__  # any real file, for a real hash
 NOTE = "על אשר לי magistros pecuariae super illos, qui sunt mihi, Junius & Tremellius"
+NOTE2 = NOTE.replace("Junius & Tremellius", "Piscator")   # the second witness's reading of the same note
 
 def _rec(**kw):
+    # candidates are the two WITNESS READINGS OF THE NOTE (full notes in production) — the guard derives
+    # note length from them, so the fixture must carry real notes, not bare spans.
     d = dict(span_id="p379:n2", chosen="A", correction="על אשר לי", rationale="cited qui sunt mihi",
              confidence=0.9, door="audited-by-agent-in-session", model="claude-in-session",
-             date="2026-08-16", crop_path=CROP, candidates=["על אשר לי", "על אשדוד"], cold_context=True)
+             date="2026-08-16", crop_path=CROP, candidates=[NOTE, NOTE2], cold_context=True)
     d.update(kw); return AR.audit_record(**d)
 
 def test_record_validates():
@@ -25,7 +28,7 @@ def test_verdict_only_rejects_retranscription():
 def test_inputs_pinned_by_hash():
     r = _rec()
     assert r["inputs"]["crop_sha16"] and len(r["inputs"]["crop_sha16"]) == 16
-    assert r["inputs"]["candidates"] == ["על אשר לי", "על אשדוד"]        # verbatim, re-auditable
+    assert r["inputs"]["candidates"] == [NOTE, NOTE2]        # verbatim, re-auditable
 
 def test_door_named_and_freshness_attested():
     r = _rec()
@@ -44,11 +47,47 @@ def test_diary_rejected():
     try: AR.validate(bad); raise SystemExit("diary accepted")
     except ValueError: pass
 
+def test_neither_requires_correction():
+    # a 'neither' verdict that supplies no span says nothing — rejected on every door
+    assert AR.validate(_rec(chosen="neither", correction="אשדוד"))     # a span given -> valid
+    try:
+        AR.validate(_rec(chosen="neither", correction=""))            # nothing said -> rejected
+        raise SystemExit("neither-without-correction accepted")
+    except ValueError: pass
+
+def test_correction_over_60pct_is_retranscription():
+    # a correction as long as the whole note makes the auditor a third witness — rejected by validate(),
+    # not only by audit_record() (the hole the browser console shipped). candidates carry the note length.
+    try:
+        AR.validate(_rec(chosen="neither", correction=NOTE))          # ~the whole note -> rejected
+        raise SystemExit("whole-note correction accepted by validate()")
+    except ValueError: pass
+    assert AR.validate(_rec(chosen="neither", correction="על אשר לי")) # a real span -> valid
+
+def test_real_exports_guarded():
+    # born-test against the actual banked files: the human-door console let 11 defective records through
+    # (6 over-long corrections + 5 empty 'neither's); the agent door (apd.py) let none through. The guard
+    # in validate() now closes the human door to match. 11 red / 24 green for Chris, 0 red / 74 for agent.
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    def counts(path):
+        recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+        recs = [r for r in recs if r.get("kind") != "sitting_manifest"]
+        red = green = 0
+        for r in recs:
+            try: AR.validate(r); green += 1
+            except ValueError: red += 1
+        return red, green
+    cr, cg = counts(os.path.join(here, "audits", "chris_sitting_b_20260823.jsonl"))
+    ar_, ag = counts(os.path.join(here, "audits", "agent_session_20260823.jsonl"))
+    assert (cr, cg) == (11, 24), f"chris: expected 11 red / 24 green, got {cr} / {cg}"
+    assert (ar_, ag) == (0, 74), f"agent: expected 0 red / 74 green, got {ar_} / {ag}"
+
 def test_append_and_reload_roundtrip():
     fd, path = tempfile.mkstemp(suffix=".jsonl"); os.close(fd)
     try:
         AR.append_verdict(path, _rec(span_id="s1"))
-        AR.append_verdict(path, _rec(span_id="s2", chosen="neither", correction=""))
+        AR.append_verdict(path, _rec(span_id="s2", chosen="neither", correction="אשדוד"))
         v = AR.load_verdicts(path)
         assert len(v) == 2 and v[1]["chosen"] == "neither"
     finally: os.remove(path)

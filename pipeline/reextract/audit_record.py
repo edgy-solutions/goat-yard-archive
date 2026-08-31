@@ -55,6 +55,21 @@ def validate(record):
     inp = record.get("inputs", {})
     if not inp.get("crop") or inp.get("crop_sha16") is None: raise ValueError("inputs.crop not pinned by hash")
     if not inp.get("candidates"): raise ValueError("inputs.candidates not pinned verbatim")
+    # VERDICT-ONLY LAW, enforced on EVERY door — not just the agent path. A browser console shipped these
+    # two holes: a 'neither' with no correction (nothing said), and a correction as long as the whole note
+    # (the auditor becoming a third witness by re-transcription). validate() couldn't see them because it
+    # never checked; both slipped past the verifier on the human door while apd.py blocked them on the
+    # agent door — the exact asymmetry this module's docstring says must not exist. The note length is the
+    # longest pinned candidate (in production a candidate IS a full witness reading of the note).
+    chosen = record.get("chosen")
+    corr = (record.get("disputed_span_correction") or "").strip()
+    if chosen == "neither" and not corr:
+        raise ValueError("chosen 'neither' requires a disputed_span_correction (a verdict must say what)")
+    if corr:
+        notelen = max((len(c) for c in inp["candidates"]), default=0)
+        if notelen and len(corr) > 0.6 * notelen:
+            raise ValueError(f"correction too long ({len(corr)} chars > 60% of {notelen}-char note) — a "
+                             "verdict is a disputed span, not a re-transcription")
     return True
 
 def append_verdict(jsonl_path, record):

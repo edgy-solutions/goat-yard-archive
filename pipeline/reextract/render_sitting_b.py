@@ -69,7 +69,8 @@ def dis_card(d):
     <label><input type="radio" name="{esc(d['span_id'])}" value="take-extracted"> take extracted</label>
     <label><input type="radio" name="{esc(d['span_id'])}" value="keep-stored"> keep stored</label>
     <label><input type="radio" name="{esc(d['span_id'])}" value="neither"> neither / correct by hand</label>
-    <input class="reason" type="text" placeholder="correction (if neither) or rationale">
+    <input class="reason" type="text" dir="auto" spellcheck="false" placeholder="correction (if neither) or rationale">
+    <div class="err"></div>
   </div>
 </article>'''
 
@@ -85,7 +86,8 @@ def agr_card(a):
   <div class="verdict">
     <label><input type="radio" name="{esc(a['span_id'])}" value="confirm"> agreement is real</label>
     <label><input type="radio" name="{esc(a['span_id'])}" value="correlated-error"> correlated error (both wrong the same way)</label>
-    <input class="reason" type="text" placeholder="if correlated error — what's actually there">
+    <input class="reason" type="text" dir="auto" spellcheck="false" placeholder="if correlated error — what's actually there">
+    <div class="err"></div>
   </div>
 </article>'''
 
@@ -111,10 +113,10 @@ def build():
           f"{len(stripmap)} strips embedded ({out.stat().st_size//1024}KB)")
 
 TEMPLATE = r'''<style>
-:root{--paper:#f4f2ee;--panel:#fbfaf7;--ink:#201d1a;--muted:#6b6459;--line:#e2ddd3;--accent:#7c2d2d;--ok:#2f6b3f;--warn:#9a6a12;
+:root{--paper:#f4f2ee;--panel:#fbfaf7;--ink:#201d1a;--muted:#6b6459;--line:#e2ddd3;--accent:#7c2d2d;--ok:#2f6b3f;--warn:#9a6a12;--crit:#a33232;
  --stored:#8a5a12;--extr:#2f5b6b;--sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,Consolas,Menlo,monospace;}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#17150f;--panel:#201d16;--ink:#ece7dd;--muted:#9a9082;--line:#332e24;--accent:#d98a6a;--ok:#7fb98a;--warn:#d6a84e;--stored:#d6a84e;--extr:#7fb4c7;}}
-:root[data-theme="dark"]{--paper:#17150f;--panel:#201d16;--ink:#ece7dd;--muted:#9a9082;--line:#332e24;--accent:#d98a6a;--ok:#7fb98a;--warn:#d6a84e;--stored:#d6a84e;--extr:#7fb4c7;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#17150f;--panel:#201d16;--ink:#ece7dd;--muted:#9a9082;--line:#332e24;--accent:#d98a6a;--ok:#7fb98a;--warn:#d6a84e;--crit:#e08a7f;--stored:#d6a84e;--extr:#7fb4c7;}}
+:root[data-theme="dark"]{--paper:#17150f;--panel:#201d16;--ink:#ece7dd;--muted:#9a9082;--line:#332e24;--accent:#d98a6a;--ok:#7fb98a;--warn:#d6a84e;--crit:#e08a7f;--stored:#d6a84e;--extr:#7fb4c7;}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5}
 .toolbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;background:var(--panel);border-bottom:1px solid var(--line);padding:.6rem 3vw;font-size:.82rem}
 .savest{font-family:var(--mono);color:var(--ok);font-weight:600;min-width:12rem}
@@ -143,6 +145,9 @@ h2{font-family:var(--mono);font-size:1.15rem;margin:2.4rem 0 .3rem;padding-top:1
 .verdict{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;padding-top:.6rem;margin-top:.7rem;border-top:1px dashed var(--line);font-size:.82rem}
 .verdict label{display:inline-flex;align-items:center;gap:.3rem;cursor:pointer}
 .reason{flex:1;min-width:13rem;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:.32rem .6rem;color:var(--ink);font:inherit;font-size:.84rem}
+.err{flex-basis:100%;color:var(--crit);font-size:.76rem;font-weight:600;margin-top:.2rem;display:none}
+.err.on{display:block}
+.card.bad{border-color:var(--crit)}
 </style>
 <title>Sitting B — Span Adjudication</title>
 <div class="toolbar">
@@ -173,37 +178,65 @@ h2{font-family:var(--mono);font-size:1.15rem;margin:2.4rem 0 .3rem;padding-top:1
 </div>
 <script>
 var STRIPS={{STRIPMAP}};
-var KEY='sitting_b_span_adjudication_v1', FRESHNESS='cold-context';
+var KEY='sitting_b_span_adjudication_v2', FRESHNESS='cold-context';
 var DOOR_DIS='adjudicated-by-human-review', DOOR_AGR='audited-by-agent-in-session';
 document.querySelectorAll('img.strip').forEach(function(im){var s=STRIPS[im.dataset.page];if(s)im.src=s;else im.remove();});
 function stamp(m){var s=document.getElementById('savest');if(s)s.textContent=m;}
+function usesCorr(val){return val==='neither'||val==='correlated-error';}
+/* The two guards backported from audit_record.validate() — the base console shipped without them.
+   A record this refuses is one the verifier would reject on the human door. */
+function check(c){
+  var v=c.querySelector('input[type=radio]:checked'), e=c.querySelector('.err'), msg='';
+  if(v){
+    var corr=usesCorr(v.value)?(c.querySelector('.reason').value||'').trim():'';
+    var cands=JSON.parse(c.dataset.candidates), notelen=0;
+    cands.forEach(function(x){if(x.length>notelen)notelen=x.length;});
+    if(v.value==='neither'&&!corr) msg='"neither" needs a correction span.';
+    else if(corr&&corr.length>0.6*notelen) msg='That is '+corr.length+' chars against a '+notelen+
+      '-char note — a re-transcription, not a span. Give only the disputed fragment.';
+  }
+  if(e){e.textContent=msg;e.classList.toggle('on',!!msg);}
+  c.classList.toggle('bad',!!msg);
+  return !msg;
+}
+/* raw per-card state for persistence — everything the auditor typed, valid or not, so nothing is lost on reload */
+function collect(){var d={};document.querySelectorAll('.card').forEach(function(c){
+  var v=c.querySelector('input[type=radio]:checked'), reason=c.querySelector('.reason').value;
+  if(v||reason) d[c.dataset.spanId]={chosen:v?v.value:null, reason:reason};});
+  return d;}
+/* export records — only cards that PASS the guards; an invalid card is skipped, not silently emitted */
 function records(){var recs=[];document.querySelectorAll('.card').forEach(function(c){
-  var v=c.querySelector('input[type=radio]:checked'); if(!v) return;
+  var v=c.querySelector('input[type=radio]:checked'); if(!v||!check(c)) return;
   var isDis=c.classList.contains('dis');
   recs.push({span_id:c.dataset.spanId, chosen:v.value,
-    disputed_span_correction:(v.value==='neither'||v.value==='correlated-error')?c.querySelector('.reason').value:"",
-    rationale:(v.value==='neither'||v.value==='correlated-error')?"":c.querySelector('.reason').value,
+    disputed_span_correction:usesCorr(v.value)?c.querySelector('.reason').value:"",
+    rationale:usesCorr(v.value)?"":c.querySelector('.reason').value,
     confidence:null, kind:c.dataset.kind||"agreed",
     provenance:{door:isDis?DOOR_DIS:DOOR_AGR, session_freshness:FRESHNESS, date:new Date().toISOString().slice(0,10)},
     inputs:{crop:c.dataset.crop, crop_sha16:c.dataset.cropSha, candidates:JSON.parse(c.dataset.candidates), page:Number(c.dataset.page)}});});
   return recs;}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(records()));stamp('saved ✓ '+new Date().toLocaleTimeString());}
-  catch(e){stamp('⚠ autosave blocked — use Export');}}
-function restore(){var d;try{d=JSON.parse(localStorage.getItem(KEY)||'[]');}catch(e){return;}
-  d.forEach(function(r){var c=document.querySelector('.card[data-span-id="'+r.span_id+'"]');if(!c)return;
-    var v=c.querySelector('input[value="'+r.chosen+'"]');if(v)v.checked=true;
-    var txt=r.disputed_span_correction||r.rationale;if(txt)c.querySelector('.reason').value=txt;});}
-document.addEventListener('input',function(e){if(e.target.closest('.card'))save();});
-document.addEventListener('change',function(e){if(e.target.closest('.card'))save();});
+function badcount(){var n=0;document.querySelectorAll('.card').forEach(function(c){if(!check(c))n++;});return n;}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(collect()));
+    var b=badcount();stamp('saved ✓ '+new Date().toLocaleTimeString()+(b?' · '+b+' need fixing':''));}
+  catch(e){stamp('⚠ autosave blocked — Export often');}}
+function restore(){var d;try{d=JSON.parse(localStorage.getItem(KEY)||'{}');}catch(e){return;}
+  Object.keys(d).forEach(function(id){var c=document.querySelector('.card[data-span-id="'+id+'"]');if(!c)return;
+    var x=d[id];
+    if(x.chosen){var r=c.querySelector('input[value="'+x.chosen+'"]');if(r)r.checked=true;}
+    if(x.reason)c.querySelector('.reason').value=x.reason;});}
+document.addEventListener('input',function(e){var c=e.target.closest&&e.target.closest('.card');if(c){check(c);save();}});
+document.addEventListener('change',function(e){var c=e.target.closest&&e.target.closest('.card');if(c){check(c);save();}});
 function exportJSONL(){
+  var recs=records(), bad=badcount();
   var manifest={kind:"sitting_manifest",sitting:"span-adjudication",session_freshness:FRESHNESS,
     date:new Date().toISOString().slice(0,10),doors:{disagreement:DOOR_DIS,agreed:DOOR_AGR},
     n_disagreement:document.querySelectorAll('.card.dis').length,n_agreed:document.querySelectorAll('.card.agr').length};
-  var lines=[JSON.stringify(manifest)].concat(records().map(function(r){return JSON.stringify(r);}));
+  var lines=[JSON.stringify(manifest)].concat(recs.map(function(r){return JSON.stringify(r);}));
   var blob=new Blob([lines.join("\n")+"\n"],{type:'application/x-ndjson'});
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='sitting_b_verdicts.jsonl';
-  document.body.appendChild(a);a.click();a.remove();stamp('exported ✓ (JSONL, '+records().length+' verdicts)');}
-restore();save();
+  document.body.appendChild(a);a.click();a.remove();
+  stamp('exported ✓ ('+recs.length+' verdicts'+(bad?', '+bad+' still need fixing':'')+')');}
+restore();document.querySelectorAll('.card').forEach(check);save();
 </script>'''
 
 if __name__ == "__main__":

@@ -32,11 +32,10 @@ function roundtrip(file, { pickValue, expectDoor, expectCandidatesNonEmpty }) {
   reason.value = "roundtrip-probe";
   radio.dispatchEvent(new w.Event("input", { bubbles: true }));   // -> page save()
 
-  // localStorage must now hold the verdict (append-as-made)
+  // localStorage must now hold the verdict (append-as-made). Shape-agnostic: Sitting A persists an array
+  // of records, Sitting B a dict of raw per-card state — either way the span id is in the serialized value.
   const KEY = Object.keys(w.localStorage).find(k => w.localStorage.getItem(k) && w.localStorage.getItem(k).includes(spanId));
-  const stored = JSON.parse(w.localStorage.getItem(KEY) || "[]");
-  const savedRec = stored.find(r => r.span_id === spanId);
-  if (!savedRec) throw new Error(`${file}: verdict not persisted to localStorage`);
+  if (!KEY) throw new Error(`${file}: verdict not persisted to localStorage`);
 
   // --- simulate HARD RELOAD: blank the form, then run the page's own restore() ---
   radio.checked = false;
