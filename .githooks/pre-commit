@@ -1,0 +1,32 @@
+#!/bin/sh
+# Code-only guard for goat-yard-archive (a PUBLIC repo). Scans, extraction outputs, verdicts, consoles,
+# and data-bearing docs live in the PRIVATE dr-voluminous repo (reextract_vol1/) — never here.
+# This hook is a WALL, not a warning: it fails the commit. It sees staged files regardless of
+# .gitignore, so it also catches `git add -f`. Install: git config core.hooksPath .githooks
+#
+# Two rules:
+#  1) no *.png/*.json/*.jsonl/*.html/*.md staged under the code-only pipeline/reextract/ tree
+#  2) no new BINARY file staged anywhere outside frontend/ (scan images must never land here)
+
+d=$(git diff --cached --name-only --diff-filter=AM \
+     | grep -E '^pipeline/reextract/.*\.(png|json|jsonl|html|md)$')
+b=$(git diff --cached --numstat | awk '$1=="-" && $2=="-" {print $3}' | grep -vE '^frontend/')
+
+if [ -n "$d" ] || [ -n "$b" ]; then
+  echo "########################################################################"
+  echo "# COMMIT REFUSED — goat-yard-archive is code-only (PUBLIC repo)."
+  if [ -n "$d" ]; then
+    echo "# data-shaped files under pipeline/reextract/:"
+    echo "$d" | sed 's/^/#   /'
+  fi
+  if [ -n "$b" ]; then
+    echo "# new binary files outside frontend/:"
+    echo "$b" | sed 's/^/#   /'
+  fi
+  echo "# Data belongs in the PRIVATE dr-voluminous repo (reextract_vol1/)."
+  echo "# See pipeline/reextract/data_config.py for the data root."
+  echo "# Deliberate override (know why): git commit --no-verify"
+  echo "########################################################################"
+  exit 1
+fi
+exit 0
