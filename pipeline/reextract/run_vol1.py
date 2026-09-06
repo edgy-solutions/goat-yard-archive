@@ -35,6 +35,23 @@ def config_hash():
             "profile": PROFILE.name, "extractor": "extract_apparatus.extract_page",
             "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
 
+def refine_status(r):
+    """Split the coarse 'no_apparatus' into WHY, for the next run's observability (this run reconciles
+    as-is). Read from the fields extract_page already returns — no change to the frozen extractor:
+      NO_BAND        — geometry found no footnote rule (presplit returned no band)
+      CROP_REFUSED   — the crop gate declined (blank/near-blank crop went through the gate)
+      READER_EMPTY   — a band was present but the reader returned nothing (incl. an honest refusal)
+      FRONT_MATTER   — before commentary_start_page; a deliberate skip, not a detection
+    Everything else (OK / ANCHOR_* / STITCH_VIOLATION / *_SUSPECT) passes through unchanged."""
+    if r.get("status") != "no_apparatus":
+        return r.get("status")
+    reason = r.get("reason")
+    if reason == "front_matter":   return "FRONT_MATTER"
+    if reason == "model-refusal":  return "READER_EMPTY"
+    if "crop_gate" in r:           return "CROP_REFUSED"
+    if "info" in r and not r.get("notes"): return "NO_BAND"
+    return "READER_EMPTY"
+
 def done_pages():
     if not OUT.exists(): return set()
     d = set()
@@ -64,7 +81,7 @@ def main():
                 r = extract_page(str(img), profile, HOST, body_md=body if Path(body).exists() else None)
                 rc = r.get("recrop_changes", []); m = r.get("anchor_match") or {}
                 info = r.get("presplit_info") or {}
-                rec = {"page": pg, "status": r["status"], "n_notes": r.get("n_notes"),
+                rec = {"page": pg, "status": refine_status(r), "n_notes": r.get("n_notes"),
                        # THE INGESTABLE ARTIFACT: per-note marker + text, persisted (the 08-10 dry-run
                        # counted then discarded this — which is why it produced no ingest candidate).
                        "notes": [{"marker": n["marker"], "text": n["text"]} for n in r.get("notes", [])],
