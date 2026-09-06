@@ -1,0 +1,13 @@
+# pipeline/reextract is CODE-ONLY.
+#
+# Every scan, extraction output, verdict, console, and data-bearing doc lives in the PRIVATE
+# dr-voluminous repo (reextract_vol1/), NEVER here — this is a PUBLIC repo and dr-voluminous scans
+# are private. Scripts read their data root from data_config.py (env REEXTRACT_DATA_ROOT).
+#
+# Config belongs in .yaml (e.g. book_profile*.yaml), never .json. To land a deliberately-scrubbed
+# public doc, force-add it (`git add -f`) — the friction is intentional.
+*.png
+*.json
+*.jsonl
+*.html
+*.md
