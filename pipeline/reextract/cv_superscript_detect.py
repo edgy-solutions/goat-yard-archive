@@ -20,11 +20,38 @@ MEASURED (14 anchored pages, count level) — PREDICTION WRONG BY ~500x, APPROAC
   at a 65px line height a ~30px letter is "small", and "raised above baseline" matches a fifth of all type.
   This is a broken mechanism, not a miscalibration (two knobs won't fix a 500x miss). predict-before-run
   caught it before it ever ran on a barren page — the point of the discipline.
-  NEXT APPROACH (resumes after reconciliation): do NOT calibrate this. Get real baselines/boxes — OCR the
-  body (glm-ocr / Tesseract with word+char boxes), then a superscript is a char whose OWN baseline sits
-  above its line's baseline. Position then maps to a body char offset for free (the coordinate bridge the
-  count-level check deferred), and score()'s letter-scope window finally means something. Template-matching
-  the specific marker glyphs is the fallback. The detect() below is kept as the recorded dead-end."""
+CUT 2 SPEC (resumes after reconciliation) — CONSTRAIN BEFORE YOU DETECT: a checklist, not a classifier.
+Cut 1 accepted 21% of all components because it had no idea how many hits it wanted. The apparatus run
+already writes, per page, the EXACT note count and each MARKER LETTER in order (the hanging-indent
+note-counter distinguishes note-starts from wraps, so the note-side letters are known). So the body
+detector is looking for PRECISELY N raised glyphs, lettered a…N in known order (with the profile's
+printer conventions — j-skip, u/v), and for nothing else. It rejects ~99% of candidates on count and
+sequence before reading a glyph. Count mismatch or out-of-order → fail-loud unanchored flag WITH A REASON
+(exactly what the standoff layer was built to receive), never a link.
+
+Pipeline:
+  1. Per page, take the expected marker letters (in order) from the apparatus run's note list.
+  2. For each note, locate its LEMMA (the body phrase it quotes) in the FROZEN body via difflib — on the
+     FLOWED paragraph (join wrapped lines first; body lines wrap mid-phrase), then map the match back to
+     the line + box where the phrase ends. That end is the predicted WINDOW for the marker.
+  3. Candidate filter, in this order:
+       a. ISOLATION — a small connected component with whitespace on BOTH sides (not touching its word),
+          bottom edge ABOVE the line baseline, height under x-height. Isolation is what kills cut 1's
+          failure: an ascender is attached to its word and sits on the baseline; a marker is a floating
+          island. Primary detector = per-line vertical projection: an isolated bump above the x-height
+          bounded by gaps (option 2). LINE-END RELAXATION (option 1): at a line end accept one-sided
+          isolation (gap left, line break right) — and lean HARDER on sequence + letter-confirm there,
+          since a wrap makes a marker look like a stray ascender.
+       b. SEQUENCE + SCOPE WINDOW — the candidate must fall between the previous and next markers'
+          positions and satisfy a…N order; an out-of-order hit is rejected/flagged.
+       c. LETTER CONFIRM — only now OCR the glyph, to confirm it is the EXPECTED letter.
+  4. box_sanity is the gate on the OCR boxes — first consumer. Tesseract boxes crossing the gutter on a
+     two-column 1766 page is the exact failure it was built for.
+POSITIONAL-ONLY rule: the body re-OCR exists ONLY to map pixels→characters in the FROZEN text; the .md
+stays the text, OCR boxes get aligned to it — never a second body extraction. content_sha asserts it.
+PREDICT BEFORE RUNNING again, on the same 14 anchored pages: predict a HIT RATE for expected markers at
+predicted windows (not a count). Land within the prediction → a detector; miss → a second recorded dead
+end and the same honest flag count. The detect() below is kept as cut 1's recorded dead-end."""
 import numpy as np
 
 def _lines(ink, min_frac=0.02):
