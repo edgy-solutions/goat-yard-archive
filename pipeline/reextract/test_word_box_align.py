@@ -21,10 +21,18 @@ def test_locate_embedded_hebrew_rtl_extent():
     assert st == "ok" and box == (100, 0, 220, 40), (st, box)
 
 def test_count_mismatch_abstains():
-    # a dropped/merged word -> box count != token count -> abstain (and this is itself a tripwire)
-    toks = W.tokenize("אלהים Deus verus")
-    box, st = W.align(toks, [(10, 60), (70, 120)], 40)        # 3 tokens, 2 boxes
-    assert box is None and st == "count-mismatch"
+    # count-mismatch = FEWER boxes than needed (a dropped/merged word before/within the Hebrew), not more:
+    # the note wraps past the line so trailing extra boxes are fine. Here the Hebrew needs box index 3
+    # (3 Latin words before it) but only 2 boxes exist -> abstain.
+    toks = W.tokenize("in voce quae אלהים")                   # 3 latin then hebrew -> need 4 boxes
+    box, st = W.align(toks, [(10, 60), (70, 120)], 40)        # only 2 boxes
+    assert box is None and st == "count-mismatch", (box, st)
+
+def test_extra_trailing_boxes_ok():
+    # the note continues past this line: more boxes than the counted prefix is NOT a mismatch
+    toks = W.tokenize("אלהים Deus verus creator omnium")      # 1 heb + many latin
+    box, st = W.align(toks, [(10, 60), (70, 120)], 40)        # locate takes box[0], ignores the rest
+    assert st == "ok" and box == (10, 0, 60, 40), (box, st)
 
 def test_hebrew_not_contiguous_abstains():
     toks = W.tokenize("אלהים Deus אחד")                       # two Hebrew runs -> don't guess
