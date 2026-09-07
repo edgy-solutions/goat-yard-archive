@@ -54,6 +54,38 @@ def _leftmost_component(band, min_area=4):
             best = (xs0, ys0, xs1 + 1, ys1 + 1)
     return best
 
+def _longest_run(colmask):
+    """Longest contiguous run of True in a 1-D bool array."""
+    best = cur = 0
+    for v in colmask:
+        cur = cur + 1 if v else 0
+        if cur > best:
+            best = cur
+    return best
+
+def strip_vrules(a, min_run=60, max_w=6):
+    """Blank vertical rule-lines — by LONGEST CONTIGUOUS vertical ink run, not fraction of total height. A
+    rule is a thin column with a long unbroken vertical segment (>> a letter's ~30px); keying on total
+    fraction misses a rule that spans only PART of the strip, e.g. the second stacked column's own border
+    (which reaches only the bottom half). Such rules (a) bridge inter-line gaps so lines can't separate and
+    (b) become the leftmost ink and defeat the raised-marker/floating test. Returns a cleaned copy."""
+    H = a.shape[0]
+    runs = np.array([_longest_run(a[:, x]) for x in range(a.shape[1])])
+    tall = runs > min_run
+    out = a.copy()
+    x = 0
+    while x < a.shape[1]:
+        if tall[x]:
+            e = x
+            while e < a.shape[1] and tall[e]:
+                e += 1
+            if e - x <= max_w:                         # a thin rule (not a genuine wide ink block)
+                out[:, x:e] = False
+            x = e
+        else:
+            x += 1
+    return out
+
 def _left_inset(col_ink):
     """x to start column content at, past a leftmost column-rule fragment (a narrow band spanning most of
     the height)."""
@@ -67,34 +99,69 @@ def _left_inset(col_ink):
             x += 1
     return x
 
-def line_opens_note(band, raised_frac=0.25, max_h_frac=1.15, gap_min=3, marker_max_w=34, min_text=25):
-    # RAISED is the workhorse discriminator (a continuation word's first letter sits on the baseline); the
-    # height cap only rejects a full ascender, since Gill's markers are raised lowercase letters ~= x-height.
-    """True iff the line's ink mask opens with an isolated, raised, small marker then a gap then text."""
-    if band.any(axis=0).sum() < min_text:
+def line_opens_note(band, raised_frac=0.55, gap_min=3, marker_max_w=42, min_text=25, floor_pad=3):
+    """True iff the line opens with a note marker, by RAISED-BAND PROJECTION (robust where the marker touches
+    the text letter beneath it, which defeats connected-components). A marker is: ink in the raised band
+    (above baseline - raised_frac*x-height) whose columns are FLOATING — they carry no ink at the baseline
+    (an ascender's columns reach the baseline; a marker's don't) — narrow, isolated by a gap, text after.
+    That is the continuation-vs-marker discriminator: a continuation's leading ascender reaches the baseline;
+    only a true marker floats."""
+    col = band.any(axis=0)
+    if col.sum() < min_text:
         return False
     baseline, xh = _line_geom(band)
-    comp = _leftmost_component(band)
-    if comp is None:
+    cut = int(baseline - raised_frac * xh)             # marker ink lives above this row
+    if cut <= 0:
         return False
-    x0, y0, x1, y1 = comp
-    if (x1 - x0) > marker_max_w:                        # wide first run -> running text, not a marker
+    rcol = band[:cut].any(axis=0)
+    xs = np.where(rcol)[0]
+    if len(xs) == 0:
         return False
-    if (y1 - y0) > max_h_frac * xh:                     # tall -> a full letter on the baseline, not a marker
+    xm0 = int(xs[0]); e = xm0
+    while e < len(rcol) and rcol[e]:
+        e += 1
+    if (e - xm0) > marker_max_w:                        # too wide -> a word's ascenders, not a marker
         return False
-    if y1 > baseline - raised_frac * xh:                # bottom reaches the baseline -> not raised
+    lo, hi = max(0, baseline - floor_pad), min(band.shape[0], baseline + floor_pad + 1)
+    if band[lo:hi, xm0:e].any():                        # columns reach the baseline -> ascender, not floating
         return False
-    col = band.any(axis=0)                              # isolation: whitespace gap after the marker
-    g = x1
+    g = e                                              # isolation: gap after the marker
     while g < len(col) and not col[g]:
         g += 1
-    if (g - x1) < gap_min:
+    if (g - e) < gap_min:
         return False
     return col[g:].sum() >= min_text
 
+def text_lines(ink):
+    """Text lines with tall (merged multi-line) bands SPLIT at internal ink valleys. _text_lines groups
+    rows on a global threshold, so densely-set apparatus lines fuse; a merged band then breaks the per-line
+    baseline/x-height geometry the marker test needs. So: take the raw bands, estimate the single-line
+    height from their median, and split any band taller than 1.5x that at its rowink minima."""
+    raw = _text_lines(ink)
+    if not raw:
+        return raw
+    heights = sorted(h for (y0, y1) in raw for h in [y1 - y0])
+    med = heights[len(heights) // 2]
+    out = []
+    for (y0, y1) in raw:
+        h = y1 - y0
+        n = int(round(h / med)) if med else 1
+        if n <= 1 or h < 1.5 * med:
+            out.append((y0, y1)); continue
+        prof = ink[y0:y1].sum(axis=1).astype(float)    # split at the n-1 deepest interior valleys
+        lo, hi = int(0.4 * med), h - int(0.4 * med)
+        cand = [i for i in range(lo, hi) if prof[i] <= prof[i - 1] and prof[i] < prof[i + 1]]
+        cand.sort(key=lambda i: prof[i])
+        cuts = sorted(cand[:n - 1])
+        prev = 0
+        for c in cuts:
+            out.append((y0 + prev, y0 + c)); prev = c
+        out.append((y0 + prev, y1))
+    return out
+
 def column_starts(col_ink, **kw):
     """y0 of each note-start line in a column ink mask, top→bottom."""
-    return [y0 for (y0, y1) in _text_lines(col_ink) if line_opens_note(col_ink[y0:y1], **kw)]
+    return [y0 for (y0, y1) in text_lines(col_ink) if line_opens_note(col_ink[y0:y1], **kw)]
 
 def detect_gutter(strip):
     a = np.asarray(strip.convert("L")) < INK
@@ -106,14 +173,16 @@ def detect_gutter(strip):
     return x if col[x] < 0.15 * (col.max() or 1) else None
 
 def page_starts(strip, profile=None):
-    """All note-starts in reading order as (col, x0, x1, y0). Per column: left then right."""
-    a = np.asarray(strip.convert("L")) < INK
-    gut = detect_gutter(strip)
-    spans = [("L", 0, gut), ("R", gut, strip.width)] if gut else [("F", 0, strip.width)]
-    out = []
-    for name, cx0, cx1 in spans:
-        col = a[:, cx0:cx1]
-        ins = _left_inset(col)
-        for y0 in column_starts(col[:, ins:]):
-            out.append((name, cx0 + ins, cx1, y0))
-    return out
+    """All note-starts in reading order as (x0, y0). NOTE: cv_footnote_presplit already VERTICALLY CONCATS
+    the two columns (left strip above right strip, 20px gap) into one single-column strip in linear reading
+    order — so there is NO side-by-side gutter to split; the 20px gaps separate the columns in the line
+    projection. Run detection on the whole strip. Vertical rules removed first; left margin inset once."""
+    a = strip_vrules(np.asarray(strip.convert("L")) < INK)
+    ins = _left_inset(a)
+    return [(ins, y0) for y0 in column_starts(a[:, ins:], **(_kw(profile)))]
+
+def _kw(profile):
+    if not profile:
+        return {}
+    nd = (profile.get("compositor_conventions") or {}).get("note_start_detection") or {}
+    return {}                                          # profile thresholds are pixel-tuned for v1; v2 geometry knobs are its own
