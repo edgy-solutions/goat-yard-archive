@@ -99,7 +99,7 @@ def _left_inset(col_ink):
             x += 1
     return x
 
-def line_opens_note(band, raised_frac=0.55, gap_min=3, marker_max_w=42, min_text=25, floor_pad=3):
+def line_opens_note(band, raised_frac=0.25, gap_min=3, marker_max_w=42, min_text=25):
     """True iff the line opens with a note marker, by RAISED-BAND PROJECTION (robust where the marker touches
     the text letter beneath it, which defeats connected-components). A marker is: ink in the raised band
     (above baseline - raised_frac*x-height) whose columns are FLOATING — they carry no ink at the baseline
@@ -122,15 +122,13 @@ def line_opens_note(band, raised_frac=0.55, gap_min=3, marker_max_w=42, min_text
         e += 1
     if (e - xm0) > marker_max_w:                        # too wide -> a word's ascenders, not a marker
         return False
-    lo, hi = max(0, baseline - floor_pad), min(band.shape[0], baseline + floor_pad + 1)
-    if band[lo:hi, xm0:e].any():                        # columns reach the baseline -> ascender, not floating
-        return False
-    g = e                                              # isolation: gap after the marker
-    while g < len(col) and not col[g]:
-        g += 1
-    if (g - e) < gap_min:
-        return False
-    return col[g:].sum() >= min_text
+    g = e                                              # ISOLATION in the FULL line: a gap right after the
+    while g < len(col) and not col[g]:                 # marker. This is the real discriminator — a marker
+        g += 1                                         # is `c` then a gap then text; a continuation word's
+    if (g - e) < gap_min:                              # first letter (`are`) is followed immediately by the
+        return False                                   # rest of the word (no gap), and its letters connect
+    return bool(col[g:].sum() >= min_text)             # in the full line. (Floating/reaches-baseline was too
+                                                       # strict — it rejected low-sitting markers like `c`.)
 
 def text_lines(ink):
     """Text lines with tall (merged multi-line) bands SPLIT at internal ink valleys. _text_lines groups
