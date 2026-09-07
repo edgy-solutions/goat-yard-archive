@@ -55,7 +55,7 @@ def test_real_p513_line_status():
         print("  (skip real-crop: scan not present)"); return
     line = Image.open(p).convert("L").crop((120, 4492, 1430, 4528))
     _, st = W.locate_hebrew(line, "תנשו אל אשה μη προσελθητε γυναικι Sept. to a woman, Ainsworth.")
-    assert st in ("ok", "count-mismatch"), st            # must fail loud, never a silent wrong box
+    assert st in ("ok", "count-mismatch", "low-confidence"), st   # must fail loud, never a silent wrong box
 
 if __name__ == "__main__":
     import traceback

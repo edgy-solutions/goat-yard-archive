@@ -111,11 +111,27 @@ def strip_marker(boxes, height):
         out = out[1:]; removed += 1                     # at most border + marker; never eat a Hebrew word
     return out
 
-def locate_hebrew(line_crop, note_text, drop_marker=True):
+def locate_hebrew(line_crop, note_text, drop_marker=True, confidence=(0.75, 2.5)):
     """Locate the Hebrew box on a single-line note crop. Returns (box, status); box=(x0,y0,x1,y1) or None.
     box is the union of the Hebrew word-boxes, selected by counting non-Hebrew tokens before the run.
-    The note marker is stripped by default (it is not a text token)."""
+    The note marker is stripped by default (it is not a text token).
+
+    CONFIDENCE GATE (abstain-not-guess): a located box whose glyph-count vs the run's letter-count falls
+    outside `confidence` = (lo, hi) is rejected as 'low-confidence' rather than emitted — a mislocated box
+    (a half-word or an overflow into Latin) shows an extreme ratio, so it abstains instead of feeding a bad
+    crop to the gates. Crucially this is a BAND, not equality: the ratio it shares with the glyph-count
+    tripwire is the tripwire's whole payload (run 2 letters, ink 4), so a drop must stay INSIDE the band and
+    reach the gate. Calibrated on the 30 ratified spans (all 4 drop-cases score 1.0-1.5, mislocates 0.33-0.73)
+    — a threshold FIT AND EVALUATED on the same 30, re-validated later on the 300-span sample. Pass
+    confidence=None to skip the gate (e.g. when the reading is unavailable)."""
     boxes = word_boxes(line_crop)
     if drop_marker:
         boxes = strip_marker(boxes, line_crop.size[1])
-    return align(tokenize(note_text), boxes, line_crop.size[1])
+    box, st = align(tokenize(note_text), boxes, line_crop.size[1])
+    if box is None or not confidence:
+        return box, st
+    from glyph_count_tripwire import count_glyphs, letter_count
+    g = count_glyphs(line_crop.crop(box)); n = letter_count(note_text)
+    if n and not (confidence[0] <= g / n <= confidence[1]):
+        return None, "low-confidence"                  # mislocated -> abstain, don't ship a wrong crop
+    return box, st
