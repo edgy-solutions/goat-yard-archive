@@ -36,6 +36,29 @@ def _column_bands(strip):
     return bands or [(0, H)]
 
 
+def strip_to_native(strip_box, info, column_bands):
+    """Un-stack a strip box to NATIVE page rectangles. cv_footnote_presplit pasted the left column strip at
+    canvas-y 0 (native origin rule_l+6) and the right column strip at canvas-y = left_height+20 (native
+    origin rule_r+6, native x origin = the footnote gutter xg). So a box wholly in one column is ONE native
+    rect; a box that straddles the 20px gap (a stitched note) is TWO — never one spanning box. Returns
+    [{box:[x0,y0,x1,y1], col}]."""
+    x0, y0, x1, y1 = strip_box
+    xg = int(info.get("fn_gutter", [x1])[0])
+    rl, rr = (info.get("rules") or [None, None] + [None, None])[:2]
+    bands = [b for b in column_bands if b[1] - b[0] > 10]
+    if info.get("mode") == "full_width" or len(bands) < 2 or rr is None:
+        ry = rl if rl is not None else (rr or 0)
+        return [{"box": [x0, ry + 6 + y0, x1, ry + 6 + y1], "col": 0}]
+    right_start = bands[1][0]                           # = left_height + 20
+    rects = []
+    if y0 < right_start - 20:                           # portion in the left column
+        ly1 = min(y1, right_start - 20)
+        rects.append({"box": [x0, rl + 6 + y0, min(x1, xg), rl + 6 + ly1], "col": 0})
+    if y1 > right_start:                                # portion in the right column (stitch tail)
+        ry0 = max(y0, right_start)
+        rects.append({"box": [xg + x0, rr + 6 + (ry0 - right_start), xg + x1, rr + 6 + (y1 - right_start)], "col": 1})
+    return rects or [{"box": [x0, (rl or 0) + 6 + y0, x1, (rl or 0) + 6 + y1], "col": 0}]
+
 def propose_regions(strip, info=None):
     """Propose a note-region per detected note-start. Returns (regions, meta). Each region: {strip_box:
     [x0,y0,x1,y1], col_index}. meta carries the column bands and native mapping availability."""
