@@ -10,7 +10,18 @@ Detector: Hebrew nikud are small marks BELOW the consonant baseline (most vowels
 (holam/dagesh). A consonantal line has a clean baseline with ink below it only under the few final-letter
 descenders (ך ן ף ץ); a pointed line has dots under MOST consonants. So the discriminator is the FRACTION
 OF COLUMNS carrying ink in the sub-baseline band — low for unpointed (descenders only), high for pointed
-(a dot under nearly every letter). Deterministic, no model — a property the model shouldn't own."""
+(a dot under nearly every letter). Deterministic, no model — a property the model shouldn't own.
+
+REAL-INK CALIBRATION (measured on the frozen scan, 2026-09-06): the run's nikud does NOT locate real
+pointing — it is model-hallucinated. The single densest run-nikud span (p513 [^2], 15 marks, "fully
+pointed" in the run) is BARE UNPOINTED CONSONANTS in the print (`תנשו אל אשה`). On a tight, single-line,
+Hebrew-only crop of it the detector reads density 0.000 → strips, correctly. The one FAILURE MODE found:
+CROP CONTAMINATION — a crop that bleeds into the adjacent Latin/Greek line inflates the sub-baseline
+fraction (0.14–0.66) and the span reads "uncertain"/"pointed", i.e. it fails SAFE (keeps) but wrongly.
+So the integration requirement is a TIGHT single-line crop of the Hebrew alone; adjacent-line bleed, not
+the threshold, is the risk. A genuinely pointed apparatus crop was NOT found in this sample — Gill's
+apparatus Hebrew is consonantal; the keep-branch is a rare-event safety net, not the common path, which is
+why erring toward keep costs nothing here."""
 import re
 import numpy as np
 
