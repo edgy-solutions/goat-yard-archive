@@ -6,31 +6,28 @@ import base64, io, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent)); sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from PIL import Image
+import cv_footnote_presplit as ps
+import note_start_detect as NS
 
 A = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits")
 IMG = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
 DATE = "20260913"
 
-def _footnote_band_top(im):
-    """Body↔footnote separator by the WHITESPACE GAP, not a rule. Body text ends, then a blank band, then the
-    footnotes — the largest blank band in the lower page (that still has real text below it) is that separator;
-    return its bottom. Robust where the rules field holds a decorative rule above a mid-page book title (the
-    crop-in-body bug). Full-width dark ROWS fail because body text lines are also dark and full-width."""
-    import numpy as np
-    a = np.asarray(im) < 110
-    W, H = im.size
-    rowink = a.sum(axis=1) / W
-    best = None; s = None
-    for y in range(int(H * 0.62), H):                  # lower page only — a body paragraph gap higher up must
-                                                       # not win; the body↔footnote separator is always down here
-        if rowink[y] < 0.06:                            # a blank row (0.06 tolerates scan speckle)
-            if s is None: s = y
-        else:
-            if s is not None and (y - s) >= 12 and a[y:H].sum() > 0.008 * W * (H - y):
-                if best is None or (y - s) > (best[1] - best[0]):
-                    best = (s, y)                       # the LARGEST blank band with real footnote text below
-            s = None
-    return best[1] if best else int(H * 0.72)
+def _first_note_crop(pg, height=440):
+    """Crop the reading-order STRIP from the FIRST detected note-start down. The seed card MUST be anchored on
+    the detector's start[0] — the SAME `page_starts` call and ordering the harvest walks — so that seed-index ==
+    harvest-index BY CONSTRUCTION: the human reads the letter at note[0], the harvest labels note[0] with it and
+    propagates. The old whitespace-gap heuristic guessed a band top independently and could land BELOW note[0]
+    (or clip it), shifting the human's 'first' by one and poisoning every propagated label from the start.
+    Returns (crop_image, n_starts) or (None, 0) when presplit/detection find nothing."""
+    strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
+    if strip is None:
+        return None, 0
+    starts = sorted(NS.page_starts(strip), key=lambda p: p[1])   # reading order; start[0] = the run's first marker
+    if not starts:
+        return None, 0
+    y0 = max(0, int(starts[0][1]) - 8)                           # a hair above note[0] so its raised marker is whole
+    return strip.crop((0, y0, strip.width, min(strip.height, y0 + height))), len(starts)
 
 def build(n_longest=40):
     census = json.loads((A / "chain_census.json").read_text(encoding="utf-8"))
@@ -46,11 +43,11 @@ def build(n_longest=40):
     cards = []
     for total, fp, e in scored[:n_longest]:
         pg = fp
-        im = Image.open(IMG / f"page{pg}_image1.png").convert("L"); W, H = im.size
-        ry = _footnote_band_top(im)
-        crop = im.crop((0, ry, W, min(H, ry + 400)))                  # native footnote-band top (first notes)
+        crop, n_starts = _first_note_crop(pg)                         # anchored on detector start[0] (harvest-aligned)
+        if crop is None:                                              # no detected note-start → skip (can't anchor)
+            continue
         b = io.BytesIO(); crop.save(b, format="PNG")
-        cards.append(dict(run=e, length=e[1] - e[0] + 1, first_page=pg, printed=pg - 88,
+        cards.append(dict(run=e, length=e[1] - e[0] + 1, first_page=pg, printed=pg - 88, n_starts=n_starts,
                           img="data:image/png;base64," + base64.b64encode(b.getvalue()).decode()))
     html = _T.replace("/*DATA*/", json.dumps(cards)).replace("{DATE}", DATE).replace("{N}", str(len(cards)))
     out = A / f"marker_seed_console_{DATE}.html"; out.write_text(html, encoding="utf-8")
@@ -78,7 +75,7 @@ function save(){localStorage.setItem(KEY,JSON.stringify(S));stat();}
 function stat(){document.getElementById("stat").textContent=Object.keys(S).length+" / {N} seeded";}
 C.forEach((c,i)=>{const k=c.first_page;
   const d=document.createElement("div");d.className="card";
-  d.innerHTML=`<div class=m><b>run ${c.run[0]}–${c.run[1]}</b> <span class=hint>${c.length} pages · first page file ${c.first_page} (printed ${c.printed})</span>
+  d.innerHTML=`<div class=m><b>run ${c.run[0]}–${c.run[1]}</b> <span class=hint>${c.length} pages · first page file ${c.first_page} (printed ${c.printed}) · read note[0] of ${c.n_starts} — the TOP marker in the crop</span>
     <span style="margin-left:auto">first marker letter: <input maxlength=1 data-k="${k}" value="${(S[k]||{}).letter||''}"></span>
     <span class=hint>a–z, no j/v</span></div><img src="${c.img}">`;
   document.getElementById("cards").appendChild(d);
