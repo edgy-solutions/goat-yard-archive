@@ -59,6 +59,31 @@ def is_consecutive_run(markers):
     L = len(ALPHABET)
     return all(idx[k] == (idx[k - 1] + 1) % L for k in range(1, len(idx)))
 
+def expected_segmented(segments):
+    """The expected marker run for a page that crosses RESET boundaries. segments = [(first, n), …] — one
+    per body segment (a book-intro / Chapter-I reset starts a new segment at 'a'; the continuing segment
+    starts where the previous page's chain left off). Each segment is a wrap-aware run; the page's expected
+    sequence is their concatenation. p2 = [('c',1),('a',4)] -> c,a,b,c,d. p315 = [('x',9),('a',1)] ->
+    x,y,z,a,b,c,d,e,f,a. Reset points come from the body alignment (verse_ref), NOT the marker stream."""
+    out = []
+    for first, n in segments:
+        out += run(first, n)
+    return out
+
+def is_valid_segmented(markers, segment_lengths):
+    """markers in reading order; segment_lengths = notes per body segment (from the alignment resets). Each
+    segment must be a gapless consecutive run (wrap-aware); segments reset independently. A duplicated letter
+    ACROSS a reset (two 'c' on p2, two 'a' on p315) is legal; a duplicate or gap WITHIN a segment (a false
+    start / a missed start — the cancellation class) is not. This is the reset-aware sequence gate."""
+    if sum(segment_lengths) != len(markers):
+        return False
+    i = 0
+    for L in segment_lengths:
+        if not is_consecutive_run(markers[i:i + L]):
+            return False
+        i += L
+    return True
+
 def sequence_breaks(letters):
     """Return the list of problems in an observed marker sequence: any illegal j/v, or a gap/backstep that
     breaks consecutiveness under the alphabet. Empty list == the sequence obeys the convention."""

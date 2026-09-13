@@ -17,11 +17,21 @@ layout:
   # own footnotes; footnote strip = below that rule. reading order = left-strip then right-strip.
   per_column_body_footnote_rule: true
   footnote_marker: lowercase_letter        # a, b, c … (NOT the canonical output marker)
-  # marker_scope CORRECTED 2026-09-13 by reading the markers on the ratified pages: the run is
-  # PAGE-CONTINUOUS across columns in reading order (left/top column then right/bottom), NOT a per-column
-  # restart. Evidence: p138 col0 ends h..p, col1 continues q..y (p→q across the gap, no restart to a); the
-  # alphabet count h→y = 16 == p138's 16 notes. The earlier `per_column` came from the build and was wrong.
-  marker_scope: page_continuous_across_columns
+  # marker_scope — encoded from fixture pages p2 and p315 (Chris, 2026-09-13), NOT inferred:
+  # markers run CONTINUOUSLY across columns AND pages within a book (p138 col0 h..p, col1 q..y — p→q across
+  # the gap; and the chain runs page-to-page). NOT per-column, NOT per-page.
+  marker_scope: book_continuous
+  marker_wrap: z_to_a                      # after z the series CONTINUES at a (a WRAP, not a reset) — p315:
+                                           # Genesis notes ...x,y,z,a,b,c,d,e,f (still Gen 50:26), no reset.
+  marker_reset_at: [book_introduction, chapter_I]   # the series RESETS to 'a' at a book's intro and its Chap. I.
+                                           # p2: intro ends 'c', Chap. I restarts a,b,c,d (two notes = 'c').
+                                           # p315: Genesis wrap ...f, then Exodus intro resets 'a' (two 'a's).
+                                           # WHETHER EVERY CHAPTER RESETS IS UNKNOWN — the chain-walk census must
+                                           # report it against the alignment's chapter/book boundaries.
+  marker_identity: [series, letter]        # a marker is (SERIES, letter), never letter alone; a duplicated
+                                           # letter from a mid-page reset resolves by position within its series.
+  marker_reset_source: body_alignment      # reset points come from the body chapter/book boundaries (verse_ref),
+                                           # NOT from the marker stream — the gate segments the expected sequence there.
   # 24-LETTER ALPHABET (Chris, from the ratification pages): 18th-c printers merged i/j and u/v, so the
   # marker run is a b c d e f g h i k l m n o p q r s t u w x y z — NO j, NO v (24 letters). This gives the
   # EXACT expected note count per column: first→last marker index in this alphabet. j and v are ILLEGAL
@@ -31,8 +41,8 @@ layout:
   marker_alphabet: "abcdefghiklmnopqrstuwxyz"   # 24 letters; index+1 = count from first→last per column
   marker_skips: [j, v]                     # both skipped (i/j merged, u/v merged)
   uv_interchange: true                     # u/v treated as interchangeable in the run
-  after_z: restart_a                       # RESOLVED 2026-09-13 from p261: markers read t,u,w,x,y,z,a,b,c,d,e,f
-                                           # — after z the run WRAPS to a single 'a' (restart), NOT doubling (aa)
+  after_z: wrap_to_a                       # see marker_wrap above — z→a is a WRAP (series continues), NOT a reset.
+                                           # p261 (t,u,w,x,y,z,a,b,c,d,e,f) and p315 confirm single 'a', not 'aa'.
   # FOSSIL (FOSSIL_SCARS #A): BODY anchor glyphs are a zoo, NOT just [a-z] — the anchor-matcher
   # must recognize all of these as in-text references (superscript letters/digits + symbols):
   body_anchor_glyphs: ["^a^", "ᵃ", "*", "†", "‡", "°", "δ", "<sup>", "[^b]", "¹²³⁴⁵⁶⁷⁸⁹⁰"]

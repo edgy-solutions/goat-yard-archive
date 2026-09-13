@@ -28,6 +28,16 @@ def test_consecutive_run_gate():
     assert not M.is_consecutive_run(["a", "a"])                 # a repeat (false start)
     assert not M.is_consecutive_run(["a", "j"])                 # illegal j
 
+def test_segmented_reset_fixtures_p2_p315():
+    # p2 (Genesis intro→Chap.I): intro 'c', then Chap.I resets a,b,c,d — two notes lettered 'c', legal
+    assert M.expected_segmented([("c", 1), ("a", 4)]) == ["c", "a", "b", "c", "d"]
+    assert M.is_valid_segmented(["c", "a", "b", "c", "d"], [1, 4])
+    # p315 (Genesis 50 wrap → Exodus intro reset): x..f wrap, then Exodus 'a' — two 'a', legal
+    assert M.expected_segmented([("x", 9), ("a", 1)]) == list("xyzabcdef") + ["a"]
+    assert M.is_valid_segmented(list("xyzabcdef") + ["a"], [9, 1])
+    # cancellation WITHIN a segment (a false start repeating a letter) must FAIL even if the count matches
+    assert not M.is_valid_segmented(["c", "a", "b", "b", "d"], [1, 4])   # b repeated inside Chap.I segment
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
