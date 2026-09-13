@@ -57,7 +57,7 @@ def build(pages):
 
 _TEMPLATE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Note-box ratify — vol1 {DATE}</title><style>
-:root{--paper:#f6f4ee;--ink:#1a1a1a;--rule:#cbc5b6;--accent:#2f6b8f;--ok:#2f7d4f;--rej:#9a2b2b;--add:#7a4bb0;--mrg:#b7791f;--sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+:root{--paper:#f6f4ee;--ink:#1a1a1a;--rule:#cbc5b6;--accent:#2f6b8f;--ok:#2f7d4f;--rej:#9a2b2b;--add:#7a4bb0;--mrg:#b7791f;--split:#1f8a70;--sans:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.4}
 header{position:sticky;top:0;background:#26302f;color:#f2efe6;padding:10px 16px;display:flex;gap:16px;align-items:center;z-index:20;border-bottom:2px solid var(--accent)}
 header h1{font-size:15px;margin:0}header .stat{font-size:13px;opacity:.85}header button{background:var(--accent);color:#fff;border:0;padding:7px 14px;border-radius:5px;font-size:13px;cursor:pointer}
@@ -72,6 +72,8 @@ header .sp{margin-left:auto}
 .nb.rej{border-color:var(--rej);background:rgba(154,43,43,.10);border-style:dashed}
 .nb.add{border-color:var(--add);background:rgba(122,75,176,.10)}
 .nb.adjust{border-color:var(--ok)}
+.nb.arm{border-color:var(--split);border-style:dashed;box-shadow:inset 0 0 0 2px var(--split);cursor:row-resize}
+.nb .tools .spl{color:var(--split)}
 /* top/bottom edge resize bars — full width, grab anywhere clear of the scrollbar */
 .nb .edge{position:absolute;left:8px;right:22px;height:9px;cursor:ns-resize;background:rgba(47,107,143,.25)}
 .nb .edge:hover{background:var(--accent)}
@@ -100,7 +102,7 @@ CARDS.forEach(c=>{
     <span>extractor notes: <b>${c.n_extractor}</b></span>
     <span class="${warn?'warn':'ok'}" data-live>detected: ${c.n_detected}${warn?' — check for missed/extra':' ✓'}</span>
     <span class="hint">${c.mode} · strip ${c.sw}×${c.sh}</span>
-    <span class="hint">move=drag body · resize=drag the blue top/bottom bars · ✕=reject · ⤒=merge into previous · drag empty area=ADD</span></div>
+    <span class="hint">move=drag body · resize=drag blue top/bottom bars · ✕=reject · ⤒=merge into note above · ✂=split (box has 2 notes) · drag empty area=ADD</span></div>
     <div class="stage" style="width:${disp+18}px"><div class="canvas" style="position:relative;width:${disp}px"><img src="${c.img}" style="width:${disp}px"></div></div>`;
   document.getElementById("cards").appendChild(card);
   const stage=card.querySelector(".stage"), canvas=card.querySelector(".canvas"), live=card.querySelector("[data-live]");
@@ -113,11 +115,12 @@ CARDS.forEach(c=>{
     const order=[...S.boxes.keys()].filter(i=>S.boxes[i].st!=="merged").sort((a,b)=>S.boxes[a].box[1]-S.boxes[b].box[1]);
     order.forEach((i,pos)=>{const bx=S.boxes[i];const[x0,y0,x1,y1]=bx.box;
       const d=document.createElement("div");
-      d.className="nb"+(bx.st==="reject"?" rej":"")+(bx.st==="adjust"?" adjust":"")+(bx.src==="human"?" add":"");
+      d.className="nb"+(bx.st==="reject"?" rej":"")+(bx.st==="adjust"?" adjust":"")+(bx.src==="human"?" add":"")+(splitArm===i?" arm":"");
       d.style.left=x0*sc+"px";d.style.top=y0*sc+"px";d.style.width=(x1-x0)*sc+"px";d.style.height=(y1-y0)*sc+"px";
       d.innerHTML=`<div class="tools"><button class="rej" title="reject">${bx.st==="reject"?"↺":"✕"}</button>`+
-        (pos>0?`<button class="mrg" title="merge into note above">⤒</button>`:``)+`</div>`+
-        `<span class="tag">${pos+1}${bx.src==="human"?"+":""}${bx.absorbed?" ⤒"+bx.absorbed:""}</span>`+
+        (pos>0?`<button class="mrg" title="merge into note above">⤒</button>`:``)+
+        `<button class="spl" title="split: has 2 notes — click, then click where the 2nd note starts">✂</button></div>`+
+        `<span class="tag">${pos+1}${bx.src==="human"?"+":""}${bx.absorbed?" ⤒"+bx.absorbed:""}${splitArm===i?" ✂ click 2nd note's top":""}</span>`+
         `<div class="edge top"></div><div class="edge bot"></div>`;
       d.querySelector(".rej").onclick=ev=>{ev.stopPropagation();bx.st=bx.st==="reject"?"confirm":"reject";save();render();};
       const mrg=d.querySelector(".mrg");
@@ -125,14 +128,21 @@ CARDS.forEach(c=>{
         const prev=S.boxes[order[pos-1]];                         // union into the previous note; record merge
         prev.box=[Math.min(prev.box[0],bx.box[0]),Math.min(prev.box[1],bx.box[1]),Math.max(prev.box[2],bx.box[2]),Math.max(prev.box[3],bx.box[3])];
         prev.absorbed=(prev.absorbed||0)+1;if(prev.st==="confirm")prev.st="adjust";
-        bx.st="merged";save();render();};
+        bx.st="merged";splitArm=null;save();render();};
+      d.querySelector(".spl").onclick=ev=>{ev.stopPropagation();splitArm=(splitArm===i?null:i);render();};
       d.addEventListener("mousedown",ev=>{if(ev.target.closest(".tools"))return;
+        const[px,py]=pt(ev);
+        if(splitArm===i){                                         // SPLIT: box has 2 notes -> click the 2nd's top
+          const b=bx.box, cy=Math.round(py);
+          if(cy>b[1]+6&&cy<b[3]-6){bx.box=[b[0],b[1],b[2],cy];if(bx.st==="confirm")bx.st="adjust";
+            S.boxes.push({box:[b[0],cy,b[2],b[3]],st:"adjust",src:"human",split:true});}  // detector missed this start
+          splitArm=null;save();render();ev.stopPropagation();ev.preventDefault();return;}
         const top=ev.target.classList.contains("top"),bot=ev.target.classList.contains("bot");
-        const[px,py]=pt(ev);drag={i,mode:top?"top":bot?"bot":"move",px,py,box:bx.box.slice()};ev.stopPropagation();ev.preventDefault();});
+        drag={i,mode:top?"top":bot?"bot":"move",px,py,box:bx.box.slice()};ev.stopPropagation();ev.preventDefault();});
       canvas.appendChild(d);});
     live_count();
   }
-  let drag=null,adding=null,ghost=null;
+  let drag=null,adding=null,ghost=null,splitArm=null;
   canvas.addEventListener("mousedown",e=>{if(e.target!==canvas&&e.target.tagName!=="IMG")return;
     const[px,py]=pt(e);adding={x0:px,y0:py,x1:px,y1:py};});
   window.addEventListener("mousemove",e=>{
@@ -162,10 +172,11 @@ document.getElementById("export").onclick=()=>{
     coordinate_convention:"cv_footnote_presplit stacked reading-order strip, pixels; un-stack to native via note_region.strip_to_native",date:"{DATE}",door:"human-note-box-ratify"}));
   CARDS.forEach(c=>{const S=state[c.page]||{boxes:[]};
     const kept=S.boxes.filter(b=>b.st!=="reject"&&b.st!=="merged");
-    const merges=S.boxes.filter(b=>b.st==="merged").length;
+    const merges=S.boxes.filter(b=>b.st==="merged").length;                 // precision signal: false extra starts
+    const splits=S.boxes.filter(b=>b.split).length;                          // recall signal: detector-missed starts
     lines.push(JSON.stringify({page:c.page,strip_size:[c.sw,c.sh],column_bands:c.column_bands,mode:c.mode,
-      n_extractor:c.n_extractor,n_detected:c.n_detected,n_ratified:kept.length,continuation_merges:merges,
-      notes:kept.map(b=>({strip_box:b.box,status:b.st,proposed_by:b.src==="human"?"human":"detector",absorbed_continuations:b.absorbed||0})),
+      n_extractor:c.n_extractor,n_detected:c.n_detected,n_ratified:kept.length,continuation_merges:merges,missed_starts_split:splits,
+      notes:kept.map(b=>({strip_box:b.box,status:b.st,proposed_by:b.src==="human"?"human":"detector",split_from_detector_box:!!b.split,absorbed_continuations:b.absorbed||0})),
       provenance:{ratified_by:"human",session_freshness:"in-context-WARN"}}));});
   const blob=new Blob([lines.join("\n")],{type:"application/x-ndjson"});const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);a.download="note_box_truth_{DATE}.jsonl";a.click();};
