@@ -11,18 +11,34 @@ A = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits")
 IMG = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
 DATE = "20260913"
 
+def _footnote_band_top(im):
+    """Detect the body↔footnote separator rule ROBUSTLY (the rules field sometimes holds a decorative rule
+    above a mid-page book title, which puts the crop in body text). A separator is a near-full-width dark row
+    in the lower page with footnote text below it; take the LOWEST such rule, which is the true separator."""
+    import numpy as np
+    a = np.asarray(im) < 110
+    W, H = im.size
+    rowfrac = a.sum(axis=1) / W
+    rules = [y for y in range(int(H * 0.40), int(H * 0.92)) if rowfrac[y] > 0.45]
+    if not rules:
+        return int(H * 0.72)
+    # group adjacent rule-rows; keep the lowest group that still has real text below it (the footnotes)
+    best = None
+    for y in rules:
+        if a[y + 6:H].sum() > 0.01 * W * (H - y):      # substantial ink below -> footnotes present
+            best = y
+    return (best + 6) if best is not None else int(H * 0.72)
+
 def build(n_longest=40):
     census = json.loads((A / "chain_census.json").read_text(encoding="utf-8"))
-    rules = {r["page"]: r.get("rules") for r in (json.loads(l) for l in
-             open(A.parent / "vol1_apparatus.jsonl", encoding="utf-8") if l.strip()) if "page" in r}
     corpus = [e for e in census["runs"] if e[0] >= 89]                 # exclude front matter + memoir
     corpus.sort(key=lambda e: -(e[1] - e[0] + 1))
     cards = []
     for e in corpus[:n_longest]:
         pg = e[0]
         im = Image.open(IMG / f"page{pg}_image1.png").convert("L"); W, H = im.size
-        rr = [x for x in (rules.get(pg) or []) if x]; ry = min(rr) if rr else int(H * 0.62)
-        crop = im.crop((0, ry + 4, W, min(H, ry + 380)))              # native footnote-band top (first notes)
+        ry = _footnote_band_top(im)
+        crop = im.crop((0, ry, W, min(H, ry + 400)))                  # native footnote-band top (first notes)
         b = io.BytesIO(); crop.save(b, format="PNG")
         cards.append(dict(run=e, length=e[1] - e[0] + 1, first_page=pg, printed=pg - 88,
                           img="data:image/png;base64," + base64.b64encode(b.getvalue()).decode()))
