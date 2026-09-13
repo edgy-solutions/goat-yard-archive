@@ -54,7 +54,7 @@ def run_census(pages=None):
         book, chapter, _ = _header(pg)
         strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
         det = len(NS.page_starts(strip)) if strip is not None else 0
-        ext = frozen[pg]["n_notes"]
+        ext = frozen[pg].get("n_notes") or 0               # None on no-apparatus / front-matter pages
         if book and book != prev_book:                     # a CANDIDATE reset boundary from the alignment —
             boundaries.append(dict(page=pg, kind="book_start", book=book, chapter=chapter, reset="unconfirmed"))
         elif chapter is not None and chapter != prev_chapter:
