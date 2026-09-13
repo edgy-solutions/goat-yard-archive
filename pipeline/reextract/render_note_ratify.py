@@ -82,7 +82,7 @@ header .sp{margin-left:auto}
 .nb .tools{position:absolute;left:2px;top:2px;display:flex;gap:3px;z-index:5}
 .nb .tools button{width:20px;height:18px;border:1px solid var(--rule);background:#fff;border-radius:3px;font-size:12px;line-height:1;cursor:pointer;padding:0}
 .nb .tools .rej{color:var(--rej)}.nb .tools .mrg{color:var(--mrg)}
-.nb .tag{position:absolute;left:46px;top:2px;font:11px ui-monospace,monospace;background:#fff;padding:0 3px;border:1px solid var(--rule);z-index:5}
+.nb .tag{position:absolute;left:76px;top:2px;font:11px ui-monospace,monospace;background:#fff;padding:0 3px;border:1px solid var(--rule);z-index:5}
 </style></head><body>
 <header><h1>Note-box ratify · vol1</h1><span class="stat" id="stat"></span>
 <span class="sp"></span><button id="reset" style="background:#7a3b3b">Reset all</button><button id="export">Export note-box truth JSONL</button></header>
