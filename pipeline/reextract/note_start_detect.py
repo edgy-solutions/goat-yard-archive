@@ -177,7 +177,18 @@ def page_starts(strip, profile=None):
     projection. Run detection on the whole strip. Vertical rules removed first; left margin inset once."""
     a = strip_vrules(np.asarray(strip.convert("L")) < INK)
     ins = _left_inset(a)
-    return [(ins, y0) for y0 in column_starts(a[:, ins:], **(_kw(profile)))]
+    ys = column_starts(a[:, ins:], **(_kw(profile)))
+    return [(ins, y) for y in _dedupe_slivers(ys)]
+
+def _dedupe_slivers(ys, min_note_h=20):
+    """STRUCTURAL guard (a bug, not a threshold): two note-starts cannot be only a few pixels apart — a note
+    is at least a line tall. Collapse a run of starts closer than min_note_h to the first. Kills the sliver
+    class a small-strip over-split produces, without touching any real start (which is ≥ a line apart)."""
+    out = []
+    for y in sorted(ys):
+        if not out or y - out[-1] >= min_note_h:
+            out.append(y)
+    return out
 
 def _kw(profile):
     if not profile:

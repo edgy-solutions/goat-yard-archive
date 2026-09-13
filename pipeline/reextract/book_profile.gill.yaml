@@ -18,8 +18,16 @@ layout:
   per_column_body_footnote_rule: true
   footnote_marker: lowercase_letter        # a, b, c … (NOT the canonical output marker)
   marker_scope: per_column                 # letters RESTART per column/paragraph, not per page
-  marker_skips: [j]                        # 1766 convention: j skipped in the run
+  # 24-LETTER ALPHABET (Chris, from the ratification pages): 18th-c printers merged i/j and u/v, so the
+  # marker run is a b c d e f g h i k l m n o p q r s t u w x y z — NO j, NO v (24 letters). This gives the
+  # EXACT expected note count per column: first→last marker index in this alphabet. j and v are ILLEGAL
+  # marker outputs — a confirmation read that emits either has misread (a flag). After z on a dense column,
+  # watch for restart or doubling (aa, bb) — record which. Flag any page whose observed sequence breaks the
+  # rule (a stray j/v = a printer's slip or a different compositor; record the page).
+  marker_alphabet: "abcdefghiklmnopqrstuwxyz"   # 24 letters; index+1 = count from first→last per column
+  marker_skips: [j, v]                     # both skipped (i/j merged, u/v merged)
   uv_interchange: true                     # u/v treated as interchangeable in the run
+  after_z: unknown                         # restart vs doubling (aa,bb) — confirm on a dense page (>24 notes/col)
   # FOSSIL (FOSSIL_SCARS #A): BODY anchor glyphs are a zoo, NOT just [a-z] — the anchor-matcher
   # must recognize all of these as in-text references (superscript letters/digits + symbols):
   body_anchor_glyphs: ["^a^", "ᵃ", "*", "†", "‡", "°", "δ", "<sup>", "[^b]", "¹²³⁴⁵⁶⁷⁸⁹⁰"]
