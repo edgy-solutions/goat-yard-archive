@@ -79,10 +79,14 @@ header .sp{margin-left:auto}
 .nb .edge:hover{background:var(--accent)}
 .nb .edge.top{top:-5px}.nb .edge.bot{bottom:-5px}
 /* controls at the LEFT, never under the right scrollbar */
-.nb .tools{position:absolute;left:2px;top:2px;display:flex;gap:3px;z-index:5}
-.nb .tools button{width:20px;height:18px;border:1px solid var(--rule);background:#fff;border-radius:3px;font-size:12px;line-height:1;cursor:pointer;padding:0}
+/* chrome is HIDDEN by default so the footnote marker (start) + box bottom (stop) are fully visible;
+   it reveals on hover (or while the box is armed for split) */
+.nb .tools{position:absolute;left:2px;top:2px;display:flex;gap:3px;z-index:5;opacity:0;transition:opacity .08s}
+.nb .tools button{width:22px;height:19px;border:1px solid var(--rule);background:#fff;border-radius:3px;font-size:12px;line-height:1;cursor:pointer;padding:0}
 .nb .tools .rej{color:var(--rej)}.nb .tools .mrg{color:var(--mrg)}
-.nb .tag{position:absolute;left:76px;top:2px;font:11px ui-monospace,monospace;background:#fff;padding:0 3px;border:1px solid var(--rule);z-index:5}
+.nb .tag{position:absolute;right:2px;top:2px;font:10px ui-monospace,monospace;color:#8a8375;background:rgba(255,255,255,.75);padding:0 3px;z-index:5;opacity:0;transition:opacity .08s}
+.nb:hover .tools,.nb:hover .tag,.nb.arm .tools,.nb.arm .tag{opacity:1}
+.nb.arm .tag{color:var(--split);background:#fff}
 </style></head><body>
 <header><h1>Note-box ratify · vol1</h1><span class="stat" id="stat"></span>
 <span class="sp"></span><button id="reset" style="background:#7a3b3b">Reset all</button><button id="export">Export note-box truth JSONL</button></header>
