@@ -186,10 +186,31 @@ document.getElementById("export").onclick=()=>{
   a.href=URL.createObjectURL(blob);a.download="note_box_truth_{DATE}.jsonl";a.click();};
 </script></body></html>"""
 
+def build_mini(page_boxes, out_name, date_suffix):
+    """Mini-console pre-loaded with explicit boxes per page (for fixups). page_boxes = {page: [[x0,y0,x1,y1]]}."""
+    nn = _nnotes()
+    cards = []
+    for pg, boxes in page_boxes.items():
+        strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
+        _, meta = NR.propose_regions(strip, info)
+        cards.append(dict(page=pg, sw=strip.width, sh=strip.height, mode=info.get("mode"),
+                          n_extractor=nn.get(pg), n_detected=len(boxes), proposed=boxes,
+                          column_bands=meta["column_bands"], img=_b64(strip)))
+    html = _TEMPLATE.replace("/*DATA*/", json.dumps(cards)).replace("{DATE}", date_suffix).replace("{N}", str(len(cards)))
+    out = DATA / out_name
+    out.write_text(html, encoding="utf-8")
+    print(f"wrote {out} ({out.stat().st_size//1024} KB, {len(cards)} pages)")
+
 if __name__ == "__main__":
-    span = sorted({int(s["span_id"].split(":")[0][1:]) for s in
-                   json.load(open(DATA / "hebrew_sample_20260906.json", encoding="utf-8")) +
-                   json.load(open(DATA / "nikud_sample_10.json", encoding="utf-8"))})
-    hard = [546, 657, 129, 226, 393]                   # full-width (546), footer class (657), dense fixtures
-    pages = span + [p for p in hard if p not in span]
-    build(pages)
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "mini":
+        cor = {r["page"]: r for r in (json.loads(l) for l in
+               open(DATA / "note_box_truth_20260906_corrected.jsonl", encoding="utf-8") if l.strip()) if "page" in r}
+        pb = {pg: [n["strip_box"] for n in cor[pg]["notes"]] for pg in (200, 261)}
+        build_mini(pb, "note_box_fix_200_261.html", "20260906fix")
+    else:
+        span = sorted({int(s["span_id"].split(":")[0][1:]) for s in
+                       json.load(open(DATA / "hebrew_sample_20260906.json", encoding="utf-8")) +
+                       json.load(open(DATA / "nikud_sample_10.json", encoding="utf-8"))})
+        hard = [546, 657, 129, 226, 393]
+        build((span + [p for p in hard if p not in span]))
