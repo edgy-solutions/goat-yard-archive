@@ -17,7 +17,11 @@ layout:
   # own footnotes; footnote strip = below that rule. reading order = left-strip then right-strip.
   per_column_body_footnote_rule: true
   footnote_marker: lowercase_letter        # a, b, c … (NOT the canonical output marker)
-  marker_scope: per_column                 # letters RESTART per column/paragraph, not per page
+  # marker_scope CORRECTED 2026-09-13 by reading the markers on the ratified pages: the run is
+  # PAGE-CONTINUOUS across columns in reading order (left/top column then right/bottom), NOT a per-column
+  # restart. Evidence: p138 col0 ends h..p, col1 continues q..y (p→q across the gap, no restart to a); the
+  # alphabet count h→y = 16 == p138's 16 notes. The earlier `per_column` came from the build and was wrong.
+  marker_scope: page_continuous_across_columns
   # 24-LETTER ALPHABET (Chris, from the ratification pages): 18th-c printers merged i/j and u/v, so the
   # marker run is a b c d e f g h i k l m n o p q r s t u w x y z — NO j, NO v (24 letters). This gives the
   # EXACT expected note count per column: first→last marker index in this alphabet. j and v are ILLEGAL
@@ -27,7 +31,8 @@ layout:
   marker_alphabet: "abcdefghiklmnopqrstuwxyz"   # 24 letters; index+1 = count from first→last per column
   marker_skips: [j, v]                     # both skipped (i/j merged, u/v merged)
   uv_interchange: true                     # u/v treated as interchangeable in the run
-  after_z: unknown                         # restart vs doubling (aa,bb) — confirm on a dense page (>24 notes/col)
+  after_z: restart_a                       # RESOLVED 2026-09-13 from p261: markers read t,u,w,x,y,z,a,b,c,d,e,f
+                                           # — after z the run WRAPS to a single 'a' (restart), NOT doubling (aa)
   # FOSSIL (FOSSIL_SCARS #A): BODY anchor glyphs are a zoo, NOT just [a-z] — the anchor-matcher
   # must recognize all of these as in-text references (superscript letters/digits + symbols):
   body_anchor_glyphs: ["^a^", "ᵃ", "*", "†", "‡", "°", "δ", "<sup>", "[^b]", "¹²³⁴⁵⁶⁷⁸⁹⁰"]
