@@ -21,17 +21,21 @@ layout:
   # markers run CONTINUOUSLY across columns AND pages within a book (p138 col0 h..p, col1 q..y — p→q across
   # the gap; and the chain runs page-to-page). NOT per-column, NOT per-page.
   marker_scope: book_continuous
-  marker_wrap: z_to_a                      # after z the series CONTINUES at a (a WRAP, not a reset) — p315:
-                                           # Genesis notes ...x,y,z,a,b,c,d,e,f (still Gen 50:26), no reset.
-  marker_reset_at: [book_introduction, chapter_I]   # the series RESETS to 'a' at a book's intro and its Chap. I.
-                                           # p2: intro ends 'c', Chap. I restarts a,b,c,d (two notes = 'c').
-                                           # p315: Genesis wrap ...f, then Exodus intro resets 'a' (two 'a's).
-                                           # WHETHER EVERY CHAPTER RESETS IS UNKNOWN — the chain-walk census must
-                                           # report it against the alignment's chapter/book boundaries.
+  # INVARIANT (the gate; never varies): within a SERIES, markers are gapless and ordered under the 24-letter
+  # alphabet, wrapping z→a. That is all the sequence gate checks.
+  marker_wrap: z_to_a                      # after z the series CONTINUES at a (a WRAP, not a reset). p315:
+                                           # Genesis ...x,y,z,a,b,c,d,e,f (still Gen 50:26), no reset.
+  # EMPIRICAL (per volume; census-discovered, NOT a fixed rule — Chris 2026-09-13): WHERE series begin. The
+  # reset rule is per-compositor/per-job, not a law. Genesis (OT): intro AND Chapter I each start a series
+  # (p2 intro→Chap.I two 'c'; p315 Exodus intro reset). Matthew (NT vol.1 p1): intro runs a–i (Jerom ⁱ), and
+  # Chapter I appears to CONTINUE, not reset. So the chain-walk must NOT assume a reset at any boundary — it
+  # DETECTS a reset as "series restarts at 'a' where the chain would have continued" (needs the marker read),
+  # and reports where the alignment says a boundary is. Reset points are stored below as OBSERVED FACTS with
+  # the page confirmed on, checked against alignment, never derived from it.
+  marker_resets_observed: []               # filled by the chain-walk census, per volume: [{page, book, chapter, kind}]
   marker_identity: [series, letter]        # a marker is (SERIES, letter), never letter alone; a duplicated
-                                           # letter from a mid-page reset resolves by position within its series.
-  marker_reset_source: body_alignment      # reset points come from the body chapter/book boundaries (verse_ref),
-                                           # NOT from the marker stream — the gate segments the expected sequence there.
+                                           # letter across a reset resolves by position within its series.
+  # NOTE: marker rules are PER VOLUME (OT vol.1 vs NT vol.1 are different jobs); this profile is vol.1 OT.
   # 24-LETTER ALPHABET (Chris, from the ratification pages): 18th-c printers merged i/j and u/v, so the
   # marker run is a b c d e f g h i k l m n o p q r s t u w x y z — NO j, NO v (24 letters). This gives the
   # EXACT expected note count per column: first→last marker index in this alphabet. j and v are ILLEGAL
