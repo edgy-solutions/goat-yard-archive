@@ -12,30 +12,40 @@ IMG = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
 DATE = "20260913"
 
 def _footnote_band_top(im):
-    """Detect the body↔footnote separator rule ROBUSTLY (the rules field sometimes holds a decorative rule
-    above a mid-page book title, which puts the crop in body text). A separator is a near-full-width dark row
-    in the lower page with footnote text below it; take the LOWEST such rule, which is the true separator."""
+    """Body↔footnote separator by the WHITESPACE GAP, not a rule. Body text ends, then a blank band, then the
+    footnotes — the largest blank band in the lower page (that still has real text below it) is that separator;
+    return its bottom. Robust where the rules field holds a decorative rule above a mid-page book title (the
+    crop-in-body bug). Full-width dark ROWS fail because body text lines are also dark and full-width."""
     import numpy as np
     a = np.asarray(im) < 110
     W, H = im.size
-    rowfrac = a.sum(axis=1) / W
-    rules = [y for y in range(int(H * 0.40), int(H * 0.92)) if rowfrac[y] > 0.45]
-    if not rules:
-        return int(H * 0.72)
-    # group adjacent rule-rows; keep the lowest group that still has real text below it (the footnotes)
-    best = None
-    for y in rules:
-        if a[y + 6:H].sum() > 0.01 * W * (H - y):      # substantial ink below -> footnotes present
-            best = y
-    return (best + 6) if best is not None else int(H * 0.72)
+    rowink = a.sum(axis=1) / W
+    best = None; s = None
+    for y in range(int(H * 0.62), H):                  # lower page only — a body paragraph gap higher up must
+                                                       # not win; the body↔footnote separator is always down here
+        if rowink[y] < 0.06:                            # a blank row (0.06 tolerates scan speckle)
+            if s is None: s = y
+        else:
+            if s is not None and (y - s) >= 12 and a[y:H].sum() > 0.008 * W * (H - y):
+                if best is None or (y - s) > (best[1] - best[0]):
+                    best = (s, y)                       # the LARGEST blank band with real footnote text below
+            s = None
+    return best[1] if best else int(H * 0.72)
 
 def build(n_longest=40):
     census = json.loads((A / "chain_census.json").read_text(encoding="utf-8"))
+    nn = {r["page"]: (r.get("n_notes") or 0) for r in (json.loads(l) for l in
+          open(A.parent / "vol1_apparatus.jsonl", encoding="utf-8") if l.strip()) if "page" in r}
     corpus = [e for e in census["runs"] if e[0] >= 89]                 # exclude front matter + memoir
-    corpus.sort(key=lambda e: -(e[1] - e[0] + 1))
+    # rank by TOTAL notes in the run (exemplar yield), not page-length; drop note-less (body-only) runs, and
+    # anchor the card on the run's first page that actually HAS notes (skip leading 0-note body pages)
+    def first_noted(e):
+        return next((p for p in range(e[0], e[1] + 1) if nn.get(p, 0) > 0), None)
+    scored = [(sum(nn.get(p, 0) for p in range(e[0], e[1] + 1)), first_noted(e), e) for e in corpus]
+    scored = sorted([(t, fp, e) for t, fp, e in scored if t > 0 and fp is not None], reverse=True)
     cards = []
-    for e in corpus[:n_longest]:
-        pg = e[0]
+    for total, fp, e in scored[:n_longest]:
+        pg = fp
         im = Image.open(IMG / f"page{pg}_image1.png").convert("L"); W, H = im.size
         ry = _footnote_band_top(im)
         crop = im.crop((0, ry, W, min(H, ry + 400)))                  # native footnote-band top (first notes)
