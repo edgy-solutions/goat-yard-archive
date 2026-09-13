@@ -28,6 +28,37 @@ def count_between(first, last):
         return None
     return b - a + 1
 
+def run(first, n):
+    """The expected n-marker run from `first`, incrementing through the alphabet and WRAPPING z→a (the
+    resolved after-z convention). The absolute start need not be 'a' (Gill pages start mid-run)."""
+    a = index(first)
+    if a < 0:
+        return []
+    L = len(ALPHABET)
+    return [ALPHABET[(a + k) % L] for k in range(n)]
+
+def count_run(first, last):
+    """Count of a consecutive run first→last inclusive, WRAP-aware (z→a). None if either is not a marker."""
+    a, b = index(first), index(last)
+    if a < 0 or b < 0:
+        return None
+    return (b - a) % len(ALPHABET) + 1
+
+def is_consecutive_run(markers):
+    """True iff `markers` (in reading order) form a gapless consecutive run under the alphabet, WRAP-aware —
+    no gaps, no repeats (except the single legal z→a step), no illegal j/v. This is the SEQUENCE-EQUALITY
+    check the gate uses: cancellation (a false start + a missed real start) cannot produce a gapless run."""
+    idx = []
+    for m in markers:
+        if not is_legal(m):
+            return False
+        i = index(m)
+        if i < 0:
+            return False
+        idx.append(i)
+    L = len(ALPHABET)
+    return all(idx[k] == (idx[k - 1] + 1) % L for k in range(1, len(idx)))
+
 def sequence_breaks(letters):
     """Return the list of problems in an observed marker sequence: any illegal j/v, or a gap/backstep that
     breaks consecutiveness under the alphabet. Empty list == the sequence obeys the convention."""

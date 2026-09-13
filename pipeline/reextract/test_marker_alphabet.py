@@ -15,6 +15,19 @@ def test_sequence_breaks_flags_slip_and_gap():
     assert any("illegal" in p for p in M.sequence_breaks(["a", "b", "j"]))   # a stray j
     assert any("non-consecutive" in p for p in M.sequence_breaks(["a", "c"]))  # missing b
 
+def test_run_and_wrap():
+    assert M.run("h", 3) == ["h", "i", "k"]                     # skips j
+    assert M.run("y", 3) == ["y", "z", "a"]                     # wraps z→a
+    assert M.count_run("h", "y") == 16                          # p138: h→y = 16 notes
+    assert M.count_run("t", "f") == 12                          # p261: t..z,a..f wrap = 12 notes
+
+def test_consecutive_run_gate():
+    assert M.is_consecutive_run(["h", "i", "k", "l"])           # legal (i→k skips j)
+    assert M.is_consecutive_run(["y", "z", "a", "b"])           # legal wrap
+    assert not M.is_consecutive_run(["a", "c"])                 # a gap (missed start)
+    assert not M.is_consecutive_run(["a", "a"])                 # a repeat (false start)
+    assert not M.is_consecutive_run(["a", "j"])                 # illegal j
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
