@@ -18,13 +18,36 @@ gates are text-only and always run: script-consistency and (upstream) the refere
                   confidently unpointed (model added the points), else keeps.
 A note is FLAGGED for the gemma dual-witness when script != ok OR the glyph tripwire fires."""
 import re
+import numpy as np
 import note_region as NR
+import note_start_detect as NS
+import marker_harvest as MH
+import sequence_gate as SEQ
 import word_box_align as WBA
 import glyph_count_tripwire as GCT
 import nikud_gate as NG
 import script_gate as SG
 
 _HEB = re.compile(r"[֐-׿]")
+
+
+def _marker_regions(strip, regions):
+    """Decision 2 (Chris 2026-09-14): the note-start detector is retired as a counter — it over-counts (body
+    lines fire as note-starts). Filter its proposed regions to those whose first line carries a real RAISED
+    MARKER glyph (marker_harvest._marker_box), dropping the body-line false regions, so alignment keys on v2's
+    validated notes rather than the detector's inflated count. Returns the marker-bearing regions in order."""
+    arr = np.asarray(strip.convert("L"))
+    keep = []
+    for reg in regions:
+        x0, y0, x1, y1 = reg["strip_box"]
+        sub = NS.strip_vrules(arr[y0:y1, x0:x1] < NS.INK)
+        lines = NS.text_lines(sub)
+        if not lines:
+            continue
+        ly0, ly1 = lines[0]
+        if MH._marker_box(sub[ly0:ly1]) is not None:
+            keep.append(reg)
+    return keep
 
 
 def _has_hebrew(text):
@@ -69,7 +92,12 @@ def apply(strip, notes, profile=None):
     if not heb_idx:
         return notes, {"hebrew_notes": 0, "flagged": 0, "aligned": None}
     regions, _meta = NR.propose_regions(strip)
-    aligned = len(regions) == len(notes)
+    mregions = _marker_regions(strip, regions)            # decision 2: detector as boxes, marker-filtered
+    chain = SEQ.page_chain_status([n.get("marker_letter") for n in notes])
+    # Align on the marker-filtered regions when they match the note count; fall back to the raw regions only on
+    # an exact match; otherwise abstain the crop gates. The chain status travels as the count-trust signal.
+    use_regions = mregions if len(mregions) == len(notes) else (regions if len(regions) == len(notes) else None)
+    aligned = use_regions is not None
     flagged = 0
     for i in heb_idx:
         n = notes[i]
@@ -77,7 +105,7 @@ def apply(strip, notes, profile=None):
         v = {"script": _script_verdict(text)}             # decision 3: scoped to the Hebrew span, not the note
         if aligned:
             try:
-                line_crop = strip.crop(tuple(regions[i]["strip_box"]))
+                line_crop = strip.crop(tuple(use_regions[i]["strip_box"]))
                 box, st = WBA.locate_hebrew(line_crop, text)
                 if box:
                     span_crop = line_crop.crop(box)
@@ -92,10 +120,11 @@ def apply(strip, notes, profile=None):
             except Exception as e:
                 v["crop_error"] = str(e)[:80]
         else:
-            v["align"] = "note-count-mismatch"            # crop gates abstain for the page
-        v["flag"] = (v["script"] != "ok") or bool(v.get("glyph_flag"))
+            v["align"] = f"unaligned(mregions={len(mregions)},regions={len(regions)},notes={len(notes)})"
+        v["flag"] = (v["script"] not in ("ok", "no-hebrew")) or bool(v.get("glyph_flag"))
         v["escalate_gemma"] = v["flag"]                   # the dual-witness intake gate
         n["hebrew_verdict"] = v
         flagged += int(v["flag"])
     return notes, {"hebrew_notes": len(heb_idx), "flagged": flagged, "aligned": aligned,
-                   "n_regions": len(regions), "n_notes": len(notes)}
+                   "n_regions": len(regions), "n_marker_regions": len(mregions), "n_notes": len(notes),
+                   "chain_status": chain["status"], "chain_confirmed": chain["confirmed"]}

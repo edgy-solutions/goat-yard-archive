@@ -29,7 +29,7 @@ def main():
                                         upscale=profile["transcription"].get("apparatus_upscale", 4))
         if strip is None:
             continue
-        notes = [{"text": n["text"], "marker": n["marker"]} for n in r["notes"]]
+        notes = [{"text": n["text"], "marker": n["marker"], "marker_letter": n.get("marker_letter")} for n in r["notes"]]
         notes, summ = HL.apply(strip, notes, profile)
         total_heb += summ["hebrew_notes"]; flagged_gemma += summ["flagged"]
         for n in notes:
