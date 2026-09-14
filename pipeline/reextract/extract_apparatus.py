@@ -72,18 +72,36 @@ def _layout_hint(profile):
     return None
 
 def transcribe_baml(strip_img, profile):
-    """Seam 1 transcription: returns (typed_note_dicts, done_reason). Lazy BAML import so the frozen httpx
-    path never depends on baml_client being generated."""
+    """Seam 1 transcription: returns (typed_note_dicts, done_reason). BAML MODULAR request/parse — BAML builds
+    the prompt (with the typed-Note[] output schema) and parses the reply into the typed contract, but the
+    request is SENT over Ollama's NATIVE /api/chat with think:false. This is deliberate: qwen3's thinking is a
+    request-level toggle that Ollama's OpenAI-compatible /v1 endpoint DROPS (prompt `/no_think` is only a soft
+    hint qwen3 doesn't always honor -> random empty replies), whereas /api/chat honors think:false — the same
+    control the frozen /api/generate config used, which is why it never had empties. Typed contract preserved,
+    no proxy. The BAML client (model qwen3.6-16k:35b, host .169) stays the single source of model+host+prompt."""
     import sys as _sys
     _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from baml_client.sync_client import b
     from baml_py import Image as BamlImage
     sig = (profile.get("furniture") or {}).get("signature_example") or "VOL. I.—OLD TEST. 4 D"
-    notes = b.TranscribeApparatus(BamlImage.from_base64("image/png", _b64_png(strip_img)), _layout_hint(profile), sig)
+    img = BamlImage.from_base64("image/png", _b64_png(strip_img))
+    req = b.request.TranscribeApparatus(img, _layout_hint(profile), sig)     # BAML builds prompt + output schema
+    body = req.body.json() if hasattr(req.body, "json") else req.body
+    msg = body["messages"][0]                                                # one user message: text(s) + image
+    texts = [p["text"] for p in msg["content"] if p.get("type") == "text"]
+    imgs = [p["image_url"]["url"].split(",", 1)[1] for p in msg["content"] if p.get("type") == "image_url"]
+    api_chat = str(req.url).replace("/v1/chat/completions", "/api/chat")     # native endpoint, same host
+    r = httpx.post(api_chat, timeout=900, json={
+        "model": body["model"], "think": False, "stream": False,
+        "options": {"temperature": 0}, "messages": [{"role": "user", "content": "\n".join(texts), "images": imgs}]})
+    content = ((r.json().get("message") or {}).get("content") or "").strip()
+    if not content:
+        return [], "empty"
+    notes = b.parse.TranscribeApparatus(content)                            # BAML parses -> typed Note[]
     out = [{"text": n.text, "marker_letter": n.marker_letter,
             "status": _STATUS_SNAKE.get(getattr(n.status, "value", str(n.status)), "complete"),
             "partial": bool(n.partial)} for n in notes]
-    return out, "baml"
+    return out, "baml-api-chat"
 
 def _body_before_defs(md):
     return A.split_body_defs(md)[0]     # robust body/def split (all zoo def formats)
