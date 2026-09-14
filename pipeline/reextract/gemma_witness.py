@@ -40,7 +40,10 @@ def main():
     profile = A.load_profile(str(PROFILE))
     qrows = [json.loads(l) for l in QWEN.read_text(encoding="utf-8").splitlines() if l.strip()]
     qpages = {r["page"]: r for r in qrows if r.get("kind") != "config_header"}
-    targets = sorted(qpages)
+    # targets = the truthset pages (for the page-level ladder against stored qwen) UNION the Hebrew-sitting
+    # spans' pages (so the Hebrew-span dual-witness has gemma reads to compare against run_text).
+    span_pages = {s["page"] for s in json.loads(HEB_SPANS.read_text(encoding="utf-8"))}
+    targets = sorted(set(qpages) | span_pages)
     done = done_pages()
     OUT.parent.mkdir(parents=True, exist_ok=True)
     fresh = not OUT.exists() or OUT.stat().st_size == 0
@@ -59,11 +62,15 @@ def main():
             try:
                 g = extract_page(str(img), profile, HOST, seam="baml", model=GEMMA)
                 gnotes = [{"text": n["text"], "marker_letter": n.get("marker_letter")} for n in g.get("notes", [])]
-                qnotes = [{"text": n["text"]} for n in qpages[pg].get("notes", [])]
-                lad = AL.ladder(qnotes, gnotes)
-                rec = {"page": pg, "rung": lad["rung"], "agree": lad["agree"], "count": lad["count"],
-                       "script_diffs": lad["script_diffs"], "text_diffs": lad["text_diffs"],
-                       "gemma_notes": gnotes, "secs": round(time.perf_counter() - t0, 1)}
+                if pg in qpages:                                    # page-level ladder needs stored qwen notes
+                    qnotes = [{"text": n["text"]} for n in qpages[pg].get("notes", [])]
+                    lad = AL.ladder(qnotes, gnotes)
+                    rec = {"page": pg, "rung": lad["rung"], "agree": lad["agree"], "count": lad["count"],
+                           "script_diffs": lad["script_diffs"], "text_diffs": lad["text_diffs"],
+                           "gemma_notes": gnotes, "secs": round(time.perf_counter() - t0, 1)}
+                else:                                               # Hebrew-span-only page: store gemma reads
+                    rec = {"page": pg, "rung": "span-only", "agree": None, "gemma_notes": gnotes,
+                           "secs": round(time.perf_counter() - t0, 1)}
             except Exception as e:
                 rec = {"page": pg, "status": "ERROR", "error": str(e)[:200], "secs": round(time.perf_counter() - t0, 1)}
             f.write(json.dumps(rec, ensure_ascii=False) + "\n"); f.flush()
@@ -73,11 +80,12 @@ def main():
     # SUMMARY
     from collections import Counter
     rows = [json.loads(l) for l in OUT.read_text(encoding="utf-8").splitlines() if l.strip()]
-    pgs = [r for r in rows if r.get("kind") != "config_header" and "rung" in r]
-    rung = Counter(r["rung"] for r in pgs)
-    disagree = [r["page"] for r in pgs if not r.get("agree")]
-    print(f"\n--- ladder rung distribution: {dict(rung)} of {len(pgs)} pages ---")
+    ladder_pgs = [r for r in rows if r.get("kind") != "config_header" and r.get("rung") not in (None, "span-only")]
+    rung = Counter(r["rung"] for r in ladder_pgs)
+    disagree = [r["page"] for r in ladder_pgs if r.get("agree") is False]
+    print(f"\n--- ladder rung distribution: {dict(rung)} of {len(ladder_pgs)} truthset pages ---")
     print(f"--- disagreement queue ({len(disagree)} pages): {disagree}")
+    pgs = [r for r in rows if r.get("kind") != "config_header" and "gemma_notes" in r]
     # Hebrew-span dual-witness
     spans = json.loads(HEB_SPANS.read_text(encoding="utf-8"))
     gpages = {r["page"]: r for r in pgs}
