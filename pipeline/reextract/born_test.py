@@ -20,6 +20,7 @@ BODYDIR = IMGDIR / "qwen_qwen3-vl-235b-a22b-thinking"
 OUT = Path(os.getenv("BORN_OUT", str(data_path("born_test_baml.jsonl"))))
 HOST = os.getenv("OLLAMA_HOST", "192.168.1.169")
 PROFILE = Path(__file__).parent / "book_profile.gill.yaml"
+BAML_SRC = Path(__file__).resolve().parent.parent.parent / "baml_src" / "gill_apparatus.baml"
 MANIFEST = data_path("audits", "sitting_manifest_span_adjudication.json")
 FIXTURES = [90, 403]                                       # reset fixtures born-tested against resets_observed
 
@@ -36,8 +37,13 @@ def header(pages):
     except Exception:
         head = "unknown"
     prof = hashlib.sha256(PROFILE.read_bytes()).hexdigest()[:16] if PROFILE.exists() else "missing"
+    # config hash covers the WHOLE seam, not just the model: model tag + endpoint + think + the BAML file
+    # (client def + prompt + output schema). If any of these move, the header changes and drift is re-provable.
+    baml = hashlib.sha256(BAML_SRC.read_bytes()).hexdigest()[:16] if BAML_SRC.exists() else "missing"
     return {"kind": "config_header", "git_head": head, "profile_sha16": prof, "profile": PROFILE.name,
-            "extractor": "extract_apparatus.extract_page", "seam": "baml", "model": "qwen3.6-16k:35b",
+            "extractor": "extract_apparatus.extract_page", "seam": "baml",
+            "model": "qwen3.6-16k:35b", "endpoint": "/api/chat", "think": False,
+            "baml_src": BAML_SRC.name, "baml_sha16": baml,
             "host": HOST, "pages": pages, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
 
 
@@ -85,6 +91,18 @@ def main():
             f.write(json.dumps(rec, ensure_ascii=False) + "\n"); f.flush()
             print(f"  p{pg} [{rec['status']}] notes={rec.get('n_notes')} ({i+1}/{len(pages)}) {rec.get('secs')}s", flush=True)
     print("DONE born-test", flush=True)
+    # STATUS DISTRIBUTION — the enum's first live measurement. A meaningful fraction of truncated_*/
+    # no_footnote_present is the geometry stage telling on itself through the reader (which crops to fix first).
+    from collections import Counter
+    rows = [json.loads(l) for l in OUT.read_text(encoding="utf-8").splitlines() if l.strip()]
+    note_stat = Counter(n.get("note_status") for r in rows if r.get("kind") != "config_header" for n in (r.get("notes") or []))
+    page_stat = Counter(r.get("status") for r in rows if r.get("kind") != "config_header")
+    total = sum(note_stat.values())
+    npages = sum(1 for r in rows if r.get("kind") != "config_header")
+    print(f"\n--- per-NOTE status distribution ({total} notes across {npages} pages) ---")
+    for s, c in note_stat.most_common():
+        print(f"  {s:20} {c:4}  ({100*c/max(1,total):.1f}%)")
+    print(f"--- per-PAGE status: {dict(page_stat)}")
 
 
 if __name__ == "__main__":
