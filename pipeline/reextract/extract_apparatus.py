@@ -71,7 +71,7 @@ def _layout_hint(profile):
                 "footnote — never merge two marked footnotes into one note, and never split one across notes.")
     return None
 
-def transcribe_baml(strip_img, profile):
+def transcribe_baml(strip_img, profile, model=None, host=None):
     """Seam 1 transcription: returns (typed_note_dicts, done_reason). BAML MODULAR request/parse — BAML builds
     the prompt (with the typed-Note[] output schema) and parses the reply into the typed contract, but the
     request is SENT over Ollama's NATIVE /api/chat with think:false. This is deliberate: qwen3's thinking is a
@@ -91,8 +91,10 @@ def transcribe_baml(strip_img, profile):
     texts = [p["text"] for p in msg["content"] if p.get("type") == "text"]
     imgs = [p["image_url"]["url"].split(",", 1)[1] for p in msg["content"] if p.get("type") == "image_url"]
     api_chat = str(req.url).replace("/v1/chat/completions", "/api/chat")     # native endpoint, same host
+    if host:                                                                 # second-witness override (gemma)
+        api_chat = re.sub(r"//[^/:]+", "//" + host, api_chat, count=1)
     r = httpx.post(api_chat, timeout=900, json={
-        "model": body["model"], "think": False, "stream": False,
+        "model": model or body["model"], "think": False, "stream": False,    # model override for the 2nd witness
         "options": {"temperature": 0}, "messages": [{"role": "user", "content": "\n".join(texts), "images": imgs}]})
     content = ((r.json().get("message") or {}).get("content") or "").strip()
     if not content:
@@ -106,7 +108,7 @@ def transcribe_baml(strip_img, profile):
 def _body_before_defs(md):
     return A.split_body_defs(md)[0]     # robust body/def split (all zoo def formats)
 
-def extract_page(image_path, profile, host, body_md=None, seam="httpx", hebrew=False):
+def extract_page(image_path, profile, host, body_md=None, seam="httpx", hebrew=False, model=None):
     page = re.search(r"page(\d+)", Path(image_path).name)
     page = page.group(1) if page else "?"
     # FRONT-MATTER BOUNDARY (book fact): images before commentary_start_page have no apparatus —
@@ -122,7 +124,7 @@ def extract_page(image_path, profile, host, body_md=None, seam="httpx", hebrew=F
     # SEAM: "baml" = config-v2 typed Note[] (assembler consumes typed notes, persists marker_letter+status);
     # "httpx" = frozen free-text line-parse. Both feed the same strip + profile substance to the same weights.
     if seam == "baml":
-        typed, done = transcribe_baml(strip, profile)
+        typed, done = transcribe_baml(strip, profile, model=model)
         r = A.canonicalize_typed_notes(typed, profile)
     else:
         resp, done = transcribe(strip, profile, host)
