@@ -37,7 +37,7 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (3)
+# Generated enums (4)
 # #########################################################################
 
 class BiblicalEra(str, Enum):
@@ -67,8 +67,16 @@ class FailureCategory(str, Enum):
     TrueSilence = "TrueSilence"
     LLMLaziness = "LLMLaziness"
 
+class NoteStatus(str, Enum):
+    Complete = "Complete"
+    TruncatedTop = "TruncatedTop"
+    TruncatedBottom = "TruncatedBottom"
+    TruncatedSide = "TruncatedSide"
+    NoFootnotePresent = "NoFootnotePresent"
+    Unreadable = "Unreadable"
+
 # #########################################################################
-# Generated classes (11)
+# Generated classes (12)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -100,6 +108,12 @@ class MetadataCore(BaseModel):
 class MetadataVerses(BaseModel):
     verse: typing.Optional[str] = None
     no_verse_markers: typing.Optional[bool] = None
+
+class Note(BaseModel):
+    text: str
+    marker_letter: str
+    status: NoteStatus
+    partial: bool
 
 class OptimizedQuery(BaseModel):
     expanded_search_terms: str

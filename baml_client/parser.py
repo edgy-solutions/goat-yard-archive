@@ -72,6 +72,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ResolveBoundaryPronouns", llm_response=llm_response, mode="request")
         return typing.cast(types.ResolvedPronoun, result)
 
+    def TranscribeApparatus(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> typing.List["types.Note"]:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="TranscribeApparatus", llm_response=llm_response, mode="request")
+        return typing.cast(typing.List["types.Note"], result)
+
     def ValidateMetadataCore(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.MetadataCore:
@@ -145,6 +151,12 @@ class LlmStreamParser:
     ) -> stream_types.ResolvedPronoun:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ResolveBoundaryPronouns", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.ResolvedPronoun, result)
+
+    def TranscribeApparatus(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> typing.List["stream_types.Note"]:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="TranscribeApparatus", llm_response=llm_response, mode="stream")
+        return typing.cast(typing.List["stream_types.Note"], result)
 
     def ValidateMetadataCore(
         self, llm_response: str, baml_options: BamlCallOptions = {},

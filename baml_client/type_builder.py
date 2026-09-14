@@ -20,13 +20,13 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","OptimizedQuery","RAGAnalysis","RepairedQuote","ResolvedPronoun","VerseChunk",]
+          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","Note","OptimizedQuery","RAGAnalysis","RepairedQuote","ResolvedPronoun","VerseChunk",]
         ), enums=set(
-          ["BiblicalEra","EntityCategory","FailureCategory",]
+          ["BiblicalEra","EntityCategory","FailureCategory","NoteStatus",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 3
+    # Generated enums 4
     # #########################################################################
 
     @property
@@ -41,9 +41,13 @@ class TypeBuilder(type_builder.TypeBuilder):
     def FailureCategory(self) -> "FailureCategoryViewer":
         return FailureCategoryViewer(self)
 
+    @property
+    def NoteStatus(self) -> "NoteStatusViewer":
+        return NoteStatusViewer(self)
+
 
     # #########################################################################
-    # Generated classes 11
+    # Generated classes 12
     # #########################################################################
 
     @property
@@ -71,6 +75,10 @@ class TypeBuilder(type_builder.TypeBuilder):
         return MetadataVersesViewer(self)
 
     @property
+    def Note(self) -> "NoteViewer":
+        return NoteViewer(self)
+
+    @property
     def OptimizedQuery(self) -> "OptimizedQueryViewer":
         return OptimizedQueryViewer(self)
 
@@ -93,7 +101,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated enums 3
+# Generated enums 4
 # #########################################################################
 
 class BiblicalEraAst:
@@ -282,9 +290,67 @@ class FailureCategoryValues:
     
 
 
+class NoteStatusAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("NoteStatus")
+        self._values: typing.Set[str] = set([  "Complete",  "TruncatedTop",  "TruncatedBottom",  "TruncatedSide",  "NoFootnotePresent",  "Unreadable",  ])
+        self._vals = NoteStatusValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "NoteStatusValues":
+        return self._vals
+
+
+class NoteStatusViewer(NoteStatusAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class NoteStatusValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def Complete(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Complete"))
+    
+    @property
+    def TruncatedTop(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("TruncatedTop"))
+    
+    @property
+    def TruncatedBottom(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("TruncatedBottom"))
+    
+    @property
+    def TruncatedSide(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("TruncatedSide"))
+    
+    @property
+    def NoFootnotePresent(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("NoFootnotePresent"))
+    
+    @property
+    def Unreadable(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Unreadable"))
+    
+    
+
+
 
 # #########################################################################
-# Generated classes 11
+# Generated classes 12
 # #########################################################################
 
 class ExtractedTextAst:
@@ -565,6 +631,57 @@ class MetadataVersesProperties:
     @property
     def no_verse_markers(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("no_verse_markers"))
+    
+    
+
+
+class NoteAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("Note")
+        self._properties: typing.Set[str] = set([  "text",  "marker_letter",  "status",  "partial",  ])
+        self._props = NoteProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "NoteProperties":
+        return self._props
+
+
+class NoteViewer(NoteAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class NoteProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def text(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("text"))
+    
+    @property
+    def marker_letter(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("marker_letter"))
+    
+    @property
+    def status(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("status"))
+    
+    @property
+    def partial(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("partial"))
     
     
 

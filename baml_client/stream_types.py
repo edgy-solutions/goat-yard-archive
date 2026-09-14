@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (11)
+# Generated classes (12)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -55,6 +55,12 @@ class MetadataCore(BaseModel):
 class MetadataVerses(BaseModel):
     verse: typing.Optional[str] = None
     no_verse_markers: typing.Optional[bool] = None
+
+class Note(BaseModel):
+    text: typing.Optional[str] = None
+    marker_letter: typing.Optional[str] = None
+    status: typing.Optional[types.NoteStatus] = None
+    partial: typing.Optional[bool] = None
 
 class OptimizedQuery(BaseModel):
     expanded_search_terms: typing.Optional[str] = None

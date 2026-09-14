@@ -34,6 +34,9 @@ type_map = {
     "types.MetadataVerses": types.MetadataVerses,
     "stream_types.MetadataVerses": stream_types.MetadataVerses,
 
+    "types.Note": types.Note,
+    "stream_types.Note": stream_types.Note,
+
     "types.OptimizedQuery": types.OptimizedQuery,
     "stream_types.OptimizedQuery": stream_types.OptimizedQuery,
 
@@ -55,5 +58,7 @@ type_map = {
     "types.EntityCategory": types.EntityCategory,
 
     "types.FailureCategory": types.FailureCategory,
+
+    "types.NoteStatus": types.NoteStatus,
 
 }
