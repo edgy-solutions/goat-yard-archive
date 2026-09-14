@@ -167,7 +167,7 @@ def extract_page(image_path, profile, host, body_md=None, seam="httpx", hebrew=F
     return {"page": page, "status": status, "done_reason": done, "n_notes": len(r["notes"]),
             "violations": viol, "dropped_furniture": r["dropped_furniture"], "notes": r["notes"],
             "markdown": md, "presplit_info": info, "anchor_match": match, "recrop_changes": recrop_changes,
-            "hebrew_summary": hebrew_summary}
+            "hebrew_summary": hebrew_summary, "marker_leaks": r.get("marker_leaks", 0)}
 
 def main():
     ap = argparse.ArgumentParser()

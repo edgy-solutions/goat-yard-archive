@@ -85,7 +85,7 @@ def main():
                                   "partial": n.get("partial")} for n in r.get("notes", [])],
                        "hebrew": any(re.search(r"[֐-׿]", n["text"]) for n in r.get("notes", [])),
                        "anchor_status": m.get("status"), "dropped_furniture": len(r.get("dropped_furniture", [])),
-                       "secs": round(time.perf_counter() - t0, 1)}
+                       "marker_leaks": r.get("marker_leaks", 0), "secs": round(time.perf_counter() - t0, 1)}
             except Exception as e:
                 rec = {"page": pg, "status": "ERROR", "error": str(e)[:200], "secs": round(time.perf_counter() - t0, 1)}
             f.write(json.dumps(rec, ensure_ascii=False) + "\n"); f.flush()
@@ -103,6 +103,8 @@ def main():
     for s, c in note_stat.most_common():
         print(f"  {s:20} {c:4}  ({100*c/max(1,total):.1f}%)")
     print(f"--- per-PAGE status: {dict(page_stat)}")
+    leaks = sum(r.get("marker_leaks", 0) for r in rows if r.get("kind") != "config_header")
+    print(f"--- marker-leak strips: {leaks} (of {total} notes; a rising rate = the prompt tightening isn't holding)")
 
 
 if __name__ == "__main__":

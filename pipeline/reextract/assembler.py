@@ -112,6 +112,7 @@ def canonicalize_typed_notes(typed, profile):
     typed-refusal channel). truncated_*/unreadable notes are KEPT (evidence) but carry status+partial so the
     count/sequence gate can exclude non-complete notes downstream. Letters stay recorded beside [^N]."""
     notes, dropped = [], []
+    leaks = 0
     for t in typed:
         text = (t.get("text") or "").strip()
         status = t.get("status") or "complete"
@@ -121,11 +122,19 @@ def canonicalize_typed_notes(typed, profile):
             dropped.append({"text": text, "reason": "furniture_regex"}); continue
         if not text: dropped.append({"text": "", "reason": "empty"}); continue
         ml = (t.get("marker_letter") or "?").strip() or "?"
+        # MARKER-LEAK STRIP (bounded so it can't eat real text): remove a leading STANDALONE glyph from text
+        # ONLY when it equals the reader's own marker_letter. A leaked `p` on a note whose marker is `p` goes;
+        # a note that genuinely begins "p. 234" is only touched if its marker is also `p` AND the `p` stands
+        # alone — accepted (Chris). "primus" is untouched (the p is not standalone). '?' markers never strip.
+        if ml != "?":
+            m = re.match(r"^" + re.escape(ml) + r"[.,)]?\s+(.*\S)$", text, re.I)
+            if m:
+                text = m.group(1).strip(); leaks += 1
         notes.append({"model_letter": ml.lower() if ml != "?" else "?", "marker_letter": ml,
                       "text": text, "status": status, "partial": bool(t.get("partial", status != "complete"))})
     for i, n in enumerate(notes, 1):
         n["marker"] = f"[^{i}]"
-    return {"notes": notes, "dropped_furniture": dropped}
+    return {"notes": notes, "dropped_furniture": dropped, "marker_leaks": leaks}
 
 # --- letter-sequence utilities (marker-scope: per-column restart; 1766 j-skip; u/v interchange) ---
 def effective_skips(profile):

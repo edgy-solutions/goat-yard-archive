@@ -26,7 +26,7 @@ enum NoteStatus {
 // PRINTED leading letter (a fact about the page the reader sees), or "?" for a symbol/superscript marker that
 // is not a letter. `partial` is true iff status != complete.
 class Note {
-  text string @description("The footnote transcribed VERBATIM as printed — Latin, English, Greek, Hebrew (Hebrew in Hebrew script, right-to-left). Do NOT translate, summarize, renumber, or invent. Exclude the leading marker letter itself from this text.")
+  text string @description("The footnote transcribed VERBATIM as printed — Latin, English, Greek, Hebrew (Hebrew in Hebrew script, right-to-left). Do NOT translate, summarize, renumber, or invent. CRITICAL: `text` must NEVER begin with the note's marker letter — the marker goes ONLY in `marker_letter`. Start `text` at the first word of the note's content (e.g. for a note printed `p In Cosmopœiam`, marker_letter is `p` and text is `In Cosmopœiam`).")
   marker_letter string @description("The single printed lowercase marker letter at the note's start (a, b, c, ...). Use \"?\" if the marker is a symbol or raised superscript rather than a plain letter. Report what is printed; do not renumber or infer from position.")
   status NoteStatus @description("Your typed self-report on this note's crop. Mandatory.")
   partial bool @description("true iff status is not `complete`. A partial note is evidence but is never a complete note.")
