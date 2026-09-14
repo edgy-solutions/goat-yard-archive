@@ -37,13 +37,13 @@ class Note {
 client<llm> ApparatusReader {
   provider openai
   options {
-    model "qwen3.6:35b"
-    base_url "http://192.168.1.179:11434/v1"
+    // qwen3.6-16k:35b = same weights as the frozen qwen3.6:35b with num_ctx 16384 baked in (confirmed via
+    // `ollama show`), so the seam matches the frozen /api/generate config (which set num_ctx 16384) WITHOUT a
+    // nested `options` block that Ollama's /v1 endpoint dropped (the empty-reply cause). Host 192.168.1.169.
+    model "qwen3.6-16k:35b"
+    base_url "http://192.168.1.169:11434/v1"
     api_key "ollama"
     temperature 0.0
-    options: {
-      num_ctx: 16384
-    }
   }
 }
 
