@@ -56,10 +56,39 @@ def transcribe(strip_img, profile, host):
     d = r.json()
     return (d.get("response", "") or ""), d.get("done_reason")
 
+# config-v2 Seam 1: transcription through BAML -> typed Note[]. The layout hint + signature are assembled
+# from the SAME profile fields build_transcribe_prompt uses (no book facts baked into the BAML), so the two
+# seams feed the model the same substance; only the transport (/v1) and the return shape (typed) differ. The
+# NoteStatus enum members map back to the snake_case contract strings the assembler expects.
+_STATUS_SNAKE = {"Complete": "complete", "TruncatedTop": "truncated_top", "TruncatedBottom": "truncated_bottom",
+                 "TruncatedSide": "truncated_side", "NoFootnotePresent": "no_footnote_present", "Unreadable": "unreadable"}
+
+def _layout_hint(profile):
+    cc = profile.get("compositor_conventions") or {}
+    if cc.get("note_layout") == "hanging_indent":
+        return ("LAYOUT — the notes are set as a HANGING INDENT: a raised marker at the left, then the note "
+                "text; a long note's continuation lines wrap WITHOUT a marker. EVERY marker begins a NEW "
+                "footnote — never merge two marked footnotes into one note, and never split one across notes.")
+    return None
+
+def transcribe_baml(strip_img, profile):
+    """Seam 1 transcription: returns (typed_note_dicts, done_reason). Lazy BAML import so the frozen httpx
+    path never depends on baml_client being generated."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from baml_client.sync_client import b
+    from baml_py import Image as BamlImage
+    sig = (profile.get("furniture") or {}).get("signature_example") or "VOL. I.—OLD TEST. 4 D"
+    notes = b.TranscribeApparatus(BamlImage.from_base64("image/png", _b64_png(strip_img)), _layout_hint(profile), sig)
+    out = [{"text": n.text, "marker_letter": n.marker_letter,
+            "status": _STATUS_SNAKE.get(getattr(n.status, "value", str(n.status)), "complete"),
+            "partial": bool(n.partial)} for n in notes]
+    return out, "baml"
+
 def _body_before_defs(md):
     return A.split_body_defs(md)[0]     # robust body/def split (all zoo def formats)
 
-def extract_page(image_path, profile, host, body_md=None):
+def extract_page(image_path, profile, host, body_md=None, seam="httpx"):
     page = re.search(r"page(\d+)", Path(image_path).name)
     page = page.group(1) if page else "?"
     # FRONT-MATTER BOUNDARY (book fact): images before commentary_start_page have no apparatus —
@@ -72,8 +101,14 @@ def extract_page(image_path, profile, host, body_md=None):
     strip, info = presplit.presplit(str(image_path), upscale=up)
     if strip is None:
         return {"page": page, "status": "no_apparatus", "notes": [], "info": info}
-    resp, done = transcribe(strip, profile, host)
-    r = A.canonicalize_page(resp.splitlines(), profile)
+    # SEAM: "baml" = config-v2 typed Note[] (assembler consumes typed notes, persists marker_letter+status);
+    # "httpx" = frozen free-text line-parse. Both feed the same strip + profile substance to the same weights.
+    if seam == "baml":
+        typed, done = transcribe_baml(strip, profile)
+        r = A.canonicalize_typed_notes(typed, profile)
+    else:
+        resp, done = transcribe(strip, profile, host)
+        r = A.canonicalize_page(resp.splitlines(), profile)
     # REFUSAL-HONOR (3rd sibling of the "nothing here" law): the model's own "no footnotes here" is a
     # no_apparatus SIGNAL, not note content — else its honesty ships as a fabricated note (p4).
     import refusal_guard

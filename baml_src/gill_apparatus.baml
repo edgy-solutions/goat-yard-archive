@@ -37,9 +37,10 @@ class Note {
 client<llm> ApparatusReader {
   provider openai
   options {
-    // qwen3.6-16k:35b = same weights as the frozen qwen3.6:35b with num_ctx 16384 baked in (confirmed via
-    // `ollama show`), so the seam matches the frozen /api/generate config (which set num_ctx 16384) WITHOUT a
-    // nested `options` block that Ollama's /v1 endpoint dropped (the empty-reply cause). Host 192.168.1.169.
+    // qwen3.6-16k:35b = same weights as the frozen qwen3.6:35b, num_ctx 16384 baked in = the frozen config's
+    // num_ctx exactly. Host 192.168.1.169. (The empty-reply cause was NOT context — it was runaway THINKING:
+    // the frozen /api/generate path set think:false; over /v1 the complex prompt sent qwen3.6 into an 8-minute
+    // reasoning loop that returned empty. `/no_think` in the prompt disables it, matching the frozen config.)
     model "qwen3.6-16k:35b"
     base_url "http://192.168.1.169:11434/v1"
     api_key "ollama"
@@ -61,6 +62,8 @@ function TranscribeApparatus(
   client ApparatusReader
 
   prompt #"
+    {{ _.role("user") }}
+    /no_think
     This image is a strip of footnotes from an early Bible commentary, already cropped and placed in correct
     reading order. Transcribe EVERY footnote verbatim. Each footnote begins with a single lowercase letter
     marker (a, b, c, ...). Transcribe Latin, English, Greek and Hebrew exactly as printed; output Hebrew in
@@ -85,7 +88,6 @@ function TranscribeApparatus(
     {{ layout_hint }}
     {% endif %}
 
-    {{ _.role("user") }}
     {{ strip }}
 
     {{ ctx.output_format }}

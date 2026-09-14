@@ -100,6 +100,33 @@ def canonicalize_page(raw_lines, profile):
         n["marker"] = f"[^{i}]"
     return {"notes": notes, "dropped_furniture": dropped}
 
+# config-v2 Seam 1: the model returns a TYPED Note[] (one note per footnote, with the printed
+# marker_letter and a self-reported status), so the line-parsing (split_note_line / strip_marker /
+# wrap-merge) is the model's job now — the assembler STAYS pure: it drops the reader's own
+# no_footnote_present, keeps the regex furniture backstop (defense in depth), assigns [^N] BY POSITION,
+# and PERSISTS the contract fields (marker_letter, status, partial) instead of discarding the letter.
+# A typed note is {text, marker_letter, status, partial}; status is the snake_case contract string.
+def canonicalize_typed_notes(typed, profile):
+    """typed Note dicts -> {'notes':[{marker,text,model_letter,marker_letter,status,partial}], 'dropped_furniture'}.
+    no_footnote_present notes are the reader's own 'this isn't a footnote' — dropped as furniture (the
+    typed-refusal channel). truncated_*/unreadable notes are KEPT (evidence) but carry status+partial so the
+    count/sequence gate can exclude non-complete notes downstream. Letters stay recorded beside [^N]."""
+    notes, dropped = [], []
+    for t in typed:
+        text = (t.get("text") or "").strip()
+        status = t.get("status") or "complete"
+        if status == "no_footnote_present":                 # the reader's typed refusal -> not a note
+            dropped.append({"text": text, "reason": "no_footnote_present"}); continue
+        if is_furniture(text, profile):                     # regex backstop (a header the reader still emitted)
+            dropped.append({"text": text, "reason": "furniture_regex"}); continue
+        if not text: dropped.append({"text": "", "reason": "empty"}); continue
+        ml = (t.get("marker_letter") or "?").strip() or "?"
+        notes.append({"model_letter": ml.lower() if ml != "?" else "?", "marker_letter": ml,
+                      "text": text, "status": status, "partial": bool(t.get("partial", status != "complete"))})
+    for i, n in enumerate(notes, 1):
+        n["marker"] = f"[^{i}]"
+    return {"notes": notes, "dropped_furniture": dropped}
+
 # --- letter-sequence utilities (marker-scope: per-column restart; 1766 j-skip; u/v interchange) ---
 def effective_skips(profile):
     lay = profile["layout"]
