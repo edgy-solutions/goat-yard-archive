@@ -63,24 +63,26 @@ def _marker_box(band, raised_frac=0.25, min_marker_w=7, marker_max_w=42, pad=2):
         x = e                                            # reaches baseline (rule/capital) or wrong width — skip
 
 
-def _page_marker_crops(pg):
+def _page_marker_crops(pg, upscale=1):
     """(strip_L_image, [(strip_box, crop_image)]) — one tight marker crop per detected note-start on the page,
     in reading order. Uses the SAME strip_vrules/inset/text_lines pipeline as page_starts, so the k-th crop is
-    the k-th start. Missing-marker notes yield no crop (the note is skipped, not cropped blind)."""
-    strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
+    the k-th start. Missing-marker notes yield no crop (the note is skipped, not cropped blind). `upscale`
+    controls the presplit resolution — markers are tiny (~20px at upscale=1, ~half native), and confusable
+    separation (c/e, f/s) is resolution-bound, so 2x is worth the pixels (pixels-not-parameters)."""
+    strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=upscale)
     if strip is None:
         return None, []
     a = NS.strip_vrules(np.asarray(strip.convert("L")) < NS.INK)
     ins = NS._left_inset(a)
     core = a[:, ins:]
     starts = [y for (y0, y1) in NS.text_lines(core) for y in [y0] if NS.line_opens_note(core[y0:y1])]
-    starts = NS._dedupe_slivers(starts, 20)
+    starts = NS._dedupe_slivers(starts, 20 * upscale)
     lines = {y0: y1 for (y0, y1) in NS.text_lines(core)}
     crops = []
     for y0 in starts:
         y1 = lines.get(y0, y0 + 40)
         band = core[y0:y1]
-        mb = _marker_box(band)
+        mb = _marker_box(band, min_marker_w=7 * upscale, marker_max_w=42 * upscale, pad=2 * upscale)
         if mb is None:
             crops.append((None, None)); continue         # slot preserved so index stays aligned; skipped on save
         mx0, my0, mx1, my1 = mb
@@ -102,9 +104,10 @@ def _load_drop_pages():
     return anom, breaks
 
 
-def harvest():
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "crops").mkdir(exist_ok=True)
+def harvest(upscale=1, out=OUT):
+    OUT_ = out
+    OUT_.mkdir(parents=True, exist_ok=True)
+    (OUT_ / "crops").mkdir(exist_ok=True)
     seeds = [json.loads(l) for l in SEEDS.read_text(encoding="utf-8").splitlines() if l.strip()]
     anom, breaks = _load_drop_pages()
     manifest, dropped, kept_runs = [], [], 0
@@ -121,7 +124,7 @@ def harvest():
         # collect every note-start across the run in reading order, then label by strict increment from the seed
         run_crops = []                                   # [(page, strip_box, crop)]
         for pg in pages:
-            _strip, crops = _page_marker_crops(pg)
+            _strip, crops = _page_marker_crops(pg, upscale)
             for sb, cr in crops:
                 run_crops.append((pg, sb, cr))
         n = len(run_crops)
@@ -138,12 +141,12 @@ def harvest():
                 continue
             idx = k_in_page.get(pg, 0); k_in_page[pg] = idx + 1
             name = f"{letter}_{pg}_{idx}.png"
-            cr.save(OUT / "crops" / name)
+            cr.save(OUT_ / "crops" / name)
             manifest.append(dict(run=s["run"], seed=seed, page=pg, k=k, letter=letter,
                                  strip_box=sb, crop=f"crops/{name}"))
-    (OUT / "manifest.jsonl").write_text(
+    (OUT_ / "manifest.jsonl").write_text(
         "\n".join(json.dumps(m) for m in manifest) + "\n", encoding="utf-8")
-    (OUT / "harvest_report.json").write_text(json.dumps(dict(
+    (OUT_ / "harvest_report.json").write_text(json.dumps(dict(
         seeds=len(seeds), kept_runs=kept_runs, dropped=dropped,
         exemplars=sum(1 for m in manifest if m.get("crop")),
         by_letter={l: sum(1 for m in manifest if m.get("letter") == l and m.get("crop")) for l in MA.ALPHABET},
@@ -157,8 +160,11 @@ def harvest():
         print(f"  drop run {d['run']} seed={d['seed']}: {d['reason']} {d.get('anomaly_pages') or d.get('break_pages') or ''}")
     cov = {l: n for l, n in ((l, sum(1 for m in manifest if m.get('letter')==l and m.get('crop'))) for l in MA.ALPHABET)}
     print("  per-letter:", " ".join(f"{l}:{n}" for l, n in cov.items() if n))
-    print(f"  wrote {OUT/'manifest.jsonl'} and {OUT/'harvest_report.json'}")
+    print(f"  wrote {OUT_/'manifest.jsonl'} and {OUT_/'harvest_report.json'}")
 
 
 if __name__ == "__main__":
-    harvest()
+    import argparse
+    ap = argparse.ArgumentParser(); ap.add_argument("--upscale", type=int, default=1)
+    ap.add_argument("--out", default=str(OUT)); a = ap.parse_args()
+    harvest(upscale=a.upscale, out=Path(a.out))
