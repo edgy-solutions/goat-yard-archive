@@ -88,7 +88,7 @@ def transcribe_baml(strip_img, profile):
 def _body_before_defs(md):
     return A.split_body_defs(md)[0]     # robust body/def split (all zoo def formats)
 
-def extract_page(image_path, profile, host, body_md=None, seam="httpx"):
+def extract_page(image_path, profile, host, body_md=None, seam="httpx", hebrew=False):
     page = re.search(r"page(\d+)", Path(image_path).name)
     page = page.group(1) if page else "?"
     # FRONT-MATTER BOUNDARY (book fact): images before commentary_start_page have no apparatus —
@@ -109,6 +109,12 @@ def extract_page(image_path, profile, host, body_md=None, seam="httpx"):
     else:
         resp, done = transcribe(strip, profile, host)
         r = A.canonicalize_page(resp.splitlines(), profile)
+    # config-v2 Hebrew layer (opt-in): attach per-note hebrew_verdict (script/glyph/nikud/span-box).
+    # Non-destructive — the note text is untouched, so this never confounds the reproduction born-test.
+    hebrew_summary = None
+    if hebrew:
+        import hebrew_layer
+        r["notes"], hebrew_summary = hebrew_layer.apply(strip, r["notes"], profile)
     # REFUSAL-HONOR (3rd sibling of the "nothing here" law): the model's own "no footnotes here" is a
     # no_apparatus SIGNAL, not note content — else its honesty ships as a fabricated note (p4).
     import refusal_guard
@@ -142,7 +148,8 @@ def extract_page(image_path, profile, host, body_md=None, seam="httpx"):
             status = f"ANCHOR_{match['status']}"     # e.g. ANCHOR_FLAGGED: notes with no body anchor
     return {"page": page, "status": status, "done_reason": done, "n_notes": len(r["notes"]),
             "violations": viol, "dropped_furniture": r["dropped_furniture"], "notes": r["notes"],
-            "markdown": md, "presplit_info": info, "anchor_match": match, "recrop_changes": recrop_changes}
+            "markdown": md, "presplit_info": info, "anchor_match": match, "recrop_changes": recrop_changes,
+            "hebrew_summary": hebrew_summary}
 
 def main():
     ap = argparse.ArgumentParser()
