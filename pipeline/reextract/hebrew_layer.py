@@ -17,7 +17,8 @@ gates are text-only and always run: script-consistency and (upstream) the refere
   nikud_gate    — per-span pointed-crop detector; proposes a nikud-stripped reading ONLY when the crop is
                   confidently unpointed (model added the points), else keeps.
 A note is FLAGGED for the gemma dual-witness when script != ok OR the glyph tripwire fires."""
-import re
+import re, json
+from pathlib import Path
 import numpy as np
 import note_region as NR
 import note_start_detect as NS
@@ -27,8 +28,29 @@ import word_box_align as WBA
 import glyph_count_tripwire as GCT
 import nikud_gate as NG
 import script_gate as SG
+import reference_hypothesis as RH
 
 _HEB = re.compile(r"[֐-׿]")
+# Decision 4 (Chris 2026-09-14): the reference-hypothesis stage uses the SAME Bible text the reader's reference
+# window already injects — the per-page `{page}_metadata.json` `hebrew_text` (verse -> pointed WLC verse). One
+# source, so the hypothesis and the reader read from one Bible; pinned + hashed via REFERENCE_SOURCE below.
+REFERENCE_SOURCE = {"kind": "page_metadata.hebrew_text", "file": "page{page}_image1_metadata.json"}
+
+
+def _passage_words(page, img_dir):
+    """Consonantal word-forms of the page's anchored verse(s), from the reference window's own source (the
+    page metadata's hebrew_text). Returns a set, or None if the metadata is absent (reference stage abstains)."""
+    if page is None or img_dir is None:
+        return None
+    p = Path(img_dir) / f"page{page}_image1_metadata.json"
+    if not p.exists():
+        return None
+    ht = (json.loads(p.read_text(encoding="utf-8")) or {}).get("hebrew_text") or {}
+    words = set()
+    for v in ht.values():
+        for w in RH._words(v):
+            words.add(RH._cons(w))
+    return words
 
 
 def _marker_regions(strip, regions):
@@ -86,11 +108,14 @@ def _script_verdict(text):
     return SG.gate(_hebrew_run_text(text) or " ".join(toks[i][1] for i in heb_idx), text)[0]
 
 
-def apply(strip, notes, profile=None):
-    """Attach `hebrew_verdict` to every Hebrew-bearing note. Returns (notes, summary). Non-destructive."""
+def apply(strip, notes, profile=None, page=None, img_dir=None):
+    """Attach `hebrew_verdict` to every Hebrew-bearing note. Returns (notes, summary). Non-destructive.
+    When `page`+`img_dir` are given, the reference-hypothesis stage (decision 4) runs text-only against the
+    page's anchored-verse Hebrew (the reference window's own source)."""
     heb_idx = [i for i, n in enumerate(notes) if _has_hebrew(n.get("text"))]
     if not heb_idx:
         return notes, {"hebrew_notes": 0, "flagged": 0, "aligned": None}
+    passage = _passage_words(page, img_dir)               # decision 4 reference window; None -> stage abstains
     regions, _meta = NR.propose_regions(strip)
     mregions = _marker_regions(strip, regions)            # decision 2: detector as boxes, marker-filtered
     chain = SEQ.page_chain_status([n.get("marker_letter") for n in notes])
@@ -103,6 +128,11 @@ def apply(strip, notes, profile=None):
         n = notes[i]
         text = n.get("text") or ""
         v = {"script": _script_verdict(text)}             # decision 3: scoped to the Hebrew span, not the note
+        if passage is not None:                           # decision 4: reference-hypothesis (text-only)
+            heb = _hebrew_run_text(text)
+            if heb:
+                outcome, _hyp = RH.classify(heb, passage, is_biblical=lambda t: False)  # Tanakh index: see note
+                v["reference"] = outcome
         if aligned:
             try:
                 line_crop = strip.crop(tuple(use_regions[i]["strip_box"]))

@@ -20,7 +20,7 @@ def main():
     rows = [json.loads(l) for l in RUN.read_text(encoding="utf-8").splitlines() if l.strip()]
     pages = [r for r in rows if r.get("kind") != "config_header" and r.get("hebrew")]
     from collections import Counter
-    script = Counter(); nikud = Counter(); locate = Counter()
+    script = Counter(); nikud = Counter(); locate = Counter(); reference = Counter()
     glyph_flagged = 0; total_heb = 0; located = 0; flagged_gemma = 0
     details = []
     for r in pages:
@@ -30,7 +30,7 @@ def main():
         if strip is None:
             continue
         notes = [{"text": n["text"], "marker": n["marker"], "marker_letter": n.get("marker_letter")} for n in r["notes"]]
-        notes, summ = HL.apply(strip, notes, profile)
+        notes, summ = HL.apply(strip, notes, profile, page=pg, img_dir=IMG)
         total_heb += summ["hebrew_notes"]; flagged_gemma += summ["flagged"]
         for n in notes:
             v = n.get("hebrew_verdict")
@@ -41,6 +41,8 @@ def main():
                 glyph_flagged += int(v["glyph_flag"])
             if v.get("nikud"):
                 nikud[v["nikud"]] += 1
+            if v.get("reference"):
+                reference[v["reference"]] += 1
             loc = "box" if v.get("span_box") else (v.get("locate") or v.get("align") or "?")
             locate[loc] += 1
             if v.get("span_box"):
@@ -53,6 +55,7 @@ def main():
     print(f"  script gate:  {dict(script)}")
     print(f"  glyph tripwire flagged: {glyph_flagged}")
     print(f"  nikud verdicts (where crop ran): {dict(nikud)}")
+    print(f"  reference-hypothesis (text-only, vs anchored-verse Hebrew): {dict(reference)}")
     print(f"  locate outcomes: {dict(locate)}   (located={located}, abstained={total_heb-located})")
     print(f"  flagged for gemma witness (script!=ok or glyph): {flagged_gemma}")
     print(f"  CROP-GATE ABSTAIN RATE: {(total_heb-located)}/{total_heb} "

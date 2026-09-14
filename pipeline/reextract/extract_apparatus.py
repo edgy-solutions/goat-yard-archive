@@ -134,7 +134,9 @@ def extract_page(image_path, profile, host, body_md=None, seam="httpx", hebrew=F
     hebrew_summary = None
     if hebrew:
         import hebrew_layer
-        r["notes"], hebrew_summary = hebrew_layer.apply(strip, r["notes"], profile)
+        r["notes"], hebrew_summary = hebrew_layer.apply(
+            strip, r["notes"], profile,
+            page=int(page) if str(page).isdigit() else None, img_dir=Path(image_path).parent)
     # REFUSAL-HONOR (3rd sibling of the "nothing here" law): the model's own "no footnotes here" is a
     # no_apparatus SIGNAL, not note content — else its honesty ships as a fabricated note (p4).
     import refusal_guard
