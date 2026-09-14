@@ -10,6 +10,7 @@ Usage: score_truth.py <results.json>   (list of {page, extracted:[{marker,text}]
 """
 import sys, json, re
 from pathlib import Path
+from data_config import data_path      # ground_truth_vol1.json lives in the private data root, not the code tree
 
 NIKUD = re.compile(r"[֑-ֽֿׁ-ׇ]")
 CLASSES = ["segmentation", "transcription", "hebrew"]
@@ -58,7 +59,7 @@ def score(gt, results):
     return per_page, class_tally
 
 def main():
-    gt = json.loads((Path(__file__).parent / "ground_truth_vol1.json").read_text(encoding="utf-8"))
+    gt = json.loads(data_path("ground_truth_vol1.json").read_text(encoding="utf-8"))
     results = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     try: sys.stdout.reconfigure(encoding="utf-8")
     except Exception: pass
