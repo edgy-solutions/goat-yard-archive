@@ -170,15 +170,15 @@ def detect_gutter(strip):
     x = lo + int(np.argmin(col[lo:hi]))
     return x if col[x] < 0.15 * (col.max() or 1) else None
 
-def page_starts(strip, profile=None):
+def page_starts(strip, profile=None, min_note_h=20, **line_kw):
     """All note-starts in reading order as (x0, y0). NOTE: cv_footnote_presplit already VERTICALLY CONCATS
     the two columns (left strip above right strip, 20px gap) into one single-column strip in linear reading
     order — so there is NO side-by-side gutter to split; the 20px gaps separate the columns in the line
     projection. Run detection on the whole strip. Vertical rules removed first; left margin inset once."""
     a = strip_vrules(np.asarray(strip.convert("L")) < INK)
     ins = _left_inset(a)
-    ys = column_starts(a[:, ins:], **(_kw(profile)))
-    return [(ins, y) for y in _dedupe_slivers(ys)]
+    ys = column_starts(a[:, ins:], **({**_kw(profile), **line_kw}))
+    return [(ins, y) for y in _dedupe_slivers(ys, min_note_h)]
 
 def _dedupe_slivers(ys, min_note_h=20):
     """STRUCTURAL guard (a bug, not a threshold): two note-starts cannot be only a few pixels apart — a note
