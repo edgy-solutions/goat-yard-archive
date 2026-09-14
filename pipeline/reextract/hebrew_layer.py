@@ -42,6 +42,27 @@ def _hebrew_run_text(text):
     return " ".join(w for _s, w in toks[lo:hi + 1])
 
 
+def _script_verdict(text):
+    """Decision 3 (Chris 2026-09-14): scope the script check to the Hebrew SPAN, not the whole note. Gill
+    routinely cites Greek AND Hebrew in one note (e.g. `וְאֶת הַפֶּלֶט … τοτο απαξ, Symmachus`); the old
+    whole-note check flagged any Greek codepoint as wrong-script — a false positive. Here wrong-script fires
+    only when Greek intrudes INTO the Hebrew span (Greek transcribed where Hebrew was printed); a separate
+    Greek citation elsewhere in the note is fine. Returns a script_gate verdict string.
+      wrong-script   Greek sits inside the contiguous Hebrew run (the span itself is script-mixed with Greek).
+      greek-suspect  clean Hebrew span, but the note cites a Greek source (routes to a script-aware read).
+      ok             clean Hebrew span, no Greek-source signal.
+      no-hebrew      no Hebrew tokens (the reference/no-hebrew stages own that; not a script flag here).
+    Full "output-script vs crop-script at the span box" (the image side) waits on the located span box."""
+    toks = WBA.tokenize(text)
+    heb_idx = [i for i, (s, _) in enumerate(toks) if s == "hebrew"]
+    if not heb_idx:
+        return "no-hebrew"
+    lo, hi = heb_idx[0], heb_idx[-1]
+    if any(toks[i][0] == "greek" for i in range(lo, hi + 1)):   # Greek INSIDE the Hebrew span
+        return "wrong-script"
+    return SG.gate(_hebrew_run_text(text) or " ".join(toks[i][1] for i in heb_idx), text)[0]
+
+
 def apply(strip, notes, profile=None):
     """Attach `hebrew_verdict` to every Hebrew-bearing note. Returns (notes, summary). Non-destructive."""
     heb_idx = [i for i, n in enumerate(notes) if _has_hebrew(n.get("text"))]
@@ -53,7 +74,7 @@ def apply(strip, notes, profile=None):
     for i in heb_idx:
         n = notes[i]
         text = n.get("text") or ""
-        v = {"script": SG.gate(text, text)[0]}            # text-only, always available
+        v = {"script": _script_verdict(text)}             # decision 3: scoped to the Hebrew span, not the note
         if aligned:
             try:
                 line_crop = strip.crop(tuple(regions[i]["strip_box"]))
