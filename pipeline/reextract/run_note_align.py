@@ -2,9 +2,11 @@
 
     python run_note_align.py [--pages dev|contaminated|both]
 
-SEALED PAGES ARE REFUSED BY THIS SCRIPT. The split is frozen in audits/ratified_split_20260920.json and
-sealed is scored exactly once, after the gate is frozen — so the runner will not read them even if asked.
-That is a guard against me, not against the user.
+SEALED PAGES ARE REFUSED BY THIS SCRIPT unless `--sealed-once` is passed, and that flag refuses to run
+unless the thresholds and rules in note_align.py match the values recorded as frozen in the split file.
+The split is frozen in audits/ratified_split_20260920.json and sealed is read exactly once, after the gate
+is frozen. The guard is against me, not against the user: the failure it prevents is reading sealed, not
+liking the number, adjusting a threshold, and reading it again.
 
 Two reads per page plus one per region: the whole band (the v2 note sequence) and each detected region on
 its own crop. Expensive, so it is cached — classification and threshold changes re-run off this file."""
@@ -32,7 +34,23 @@ def done(path):
     return d
 
 
-def main(which="both"):
+def _check_frozen(split):
+    """Sealed may only be read against the frozen gate. Compares the live thresholds AND the live rules to
+    what the split file records as frozen; any drift refuses the run rather than quietly scoring sealed
+    against a different gate than the one the predictions were written for."""
+    import note_align as _NA
+    frozen = split.get("frozen_thresholds") or {}
+    if not frozen:
+        raise SystemExit("refusing --sealed-once: no frozen_thresholds recorded in the split file")
+    now = {"T_HIGH": _NA.T_HIGH, "T_LOW": _NA.T_LOW, "T_CONT": _NA.T_CONT, "MARGIN": _NA.MARGIN}
+    if {k: frozen.get(k) for k in now} != now:
+        raise SystemExit(f"refusing --sealed-once: live thresholds {now} != frozen {frozen}")
+    if not (split.get("frozen_rules") or {}).get("n_read_ge_2_is_merged"):
+        raise SystemExit("refusing --sealed-once: the n_read>=2 rule is not recorded as frozen")
+    print(f"frozen gate confirmed: {now} + n_read>=2 merged, frozen {split.get('frozen_on')}")
+
+
+def main(which="both", sealed_once=False):
     split = json.loads(SPLIT.read_text(encoding="utf-8"))
     pages = []
     if which in ("dev", "both"):
@@ -40,9 +58,14 @@ def main(which="both"):
     if which in ("contaminated", "both"):
         pages += split["contaminated"]
     sealed = set(split["sealed"])
-    pages = sorted(set(pages) - sealed)
-    if sealed & set(pages):
-        raise SystemExit("refusing: sealed pages requested")
+    if sealed_once:
+        _check_frozen(split)
+        pages += split["sealed"]
+        pages = sorted(set(pages))
+    else:
+        pages = sorted(set(pages) - sealed)
+        if sealed & set(pages):
+            raise SystemExit("refusing: sealed pages requested")
 
     profile = A.load_profile(str(PROFILE))
     have = done(OUT)
@@ -70,4 +93,4 @@ if __name__ == "__main__":
     w = "both"
     if "--pages" in sys.argv:
         w = sys.argv[sys.argv.index("--pages") + 1]
-    main(w)
+    main(w, sealed_once="--sealed-once" in sys.argv)
