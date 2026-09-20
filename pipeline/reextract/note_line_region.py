@@ -94,11 +94,11 @@ def _band_notes(a, by0, by1, profile):
     if cur is not None: notes.append(cur)
     return ins, pre, notes
 
-def note_line_regions(band, n_notes, profile):
-    """Map notes 0..n_notes-1 to {col, x0, x1, ins, lines, segments}. Returns (regions|None, status). Gate:
-    total detected note-starts must equal n_notes; else abstain the page with a count-mismatch/stitch
-    status. Box x-bounds follow the RATIFIED convention — full strip width — while `ins` is the content
-    inset used for line analysis and the marker search."""
+def detect_regions(band, profile):
+    """Every detected note-region on the page, in reading order, WITHOUT any count gate. Returns
+    (regions, stitched). This is the honest output of the detector: it may over- or under-produce, and
+    saying so is the caller's job, not this function's. Box x-bounds follow the RATIFIED convention — full
+    strip width — while `ins` is the content inset used for line analysis and the marker search."""
     Wd = band.width
     a = np.asarray(band.convert("L")) < INK
     spans = [(str(i), y0, y1) for i, (y0, y1) in enumerate(strip_bands(band))] or [("0", 0, band.height)]
@@ -118,6 +118,16 @@ def note_line_regions(band, n_notes, profile):
         for (sy, lns) in notes:
             ordered.append(dict(col=name, x0=x0, x1=x1, ins=ins, lines=lns,
                                 segments=[dict(col=name, x0=x0, x1=x1, ins=ins, lines=lns)]))
+    return ordered, stitched
+
+def note_line_regions(band, n_notes, profile):
+    """COUNT PRE-FILTER, no longer a gate (Chris, 2026-09-20). Standing law: sequence equality is
+    sufficient, cancellation must fail. Count equality compares two totals and is therefore blind to a
+    compensating error — one false note-start plus one missed start sums to the right number and passes
+    while every note after the first error is mis-mapped. Measured on the ratified boxes: 21 of 54 notes
+    on pages that PASSED this check were mapped to the wrong note. It is retained only as a cheap reject
+    before the expensive alignment gate (note_align.py), never as authority for a mapping."""
+    ordered, stitched = detect_regions(band, profile)
     if len(ordered) != n_notes:
         return None, f"count-mismatch:detected={len(ordered)},extractor={n_notes}" + (";stitch" if stitched else "")
     return ordered, "ok"
