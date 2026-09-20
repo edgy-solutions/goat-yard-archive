@@ -106,6 +106,25 @@ def main():
     leaks = sum(r.get("marker_leaks", 0) for r in rows if r.get("kind") != "config_header")
     print(f"--- marker-leak strips: {leaks} (of {total} notes; a rising rate = the prompt tightening isn't holding)")
 
+    # FIXTURE LETTER ASSERTION — count and structure are not enough. A page can carry the right number of
+    # notes in the right shape with every marker letter wrong, and since the chain IS the count authority a
+    # wrong letter is a wrong authority, silently. Assert the persisted marker_letter against the ratified
+    # reset records. EXPECTED-RED today (p90, p403); the per-note crop path is what turns it green.
+    import fixture_assert as FA
+    print("\n--- reset-fixture marker LETTERS vs ratified record ---")
+    recs, _off = FA.load_records()
+    for pg in FIXTURES:
+        obs = FA.letters_from_run(OUT, pg)
+        if obs is None:
+            print(f"  p{pg}: not in run"); continue
+        r = FA.check_page(pg, obs, recs)
+        if r["ok"] is None:
+            print(f"  p{pg}: UNASSERTABLE — {r['why']}"); continue
+        print(f"  p{pg}: letters_ok={r['letters_ok']} series_ok={r['series_ok']} "
+              f"count_ok={r['count_ok']}  expected={','.join(r['expected_flat'])} "
+              f"observed={','.join(r['observed_flat'])}")
+    print("  (run `python test_born_fixtures.py` for the full report; red is the correct state today)")
+
 
 if __name__ == "__main__":
     try: sys.stdout.reconfigure(encoding="utf-8")
