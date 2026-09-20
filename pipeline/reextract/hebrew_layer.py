@@ -131,8 +131,14 @@ def apply(strip, notes, profile=None, page=None, img_dir=None):
         if passage is not None:                           # decision 4: reference-hypothesis (text-only)
             heb = _hebrew_run_text(text)
             if heb:
-                outcome, _hyp = RH.classify(heb, passage, is_biblical=lambda t: False)  # Tanakh index: see note
+                # The Tanakh index is NOT BUILT. `is_biblical` is a stub that returns False for every token,
+                # so every span is forced down the extra-biblical branch — an answer the evidence never
+                # gave. Label it at the point of emission: `crossref_index: absent` travels with the
+                # outcome so no consumer can read a forced classification as a measured mismatch. Remove
+                # the label only when a real index backs the call.
+                outcome, _hyp = RH.classify(heb, passage, is_biblical=lambda t: False)
                 v["reference"] = outcome
+                v["crossref_index"] = "absent"
         if aligned:
             try:
                 line_crop = strip.crop(tuple(use_regions[i]["strip_box"]))
