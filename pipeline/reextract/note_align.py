@@ -21,8 +21,24 @@ level (a page is no longer all-or-nothing):
   spurious    no note is substantially contained in this region — a false note-start. Corroborated when the
               region's own read comes back `no_footnote_present`, which is the intake gate doing its job:
               a region with nothing in it must be able to SAY so rather than inventing a note.
-  merged      two or more whole-band notes are substantially contained in this region — a missed start
+  merged      the region's OWN read returned two or more notes, OR two or more whole-band notes are
+              substantially contained in it — a missed start
   ambiguous   a candidate clears T_LOW but not T_HIGH, or best and runner-up are within MARGIN
+
+THE `n_read` RULE, AND THE MEASUREMENT THAT FORCED IT (2026-09-20). The first scored run produced 7 wrong
+mappings — 4 dev, 3 contaminated — and **every one of them was a region whose own read returned 2 or 3
+notes.** The read had said, plainly, "there is more than one footnote in this crop." `read_page` then kept
+`rn[0]` and threw the rest away, the surviving first note matched its band note at similarity 1.000, and
+the gate reported a clean mapping while handing that note a rectangle containing its neighbour.
+
+The component was honest and the harness discarded the honesty. That is the same defect as a system with no
+"empty" channel: `no_footnote_present` is how a region says "nothing here", and `len(notes) >= 2` is how it
+says "more than one here" — both are the read's own testimony about its input, and both must be able to
+stop a mapping. A region that reports two notes is MERGED. This is a deterministic property of the read,
+not a threshold: there is nothing to tune and nothing to fit.
+
+The rule is derived from the failures it removes, so dev going to zero wrong proves nothing — that number
+is circular and is reported as such. SEALED, scored once, is the only evidence for the zero.
 
 SECONDARY CHECK on aligned notes: the marker sub-crop goes to the confusable-margin verifier expecting the
 aligned note's letter. A REJECT demotes to abstain and logs; an ABSTAIN changes nothing. This is deliberately
@@ -123,8 +139,14 @@ def classify(region_reads, band_notes):
         second = row[order[1]] if len(order) > 1 else 0.0
         conts = [j for j in range(len(ntoks)) if contained(ntoks[j], rt) >= T_CONT]
         status = (region_reads[i].get("status") or "").lower()
+        n_read = int(region_reads[i].get("n_read") or 1)
 
-        if len(conts) >= 2:
+        # The region's OWN read is asked first. If it found two notes in this crop, the crop spans two
+        # notes — no token arithmetic can overturn the read's own count of what it saw, and the alignment
+        # key is built from only the FIRST of those notes, so containment is blind here by construction.
+        if n_read >= 2:
+            cls, mapped = "merged", None
+        elif len(conts) >= 2:
             cls, mapped = "merged", None
         elif not conts and best < T_LOW:
             cls, mapped = "spurious", None
@@ -133,7 +155,9 @@ def classify(region_reads, band_notes):
         else:
             cls, mapped = "ambiguous", None
 
-        out.append({"i": i, "cls": cls, "note": mapped, "best_j": best_j,
+        out.append({"i": i, "cls": cls, "note": mapped, "best_j": best_j, "n_read": n_read,
+                    "merged_by": ("region-read" if n_read >= 2 else
+                                  "containment" if len(conts) >= 2 else None),
                     "best": round(best, 3), "second": round(second, 3),
                     "contains": conts, "region_status": status,
                     "empty_self_report": status == "no_footnote_present",
