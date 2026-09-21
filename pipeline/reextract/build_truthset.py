@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
 from extract_apparatus import extract_page
+from endpoint_guard import resolve_host, EndpointMissing, EndpointRefused
 
 STRATA = {
     "ground_truth":       [100, 473, 571],
@@ -39,12 +40,23 @@ def main():
     ap.add_argument("--img-dir", default="c:/Users/cnogr/git/dr-voluminous/commentary/volume1")
     ap.add_argument("--body-dir", default="c:/Users/cnogr/git/dr-voluminous/commentary/volume1/qwen_qwen3-vl-235b-a22b-thinking")
     ap.add_argument("--profile", default=str(Path(__file__).parent / "book_profile.gill.yaml"))
-    ap.add_argument("--host", default=os.getenv("OLLAMA_HOST", "192.168.1.179"))
+    # NO DEFAULT ENDPOINT (Chris's ruling, 2026-09-20). The old default was 192.168.1.179 = endpoint E,
+    # which gpu-servers.md marks Closed. resolve_host() requires an explicit choice and hard-refuses
+    # the reserved pair; see endpoint_guard.py for why both rules are needed.
+    ap.add_argument("--host", default=None,
+                    help="Ollama endpoint, e.g. 192.168.1.169 (C). REQUIRED - no default; .179/.188 refused.")
     ap.add_argument("--out", default=str(Path(__file__).parent / "truthset_out"))
     ap.add_argument("--strata-json", default="", help="override STRATA with a {stratum: [pages]} JSON file (leaves the canonical set untouched)")
     a = ap.parse_args()
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
+    # Resolve the endpoint BEFORE any page is loaded or any model is called: a run that is going to be
+    # refused should be refused at second zero, not after the first page's transcription.
+    try:
+        host = resolve_host(a.host, who="build_truthset")
+    except (EndpointMissing, EndpointRefused) as e:
+        print("", file=sys.stderr); print(e, file=sys.stderr); print("", file=sys.stderr); return 2
+    print(f"endpoint: {host}   (record this with the result - runs from different endpoints are not comparable)")
     profile = A.load_profile(a.profile)
     out = Path(a.out); out.mkdir(exist_ok=True)
     strata = json.loads(Path(a.strata_json).read_text(encoding="utf-8")) if a.strata_json else STRATA
@@ -54,7 +66,7 @@ def main():
         img = Path(a.img_dir) / f"page{page}_image1.png"
         if not img.exists(): print(f"p{page}: MISSING IMAGE", flush=True); continue
         body = str(Path(a.body_dir) / f"page{page}_image1.md")
-        res = extract_page(str(img), profile, a.host, body_md=body)
+        res = extract_page(str(img), profile, host, body_md=body)
         notes = res.get("notes", [])
         heb = any(HEBREW.search(n["text"]) for n in notes)
         m = res.get("anchor_match") or {}
@@ -90,4 +102,4 @@ def main():
     print(f"\n=== {len(results)} pages | statuses: {dict(st)} | total flagged (fail-loud) anchors: {fl} ===")
     print(f"written -> {out/'truthset_results.json'}")
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": sys.exit(main() or 0)
