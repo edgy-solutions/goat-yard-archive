@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (12)
+# Generated classes (15)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -33,12 +33,24 @@ class ExtractionResult(BaseModel):
     entities: typing.List["GillEntity"]
     cross_references: typing.List[str]
 
+class GillAnswer(BaseModel):
+    reasoning: typing.Optional[str] = None
+    zone1_interpretation: typing.Optional[str] = None
+    phrases: typing.List["Zone2Phrase"]
+    refusal: typing.Optional["GillRefusal"] = None
+    zone3_notes: typing.Optional[str] = None
+
 class GillEntity(BaseModel):
     name: typing.Optional[str] = None
     category: typing.Optional[types.EntityCategory] = None
     biblical_era: typing.Optional[types.BiblicalEra] = None
     role: typing.Optional[str] = None
     description: typing.Optional[str] = None
+
+class GillRefusal(BaseModel):
+    mode: typing.Optional[str] = None
+    gap_statement: typing.Optional[str] = None
+    adjacent_phrases: typing.List["Zone2Phrase"]
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None
@@ -81,6 +93,12 @@ class VerseChunk(BaseModel):
     verse_ref: typing.Optional[str] = None
     start_phrase: typing.Optional[str] = None
     end_phrase: typing.Optional[str] = None
+
+class Zone2Phrase(BaseModel):
+    framing: typing.Optional[str] = None
+    gill_quote: typing.Optional[str] = None
+    scripture_quote: typing.Optional[str] = None
+    sentence_id: typing.Optional[str] = None
 
 # #########################################################################
 # Generated type aliases (0)

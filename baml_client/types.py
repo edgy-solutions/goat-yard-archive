@@ -76,7 +76,7 @@ class NoteStatus(str, Enum):
     Unreadable = "Unreadable"
 
 # #########################################################################
-# Generated classes (12)
+# Generated classes (15)
 # #########################################################################
 
 class ExtractedText(BaseModel):
@@ -86,12 +86,24 @@ class ExtractionResult(BaseModel):
     entities: typing.List["GillEntity"]
     cross_references: typing.List[str]
 
+class GillAnswer(BaseModel):
+    reasoning: str
+    zone1_interpretation: typing.Optional[str] = None
+    phrases: typing.List["Zone2Phrase"]
+    refusal: typing.Optional["GillRefusal"] = None
+    zone3_notes: typing.Optional[str] = None
+
 class GillEntity(BaseModel):
     name: str
     category: EntityCategory
     biblical_era: BiblicalEra
     role: typing.Optional[str] = None
     description: typing.Optional[str] = None
+
+class GillRefusal(BaseModel):
+    mode: str
+    gap_statement: str
+    adjacent_phrases: typing.List["Zone2Phrase"]
 
 class Metadata(BaseModel):
     book_name: typing.Optional[str] = None
@@ -134,6 +146,12 @@ class VerseChunk(BaseModel):
     verse_ref: str
     start_phrase: str
     end_phrase: str
+
+class Zone2Phrase(BaseModel):
+    framing: str
+    gill_quote: typing.Optional[str] = None
+    scripture_quote: typing.Optional[str] = None
+    sentence_id: str
 
 # #########################################################################
 # Generated type aliases (0)

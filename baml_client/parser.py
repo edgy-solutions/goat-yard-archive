@@ -48,6 +48,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractVersesFromMarkdown", llm_response=llm_response, mode="request")
         return typing.cast(typing.List["types.VerseChunk"], result)
 
+    def GenerateGillAnswer(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.GillAnswer:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateGillAnswer", llm_response=llm_response, mode="request")
+        return typing.cast(types.GillAnswer, result)
+
     def NormalizeGillMarkdown(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> str:
@@ -127,6 +133,12 @@ class LlmStreamParser:
     ) -> typing.List["stream_types.VerseChunk"]:
         result = self.__options.merge_options(baml_options).parse_response(function_name="ExtractVersesFromMarkdown", llm_response=llm_response, mode="stream")
         return typing.cast(typing.List["stream_types.VerseChunk"], result)
+
+    def GenerateGillAnswer(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.GillAnswer:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateGillAnswer", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.GillAnswer, result)
 
     def NormalizeGillMarkdown(
         self, llm_response: str, baml_options: BamlCallOptions = {},

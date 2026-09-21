@@ -15,6 +15,14 @@ except ImportError:
     KJV_DATA = {}
     print("Warning: Could not import BIBLE_MAP from bible_api")
 
+# ADR-0009 structured answer path (behind GILL_STRUCTURED_ANSWER). Imported both ways
+# for the same reason as bible_api above: this module is run as a package from the API
+# and flat from scripts and tests.
+try:
+    from . import structured_answer
+except ImportError:
+    import structured_answer  # type: ignore
+
 
 # ---------------------------------------------------------------------------
 # Verbatim quote verification (see ADR-0006).
@@ -1016,7 +1024,53 @@ class GroundedGillBot(dspy.Module):
             
         # 2. Generate
         print(f"DEBUG: Valid Citations in Context: {valid_citations}")
-        pred = self.generate_answer(context=formatted_context, question=question, available_books=available_books)
+
+        # ADR-0009 structured answer path, behind GILL_STRUCTURED_ANSWER (default OFF).
+        #
+        # The flag branches GENERATION only. Everything downstream — quote repair, the
+        # Zone-3 sweep, the trailing-prose bookend check, citation validation — runs
+        # unchanged on the rendered prose. That is deliberate for the first cut: the
+        # eval then measures the schema change against the same verification stack,
+        # not schema-plus-a-verifier-rewrite. ADR-0009 Phase 2.3 retires the prose-era
+        # scaffolding AFTER the flag flips, on evidence, not before it.
+        structured_payload = None
+        structured_meta = None
+        structured_violations: List[str] = []
+        if structured_answer.structured_enabled():
+            gill_answer = structured_answer.generate(
+                context=formatted_context,
+                question=question,
+                available_books=available_books,
+            )
+            structured_violations = structured_answer.check_structure(
+                gill_answer, valid_sids=valid_citations
+            )
+            if structured_violations:
+                # A flag, never a gate: a structurally odd answer that still quotes Gill
+                # correctly serves the reader better than an error screen. What the flag
+                # buys is that the oddity is visible instead of silent.
+                print(f"DEBUG: [structured] {len(structured_violations)} structural violation(s):")
+                for viol in structured_violations:
+                    print(f"  {viol}")
+            rendered, structured_citations, structured_meta = structured_answer.render(
+                gill_answer, available_books
+            )
+            structured_payload = structured_answer.to_payload(gill_answer)
+            if structured_meta.get("zone3_notes"):
+                # Logged, never rendered. This is the measurement the ADR-0009 release
+                # valve exists to produce: what the model wanted to say about Gill.
+                print(f"DEBUG: [structured] zone3_notes (NOT rendered): "
+                      f"{structured_meta['zone3_notes'][:200]!r}")
+            print(f"DEBUG: [structured] mode={structured_meta.get('refusal_mode') or 'answer'} "
+                  f"phrases={len(structured_payload['phrases'])} "
+                  f"citations={len(structured_citations)}")
+            pred = dspy.Prediction(
+                answer=rendered,
+                citations=structured_citations,
+                reasoning=gill_answer.reasoning or "",
+            )
+        else:
+            pred = self.generate_answer(context=formatted_context, question=question, available_books=available_books)
         
         # 3. Assertions (The Critic)
         # Check 1: Format
@@ -1258,6 +1312,13 @@ class GroundedGillBot(dspy.Module):
             # distinguish "bot LLM produced different text" from "verifier
             # repaired differently" when comparing across runs.
             raw_answer=pred.answer,
+            # ADR-0009. None on the DSPy path, so every consumer can treat presence as
+            # "this answer came from the structured path" without reading the flag.
+            # `structured_payload` carries zone3_notes — it goes to traces and logs,
+            # NEVER to a rendered answer.
+            structured_payload=structured_payload,
+            structured_meta=structured_meta,
+            structured_violations=structured_violations,
         )
 
 if __name__ == "__main__":

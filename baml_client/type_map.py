@@ -22,8 +22,14 @@ type_map = {
     "types.ExtractionResult": types.ExtractionResult,
     "stream_types.ExtractionResult": stream_types.ExtractionResult,
 
+    "types.GillAnswer": types.GillAnswer,
+    "stream_types.GillAnswer": stream_types.GillAnswer,
+
     "types.GillEntity": types.GillEntity,
     "stream_types.GillEntity": stream_types.GillEntity,
+
+    "types.GillRefusal": types.GillRefusal,
+    "stream_types.GillRefusal": stream_types.GillRefusal,
 
     "types.Metadata": types.Metadata,
     "stream_types.Metadata": stream_types.Metadata,
@@ -51,6 +57,9 @@ type_map = {
 
     "types.VerseChunk": types.VerseChunk,
     "stream_types.VerseChunk": stream_types.VerseChunk,
+
+    "types.Zone2Phrase": types.Zone2Phrase,
+    "stream_types.Zone2Phrase": stream_types.Zone2Phrase,
 
 
     "types.BiblicalEra": types.BiblicalEra,
