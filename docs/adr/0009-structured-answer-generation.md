@@ -1,6 +1,6 @@
 # ADR-0009: Structured Answer Generation
 
-- **Status:** Proposed (sequencing note: build ONLY after ADR-0008 Phase 1 Steps 4–6 complete on the current architecture)
+- **Status:** **Accepted** 2026-09-20 on the strength of E-12 ([`FINDINGS.md`](../../evals/e12_adr9_compliance_smoke/FINDINGS.md)): 120/120 parseable + schema-valid across three DeepSeek models. Accepted means the typed schema is the decided shape; it does **not** mean the feature is on. The implementation ships behind a feature flag and **the flag is off** — see "Acceptance record" in Notes.
 - **Date:** 2026-07-05
 - **Deciders:** Chris Nogradi
 
@@ -206,3 +206,36 @@ Every road this month leads here. The forcing evidence is now four independent l
 ### Sequencing
 
 Sequencing is load-bearing: do NOT swap the output architecture mid-Phase-1. Steps 4–6 complete on the current architecture; the lexical backstop and semantic judge are still needed in the structured world (structure shrinks the surface, does not eliminate it); nothing built during Phase 1 becomes wasted. This ADR files the design; Phase 2 executes it.
+
+### Acceptance record (2026-09-20, Lane A)
+
+**Accepted on E-12, not on the flag eval.** The decision this ADR records is *whether the answer
+should be a typed schema instead of free prose*. E-12 settled that: 120/120 parseable and
+schema-valid, three models, including the informative-refusal shape that was the riskiest case.
+The 28-question flag eval run on this date independently reproduced the structural half of that
+result — **0 parse errors, 0 schema errors, 0 `must_not_cite` violations across 70 valid
+generations**.
+
+**The flag stays off.** The same run cannot say whether the change helps, for reasons that are
+harness defects rather than findings: the flag-off arm served runs 2 and 3 of every question from
+an in-process LM cache (N was effectively 1, not 3), and the flag-on arm lost 14 of 84 runs to the
+90 s timeout, each scored as a content failure rather than an error. Both apparent
+STABLE-PASS → STABLE-FAIL regressions had zero valid runs. Full analysis:
+`evals/output/adr0009_flag/RULING4_BEFORE_AFTER.md` (untracked; `evals/output/` is gitignored).
+
+Of the three named failures the flag flip is gated on, only `real_eternal_justification_001`
+returned a clean verdict, and it is **still failing** (0/3, no timeouts). The Garden and
+"two administrations" questions produced one and two valid runs respectively — suggestive, not
+results.
+
+**Schema deviation, recorded:** the sketch above names the per-quote field `ref`. The shipped BAML
+class uses **`sentence_id`**. `ref` is a BAML keyword and cannot be used as a field name; the
+rename is forced by the tool, carries no semantic change, and `sentence_id` is in any case the
+name the rest of this codebase uses for the same identifier (`[BOOK_C_V_SN]`).
+
+**What acceptance does NOT settle:** whether `zone3_notes` earns its place (the flag eval could not
+measure it — the harness stores only answer text, and the structured fields land in
+`stages_capture` under `debug=True`, which the eval never requests); whether the release valve of
+Phase 2.4 is needed; and whether the typed path's ~25.7 s median generation is acceptable against
+the 90 s request ceiling, which on this evidence it is not without either more headroom or an
+uncontended endpoint.
