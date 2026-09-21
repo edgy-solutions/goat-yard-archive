@@ -63,21 +63,90 @@ TRUTH = {
 }
 UNSCORABLE = {"p138:n6": "signed wrong, correction field empty - no signed truth string"}
 
+# ---------------------------------------------------------------------------------------------------
+# The SEALED-page half of the same signed sitting. Chris's ruling 2 (2026-09-20) opens sealed pages for
+# THIS HARNESS ONLY: a Hebrew READ on a sealed page does not touch the alignment gate's evidence, which
+# is what "sealed" protects. Nothing here re-scores an alignment decision, and the gate stays frozen.
+#
+# These strings are DERIVED from the sitting file rather than retyped, and the derivation is asserted
+# against the four hand-written candidate-verbatim entries above at import time (_assert_derivation).
+# Retyping Hebrew by hand is exactly the plausible-word-substitution risk this lane measures at 35%.
+#
+#   chosen == "correct"                  -> truth is the candidate's Hebrew span, verbatim
+#   chosen == "wrong" + correction       -> truth is the correction string
+#   chosen == "wrong" + empty correction -> UNSCORABLE (same rule that excluded p138:n6)
+SEALED_TRUTH = {
+    "p217:n2": ("הימלא", "signed-correct:candidate-verbatim"),
+    "p293:n0": ("יחמנה", "signed-correct:candidate-verbatim"),
+    "p362:n1": ("להתגללעלינו",
+                "signed-correction:verbatim"),
+    "p423:n3": ("ותגע לרבליו",
+                "signed-correction:verbatim"),
+    "p427:n4": ("הבאשתם", "signed-correct:candidate-verbatim"),
+    "p491:n1": ("בשמע", "signed-correct:candidate-verbatim"),
+    # Chris marked this `wrong` but wrote "correct but should have no makers" - an adjudication about the
+    # note's MARKERS, not about the Hebrew string, which he affirms. Truth is therefore the candidate
+    # verbatim. This interpretation is load-bearing for n: the prerun's arithmetic ("n goes 10 -> 19")
+    # counts this span as scorable and p596:n2 as not, which is only consistent with reading it this way.
+    # Flagged in every report rather than buried; if Chris reads it otherwise, n is 18 and this span drops.
+    "p726:n3": ("שְׁאָר אָבִיךְ",
+                "signed-wrong:marker-defect-not-hebrew-defect"),
+    "p897:n4": ("ענו לה", "signed-correction:verbatim"),
+    "p912:n2": ("ביעקב בישראל",
+                "signed-correct:candidate-verbatim"),
+}
+SEALED_UNSCORABLE = {"p596:n2": "signed wrong, correction field empty - no signed truth string"}
+
 
 def _lines(p):
     return [json.loads(l) for l in io.open(p, encoding="utf-8") if l.strip()]
 
 
-def build_set():
-    """The 11 carried spans with their signed verdict, latin context, and both ratified boxes (strip coords)."""
+def _assert_derivation(sitting):
+    """The sealed truths must fall out of the sitting file, not out of my typing. Checked at import."""
+    for sid, (want, basis) in SEALED_TRUTH.items():
+        rec = sitting.get(sid)
+        if not rec:
+            raise AssertionError(f"{sid}: not in the signed sitting")
+        corr = (rec.get("disputed_span_correction") or "").strip()
+        got = corr if (rec.get("chosen") == "wrong" and HEB.search(corr)) else _heb_span(
+            rec["inputs"]["candidates"][0])
+        if _norm(got) != _norm(want):
+            raise AssertionError(f"{sid}: derived {got!r} != recorded {want!r}")
+
+
+def _heb_span(text):
+    """The maximal Hebrew run in a candidate line, separators kept. Validated against the hand-written
+    entries in TRUTH (p102, p138:n5, p219, p360) by test_hebrew_sealed_truth.py."""
+    toks = re.findall(r"[֐-׿][֐-׿]*", text or "")
+    if not toks:
+        return None
+    i, j = text.index(toks[0]), text.rindex(toks[-1]) + len(toks[-1])
+    seg = text[i:j]
+    return seg if re.fullmatch(r"[֐-׿ \-]+", seg) else " ".join(toks)
+
+
+def build_set(include_sealed=False):
+    """The carried spans with their signed verdict, latin context, and both ratified boxes (strip coords).
+
+    n=10 scorable by default. `include_sealed=True` adds the sealed half of the SAME signed sitting under
+    Chris's ruling-2 carve-out -> n=19 scorable. A sealed page is opened here for a READ only; no
+    alignment evidence is re-scored and the gate stays frozen."""
     sitting = {o["span_id"]: o for o in _lines(DOWN / "hebrew_sitting_chris_20260906.jsonl") if "span_id" in o}
     resid = {o["span_id"]: o for o in _lines(DATA / "chris_sitting_b_residue_20260823.jsonl") if "span_id" in o}
     spanbox = {o["span_id"]: o for o in _lines(DOWN / "span_box_verdicts_20260906.jsonl")}
     notebox = {o["page"]: o for o in _lines(DATA / "note_box_truth_20260906_FINAL.jsonl") if "page" in o}
+    truth = dict(TRUTH)
+    unscorable = dict(UNSCORABLE)
+    if include_sealed:
+        _assert_derivation(sitting)
+        truth.update(SEALED_TRUTH)
+        unscorable.update(SEALED_UNSCORABLE)
     out = []
-    for sid in list(TRUTH) + list(UNSCORABLE):
+    for sid in list(truth) + list(unscorable):
         pg, ni = int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:])
-        assert pg not in SEALED, f"{sid} is on a SEALED page"
+        if not include_sealed:
+            assert pg not in SEALED, f"{sid} is on a SEALED page"
         rec = sitting.get(sid) or resid.get(sid)
         cand = rec["inputs"]["candidates"][0] if rec else ""
         nb = notebox.get(pg)
@@ -102,8 +171,8 @@ def build_set():
         out.append(dict(
             span_id=sid, page=pg, note_idx=ni,
             signed=(rec or {}).get("chosen"), latin_context=cand,
-            truth=TRUTH.get(sid, (None, None))[0], truth_basis=TRUTH.get(sid, (None, None))[1],
-            unscorable=UNSCORABLE.get(sid),
+            truth=truth.get(sid, (None, None))[0], truth_basis=truth.get(sid, (None, None))[1],
+            unscorable=unscorable.get(sid), sealed=(pg in SEALED),
             note_box=nbox, note_box_status=(nb["notes"][used]["status"] if nbox else None),
             a1_idx_declared=ni, a1_idx_used=used, a1_span_overlap=ovf, a1_clips_span_frac=clip,
             span_box=sbox, column_bands=(nb or {}).get("column_bands"),
@@ -137,10 +206,10 @@ def _native_crop(page_img, strip_box, info, bands, pad=0):
     return canv, rects
 
 
-def crops(save=True):
+def crops(save=True, include_sealed=False):
     CROPDIR.mkdir(parents=True, exist_ok=True)
     built, page_cache = [], {}
-    for s in build_set():
+    for s in build_set(include_sealed=include_sealed):
         pg = s["page"]
         if pg not in page_cache:
             strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
