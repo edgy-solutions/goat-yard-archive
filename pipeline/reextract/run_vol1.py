@@ -10,12 +10,8 @@ Env: OLLAMA_HOST -- required, no default (gpu-servers.md; E/.179 and F/.188 refu
 """
 import sys, os, re, json, time, hashlib, subprocess
 from pathlib import Path
-# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
-# pipeline/__init__.py imports dagster_slack, which is not in the venv.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common.endpoint_guard import resolve_ollama_bare_host
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from endpoint_guard import resolve_host, EndpointMissing, EndpointRefused
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
 from extract_apparatus import extract_page
@@ -25,10 +21,6 @@ IMGDIR = Path(os.getenv("VOL1_IMG", "c:/Users/cnogr/git/dr-voluminous/commentary
 BODYDIR = IMGDIR / "qwen_qwen3-vl-235b-a22b-thinking"
 # output is DATA -> private root, never the code tree (default), overridable with VOL1_OUT
 OUT = Path(os.getenv("VOL1_OUT", str(data_path("vol1_apparatus.jsonl"))))
-def _host():
-    # Resolved at call time, not import time, so importing this module
-    # for its helpers does not require an endpoint.
-    return resolve_ollama_bare_host(purpose="run_vol1")
 PROFILE = Path(__file__).parent / "book_profile.gill.yaml"
 
 def config_hash():
@@ -69,6 +61,31 @@ def done_pages():
     return d
 
 def main():
+    # BEFORE the first page loads. Lane B's first patch to nikud_audit_run put the guard after a
+    # module-level data load and died on a missing file instead of on the endpoint - a non-zero
+    # exit for the wrong reason, which reads as a firing guard and is not one.
+    try:
+        host = resolve_host(os.getenv("OLLAMA_HOST"), who="run_vol1")
+    except (EndpointMissing, EndpointRefused) as e:
+        print("", file=sys.stderr); print(e, file=sys.stderr); return 2
+    # This tree builds "http://<host>:11434/..." itself (extract_apparatus.py:55), so a host
+    # carrying its own port or scheme silently produces a malformed URL that fails at connect
+    # time with a confusing error. resolve_host returns the value as given, by design, so the
+    # SHAPE check belongs here. Refuse rather than strip: stripping would send the run to
+    # :11434 on a machine where a different port was asked for, and write a host nobody chose
+    # into the artifacts. NOTE this means endpoint D (192.168.1.169:11435) is UNREACHABLE from
+    # this script until the hardcoded :11434 is widened - shared URL construction, not changed here.
+    if "://" in host or host.count(":") == 1:
+        print("", file=sys.stderr)
+        print("REFUSED: run_vol1 needs a BARE host. It builds http://<host>:11434/... itself,",
+              file=sys.stderr)
+        print("  so " + repr(host) + " would become a malformed URL.", file=sys.stderr)
+        print("  Pass just the address, e.g. 192.168.1.169.", file=sys.stderr)
+        print("  Note endpoint D (192.168.1.169:11435) cannot be reached from here: the",
+              file=sys.stderr)
+        print("  :11434 in the URL is hardcoded. See gpu-servers.md.", file=sys.stderr)
+        return 2
+
     profile = A.load_profile(str(PROFILE))
     imgs = sorted(IMGDIR.glob("page*_image1.png"),
                   key=lambda p: int(re.search(r"page(\d+)", p.name).group(1)))
@@ -86,7 +103,7 @@ def main():
             body = str(BODYDIR / f"{img.stem}.md")
             t0 = time.perf_counter()
             try:
-                r = extract_page(str(img), profile, _host(), body_md=body if Path(body).exists() else None)
+                r = extract_page(str(img), profile, host, body_md=body if Path(body).exists() else None)
                 rc = r.get("recrop_changes", []); m = r.get("anchor_match") or {}
                 info = r.get("presplit_info") or {}
                 rec = {"page": pg, "status": refine_status(r), "n_notes": r.get("n_notes"),
@@ -108,4 +125,4 @@ def main():
                 print(f"  ...{pg} [{rec['status']}] ({i+1}/{len(imgs)})", flush=True)
     print("DONE vol1 run", flush=True)
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": sys.exit(main() or 0)

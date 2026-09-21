@@ -7,14 +7,12 @@ Passes are generic; book_profile.gill.yaml makes them Gill-specific. Host is inf
 """
 import sys, os, re, io, base64, argparse
 from pathlib import Path
-# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
-# pipeline/__init__.py imports dagster_slack, which is not in the venv.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common.endpoint_guard import resolve_ollama_bare_host
 
 import httpx
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from endpoint_guard import resolve_host, EndpointMissing, EndpointRefused
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import cv_footnote_presplit as presplit
 import assembler as A
@@ -187,7 +185,29 @@ def main():
                          "E (.179) and F (.188) are refused; see gpu-servers.md.")
     ap.add_argument("--body-dir", default="", help="dir of body .md files (for anchor matching)")
     a = ap.parse_args()
-    a.host = resolve_ollama_bare_host(a.host, purpose="extract_apparatus")
+    # Immediately after parsing and before load_profile touches the disk: a guard that runs after
+    # a data load exits non-zero for the wrong reason and only looks like it fired.
+    try:
+        a.host = resolve_host(a.host, who="extract_apparatus")
+    except (EndpointMissing, EndpointRefused) as e:
+        print("", file=sys.stderr); print(e, file=sys.stderr); return 2
+    # This tree builds "http://<host>:11434/..." itself (extract_apparatus.py:55), so a host
+    # carrying its own port or scheme silently produces a malformed URL that fails at connect
+    # time with a confusing error. resolve_host returns the value as given, by design, so the
+    # SHAPE check belongs here. Refuse rather than strip: stripping would send the run to
+    # :11434 on a machine where a different port was asked for, and write a host nobody chose
+    # into the artifacts. NOTE this means endpoint D (192.168.1.169:11435) is UNREACHABLE from
+    # this script until the hardcoded :11434 is widened - shared URL construction, not changed here.
+    if "://" in a.host or a.host.count(":") == 1:
+        print("", file=sys.stderr)
+        print("REFUSED: extract_apparatus needs a BARE host. It builds http://<host>:11434/... itself,",
+              file=sys.stderr)
+        print("  so " + repr(a.host) + " would become a malformed URL.", file=sys.stderr)
+        print("  Pass just the address, e.g. 192.168.1.169.", file=sys.stderr)
+        print("  Note endpoint D (192.168.1.169:11435) cannot be reached from here: the",
+              file=sys.stderr)
+        print("  :11434 in the URL is hardcoded. See gpu-servers.md.", file=sys.stderr)
+        return 2
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
     profile = A.load_profile(a.profile)
@@ -207,4 +227,4 @@ def main():
         print("-" * 66); print(res.get("markdown", ""))
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
