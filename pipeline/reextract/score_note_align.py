@@ -122,6 +122,9 @@ def _vec_from_img(im):
     return v / n if n else v
 
 
+MARKER_LOG = []   # ruling 4: per-call (expected letter, confusable set, verdict, computed margin)
+
+
 def marker_check(strip, region, expected, templates, margin):
     """Secondary check on an ALIGNED note: cut the marker from the region's OWN first line and ask the
     verifier whether it is the aligned note's letter. Returns 'reject' / 'confirm' / 'abstain'.
@@ -143,6 +146,11 @@ def marker_check(strip, region, expected, templates, margin):
     if crop.size[0] < 3 or crop.size[1] < 3:
         return "abstain-tiny"
     ok, _m = MM.verify(_vec_from_img(crop), expected, templates, margin)
+    # Ruling 4 (2026-09-20): log the expected letter WITH its computed margin. `expected_letter` was
+    # already recorded per row, but the margin was not, so a reject could not be told from a near-miss.
+    MARKER_LOG.append({"expected": expected, "confusables": MM.CONF.get(expected, []),
+                       "verdict": "confirm" if ok else "reject", "margin": round(float(_m), 4),
+                       "threshold": margin})
     return "confirm" if ok else "reject"
 
 
@@ -284,7 +292,8 @@ def main():
 
     rep = {"thresholds": {"T_HIGH": NA.T_HIGH, "T_LOW": NA.T_LOW, "T_CONT": NA.T_CONT, "MARGIN": NA.MARGIN},
            "marker_check": "on" if args.marker_check else "disabled-33of33-reject-on-dev",
-           "verifier_margin": margin, "dev": dev, "contaminated": con, "sealed": seal, "pages": out}
+           "verifier_margin": margin, "marker_log": MARKER_LOG, "dev": dev, "contaminated": con,
+           "sealed": seal, "pages": out}
     path = Path(args.out or (D / "audits" / "note_align_score_20260920.json"))
     path.write_text(json.dumps(rep, indent=1), encoding="utf-8")
     print(f"\nwrote {path}")
