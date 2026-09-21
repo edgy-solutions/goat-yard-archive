@@ -184,3 +184,55 @@ apparatus client, so it is reported, not changed.
   four defaults to C. That would have left a default in place. A default pointing somewhere safe
   is still a value nobody at the call site sees, and the next endpoint reshuffle makes it wrong
   again silently. The guard removes the default instead.
+
+## Second pass, 2026-09-20 — the reextract substrate
+
+Lane B's guard (`pipeline/reextract/endpoint_guard.py`, cherry-picked as `02fbd50`) is now
+wired into `extract_apparatus.py` and `run_vol1.py` (`00c4cbd`). Both previously defaulted
+to `192.168.1.179`. Lane B's born-test prints GUARDED for both without needing an edit.
+
+**Two guard modules now coexist, and should not.**
+
+| module | covers | resolves DNS | returns |
+|---|---|---|---|
+| `pipeline/common/endpoint_guard.py` (mine) | evals, `normalize_markdown`, `test_litellm_proxy` | yes | bare-host variant refuses ports |
+| `pipeline/reextract/endpoint_guard.py` (Lane B's) | the six reextract scripts | **no** | the value as given, port included |
+
+Two behavioural differences that matter, neither fixed here because the module is Lane B's:
+
+1. **No DNS resolution.** A hostname resolving to .179/.188 passes Lane B's guard. Mine
+   refuses it. Low risk (nothing in this tree uses names) but it is a real difference.
+2. **The port comes back as given.** `extract_apparatus.py:55` builds
+   `f"http://{host}:11434/api/generate"`, so `OLLAMA_HOST=192.168.1.169:11435` — endpoint
+   **D, Lane A's own assigned endpoint** — would have built
+   `http://192.168.1.169:11435:11434/...`. Closed with a local shape check in the two
+   scripts: refuse, never strip. Stripping would silently redirect the run to :11434 on
+   that machine and record a host nobody chose.
+
+**Consequence worth stating plainly: endpoint D is unreachable from the reextract tree.**
+The `:11434` is hardcoded in shared URL construction. Widening it is a change Lane B also
+depends on, so it is not made here; the refusal message says so rather than leaving an
+operator to discover it as a connection error.
+
+**Repo grep, after the change** — every remaining .179/.188 occurrence outside `.git`,
+`baml_client`, `.venv`:
+
+- guard modules + their tests (they name the pair in order to refuse it) — correct;
+- `baml_src/main.baml:35,52` — comments recording removed defaults, not endpoints;
+- `charts/goat-yard-archive/values.yaml:160-161` — the LiteLLM round-robin pair. This is
+  the production config itself; in scope, leave alone.
+- `charts/weaviate-overrides/values-ollama-gpu.yaml:17` — `OLLAMA_API_ENDPOINT` pointing
+  Weaviate's embedder **directly at F, bypassing LiteLLM**. Outside the LiteLLM carve-out
+  and outside my lane; flagged, not changed. Someone should confirm it is intentional.
+
+No executable default anywhere now reaches a closed endpoint.
+
+### What this second pass does NOT solve
+
+- Doesn't collapse the two guard modules. Recommend one module, Lane B's location, with my
+  DNS resolution folded in.
+- Doesn't make D reachable from reextract.
+- `two_model_corpus.py` and `vol7_run.py` still use my `common` guard, not Lane B's — safe,
+  but the directory is now inconsistent.
+- Still proves nothing about whether any past run reached E. It only makes future ones fail
+  loud.
