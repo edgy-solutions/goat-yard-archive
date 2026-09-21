@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
 from extract_apparatus import extract_page
+from run_header import build_header
 from data_config import data_path
 
 IMGDIR = Path(os.getenv("VOL1_IMG", "c:/Users/cnogr/git/dr-voluminous/commentary/volume1"))
@@ -29,9 +30,12 @@ def header(targets):
         head = "unknown"
     baml = hashlib.sha256(BAML_SRC.read_bytes()).hexdigest()[:16] if BAML_SRC.exists() else "missing"
     prof = hashlib.sha256(PROFILE.read_bytes()).hexdigest()[:16] if PROFILE.exists() else "missing"
-    return {"kind": "config_header", "git_head": head, "profile_sha16": prof, "baml_sha16": baml,
-            "seam": "baml", "model": "qwen3.6-16k:35b", "endpoint": "/api/chat", "think": False,
-            "n_targets": len(targets), "host": HOST, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    # Machine in the header and in the hash (Chris's ruling, 2026-09-20). `endpoint` meant the API PATH
+    # here; it is renamed `api_path` so `endpoint_id`/`endpoint_host` can mean the GPU server unambiguously.
+    return build_header(
+        host=HOST, model="qwen3.6-16k:35b", profile_path=PROFILE,
+        identity_extra={"seam": "baml", "api_path": "/api/chat", "think": False, "baml_sha16": baml},
+        extra={"n_targets": len(targets)})
 
 
 def done_pages():

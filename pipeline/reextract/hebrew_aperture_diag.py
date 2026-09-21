@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from PIL import Image
 import httpx
 import cv_footnote_presplit as ps
+from run_header import build_header, model_digests, normalize_hostport
 import note_region, nikud_gate, script_gate
 from hebrew_recrop import _RECROP_PROMPT
 
@@ -197,11 +198,17 @@ def run():
         done = {(o["span_id"], o["aperture"], o["model"]) for o in _lines(OUT) if "span_id" in o}
     with io.open(OUT, "a", encoding="utf-8") as f:
         if not done:
-            f.write(json.dumps({"kind": "config_header", "endpoint": "/api/generate", "think": False,
-                                "temperature": 0, "num_ctx": NUM_CTX, "models": MODELS, "host": HOST,
-                                "prompt_head": _RECROP_PROMPT[:40], "pad_native_px": PAD,
-                                "prerun": "hebrew_aperture_prerun_20260920.md",
-                                "date": "2026-09-20"}, ensure_ascii=False) + "\n")
+            # Machine in the header and in the hash (ruling, 2026-09-20). This harness calls TWO models,
+            # so there is no single set of weights: the per-model digest map goes into the hash, since
+            # collapsing it to one model would let a run with a swapped witness hash alike.
+            hp = normalize_hostport(HOST)
+            hdr = build_header(host=HOST, model="+".join(MODELS),
+                               identity_extra={"api_path": "/api/generate", "think": False,
+                                               "temperature": 0, "num_ctx": NUM_CTX, "models": MODELS,
+                                               "model_digests16": model_digests(hp, MODELS),
+                                               "prompt_head": _RECROP_PROMPT[:40], "pad_native_px": PAD},
+                               extra={"prerun": "hebrew_aperture_prerun_20260920.md"})
+            f.write(json.dumps(hdr, ensure_ascii=False) + chr(10))
         for s in built:
             ctx = Image.open(s["context_strip"]).convert("L")
             for ap in ("A1_notebox", "A2_spanbox"):

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
 from extract_apparatus import extract_page
+from run_header import build_header
 import agreement_ladder as AL
 from data_config import data_path
 
@@ -50,9 +51,14 @@ def main():
     print(f"gemma witness -> {OUT}\n  {len(targets)} pages ({len(targets)-len(done)} to go), model {GEMMA}", flush=True)
     with OUT.open("a", encoding="utf-8") as f:
         if fresh:
-            f.write(json.dumps({"kind": "config_header", "witness_model": GEMMA, "endpoint": "/api/chat",
-                                "think": False, "primary": "qwen3.6-16k:35b", "host": HOST,
-                                "started": time.strftime("%Y-%m-%dT%H:%M:%S")}, ensure_ascii=False) + "\n")
+            # Machine in the header and in the hash (ruling, 2026-09-20). It matters most HERE: the
+            # witness may legitimately run on endpoint B while the primary ran on C, and a witness
+            # disagreement that is really an endpoint difference must be readable from the artifact.
+            hdr = build_header(host=HOST, model=GEMMA, profile_path=PROFILE,
+                               identity_extra={"seam": "baml", "api_path": "/api/chat",
+                                               "think": False, "primary": "qwen3.6-16k:35b"},
+                               extra={"witness_model": GEMMA})
+            f.write(json.dumps(hdr, ensure_ascii=False) + chr(10))
         for i, pg in enumerate(targets):
             if pg in done: continue
             img = IMG / f"page{pg}_image1.png"

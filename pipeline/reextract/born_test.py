@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
 from extract_apparatus import extract_page
+from run_header import build_header
 from data_config import data_path
 
 IMGDIR = Path(os.getenv("VOL1_IMG", "c:/Users/cnogr/git/dr-voluminous/commentary/volume1"))
@@ -40,11 +41,14 @@ def header(pages):
     # config hash covers the WHOLE seam, not just the model: model tag + endpoint + think + the BAML file
     # (client def + prompt + output schema). If any of these move, the header changes and drift is re-provable.
     baml = hashlib.sha256(BAML_SRC.read_bytes()).hexdigest()[:16] if BAML_SRC.exists() else "missing"
-    return {"kind": "config_header", "git_head": head, "profile_sha16": prof, "profile": PROFILE.name,
-            "extractor": "extract_apparatus.extract_page", "seam": "baml",
-            "model": "qwen3.6-16k:35b", "endpoint": "/api/chat", "think": False,
-            "baml_src": BAML_SRC.name, "baml_sha16": baml,
-            "host": HOST, "pages": pages, "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    # The machine is part of the configuration (Chris's ruling, 2026-09-20): endpoint ID, host:port and
+    # model digest go in the header AND into config_sha16. `git_head`/`profile_sha16` above are computed by
+    # build_header; baml_sha16 stays IN the hash via identity_extra so the seam discipline is not flattened.
+    return build_header(
+        host=HOST, model="qwen3.6-16k:35b", profile_path=PROFILE,
+        identity_extra={"seam": "baml", "api_path": "/api/chat", "think": False,
+                        "baml_src": BAML_SRC.name, "baml_sha16": baml},
+        extra={"profile": PROFILE.name, "extractor": "extract_apparatus.extract_page", "pages": pages})
 
 
 def done_pages():
