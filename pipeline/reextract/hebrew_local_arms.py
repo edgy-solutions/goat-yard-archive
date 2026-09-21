@@ -248,6 +248,50 @@ def _tally(rows):
     return t
 
 
+def load_c_arms(include_sealed=True):
+    """The recorded endpoint-C reads, labelled by endpoint, for the AGREEMENT matrix only.
+
+    These are a different device AND a different API route (/api/generate on C vs /api/chat on D). They are
+    carried here so the matrix can answer "do independent readers produce the same string", which is a
+    question about the printed page. They are NEVER differenced against the D arms: Chris's device-noise
+    rule puts cross-run differences of ~3 spans or fewer inside the floor, and these differ on two axes."""
+    if not D.OUT.exists():
+        return []
+    sets = {x["span_id"]: x for x in D.build_set(include_sealed=include_sealed)}
+    out = []
+    for o in D._lines(D.OUT):
+        if "span_id" not in o or o["span_id"] not in sets:
+            continue
+        o = dict(o)
+        o["endpoint_id"], o["model"] = "C", o["model"] + " (C)"
+        s = sets[o["span_id"]]
+        o["cls"] = "UNSCORABLE" if s["unscorable"] else D.classify(o["gated"], s["truth"])
+        out.append(o)
+    return out
+
+
+def agreement(rows, aperture):
+    """Pairwise: over spans BOTH models read, how often is the gated string identical?
+
+    Agreement is not correctness. Unanimity is confidence only over SHARED EVIDENCE, never over shared
+    priors - every arm here reads the same two crops, so agreeing on a misread is exactly what they would
+    do. The matrix is reported beside the signed verdict, never in place of it."""
+    sub = [o for o in rows if o["aperture"] == aperture]
+    models = sorted({o["model"] for o in sub})
+    by = {}
+    for o in sub:
+        by.setdefault(o["model"], {})[o["span_id"]] = D._norm(o.get("gated") or "")
+    pairs = {}
+    for i, a in enumerate(models):
+        for b in models[i + 1:]:
+            shared = set(by.get(a, {})) & set(by.get(b, {}))
+            if not shared:
+                continue
+            same = sum(1 for sid in shared if by[a][sid] == by[b][sid] and by[a][sid])
+            pairs[(a, b)] = (same, len(shared))
+    return models, by, pairs
+
+
 if __name__ == "__main__":
     try:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -260,6 +304,8 @@ if __name__ == "__main__":
     ap.add_argument("--model", action="append", default=None, help="one arm; repeatable. Default: all four.")
     ap.add_argument("--out", default=str(OUT))
     ap.add_argument("--no-sealed", action="store_true")
+    ap.add_argument("--with-c", action="store_true",
+                    help="carry the recorded endpoint-C reads into the AGREEMENT matrix (never differenced)")
     a = ap.parse_args()
     include_sealed = not a.no_sealed
     out = Path(a.out)
@@ -298,6 +344,8 @@ if __name__ == "__main__":
                     print(f"{m:16s} {apn:11s} n={len(sub):3d}  {_tally(sub)}")
     elif a.cmd == "matrix":
         rows, sets = score(out, include_sealed)
+        if a.with_c:
+            rows = rows + [o for o in load_c_arms(include_sealed) if o["span_id"] in sets]
         for apn in APERTURES:
             print(f"\n=== {apn} ===")
             models = sorted({o["model"] for o in rows if o["aperture"] == apn})
@@ -306,3 +354,22 @@ if __name__ == "__main__":
             for sid in sorted(sets, key=lambda x: int(x.split(':')[0][1:])):
                 cells = [(by.get((sid, m)) or {}).get("cls", "-")[:13] for m in models]
                 print(f"{sid:11s} {int(sets[sid]['sealed']):<4d} " + " ".join(f"{c:13s}" for c in cells))
+            ms, bys, pairs = agreement(rows, apn)
+            print(f"\n  pairwise string agreement - agreement, NOT correctness:")
+            for (x, y), (same, n) in sorted(pairs.items()):
+                print(f"    {x[:18]:18s} vs {y[:18]:18s}  {same:2d}/{n:2d}")
+            print(f"\n  per-span unanimity:")
+            for sid in sorted(sets, key=lambda z: int(z.split(':')[0][1:])):
+                vals = [bys[m][sid] for m in ms if bys.get(m, {}).get(sid)]
+                if not vals:
+                    continue
+                uniq = len(set(vals))
+                tr = sets[sid]["truth"]
+                # One read is not unanimity. Say how many agreed, and only call it unanimous at 2+.
+                label = (str(uniq) + " readings" if uniq > 1
+                         else ("UNANIMOUS" if len(vals) > 1 else "single read"))
+                mark = ""
+                if uniq == 1 and tr and len(vals) > 1:
+                    hit = (not D.HEB.search(vals[0])) if tr == D.NOT_HEBREW else (vals[0] == D._norm(tr))
+                    mark = "  = signed" if hit else "  != signed  (agreed misread)"
+                print(f"    {sid:11s} {len(vals):2d} reads  {label:12s}{mark}")
