@@ -8,7 +8,7 @@ from pathlib import Path
 # pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
 # pipeline/__init__.py imports dagster_slack, which is not in the venv.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from common.endpoint_guard import resolve_ollama_bare_host
+from common.endpoint_guard import resolve_ollama_bare_host, EndpointError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -21,7 +21,12 @@ GREEK = re.compile(r"[\u0370-\u03FF]")       # vol7 (NT) apparatus is mostly GRE
 HEBREW = re.compile(r"[\u0590-\u05FF]")       # + rabbinic Hebrew citations
 
 def main():
-    host = resolve_ollama_bare_host(purpose="vol7_run")
+    # Exit 2 with the message, not a traceback: every other script in this tree refuses
+    # the same way, and a traceback reads as a crash rather than as a guard firing.
+    try:
+        host = resolve_ollama_bare_host(purpose="vol7_run")
+    except EndpointError as e:
+        print("", file=sys.stderr); print(e, file=sys.stderr); return 2
     profile = A.load_profile(str(Path(__file__).parent / "book_profile.gill_vol7.yaml"))
     out = Path(__file__).parent / "vol7_out"; out.mkdir(exist_ok=True)
     pages = json.loads((Path(__file__).parent / "vol7_sample.json").read_text())
@@ -66,4 +71,4 @@ def main():
 if __name__ == "__main__":
     try: sys.stdout.reconfigure(encoding="utf-8")
     except Exception: pass
-    main()
+    sys.exit(main() or 0)

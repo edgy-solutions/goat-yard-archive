@@ -226,6 +226,148 @@ def test_bare_host_still_refuses_closed():
 def test_bare_host_requires_an_endpoint():
     with _clean():
         _raises(MissingEndpointError, resolve_ollama_bare_host)
+# --------------------------------------------------------------------------
+# 4. Name resolution: injectable, and failure is a refusal (ruling 2026-09-20)
+# --------------------------------------------------------------------------
+
+from common.endpoint_guard import (  # noqa: E402
+    RESERVED,
+    EndpointRefused,
+    UnresolvableEndpointError,
+    host_ip,
+    resolve_host,
+    set_resolver,
+)
+
+
+@contextmanager
+def _resolver(fn):
+    """Swap the name resolver for the duration of a test, restoring exactly."""
+    prev = set_resolver(fn)
+    try:
+        yield
+    finally:
+        set_resolver(prev)
+
+
+def test_name_resolving_to_reserved_is_refused():
+    """The hole the old module documented and left open. A name is not a loophole."""
+    with _clean(), _resolver(lambda h: ["10.0.0.5", CLOSED_E]):
+        msg = _raises(ClosedEndpointError, resolve_ollama_host, "gpu-box.local")
+        assert "192.168.1.179" in msg, msg
+        assert "gpu-box.local" in msg, msg          # says HOW it got there
+        assert "gpu-servers.md" in msg, msg
+
+
+def test_resolution_failure_is_a_refusal_not_a_pass():
+    """Unknown is refused, not assumed safe.
+
+    The old module returned "not closed" when DNS failed, reasoning that an unresolvable name
+    cannot reach anything. That is wrong in the case that matters: a name resolvable from the
+    run host but not from here would pass. This is the ruling, asserted.
+    """
+    def boom(h):
+        raise OSError("no such host")
+
+    with _clean(), _resolver(boom):
+        msg = _raises(UnresolvableEndpointError, resolve_ollama_host, "unknown.local")
+        assert "REFUSED" in msg, msg
+        assert "could not be resolved" in msg, msg
+        assert "not overridable" in msg, msg
+
+
+def test_resolution_failure_is_caught_by_existing_except_clauses():
+    """UnresolvableEndpointError must be catchable as EndpointRefused.
+
+    pipeline/reextract/ scripts catch (EndpointMissing, EndpointRefused). If the new error
+    were a sibling rather than a subclass, they would traceback instead of exiting 2 with a
+    message - a guard that fires as a crash.
+    """
+    def boom(h):
+        raise OSError("no such host")
+
+    with _clean(), _resolver(boom):
+        try:
+            resolve_host("unknown.local", who="probe")
+        except EndpointRefused as e:
+            assert "REFUSED" in str(e), str(e)
+        else:
+            raise AssertionError("an unresolvable name was allowed through")
+
+
+def test_ip_literals_never_hit_the_resolver():
+    """The property that keeps every born-test offline: an address needs no lookup."""
+    calls = []
+
+    def tripwire(h):
+        calls.append(h)
+        raise AssertionError(f"resolver called for the IP literal {h!r}")
+
+    with _clean(), _resolver(tripwire):
+        assert resolve_ollama_host("192.168.1.169") == "192.168.1.169"
+        _raises(ClosedEndpointError, resolve_ollama_host, CLOSED_E)   # refused without DNS
+        assert calls == [], calls
+
+
+def test_a_resolver_cannot_launder_a_reserved_ip():
+    """set_resolver is a test seam, not an escape hatch: the literal check runs first."""
+    with _clean(), _resolver(lambda h: ["10.0.0.5"]):
+        _raises(ClosedEndpointError, resolve_ollama_host, CLOSED_E)
+        _raises(ClosedEndpointError, resolve_ollama_host, f"http://{CLOSED_F}:11434/v1")
+
+
+# --------------------------------------------------------------------------
+# 5. The cross-lane contract: pipeline/reextract/test_endpoint_guard.py greps
+#    subprocess output for these exact tokens. Reword the messages and Lane B's
+#    born-test fails in a way that looks like a wiring regression. Asserted here
+#    so it cannot be broken silently from this side.
+# --------------------------------------------------------------------------
+
+def test_refusal_message_contains_the_literal_token_REFUSED():
+    with _clean():
+        msg = _raises(ClosedEndpointError, resolve_host, CLOSED_E, who="probe")
+        assert "REFUSED" in msg, msg
+        assert "gpu-servers.md" in msg, msg
+
+
+def test_missing_message_reads_as_NO_DEFAULT_in_both_spellings():
+    with _clean():
+        msg = _raises(MissingEndpointError, resolve_host, None, "_UNSET_VAR_", "probe")
+        assert "no default" in msg, msg            # Lane A's spelling
+        assert "NO DEFAULT" in msg.upper(), msg    # Lane B's spelling
+
+
+def test_reextract_names_are_the_same_objects_not_a_second_implementation():
+    """If the shim ever grows its own copy, this fails."""
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reextract"))
+    import endpoint_guard as reextract_guard
+
+    from common import endpoint_guard as common_guard
+
+    assert reextract_guard.resolve_host is common_guard.resolve_host
+    assert reextract_guard.host_ip is common_guard.host_ip
+    assert reextract_guard.RESERVED is common_guard.RESERVED
+    assert reextract_guard.EndpointRefused is common_guard.ClosedEndpointError
+    assert reextract_guard.EndpointMissing is common_guard.MissingEndpointError
+
+
+def test_host_ip_parses_every_spelling_this_tree_uses():
+    for raw, want in [
+        ("192.168.1.179", "192.168.1.179"),
+        ("192.168.1.179:11434", "192.168.1.179"),
+        ("http://192.168.1.179:11434", "192.168.1.179"),
+        ("http://192.168.1.179:11434/v1", "192.168.1.179"),
+        ("  192.168.1.179  ", "192.168.1.179"),
+        ("HTTP://192.168.1.179:11434", "192.168.1.179"),
+        ("http://user@192.168.1.188:11434", "192.168.1.188"),
+        ("http://192.168.1.179:11434/../v1", "192.168.1.179"),
+    ]:
+        assert host_ip(raw) == want, f"{raw!r} -> {host_ip(raw)!r}, wanted {want!r}"
+
+
+def test_reserved_table_is_exactly_the_pair_gpu_servers_names():
+    assert RESERVED == {"192.168.1.179": "E", "192.168.1.188": "F"}, RESERVED
 
 
 if __name__ == "__main__":

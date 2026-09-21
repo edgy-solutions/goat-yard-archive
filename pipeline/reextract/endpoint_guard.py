@@ -36,74 +36,70 @@ did name is reachable, is the endpoint you meant, holds the model you want, or h
 Nothing here inspects the port: a request aimed at D by port is a request to a different GPU, and only the
 caller knows which was meant.
 
-Born-test: `test_endpoint_guard.py`."""
+Born-test: `test_endpoint_guard.py`.
+
+---
+
+COLLAPSED INTO `pipeline/common/endpoint_guard.py` (Lane A, per ruling 2026-09-20). Everything above still
+holds; what changed is where it lives. Two guard modules existed for about a day — this one and Lane A's —
+and they agreed on the refusal but disagreed at the edges: this one did no name resolution, that one did.
+The edge is exactly where a guard earns its keep, so two guards that differ there are worse than one.
+
+This file stays, with every public name unchanged, because the six scripts in this tree import from it, and
+because `test_endpoint_guard.py` imports `resolve_host`, `host_ip`, `RESERVED`, `EndpointMissing` and
+`EndpointRefused` from it by name and must keep passing UNCHANGED. There is no second implementation below:
+the names are re-exported from `common`, so the two trees cannot drift apart again.
+
+BEHAVIOUR CHANGES, since the names did not change:
+  - A hostname is now resolved and checked against the reserved pair. It previously was not, so a name
+    pointing at .179/.188 would have passed.
+  - A hostname that FAILS to resolve is now REFUSED (`UnresolvableEndpointError`, a subclass of
+    `EndpointRefused`, so existing `except` clauses already catch it). Unknown is refused rather than
+    assumed safe: a name that resolves from the run host but not from here would otherwise get through.
+  - IP literals are never resolved, so nothing here makes a network call for an address, and the born-test
+    stays offline. The resolver is injectable (`set_resolver`) so the name paths can be tested offline too.
+"""
+
+from __future__ import annotations
+
 import os
-import re
+import sys
 
-REF = "C:/Users/cnogr/git/gpu-servers.md"
+# Import as `common.endpoint_guard`, with pipeline/ on the path, NOT as `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv, so the package route
+# fails before the guard is even loaded.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# The Closed pair. Keys are bare IPs; the value is the endpoint ID as `gpu-servers.md` names it.
-RESERVED = {"192.168.1.179": "E", "192.168.1.188": "F"}
+from common.endpoint_guard import (  # noqa: E402,F401
+    RESERVED,
+    ClosedEndpointError,
+    EndpointError,
+    EndpointMissing,
+    EndpointRefused,
+    MissingEndpointError,
+    UnresolvableEndpointError,
+    assert_endpoint_allowed,
+    host_ip,
+    resolve_host,
+    resolve_ollama_bare_host,
+    resolve_ollama_base_url,
+    resolve_ollama_host,
+    set_resolver,
+)
 
-# Endpoints this project may use, quoted for the error message so the fix is in the failure.
-SUGGESTED = ("192.168.1.169  (C, ai2 32 GB — this project's assigned testing endpoint)\n"
-             "    192.168.1.100  (B, open, may be offline — gemma witness batches only, recorded as a\n"
-             "                   different model variant AND endpoint)")
-
-
-class EndpointRefused(RuntimeError):
-    """Raised for a reserved address. Distinct from the missing-host case so a caller can tell them apart."""
-
-
-class EndpointMissing(RuntimeError):
-    """Raised when no endpoint was named. There is no default and there will not be one."""
-
-
-def host_ip(value):
-    """Bare IP/hostname from any of the forms this tree passes around.
-
-    Accepts `192.168.1.169`, `192.168.1.169:11434`, `http://192.168.1.169:11434`, and the same with a
-    trailing `/v1` or other path. Returns the host part, lowercased and stripped. The refusal must not be
-    defeatable by the spelling of the URL, which is why it never string-matches the raw value."""
-    v = str(value).strip()
-    v = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", v)   # scheme
-    v = v.split("/", 1)[0]                               # path
-    v = v.split("@")[-1]                                 # userinfo, if anyone ever adds one
-    if v.startswith("["):                                # bracketed IPv6
-        return v[1:].split("]", 1)[0].lower()
-    return v.rsplit(":", 1)[0].lower() if v.count(":") == 1 else v.lower()
-
-
-def resolve_host(explicit=None, env="OLLAMA_HOST", who=None):
-    """Return the endpoint to use, or raise. There is no default.
-
-    `explicit` is the CLI value (or None); `env` is consulted only if `explicit` is empty. Either way the
-    endpoint has to have been *named by a human at the call site*, which is the whole point."""
-    tag = f" [{who}]" if who else ""
-    raw = explicit if (explicit is not None and str(explicit).strip()) else os.getenv(env)
-
-    if raw is None or not str(raw).strip():
-        raise EndpointMissing(
-            f"No Ollama endpoint named{tag}, and this script has NO DEFAULT on purpose.\n"
-            f"  Pass --host, or set {env}.\n"
-            f"  Endpoints this project may use (see {REF}):\n"
-            f"    {SUGGESTED}\n"
-            f"  Record the endpoint ID with any result: output at temperature 0 is only stable on the\n"
-            f"  same GPU architecture and backend, and runs from different endpoints are not comparable.")
-
-    ip = host_ip(raw)
-    if ip in RESERVED:
-        raise EndpointRefused(
-            f"REFUSED{tag}: {raw!r} resolves to {ip}, endpoint {RESERVED[ip]} — RESERVED.\n"
-            f"  {REF} marks E (192.168.1.179) and F (192.168.1.188) Closed: a characterized matched\n"
-            f"  7900 XTX pair serving goatyardarchive PRODUCTION and goatyardtest via LiteLLM\n"
-            f"  round-robin. \"No other project, agent, test, or ad hoc script may send requests to\n"
-            f"  .179 or .188.\"\n"
-            f"  A request here can evict a pinned production model: keep_alive -1 only disables the idle\n"
-            f"  timer, it does not protect the weights.\n"
-            f"  Use instead:\n"
-            f"    {SUGGESTED}\n"
-            f"  There is no override flag. If production work genuinely needs to run here, it does not\n"
-            f"  run from this tree.")
-
-    return str(raw).strip()
+__all__ = [
+    "RESERVED",
+    "ClosedEndpointError",
+    "EndpointError",
+    "EndpointMissing",
+    "EndpointRefused",
+    "MissingEndpointError",
+    "UnresolvableEndpointError",
+    "assert_endpoint_allowed",
+    "host_ip",
+    "resolve_host",
+    "resolve_ollama_bare_host",
+    "resolve_ollama_base_url",
+    "resolve_ollama_host",
+    "set_resolver",
+]
