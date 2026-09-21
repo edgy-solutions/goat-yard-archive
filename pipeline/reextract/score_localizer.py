@@ -8,7 +8,7 @@ from PIL import Image
 import cv_footnote_presplit as ps
 import word_box_align as W
 A='C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits/'
-verd={r['span_id']:r for r in (json.loads(l) for l in open('C:/Users/cnogr/Downloads/span_box_verdicts_20260906.jsonl',encoding='utf-8') if l.strip())}
+verd={r['span_id']:r for r in (json.loads(l) for l in open('C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits/span_box_verdicts_20260906.jsonl',encoding='utf-8') if l.strip())}
 spans={s['span_id']:s for s in json.load(open(A+'hebrew_sample_20260906.json',encoding='utf-8'))+json.load(open(A+'nikud_sample_10.json',encoding='utf-8'))}
 props={p['span_id']:p for p in json.load(open(A+'span_box_proposals_20260906.json',encoding='utf-8'))}
 def band(pg):
