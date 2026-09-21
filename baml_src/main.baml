@@ -32,9 +32,10 @@ client<llm> Ollama {
   provider openai
   options {
     model "qwen2.5vl:32b"
-    base_url "http://192.168.1.188:11434/v1"
-    //model "qwen3-vl-8k:32b"
-    //base_url "http://192.168.1.179:11434/v1"
+    // No hardcoded endpoint. This was http://192.168.1.188:11434/v1 -- endpoint F,
+    // which gpu-servers.md marks CLOSED. BAML raises if the variable is unset, which
+    // is the intended behaviour: choose an endpoint, do not inherit one.
+    base_url env.OLLAMA_VISION_URL
     api_key "ollama"
     temperature 0.1
     options: {
@@ -48,7 +49,8 @@ client<llm> OllamaGPT {
   provider openai
   options {
     model "qwen3-8k:32b"
-    base_url "http://192.168.1.188:11434/v1"
+    // Was http://192.168.1.188:11434/v1 -- endpoint F, CLOSED per gpu-servers.md.
+    base_url env.OLLAMA_TEXT_URL
     api_key "ollama"
     temperature 0.1
   }

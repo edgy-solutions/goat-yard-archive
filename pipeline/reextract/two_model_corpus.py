@@ -6,6 +6,11 @@ full apparatus set is covered in one night. Checkpointed/resumable.
 """
 import sys, os, re, json, time, argparse
 from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_bare_host
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
@@ -18,9 +23,12 @@ def main():
     ap.add_argument("--census", required=True)     # vol1_run.jsonl (to pick apparatus pages)
     ap.add_argument("--half", type=int, default=0) # 0 or 1 (every-other-page split across hosts)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--host", default=os.getenv("OLLAMA_HOST", "192.168.1.179"))
+    ap.add_argument("--host", default=None,
+                    help="Ollama endpoint, bare host. REQUIRED - there is no default. "
+                         "E (.179) and F (.188) are refused; see gpu-servers.md.")
     ap.add_argument("--second", default="gemma4:31b")
     a = ap.parse_args()
+    a.host = resolve_ollama_bare_host(a.host, purpose="two_model_corpus")
     profile = A.load_profile(str(Path(__file__).parent / "book_profile.gill.yaml"))
     profile["transcription"]["recrop_enabled"] = False   # compare BASE reads
     census = [json.loads(l) for l in Path(a.census).read_text(encoding="utf-8").splitlines()]

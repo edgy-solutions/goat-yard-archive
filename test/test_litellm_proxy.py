@@ -3,10 +3,15 @@ import os
 import pytest
 import time
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
+from common.endpoint_guard import resolve_ollama_base_url
 def test_direct_ollama_embedding():
     """Test direct connection to Ollama server"""
     litellm.api_key = "anything"
-    api_base = "http://192.168.1.179:11434"
+    # E (.179) was hardcoded here. No default now; the guard refuses E and F.
+    api_base = resolve_ollama_base_url(purpose="test_litellm_proxy")
     
     try:
         response = litellm.embedding(

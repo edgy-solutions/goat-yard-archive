@@ -5,6 +5,11 @@ shows what the vol1-tuned pipeline actually does on vol7 — where it holds, whe
 profile facts. Emits the same truthset_results.json the console renders."""
 import sys, os, re, io, json, base64
 from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_bare_host
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
@@ -16,7 +21,7 @@ GREEK = re.compile(r"[\u0370-\u03FF]")       # vol7 (NT) apparatus is mostly GRE
 HEBREW = re.compile(r"[\u0590-\u05FF]")       # + rabbinic Hebrew citations
 
 def main():
-    host = os.getenv("OLLAMA_HOST", "192.168.1.179")
+    host = resolve_ollama_bare_host(purpose="vol7_run")
     profile = A.load_profile(str(Path(__file__).parent / "book_profile.gill_vol7.yaml"))
     out = Path(__file__).parent / "vol7_out"; out.mkdir(exist_ok=True)
     pages = json.loads((Path(__file__).parent / "vol7_sample.json").read_text())

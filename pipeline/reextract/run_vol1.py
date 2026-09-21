@@ -6,10 +6,15 @@ accept/gated stats, presplit mode + footnote-gutter + rule geometry, furniture d
 
 CHECKPOINTED per-page (JSONL append): a crash RESUMES (skips pages already in the file), never
 restarts. Re-running when stage-3 changes outputs is free. Summarize with summarize_vol1.py.
-Env: OLLAMA_HOST (default .179).
+Env: OLLAMA_HOST -- required, no default (gpu-servers.md; E/.179 and F/.188 refused).
 """
 import sys, os, re, json, time, hashlib, subprocess
 from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_bare_host
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
@@ -20,7 +25,10 @@ IMGDIR = Path(os.getenv("VOL1_IMG", "c:/Users/cnogr/git/dr-voluminous/commentary
 BODYDIR = IMGDIR / "qwen_qwen3-vl-235b-a22b-thinking"
 # output is DATA -> private root, never the code tree (default), overridable with VOL1_OUT
 OUT = Path(os.getenv("VOL1_OUT", str(data_path("vol1_apparatus.jsonl"))))
-HOST = os.getenv("OLLAMA_HOST", "192.168.1.179")
+def _host():
+    # Resolved at call time, not import time, so importing this module
+    # for its helpers does not require an endpoint.
+    return resolve_ollama_bare_host(purpose="run_vol1")
 PROFILE = Path(__file__).parent / "book_profile.gill.yaml"
 
 def config_hash():
@@ -78,7 +86,7 @@ def main():
             body = str(BODYDIR / f"{img.stem}.md")
             t0 = time.perf_counter()
             try:
-                r = extract_page(str(img), profile, HOST, body_md=body if Path(body).exists() else None)
+                r = extract_page(str(img), profile, _host(), body_md=body if Path(body).exists() else None)
                 rc = r.get("recrop_changes", []); m = r.get("anchor_match") or {}
                 info = r.get("presplit_info") or {}
                 rec = {"page": pg, "status": refine_status(r), "n_notes": r.get("n_notes"),

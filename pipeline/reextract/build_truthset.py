@@ -11,6 +11,11 @@ only real failure.
 """
 import sys, os, re, io, json, base64, argparse
 from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_bare_host
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
@@ -39,10 +44,13 @@ def main():
     ap.add_argument("--img-dir", default="c:/Users/cnogr/git/dr-voluminous/commentary/volume1")
     ap.add_argument("--body-dir", default="c:/Users/cnogr/git/dr-voluminous/commentary/volume1/qwen_qwen3-vl-235b-a22b-thinking")
     ap.add_argument("--profile", default=str(Path(__file__).parent / "book_profile.gill.yaml"))
-    ap.add_argument("--host", default=os.getenv("OLLAMA_HOST", "192.168.1.179"))
+    ap.add_argument("--host", default=None,
+                    help="Ollama endpoint, bare host. REQUIRED - there is no default. "
+                         "E (.179) and F (.188) are refused; see gpu-servers.md.")
     ap.add_argument("--out", default=str(Path(__file__).parent / "truthset_out"))
     ap.add_argument("--strata-json", default="", help="override STRATA with a {stratum: [pages]} JSON file (leaves the canonical set untouched)")
     a = ap.parse_args()
+    a.host = resolve_ollama_bare_host(a.host, purpose="build_truthset")
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
     profile = A.load_profile(a.profile)

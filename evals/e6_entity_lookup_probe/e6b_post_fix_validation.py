@@ -19,9 +19,17 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 import weaviate
 import weaviate.classes as wvc
 
+import os, sys
+from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard (not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, absent from the venv).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pipeline"))
+from common.endpoint_guard import resolve_ollama_base_url
+
 WEAVIATE_HOST = "192.168.1.54"
 WEAVIATE_GRPC_HOST = "192.168.1.53"
-OLLAMA_URL = "http://192.168.1.179:11434/api/embeddings"
+# No default: the endpoint must be chosen, and E/.179 + F/.188 are refused outright.
+OLLAMA_URL = resolve_ollama_base_url(purpose="this probe").rstrip("/") + "/api/embeddings"
 OLLAMA_MODEL = "qwen3-embedding"
 
 # ADR-0010 constants

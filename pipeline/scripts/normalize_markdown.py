@@ -19,6 +19,13 @@ from datetime import datetime
 from dotenv import load_dotenv
 from abc import ABC, abstractmethod
 
+# pipeline/ on the path for common.endpoint_guard (not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, absent from the venv).
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_base_url
+
 # Load environment variables
 load_dotenv()
 
@@ -148,7 +155,8 @@ class DSPyBackend(NormalizerBackend):
         else:
             # Local Ollama configuration
             if api_base is None:
-                api_base = "http://192.168.1.188:11434"
+                # No default endpoint: F (.188) was hardcoded here and is closed.
+                api_base = resolve_ollama_base_url(purpose="normalize_markdown")
             self._lm = dspy.LM(
                 model=model,
                 api_base=api_base,
@@ -1140,7 +1148,8 @@ def main():
     parser.add_argument("--model", "-m", type=str,
                         help="Model name for DSPy backend (default: ollama_chat/qwen3-8k:32b)")
     parser.add_argument("--api-base", type=str,
-                        help="API base URL for DSPy backend (default: http://192.168.1.188:11434)")
+                        help="API base URL for DSPy backend. REQUIRED for the local path - no default; "
+                             "E (.179) and F (.188) are refused. See gpu-servers.md.")
     parser.add_argument("--temperature", "-t", type=float, default=0.1,
                         help="Temperature for DSPy backend (default: 0.1)")
     

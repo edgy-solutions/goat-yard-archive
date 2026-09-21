@@ -2,9 +2,14 @@
 27 pages. run_vol1 logged recrop COUNTS, not change-texts, so this re-runs ONLY the recrop-active pages
 (from recrop_pages.json) capturing the full recrop_changes, and flags ANY accepted change containing a
 Hebrew point. The gate rejects nikud by construction (_gate_accept); this is defense-in-depth empirical
-confirmation. Checkpointed/resumable. Env: OLLAMA_HOST (default .179, free after the vol1 run)."""
+confirmation. Checkpointed/resumable. Env: OLLAMA_HOST -- required, no default (gpu-servers.md; E/.179 and F/.188 refused)."""
 import sys, os, re, json, time
 from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_bare_host
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import assembler as A
@@ -14,7 +19,10 @@ IMGDIR = Path("c:/Users/cnogr/git/dr-voluminous/commentary/volume1")
 D = Path(os.getenv("AUDIT_DIR", str(Path(__file__).parent)))
 PAGES = json.loads((D / "recrop_pages.json").read_text())
 OUT = D / "recrop_audit.jsonl"
-HOST = os.getenv("OLLAMA_HOST", "192.168.1.179")
+def _host():
+    # Resolved at call time, not import time, so importing this module
+    # for its helpers does not require an endpoint.
+    return resolve_ollama_bare_host(purpose="nikud_audit_run")
 NIKUD = re.compile(r"[֑-ׇ]")
 
 def done():
@@ -30,7 +38,7 @@ def main():
         for i, pg in enumerate(todo):
             img = IMGDIR / f"page{pg}_image1.png"
             try:
-                r = extract_page(str(img), profile, HOST)
+                r = extract_page(str(img), profile, _host())
                 changes = r.get("recrop_changes", [])
                 bad = [c for c in changes if c.get("accepted") and NIKUD.search(c.get("new", ""))]
                 violations += len(bad)

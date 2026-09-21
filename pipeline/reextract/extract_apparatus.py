@@ -7,6 +7,11 @@ Passes are generic; book_profile.gill.yaml makes them Gill-specific. Host is inf
 """
 import sys, os, re, io, base64, argparse
 from pathlib import Path
+# pipeline/ on the path for common.endpoint_guard. Not `pipeline.common...`:
+# pipeline/__init__.py imports dagster_slack, which is not in the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from common.endpoint_guard import resolve_ollama_bare_host
+
 import httpx
 from PIL import Image
 
@@ -177,9 +182,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("images", nargs="+", help="page image path(s)")
     ap.add_argument("--profile", default=str(Path(__file__).parent / "book_profile.gill.yaml"))
-    ap.add_argument("--host", default=os.getenv("OLLAMA_HOST", "192.168.1.179"))
+    ap.add_argument("--host", default=None,
+                    help="Ollama endpoint, bare host. REQUIRED - there is no default. "
+                         "E (.179) and F (.188) are refused; see gpu-servers.md.")
     ap.add_argument("--body-dir", default="", help="dir of body .md files (for anchor matching)")
     a = ap.parse_args()
+    a.host = resolve_ollama_bare_host(a.host, purpose="extract_apparatus")
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
     profile = A.load_profile(a.profile)
