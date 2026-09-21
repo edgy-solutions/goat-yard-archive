@@ -208,6 +208,21 @@ def main():
               file=sys.stderr)
         print("  :11434 in the URL is hardcoded. See gpu-servers.md.", file=sys.stderr)
         return 2
+
+    # Instrument the accept path, because the dangerous case is the one that SUCCEEDS.
+    # C and D are the same IP on different ports (gpu-servers.md:17-18) and, worse, different
+    # silicon: C = 192.168.1.169:11434, Radeon internal, ~28 GB usable and contended;
+    # D = 192.168.1.169:11435, Strix Halo iGPU, ~90 GB. The port is hardcoded below, so a bare
+    # .169 - which the shape check above REQUIRES - silently runs on C while the operator
+    # believes they asked for D, and no artifact records which. Ruling 1 (parse the port, put
+    # host:port and the endpoint ID in the header) is the actual fix; until then this at least
+    # says out loud where the requests are going.
+    print(f"[endpoint] extract_apparatus -> http://{a.host}:11434  (port is hardcoded)", file=sys.stderr)
+    if a.host == "192.168.1.169":
+        print("[endpoint] NOTE: that is endpoint C (Radeon internal, ~28 GB, contended), "
+              "NOT endpoint D", file=sys.stderr)
+        print("[endpoint]       (192.168.1.169:11435, Strix Halo, ~90 GB). Same IP, different "
+              "GPU. See gpu-servers.md.", file=sys.stderr)
     try: sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     except Exception: pass
     profile = A.load_profile(a.profile)
