@@ -350,14 +350,14 @@ if __name__ == "__main__":
             print(f"\n=== {apn} ===")
             models = sorted({o["model"] for o in rows if o["aperture"] == apn})
             by = {(o["span_id"], o["model"]): o for o in rows if o["aperture"] == apn}
-            print(f"{'span':11s} {'seal':4s} " + " ".join(f"{m[:13]:13s}" for m in models))
+            print(f"{'span':11s} {'seal':4s} " + " ".join(f"{m[:20]:20s}" for m in models))
             for sid in sorted(sets, key=lambda x: int(x.split(':')[0][1:])):
-                cells = [(by.get((sid, m)) or {}).get("cls", "-")[:13] for m in models]
-                print(f"{sid:11s} {int(sets[sid]['sealed']):<4d} " + " ".join(f"{c:13s}" for c in cells))
+                cells = [(by.get((sid, m)) or {}).get("cls", "-")[:20] for m in models]
+                print(f"{sid:11s} {int(sets[sid]['sealed']):<4d} " + " ".join(f"{c:20s}" for c in cells))
             ms, bys, pairs = agreement(rows, apn)
             print(f"\n  pairwise string agreement - agreement, NOT correctness:")
             for (x, y), (same, n) in sorted(pairs.items()):
-                print(f"    {x[:18]:18s} vs {y[:18]:18s}  {same:2d}/{n:2d}")
+                print(f"    {x[:22]:22s} vs {y[:22]:22s}  {same:2d}/{n:2d}")
             print(f"\n  per-span unanimity:")
             for sid in sorted(sets, key=lambda z: int(z.split(':')[0][1:])):
                 vals = [bys[m][sid] for m in ms if bys.get(m, {}).get(sid)]
@@ -372,4 +372,4 @@ if __name__ == "__main__":
                 if uniq == 1 and tr and len(vals) > 1:
                     hit = (not D.HEB.search(vals[0])) if tr == D.NOT_HEBREW else (vals[0] == D._norm(tr))
                     mark = "  = signed" if hit else "  != signed  (agreed misread)"
-                print(f"    {sid:11s} {len(vals):2d} reads  {label:12s}{mark}")
+                print(f"    {sid:11s} {len(vals):2d} read{'s' if len(vals) != 1 else ' '}  {label:12s}{mark}")

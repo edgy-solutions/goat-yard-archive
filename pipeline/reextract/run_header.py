@@ -120,6 +120,30 @@ def _git_head(where=None):
         return "unknown"
 
 
+def _git_dirty(where=None):
+    """Files modified or untracked relative to `git_head`, or `unknown`. Goes IN the hash.
+
+    `git_head` alone is a lie whenever the tree is dirty: it names a commit, and the code that ran was
+    something else. The n=19 local-arms run of 2026-09-20 is the worked example. Its header recorded
+    `git_head 29f58c1` (committed 21:38:49); the run started at 22:01:26; the sealed carve-out that
+    produced its n=19 truth set was not committed until 07:16:47 the next morning. Every SEALED_TRUTH
+    read in that artifact executed code that was in no commit, and a reader doing `git checkout 29f58c1`
+    to reproduce it gets the n=10 module and a different answer, silently.
+
+    Returns the count and the paths (capped), not a boolean: "3 files dirty" is a footnote, "47 files
+    dirty" means the commit hash in the header is decoration. `unknown` when git cannot be reached --
+    distinguishable from `clean`, because not knowing is not the same as knowing it was clean."""
+    root = str(where or Path(__file__).parent)
+    try:
+        out = subprocess.check_output(["git", "-C", root, "status", "--porcelain"]).decode()
+    except Exception:
+        return {"state": "unknown"}
+    paths = [ln[3:].strip() for ln in out.splitlines() if ln.strip()]
+    if not paths:
+        return {"state": "clean"}
+    return {"state": "dirty", "n": len(paths), "paths": sorted(paths)[:20]}
+
+
 def config_sha16(fields):
     """Hash over the identity fields, machine included. Canonical JSON so key order cannot change it."""
     return hashlib.sha256(json.dumps(fields, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
@@ -142,8 +166,8 @@ def build_header(host, model, profile_path=None, extra=None, identity_extra=None
         p = Path(profile_path)
         prof = hashlib.sha256(p.read_bytes()).hexdigest()[:16] if p.exists() else "missing"
 
-    identity = {"git_head": _git_head(), "profile_sha16": prof, "model": model,
-                "model_digest16": digest, "endpoint_host": hostport, "endpoint_id": eid}
+    identity = {"git_head": _git_head(), "git_dirty": _git_dirty(), "profile_sha16": prof,
+                "model": model, "model_digest16": digest, "endpoint_host": hostport, "endpoint_id": eid}
     if identity_extra:
         identity.update(identity_extra)
     hdr = dict(identity)

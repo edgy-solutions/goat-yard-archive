@@ -128,6 +128,40 @@ check("normalize_hostport strips scheme and path",
       normalize_hostport("http://192.168.1.169:11435/v1") == "192.168.1.169:11435")
 check("endpoint_id never returns blank", endpoint_id("10.0.0.9:11434").startswith("UNREGISTERED:"))
 
+print("\n(2b) the header says whether the tree was DIRTY, and that is inside the hash")
+# WHY. `git_head` alone is a lie whenever the tree is dirty: it names a commit, and what ran was
+# something else. Worked example, from this lane: the n=19 local-arms run recorded git_head 29f58c1
+# (committed 2026-09-20T21:38:49), started at 22:01:26, and the sealed carve-out that built its n=19
+# truth set was not committed until 07:16:47 the next morning. A reader reproducing that run from
+# 29f58c1 gets the n=10 module and a different answer, with nothing in the artifact to warn them.
+#
+# The dirty check is `git status --porcelain` on purpose. Byte- or grep-level CR hunting is
+# environment-dependent here -- on this machine the same file reports 349 CRs to one shell's grep and
+# 0 to another's, while `tr -d \r` strips 349 bytes either way. git already knows about autocrlf, so
+# git is the honest primitive and the only one whose answer does not depend on whose shell ran it.
+IDENTITY_KEYS = ["git_head", "git_dirty", "profile_sha16", "model", "model_digest16",
+                 "endpoint_host", "endpoint_id"]
+hd = build_header(host="192.168.1.169", model="m", digest_fn=FAKE)
+check("header records git_dirty", "git_dirty" in hd)
+check("git_dirty has a state of clean/dirty/unknown",
+      isinstance(hd.get("git_dirty"), dict) and
+      hd["git_dirty"].get("state") in ("clean", "dirty", "unknown"), str(hd.get("git_dirty")))
+check("'unknown' is distinguishable from 'clean' (not knowing is not knowing it was clean)",
+      hd["git_dirty"].get("state") != "unknown" or "n" not in hd["git_dirty"])
+
+# The decisive one: recompute the hash from the identity fields and confirm it matches. If git_dirty
+# were recorded BESIDE the hash instead of inside it, two runs from the same commit -- one clean, one
+# with an uncommitted rewrite of the truth set -- would carry the same config_sha16.
+base = {k: hd[k] for k in IDENTITY_KEYS}
+check("config_sha16 is computed over git_dirty (recomputation matches)",
+      config_sha16(base) == hd["config_sha16"], "git_dirty sits outside the hash")
+check("a clean tree and a dirty tree hash differently",
+      config_sha16({**base, "git_dirty": {"state": "clean"}}) !=
+      config_sha16({**base, "git_dirty": {"state": "dirty", "n": 1, "paths": ["x.py"]}}))
+check("WHICH files were dirty is in the hash, not just how many",
+      config_sha16({**base, "git_dirty": {"state": "dirty", "n": 1, "paths": ["a.py"]}}) !=
+      config_sha16({**base, "git_dirty": {"state": "dirty", "n": 1, "paths": ["b.py"]}}))
+
 print("\n(3) a written run artifact is checkable end-to-end")
 with tempfile.TemporaryDirectory() as td:
     from run_header import read_header
