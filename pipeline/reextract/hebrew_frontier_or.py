@@ -94,6 +94,8 @@ ARMS = [
 HEB = re.compile(r"[֐-׿יִ-ﭏ]+")
 MAX_TOKENS = 300
 OUT_TOKEN_FLAG = 300          # flag, never abort, a model whose median output exceeds this
+RETRIES = 3                   # transient upstream 429/5xx only -- never a retry on a wrong answer
+BACKOFF = 4.0
 
 PROMPT_HEAD = (
     "The image is a magnified crop from a footnote in a 1766 English Bible commentary. It contains "
@@ -154,7 +156,14 @@ def _no_hebrew_outbound(body):
     return True
 
 
-def _body(model, ctx, img_b64, structured):
+REASONING_LADDER = [
+    ({"enabled": False}, "enabled:false"),
+    ({"effort": "minimal"}, "effort:minimal"),
+    (None, "omitted"),
+]
+
+
+def _body(model, ctx, img_b64, structured, reasoning=None):
     text = PROMPT_HEAD + (
         "Context from the surrounding footnote text. Hebrew has been removed; each • marks one "
         f"Hebrew word that stood there:\n  {ctx}\n"
@@ -164,7 +173,6 @@ def _body(model, ctx, img_b64, structured):
         "model": model,
         "temperature": 0,
         "max_tokens": MAX_TOKENS,
-        "reasoning": {"enabled": False},
         "provider": {"data_collection": "deny"},
         "usage": {"include": True},
         "messages": [{"role": "user", "content": [
@@ -172,6 +180,10 @@ def _body(model, ctx, img_b64, structured):
             {"type": "text", "text": text},
         ]}],
     }
+    if reasoning is None:
+        reasoning = REASONING_LADDER[0][0]
+    if reasoning:
+        b["reasoning"] = reasoning
     if structured:
         b["response_format"] = {"type": "json_object"}
     return b
@@ -241,16 +253,44 @@ def _budget():
 
 
 def call(model, s, cpath, ctx, structured, timeout=300):
-    """One read. Returns the row that goes on disk, including what was applied and what it cost."""
-    body = _body(model, ctx, base64.b64encode(Path(cpath).read_bytes()).decode(), structured)
-    _no_hebrew_outbound(body)
-    t0 = time.time()
-    r = httpx.post(URL, headers={"Authorization": f"Bearer {_key()}",
-                                 "content-type": "application/json"}, json=body, timeout=timeout)
-    secs = round(time.time() - t0, 1)
+    """One read, walking the reasoning ladder. Records what was APPLIED, not what was asked for.
+
+    Chris's setting is "reasoning off or minimum effort wherever the API allows, and record what was
+    actually applied". Some endpoints refuse: `openai/gpt-6-astra` answers 400 "Reasoning is mandatory
+    for this endpoint and cannot be disabled." Dropping that arm would report a capability gap that is
+    really a routing rule, so the ladder steps down -- off, then minimal, then omitted -- and the row
+    says which rung carried the read. A rung is never silently skipped: `reasoning_ladder` lists the
+    refusals that got us there."""
+    img = base64.b64encode(Path(cpath).read_bytes()).decode()
+    refusals, r, body, applied, secs = [], None, None, None, 0.0
+    for spec, label in REASONING_LADDER:
+        body = _body(model, ctx, img, structured, reasoning=spec)
+        _no_hebrew_outbound(body)
+        t0 = time.time()
+        r = httpx.post(URL, headers={"Authorization": f"Bearer {_key()}",
+                                     "content-type": "application/json"}, json=body, timeout=timeout)
+        secs += round(time.time() - t0, 1)
+        applied = label
+        # Transient upstream limits are not a capability result. Bounded, and every wait is recorded.
+        for attempt in range(RETRIES):
+            if r.status_code not in (429, 500, 502, 503, 504):
+                break
+            wait = BACKOFF * (2 ** attempt)
+            refusals.append({"rung": label, "http": r.status_code, "retry_in_s": wait,
+                             "error": r.text[:120]})
+            time.sleep(wait)
+            t0 = time.time()
+            r = httpx.post(URL, headers={"Authorization": f"Bearer {_key()}",
+                                         "content-type": "application/json"}, json=body,
+                           timeout=timeout)
+            secs += round(time.time() - t0, 1)
+        if not (r.status_code == 400 and "reasoning" in r.text.lower()):
+            break
+        refusals.append({"rung": label, "http": 400, "error": r.text[:160]})
     if r.status_code >= 400:
         return {"span_id": s["span_id"], "aperture": APERTURE, "model": model, "kind": "call_error",
-                "http": r.status_code, "error": r.text[:400], "secs": secs}
+                "http": r.status_code, "error": r.text[:400], "secs": secs,
+                "reasoning_ladder": refusals, "reasoning_applied": applied}
     d = r.json()
     if "choices" not in d:
         return {"span_id": s["span_id"], "aperture": APERTURE, "model": model, "kind": "call_error",
@@ -272,7 +312,8 @@ def call(model, s, cpath, ctx, structured, timeout=300):
         "tok_in": u.get("prompt_tokens"), "tok_out": u.get("completion_tokens"),
         "reasoning_tokens": det.get("reasoning_tokens"),
         "cost_usd": u.get("cost"), "is_byok": u.get("is_byok"),
-        "applied": {"temperature": 0, "reasoning_requested": "enabled:false",
+        "reasoning_applied": applied, "reasoning_ladder": refusals,
+        "applied": {"temperature": 0, "reasoning_requested": applied,
                     "structured_requested": bool(structured),
                     "data_collection": "deny", "max_tokens": MAX_TOKENS},
         "secs": secs,
@@ -351,7 +392,9 @@ def run(only=None):
                 print(f"SKIP {model}: {c.get('status')}")
                 continue
             print(f"\n== {model}")
+            from run_header import _git_head, _git_dirty
             f.write(json.dumps({"kind": "arm_header", "model": model, "started": time.strftime("%H:%M:%S"),
+                                "git_head": _git_head(), "git_dirty": _git_dirty(),
                                 "pricing": {k: c[k] for k in ("prompt_per_mtok", "completion_per_mtok",
                                                               "image_per_1k")},
                                 "structured": c["structured"]}, ensure_ascii=False) + "\n")

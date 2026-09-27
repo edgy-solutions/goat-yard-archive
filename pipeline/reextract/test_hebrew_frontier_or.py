@@ -126,6 +126,33 @@ check("the prompt offers ABSTAIN instead of a guess", "ABSTAIN" in F.PROMPT_HEAD
 check("the prompt states no verse citation is available (it is not invented)",
       "No scripture citation is recorded" in b["messages"][0]["content"][1]["text"])
 
+print("\n(4b) reasoning: off where allowed, MINIMUM where the endpoint refuses off")
+# WHY. Chris's setting is "reasoning off or minimum effort wherever the API allows, and record what
+# was actually applied". `openai/gpt-6-astra` answers 400 "Reasoning is mandatory for this endpoint
+# and cannot be disabled" -- 18 of 18 calls failed that way on the first pass. Dropping the arm would
+# have reported a capability gap that is really a routing rule, so the ladder steps down and the row
+# records the rung that carried the read plus the refusals collected on the way.
+LAD = F.REASONING_LADDER
+check("the ladder starts with reasoning OFF", LAD[0][0] == {"enabled": False}, str(LAD[0]))
+check("the ladder's second rung is MINIMUM effort, not full", LAD[1][0] == {"effort": "minimal"},
+      str(LAD[1]))
+check("the ladder ends by omitting the parameter, never by raising effort",
+      LAD[-1][0] is None and not any((sp or {}).get("effort") in ("high", "medium") for sp, _l in LAD))
+check("every rung has a label that can be recorded", all(isinstance(l, str) and l for _sp, l in LAD))
+check("_body honours the requested rung",
+      F._body("m", x0, "A", False, reasoning={"effort": "minimal"})["reasoning"] == {"effort": "minimal"})
+check("the omitted rung sends no reasoning key at all",
+      "reasoning" not in F._body("m", x0, "A", False, reasoning=False))
+check("the default body still asks for reasoning off",
+      F._body("m", x0, "A", False)["reasoning"] == {"enabled": False})
+SRC = (HERE / "hebrew_frontier_or.py").read_text(encoding="utf-8")
+check("a read row records reasoning_applied, not only what was requested",
+      chr(34) + "reasoning_applied" + chr(34) + ": applied" in SRC)
+check("refusals on the way down are kept, not swallowed",
+      chr(34) + "reasoning_ladder" + chr(34) + ": refusals" in SRC)
+check("each arm header carries its own git_head and git_dirty (a resumed arm cannot lie)",
+      "_git_head(), " + chr(34) + "git_dirty" + chr(34) + ": _git_dirty()" in SRC)
+
 print("\n(5) the reply parser takes the Hebrew from JSON, and from prose when a model ignores JSON")
 check("parses a clean JSON reply", F._parse('{"hebrew": "ABC"}') == ("ABC", "json"))
 check("parses a fenced JSON reply", F._parse('```json\n{"hebrew": "ABC"}\n```')[0] == "ABC")
