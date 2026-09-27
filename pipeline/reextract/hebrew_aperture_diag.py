@@ -280,21 +280,171 @@ def _native_crop(page_img, strip_box, info, bands, pad=0):
 #
 # The fault is recorded per APERTURE, because they fail independently: p124:n4's A1 is out-of-bounds
 # while its A2 -- the one that is scored -- is clean.
-def crop_fault(im, rects, page_size):
-    """The fault string for a cut, or None if it is safe to send. Checked before any outbound call."""
-    W, H = page_size
+# NEAR-UNIFORM threshold, derived from measurement rather than chosen: the ink fraction of all 740
+# PNGs in the six artifact folders is BIMODAL with an empty band. Exactly 4 crops sit at 0.00000 ink
+# (p423:n3 and p726:n3, both apertures each) and the next-lowest crop in the corpus is 0.02555
+# (truthset_review/strip_619.png). There is NOTHING between. So 0.005 is ~5x below the lowest real
+# crop and refuses only what is effectively empty.
+#
+# Honest consequence: on this corpus the near-uniform test catches nothing the uniform test does not
+# already catch -- it is currently redundant, and it is here because 740 crops without a borderline
+# case is not a promise about page 741. It is a guard, not a finding. If it ever fires alone, that is
+# new information and the census will say so.
+NEAR_UNIFORM_INK = 0.005
+
+
+def crop_fault(im, rects, page_size, strip_box=None, strip_size=None):
+    """The fault string for a cut, or None if it is safe to send. Checked before any outbound call.
+
+    A rect leaving the page OR the strip is a geometry fault, per Chris 2026-09-27. The strip check
+    is the earlier of the two and the more diagnostic: the strip box is what a human ratified, so a
+    box that already leaves the STRIP was wrong before any mapping ran, while a box that leaves the
+    page survived ratification and was broken by `strip_to_native`. Reporting them as one fault
+    would merge a ratification error with a mapping error."""
+    if strip_box and strip_size:
+        x0, y0, x1, y1 = strip_box
+        beyond = _beyond_strip(strip_box, strip_size)
+        if beyond:
+            return (f"out-of-strip:box={[x0, y0, x1, y1]}_strip={list(strip_size)}"
+                    f"_beyond={beyond}")
     for r in rects:
         x0, y0, x1, y1 = r["box"]
-        if x0 < 0 or y0 < 0 or x1 > W or y1 > H:
-            return f"out-of-bounds:rect={[x0, y0, x1, y1]}_page={[W, H]}"
+        if clamp_loss(r["box"], page_size)[0]:
+            return (f"out-of-bounds:rect={[x0, y0, x1, y1]}_page={list(page_size)}"
+                    f"_lost={_lossdesc(r['box'], page_size)}")
     if im is None:
         return "no-rect"
     lo, hi = im.convert("L").getextrema()
     if lo == hi:
         return f"blank:uniform={lo}"
+    ink = ink_fraction(im)
+    if ink <= NEAR_UNIFORM_INK:
+        return f"blank:near-uniform=ink{ink:.5f}"
     if not crop_quality.crop_has_line(im):
         return "blank:no-line"
     return None
+
+
+def _beyond_strip(box, size):
+    """How far a ratified strip box reaches outside the strip, per edge, or "" if it is inside.
+
+    NOT a loss figure, and this distinction was got wrong once here before it was measured. The strip
+    box is MAPPED by `note_region.strip_to_native`, not cut out of the strip, so an overrun is never
+    clamped and no pixels are amputated. Measured on p900:n4's A2, whose box asks rows 268-332 of a
+    330-row strip: the mapped native rect is the full 64 rows, sits entirely inside the page, and the
+    served crop carries 0.2020 ink. It is a clean, usable crop.
+
+    So the fault is real but its consequence is the opposite of a clamp: those 2 rows are page pixels
+    the strip never represented, which means the crop silently INCLUDES material from outside the
+    ratified region rather than losing material inside it. Unverified inclusion, not amputation.
+    Reporting it as "lost=428px" -- which this function replaced -- was a claim about a mechanism
+    nobody had tested."""
+    x0, y0, x1, y1 = box
+    W, H = size
+    out = []
+    if x0 < 0:
+        out.append(f"left{-x0}")
+    if y0 < 0:
+        out.append(f"top{-y0}")
+    if x1 > W:
+        out.append(f"right{x1 - W}")
+    if y1 > H:
+        out.append(f"bottom{y1 - H}")
+    return ",".join(out)
+
+
+def clamp_loss(box, size):
+    """(lost_pixels, lost_fraction) for cutting `box` out of a `size` substrate with silent clamping.
+
+    This exists because "was clamped" spans 170x in severity and one boolean cannot carry that.
+    MEASURED over the 21 spans: the two strip overruns lose 3.1% and 0.1% -- they overshoot the
+    substrate edge into pixels that do not exist, so nothing is amputated and the defect is purely in
+    the coordinates. The five page overruns lose 0.9% to 17.1%: p726:n3's A1 asked for 1958px of a
+    3584px page starting at x=1960 and was served 1624, losing 19,372 real pixels of note.
+    Both are refused -- a clamp fails loud, per Chris 2026-09-27 -- but a consumer that cannot tell
+    them apart would treat a 2px phantom and a 17% amputation as one thing, and they are not."""
+    x0, y0, x1, y1 = box
+    W, H = size
+    asked = max(0, x1 - x0) * max(0, y1 - y0)
+    if not asked:
+        return 0, 0.0
+    sw = max(0, min(W, x1) - max(0, x0))
+    sh = max(0, min(H, y1) - max(0, y0))
+    lost = asked - sw * sh
+    return max(0, lost), max(0.0, lost / float(asked))
+
+
+def _lossdesc(box, size):
+    n, frac = clamp_loss(box, size)
+    return f"{n}px/{frac * 100:.1f}%"
+
+
+def ink_fraction(im):
+    """Fraction of pixels below mid-grey. One definition, used by the guard and by the census, so a
+    crop can never be blank by one measure and inked by the other."""
+    g = im.convert("L")
+    h = g.histogram()
+    dark = sum(h[:128])
+    return dark / float(max(1, g.width * g.height))
+
+
+# --- THE OUTBOUND CHOKEPOINT ---------------------------------------------------------------------
+# Item 2 says the guard runs BEFORE ANY OUTBOUND CALL. A gate that an arm can forget to call is not
+# that. The four arms (hebrew_frontier_or, hebrew_local_arms, hebrew_aperture_frontier,
+# hebrew_recrop) each had their own base64 step reading PNGs straight off disk, so the gate sitting
+# in `crops()` protected the crop BUILD and nothing else -- and since a faulted crop is still
+# written to disk on purpose (it is the evidence of what was sent), the blank PNGs were there to be
+# picked up and sent by anything that globbed the folder. They were.
+#
+# So the gate returns the BYTES. An arm cannot obtain sendable bytes without passing through it, and
+# a refusal is a return value the caller has to handle rather than a warning it can ignore. This is
+# the same shape as the record stores in hebrew_glyph_card: the safe path is the only path.
+class CropRefused(Exception):
+    """Raised by the gated encoder. It is an EXCEPTION and not a return value on purpose: an arm that
+    ignores a returned fault still sends the image, while an arm that ignores this one does not run.
+    The caller records the refusal as its own row -- UNSCORABLE, which is not the same thing as a
+    wrong read and must never be tallied as one."""
+
+    def __init__(self, fault, what=""):
+        self.fault = fault
+        self.what = what
+        super().__init__(f"crop refused before send: {fault}" + (f" [{what}]" if what else ""))
+
+
+def b64_gated(src, what="", **geo):
+    """base64 of an image that PASSED the gate, or CropRefused. The ONLY sanctioned encoder.
+
+    Every arm routes its base64 through here -- hebrew_frontier_or, hebrew_local_arms,
+    hebrew_aperture_frontier, hebrew_recrop. The gate is placed at the ENCODE rather than beside the
+    post() because an arm cannot reach the wire without encoding, so this is the one step that cannot
+    be skipped by forgetting. A gate an arm has to remember to call is not a gate; it is a comment."""
+    raw, fault = gate_outbound(src, **geo)
+    if fault:
+        raise CropRefused(fault, what or str(getattr(src, "name", "") or src)[-60:])
+    return base64.b64encode(raw).decode()
+
+
+def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None):
+    """(png_bytes, None) when it is safe to send; (None, fault) when it is refused.
+
+    `src` is a path or a PIL image. Geometry arguments are optional because a recrop made in memory
+    has no ratified rect to check -- but the pixel checks always run, so nothing reaches the wire
+    unexamined."""
+    if hasattr(src, "convert"):
+        im = src
+        buf = io.BytesIO()
+        im.save(buf, format="PNG")
+        raw = buf.getvalue()
+    else:
+        pth = Path(src)
+        if not pth.exists():
+            return None, f"missing:{pth.name}"
+        raw = pth.read_bytes()
+        im = Image.open(io.BytesIO(raw))
+    fault = crop_fault(im, list(rects), page_size or im.size, strip_box, strip_size)
+    if fault:
+        return None, fault
+    return raw, None
 
 
 def crop_faults(aperture="A2_spanbox"):
@@ -327,7 +477,7 @@ def crops(save=True, include_sealed=False):
                 rec[ap] = None
                 continue
             im, rects = _native_crop(native, box, info, bands, pad)
-            fault = crop_fault(im, rects, native.size)
+            fault = crop_fault(im, rects, native.size, box, strip.size)
             if im is None:
                 rec[ap] = None
                 rec[ap + "_fault"] = fault

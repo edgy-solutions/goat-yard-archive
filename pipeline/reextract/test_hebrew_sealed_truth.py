@@ -171,7 +171,19 @@ print("\n(6) the CROP FAULT GATE refuses what was never shown to a model")
 # The two spans below were read by 30 arms and every one of those reads is void: the image was one
 # uniform white value. This section is the born-test for that never recurring silently.
 from PIL import Image                                                        # noqa: E402
+from pathlib import Path as _Path                                            # noqa: E402
+_HERE = _Path(__file__).parent
 _full = {s["span_id"]: s for s in D.build_set(include_sealed=True)}
+
+
+def _gate_err(src):
+    """The fault the gated encoder raises, or None when it encoded. Used so a born-test asserts on
+    the REFUSAL rather than on whether an exception type was spelled correctly."""
+    try:
+        D.b64_gated(src)
+        return None
+    except D.CropRefused as e:
+        return e.fault
 for sid in ("p423:n3", "p726:n3"):
     u = _full[sid]["unscorable"] or ""
     check(f"{sid} is UNSCORABLE by crop fault, not by signature", u.startswith("crop-fault:"), u)
@@ -212,6 +224,84 @@ check("a degenerate Latin loop does NOT score exact against a NOT_HEBREW truth",
 check("an ordinary short read is never degenerate",
       D.repetition_ratio("\u05dc\u05d0 \u05db\u05df") < D.DEGENERATE_AT)
 check("glm-ocr is dropped from scoring", "glm-ocr:bf16" in D.DROPPED_ARMS)
+
+print("\n(9) ITEM 2 -- the guard stands in front of the wire, not beside it")
+# The gate existed and the arms did not call it. Each of the four arms had its own base64 step reading
+# PNGs straight off disk, so the check in crops() protected the crop BUILD and nothing downstream --
+# and a faulted crop is written to disk deliberately, as the evidence of what was sent. So the blank
+# PNGs sat there to be picked up by anything that globbed the folder, and they were.
+#
+# The fix puts the gate at the ENCODE, because an arm cannot reach the wire without encoding. These
+# checks are structural: they read the arm sources. A behavioural check that one arm refuses one crop
+# would say nothing about the arm that forgot.
+import re as _re                                                             # noqa: E402
+_ARMS = ("hebrew_frontier_or.py", "hebrew_local_arms.py", "hebrew_aperture_frontier.py",
+         "hebrew_recrop.py")
+for _a in _ARMS:
+    _src = io.open(_HERE / _a, encoding="utf-8").read()
+    check(f"{_a} encodes images only through the gate", "b64_gated" in _src, _a)
+    # A raw b64encode of image bytes anywhere in an arm is a bypass. base64 of a KEY or a text payload
+    # is not, so the check is scoped to the image verbs that were actually there before.
+    _bypass = [m for m in _re.findall(r"base64\.b64encode\([^\n]*", _src)
+               if any(k in m for k in ("read_bytes", "getvalue", "BytesIO", "img", "crop", "im."))]
+    check(f"{_a} has no ungated image encode left", not _bypass, _bypass)
+
+check("the gated encoder refuses a uniform image",
+      isinstance(_gate_err(Image.new("L", (80, 40), 255)), str))
+check("the gated encoder passes a real crop",
+      _gate_err(D.CROPDIR / "p912_n2_A2_spanbox.png") is None)
+check("a missing file is refused rather than crashing",
+      (_gate_err(D.CROPDIR / "definitely_not_here.png") or "").startswith("missing"))
+
+# Chris 2026-09-27: refuse a crop whose mapped rect leaves the page OR THE STRIP.
+check("a box that leaves the strip is refused",
+      (D.crop_fault(Image.open(D.CROPDIR / "p912_n2_A2_spanbox.png"), [],
+                    (3584, 5400), [10, 10, 100, 340], (1841, 330)) or "").startswith("out-of-strip"))
+check("a box inside the strip is not refused for strip reasons",
+      not (D.crop_fault(Image.open(D.CROPDIR / "p912_n2_A2_spanbox.png"), [],
+                        (3584, 5400), [10, 10, 100, 300], (1841, 330)) or "")
+      .startswith("out-of-strip"))
+# The strip fault must NOT claim a loss. Measured: the strip box is mapped, not cut, so nothing is
+# clamped -- p900:n4 A2 asks 2 rows past a 330-row strip and still gets a full 64-row crop carrying
+# 0.2020 ink. An earlier version of this fault string said "lost=428px" and that was false.
+_sf = D.crop_fault(Image.open(D.CROPDIR / "p912_n2_A2_spanbox.png"), [], (3584, 5400),
+                   [139, 268, 353, 332], (1841, 330))
+check("the strip fault reports reach, and claims no pixel loss",
+      "beyond=bottom2" in _sf and "lost" not in _sf, _sf)
+check("a page clamp DOES report the pixels it costs",
+      "lost=19372px/17.1%" in (D.crop_fault(None, [{"box": [1960, 4713, 3918, 4771]}],
+                                            (3584, 5400)) or ""),
+      D.crop_fault(None, [{"box": [1960, 4713, 3918, 4771]}], (3584, 5400)))
+check("clamp_loss is zero for a box that fits", D.clamp_loss([0, 0, 10, 10], (100, 100)) == (0, 0.0))
+
+# A refusal is not a call error: it never reached the wire and it cost nothing. Folding the two
+# together would blame the endpoint for our geometry and feed a dead-item rule with live items.
+for _a, _tok in (("hebrew_frontier_or.py", "crop_refused"),
+                 ("hebrew_local_arms.py", "REFUSED:")):
+    _src = io.open(_HERE / _a, encoding="utf-8").read()
+    check(f"{_a} records a refusal apart from a call error", _tok in _src, _a)
+    check(f"{_a} catches CropRefused before the broad handler",
+          _src.index("CropRefused") < _src.rindex("except Exception"), _a)
+
+# The near-uniform threshold sits in the empty band measured across all 740 PNGs: nothing in the
+# corpus lies between 0.0 and 0.02555 ink.
+check("the near-uniform threshold is below every real crop in the corpus",
+      0 < D.NEAR_UNIFORM_INK < 0.02555, D.NEAR_UNIFORM_INK)
+
+print("\n(10) ITEM 2 -- the census counts every folder, and says what it cannot judge")
+import crop_census as CC                                                     # noqa: E402
+_per, _bad, (_nall, _nempty, _nnoline, _nunread) = CC.report(write=False)
+print(f"      {_nall} PNGs in {len(_per)} folders: {_nempty} EMPTY, {_nnoline} no-line, "
+      f"{_nunread} unreadable")
+check("the census covers the whole tree, not one folder", len(_per) >= 5 and _nall >= 700,
+      (len(_per), _nall))
+check("the blank-crop count across all artifact folders is 4", _nempty == 4,
+      sorted(r["name"] for r in _bad if r["kind"] == "empty"))
+check("every blank sits in the aperture crop folder",
+      all("hebrew_aperture_crops" in r["folder"] for r in _bad if r["kind"] == "empty"))
+check("the no-line case is reported separately and is not counted as blank",
+      _nnoline == 1 and all(r["ink"] > D.NEAR_UNIFORM_INK for r in _bad if r["kind"] == "noline"))
+check("nothing in the tree is unreadable", _nunread == 0, _nunread)
 
 print()
 if fails:

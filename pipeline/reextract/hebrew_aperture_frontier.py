@@ -48,8 +48,9 @@ PROVIDERS = {
 }
 
 
-def _b64_file(p):
-    return base64.b64encode(Path(p).read_bytes()).decode()
+def _b64_file(p, what=""):
+    """GATED -- see hebrew_aperture_diag.b64_gated."""
+    return diag.b64_gated(p, what=what or str(p)[-50:])
 
 
 def _body(prov, model, ctx_b64, crop_b64):

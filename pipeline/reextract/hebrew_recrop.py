@@ -22,7 +22,12 @@ def _nonlatin_span(text):
 
 _NIKUD = re.compile(r"[֑-ׇ]")
 _HEB = re.compile(r"[֐-׿]")
-_B64 = lambda img: base64.b64encode((lambda b: (img.save(b, format="PNG"), b.getvalue())[1])(io.BytesIO())).decode()
+def _B64(img):
+    """GATED. A recrop is made in memory and has no ratified rect to check, so only the pixel half of
+    the gate applies -- but a recrop that came out blank is precisely the failure this arm exists to
+    prevent, so it must not be the one place that skips the check."""
+    import hebrew_aperture_diag as _D
+    return _D.b64_gated(img, what="recrop")
 
 # Stage-4 v2 prompt: COMBINED CONTEXT (full strip + magnified region) + consonants-only instruction.
 # The recrop's disease was context amputation; the full strip restores it while the crop keeps pixels.

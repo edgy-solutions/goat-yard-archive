@@ -267,7 +267,9 @@ def call(model, s, cpath, ctx, structured, timeout=300):
     really a routing rule, so the ladder steps down -- off, then minimal, then omitted -- and the row
     says which rung carried the read. A rung is never silently skipped: `reasoning_ladder` lists the
     refusals that got us there."""
-    img = base64.b64encode(Path(cpath).read_bytes()).decode()
+    # GATED: a blank or clamped crop never reaches OpenRouter. p423:n3 and p726:n3 went out to 30
+    # arms as pure white before this existed, and 7 of 8 answered with Hebrew anyway.
+    img = diag.b64_gated(cpath, what="frontier crop")
     refusals, r, body, applied, secs = [], None, None, None, 0.0
     for spec, label in REASONING_LADDER:
         body = _body(model, ctx, img, structured, reasoning=spec)
@@ -413,9 +415,18 @@ def run(only=None):
                     continue
                 try:
                     row = call(model, s, cpath, ctx, c["structured"])
+                except diag.CropRefused as e:
+                    # Pre-send refusal: no request was made, no tokens were spent, and the span is
+                    # UNSCORABLE rather than wrongly read. It is kept in the file because a silent
+                    # skip would leave the span looking un-attempted.
+                    row = {"span_id": s["span_id"], "aperture": APERTURE, "model": model,
+                           "kind": "crop_refused", "unscorable": f"crop-fault:{e.fault}",
+                           "crop_fault": e.fault, "what": e.what, "cost_usd": 0.0,
+                           "reached_wire": False}
                 except Exception as e:
                     row = {"span_id": s["span_id"], "aperture": APERTURE, "model": model,
-                           "kind": "call_error", "error": f"{type(e).__name__}: {e}"[:300]}
+                           "kind": "call_error", "error": f"{type(e).__name__}: {e}"[:300],
+                           "reached_wire": True}
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
                 f.flush()
                 tag = row.get("kind")

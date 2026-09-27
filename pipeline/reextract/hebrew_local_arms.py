@@ -63,10 +63,10 @@ VRAM_MIN = 0.98        # size_vram/size. Below this the model spilled to CPU and
 KEEP_ALIVE = "30m"
 
 
-def _b64(im):
-    b = io.BytesIO()
-    im.save(b, format="PNG")
-    return base64.b64encode(b.getvalue()).decode()
+def _b64(im, what=""):
+    """GATED. The local arms are cheap, which is exactly why they were shown blank crops most often;
+    cheap is not a reason to send a white rectangle to a model."""
+    return D.b64_gated(im, what=what)
 
 
 def _opts():
@@ -182,14 +182,24 @@ def run(hostport, models, out=OUT, include_sealed=True):
                     ctx = Image.open(s["context_strip"]).convert("L")
                     try:
                         raw, dr, think, secs = read_one(hostport, model, ctx, crop)
+                        refused = None
+                    except D.CropRefused as e:
+                        # See hebrew_frontier_or: a refused crop is unscorable, not an error, and it
+                        # must not count toward any dead-item rule.
+                        raw, dr, think, secs = "", f"REFUSED:{e.fault}", "", 0.0
+                        refused = e.fault
                     except Exception as e:
                         raw, dr, think, secs = "", f"ERROR:{type(e).__name__}", "", 0.0
+                        refused = None
                     gated, nik, dens = nikud_gate.gated_strip(raw, crop)
                     sv, sr = script_gate.gate(gated, s["latin_context"])
                     f.write(json.dumps({"span_id": s["span_id"], "aperture": ap, "model": model,
                                         "endpoint_id": eid, "endpoint_host": hostport,
                                         "model_digest16": digest, "sealed": s["sealed"],
                                         "raw": raw, "gated": gated, "nikud_verdict": nik,
+                                        "crop_fault": refused,
+                                        "unscorable": (f"crop-fault:{refused}" if refused else None),
+                                        "reached_wire": refused is None,
                                         "nikud_density": round(float(dens), 3), "script_verdict": sv,
                                         "script_reason": sr, "done_reason": dr, "secs": secs,
                                         "thinking_leak": think, "crop_size": s[ap]["size"]},
