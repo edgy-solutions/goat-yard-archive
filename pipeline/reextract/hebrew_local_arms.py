@@ -55,7 +55,8 @@ from hebrew_recrop import _RECROP_PROMPT
 DATA = D.DATA
 OUT = DATA / "hebrew_local_arms_reads_20260920.jsonl"
 PRERUN = DATA / "hebrew_local_arms_prerun_20260920.md"
-ARMS = ["qwen3.5:122b", "glm-ocr:bf16", "nemotron3:33b", "qwen3.8:latest"]
+ARMS = [m for m in ["qwen3.5:122b", "glm-ocr:bf16", "nemotron3:33b", "qwen3.8:latest"]
+        if m not in D.DROPPED_ARMS]        # glm-ocr dropped 2026-09-27, see D.DROPPED_ARMS
 APERTURES = ("A1_notebox", "A2_spanbox")
 NUM_CTX = D.NUM_CTX
 VRAM_MIN = 0.98        # size_vram/size. Below this the model spilled to CPU and the arm is aborted.
@@ -216,7 +217,9 @@ def _built(include_sealed):
 
 def score(out=OUT, include_sealed=True):
     sets = {s["span_id"]: s for s in D.build_set(include_sealed=include_sealed)}
-    rows = [o for o in D._lines(out) if "span_id" in o]
+    # The single choke point for D-lane scoring: a dropped arm never reaches a tally or the console.
+    # Exact match on the model id, so `z-ai/glm-5.3-flash` -- a different arm that never loops -- stays.
+    rows = [o for o in D._lines(out) if "span_id" in o and o.get("model") not in D.DROPPED_ARMS]
     for o in rows:
         s = sets.get(o["span_id"])
         if not s:
@@ -230,15 +233,24 @@ def _tally(rows):
     """exact / nikud-only / wrong / abstain, with punct-only and contains folded where they belong.
 
     `punct-only` folds into exact: the signed verdict is about the LETTERS, and a maqaf-vs-hyphen
-    difference is not a reading difference. `contains` folds into wrong: extra material around the right
-    letters is still not the printed span, and this lane does not grade on coherence."""
-    t = {"exact": 0, "nikud-only": 0, "wrong": 0, "abstain": 0, "unscorable": 0}
+    difference is not a reading difference.
+
+    `contains` NO LONGER folds into wrong, and neither do `clipped` or `degenerate`. The old rule read
+    "extra material around the right letters is still not the printed span" -- true about the string,
+    false about the cause. The extra material is in the CROP: p124:n4's ratified box holds two Hebrew
+    runs and a Latin word, so an arm that transcribes what it was shown must return more than the
+    signature. That is the box being wrong, not the reader. `clipped` is the same defect mirrored
+    (p912:n2's box holds one of the signature's two words). `degenerate` is a generation loop and was
+    never a reading at all. Charging any of the three to `wrong` grades geometry and decoding as
+    misreads, which is exactly the confusion this lane exists to prevent."""
+    t = {"exact": 0, "nikud-only": 0, "wrong": 0, "abstain": 0, "unscorable": 0,
+         "contains": 0, "clipped": 0, "degenerate": 0}
     for o in rows:
         c = o["cls"]
         if c in ("exact", "punct-only"):
             t["exact"] += 1
-        elif c == "nikud-only":
-            t["nikud-only"] += 1
+        elif c in ("nikud-only", "contains", "clipped", "degenerate"):
+            t[c] += 1
         elif c == "abstain":
             t["abstain"] += 1
         elif c == "UNSCORABLE":
@@ -261,6 +273,8 @@ def load_c_arms(include_sealed=True):
     out = []
     for o in D._lines(D.OUT):
         if "span_id" not in o or o["span_id"] not in sets:
+            continue
+        if o.get("model") in D.DROPPED_ARMS:
             continue
         o = dict(o)
         o["endpoint_id"], o["model"] = "C", o["model"] + " (C)"

@@ -148,12 +148,15 @@ full = D.build_set(include_sealed=True)
 nb = sum(1 for s in base if not s["unscorable"])
 nf = sum(1 for s in full if not s["unscorable"])
 check("default set is n=10 scorable (sealed pages untouched)", nb == 10, str(nb))
-check("carve-out set is n=19 scorable", nf == 19, str(nf))
-check("the carve-out adds exactly 9 scorable spans", nf - nb == 9, str(nf - nb))
+# 19 -> 17 and 18 -> 16 on 2026-09-27, and the two that left are not a retune: p423:n3 and p726:n3
+# were sent to all 30 arms as pure white images, so no arm was ever shown them and no arm can be
+# graded on them. The numbers below move only when the CROP FAULT GATE says they may.
+check("carve-out set is n=17 scorable (2 lost to the crop-fault gate)", nf == 17, str(nf))
+check("the carve-out adds exactly 7 scorable spans", nf - nb == 7, str(nf - nb))
 check("every added span is on a SEALED page",
       all(s["sealed"] for s in full if s["span_id"] not in {b["span_id"] for b in base}))
-check("A2 is n=18 (p657:n0 has no ratified span box)",
-      sum(1 for s in full if not s["unscorable"] and s["span_box"]) == 18,
+check("A2 is n=16 (p657:n0 has no span box; 2 blank crops are unscorable)",
+      sum(1 for s in full if not s["unscorable"] and s["span_box"]) == 16,
       str(sum(1 for s in full if not s["unscorable"] and s["span_box"])))
 check("the default set still refuses sealed pages",
       all(not s["sealed"] for s in base))
@@ -163,11 +166,59 @@ for s in [x for x in full if x["sealed"]]:
     check(f"{s['span_id']} has a ratified note box and span box",
           bool(s["note_box"]) and bool(s["span_box"]))
 
+
+print("\n(6) the CROP FAULT GATE refuses what was never shown to a model")
+# The two spans below were read by 30 arms and every one of those reads is void: the image was one
+# uniform white value. This section is the born-test for that never recurring silently.
+from PIL import Image                                                        # noqa: E402
+_full = {s["span_id"]: s for s in D.build_set(include_sealed=True)}
+for sid in ("p423:n3", "p726:n3"):
+    u = _full[sid]["unscorable"] or ""
+    check(f"{sid} is UNSCORABLE by crop fault, not by signature", u.startswith("crop-fault:"), u)
+    check(f"{sid} names the fault as blank", "blank" in u, u)
+check("a uniform image is refused",
+      D.crop_fault(Image.new("L", (60, 40), 255), [{"box": [0, 0, 60, 40]}], (3584, 5400))
+      == "blank:uniform=255")
+check("a rect off the page edge is refused, never clamped",
+      (D.crop_fault(Image.new("L", (60, 40), 255), [{"box": [3500, 0, 3600, 40]}], (3584, 5400))
+       or "").startswith("out-of-bounds"))
+check("a real inked crop passes",
+      D.crop_fault(Image.open(D.CROPDIR / "p912_n2_A2_spanbox.png"),
+                   [{"box": [449, 4645, 649, 4702]}], (3584, 5400)) is None)
+
+print("\n(7) box faults are not misreads, and a loop is not a reading")
+# contains: the box held MORE than the signature (p124:n4). clipped: it held LESS (p912:n2).
+check("signed inside a fuller transcription is `contains`",
+      D.classify("\u05dc\u05db\u05df quasi \u05dc\u05d0 \u05db\u05df",
+                 "\u05dc\u05d0 \u05db\u05df") == "contains")
+check("a partial read of a two-word signature is `clipped`",
+      D.classify("\u05d1\u05d9\u05e9\u05e8\u05d0\u05dc",
+                 "\u05d1\u05d9\u05e9\u05e8\u05d0\u05dc \u05d1\u05d9\u05e2\u05e7\u05d1")
+      == "clipped")
+check("neither is `wrong`",
+      "wrong" not in {D.classify("\u05dc\u05db\u05df quasi \u05dc\u05d0 \u05db\u05df",
+                                 "\u05dc\u05d0 \u05db\u05df"),
+                      D.classify("\u05d1\u05d9\u05e9\u05e8\u05d0\u05dc",
+                                 "\u05d1\u05d9\u05e9\u05e8\u05d0\u05dc "
+                                 "\u05d1\u05d9\u05e2\u05e7\u05d1")})
+# The two real degenerate outputs this class was built from.
+check("the p596:n2 repetition loop is `degenerate`",
+      D.classify("See Buxtorf. in voce " * 40, "\u05e1\u05e0\u05d4") == "degenerate")
+check("the p423:n3 est-loop is `degenerate`",
+      D.classify("est." * 80, "\u05d5\u05ea\u05d2\u05e2 \u05dc\u05e8\u05d1\u05dc\u05d9\u05d5")
+      == "degenerate")
+check("a degenerate Latin loop does NOT score exact against a NOT_HEBREW truth",
+      D.classify("est." * 80, D.NOT_HEBREW) == "degenerate")
+check("an ordinary short read is never degenerate",
+      D.repetition_ratio("\u05dc\u05d0 \u05db\u05df") < D.DEGENERATE_AT)
+check("glm-ocr is dropped from scoring", "glm-ocr:bf16" in D.DROPPED_ARMS)
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")
     for f in fails:
         print(f"  - {f}")
     sys.exit(1)
-print(f"PASS: {len(D.SEALED_TRUTH)} sealed truths trace to the signature; n=19 scorable, A2 n=18.")
+print(f"PASS: {len(D.SEALED_TRUTH)} sealed truths trace to the signature; n=17 scorable, A2 n=16 "
+      f"(p423:n3 and p726:n3 held out by the crop-fault gate).")
 sys.exit(0)

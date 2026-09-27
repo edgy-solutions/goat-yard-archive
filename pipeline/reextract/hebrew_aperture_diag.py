@@ -25,7 +25,7 @@ from PIL import Image
 import httpx
 import cv_footnote_presplit as ps
 from run_header import build_header, model_digests, normalize_hostport
-import note_region, nikud_gate, script_gate
+import note_region, nikud_gate, script_gate, crop_quality
 from hebrew_recrop import _RECROP_PROMPT
 
 DATA = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits")
@@ -221,6 +221,13 @@ def build_set(include_sealed=False):
             a1_idx_declared=ni, a1_idx_used=used, a1_span_overlap=ovf, a1_clips_span_frac=clip,
             span_box=sbox, column_bands=(nb or {}).get("column_bands"),
             n_ratified=(nb or {}).get("n_ratified")))
+    # A span whose scored crop is faulted was never shown to any arm, so no arm can be graded on it --
+    # not the frontier arms, not D, not C, all of which read the same crop folder. It is UNSCORABLE,
+    # which is a different thing from "no arm read it correctly" and must never be reported as that.
+    faults = crop_faults()
+    for rec in out:
+        if faults.get(rec["span_id"]) and not rec["unscorable"]:
+            rec["unscorable"] = f"crop-fault:{faults[rec['span_id']]}"
     return out
 
 
@@ -250,6 +257,59 @@ def _native_crop(page_img, strip_box, info, bands, pad=0):
     return canv, rects
 
 
+# --- CROP FAULT GATE ------------------------------------------------------------------------
+# Standing law here is "an empty result from a claimed region is an error", and `crop_quality.
+# crop_has_line()` has implemented it since Build 3. This harness never called it. The cost of that
+# omission is measured, not hypothetical: p423:n3 and p726:n3 went out to 30 arms as PURE WHITE
+# images -- extrema (255,255), ink 0.0000, at BOTH apertures -- and nothing failed loud. 7 of 8 arms
+# answered p423 with Hebrew anyway, three of them with the canonical Exodus 4:25 wording that the
+# Latin gloss translates. A blank crop does not produce blank output. It produces the back-
+# translation, confidently. So the gate belongs BEFORE the spend, never in the scoring afterwards.
+#
+# Two faults, both previously silent, kept separate because they have different causes and homes:
+#
+#   blank         -- the cut landed off the text. MEASURED: the mapped rects for those two spans sit
+#                    80-111px below the nearest inked row, past the last printed line of the page,
+#                    while every other A2 crop carries 0.12-0.30 ink. WHY the map overshoots on
+#                    exactly those two pages is NOT established and is not claimed here; the guard
+#                    does not need the cause, it needs the pixels.
+#   out-of-bounds -- the mapped rect ran off the page and the cut was silently CLAMPED, so the model
+#                    was shown a narrower crop than the ratified box asked for. p726:n3's A1 asked
+#                    for 1958px starting at x=1960 of a 3584px-wide page and was served 1624.
+#                    p124:n4's A1 overruns by 16px. A clamp is a coordinate fault, not a crop option.
+#
+# The fault is recorded per APERTURE, because they fail independently: p124:n4's A1 is out-of-bounds
+# while its A2 -- the one that is scored -- is clean.
+def crop_fault(im, rects, page_size):
+    """The fault string for a cut, or None if it is safe to send. Checked before any outbound call."""
+    W, H = page_size
+    for r in rects:
+        x0, y0, x1, y1 = r["box"]
+        if x0 < 0 or y0 < 0 or x1 > W or y1 > H:
+            return f"out-of-bounds:rect={[x0, y0, x1, y1]}_page={[W, H]}"
+    if im is None:
+        return "no-rect"
+    lo, hi = im.convert("L").getextrema()
+    if lo == hi:
+        return f"blank:uniform={lo}"
+    if not crop_quality.crop_has_line(im):
+        return "blank:no-line"
+    return None
+
+
+def crop_faults(aperture="A2_spanbox"):
+    """span_id -> fault for the aperture that gets scored. {} when the fault file has not been built.
+
+    Read from `crop_faults.json`, which the `faults` command writes WITHOUT re-cutting the PNGs: the
+    crops on disk are the evidence of what was actually sent, and an audit does not overwrite its own
+    evidence."""
+    p = CROPDIR / "crop_faults.json"
+    if not p.exists():
+        return {}
+    return {k: v[aperture] for k, v in json.loads(p.read_text(encoding="utf-8")).items()
+            if v.get(aperture)}
+
+
 def crops(save=True, include_sealed=False):
     CROPDIR.mkdir(parents=True, exist_ok=True)
     built, page_cache = [], {}
@@ -267,14 +327,17 @@ def crops(save=True, include_sealed=False):
                 rec[ap] = None
                 continue
             im, rects = _native_crop(native, box, info, bands, pad)
+            fault = crop_fault(im, rects, native.size)
             if im is None:
                 rec[ap] = None
+                rec[ap + "_fault"] = fault
                 continue
             p = CROPDIR / f"{s['span_id'].replace(':', '_')}_{ap}.png"
             if save:
                 im.save(p)
             rec[ap] = dict(path=str(p), size=list(im.size),
-                           native_rects=[r["box"] for r in rects], n_rects=len(rects))
+                           native_rects=[r["box"] for r in rects], n_rects=len(rects),
+                           fault=fault)
         ctxp = CROPDIR / f"p{pg}_context_strip.png"
         if save and not ctxp.exists():
             strip.save(ctxp)
@@ -352,8 +415,40 @@ def _punct_fold(t):
     return _norm(t).replace("\u05be", "-").replace("\u2010", "-").replace("\u2011", "-")
 
 
+DROPPED_ARMS = ("glm-ocr:bf16",)
+"""Arms excluded from every future score and from the console, by Chris's instruction 2026-09-27.
+
+glm-ocr:bf16 does not return a reading. It returns the surrounding note, at length, in a repetition
+loop -- "See Buxtorf. in voce" x40 on p596:n2, "est.est.est." on p423:n3. MEASURED over the 787
+recorded reads: all 19 with any repeated 12-char shingle are glm-ocr's, 17 of its 41 reads exceed a
+0.5 ratio, and the maximum ratio over all 746 reads from every other arm is 0.000. It is dropped as
+an arm, not merely reclassified, because a verbose non-reading pollutes the agreement matrix and the
+console with strings that were never a candidate for the span."""
+
+
+def repetition_ratio(text, k=12):
+    """Fraction of k-char shingles that are repeats. A degenerate generation loop, not a reading.
+
+    Not a tuned threshold: the gap it sits in is empty. Every non-glm-ocr read in the corpus scores
+    exactly 0.000 and the lowest degenerate glm-ocr read scores 0.679, so any cut in between is the
+    same cut. 0.35 is chosen to stay well clear of a legitimately repetitive short Latin note."""
+    t = " ".join(text.split())
+    if len(t) < k * 2:
+        return 0.0
+    sh = [t[i:i + k] for i in range(len(t) - k + 1)]
+    return 1.0 - len(set(sh)) / len(sh)
+
+
+DEGENERATE_AT = 0.35
+
+
 def classify(read, truth):
     r, t = _norm(read), _norm(truth)
+    # Before anything else: a repetition loop is not a reading and cannot be graded as one. It is
+    # tested ahead of the NOT_HEBREW branch because glm-ocr's p900:n4 loop is Latin, and a truth of
+    # "not Hebrew" would otherwise score that degenerate output `exact`.
+    if repetition_ratio(read or "") >= DEGENERATE_AT:
+        return "degenerate"
     if truth == NOT_HEBREW:
         return "exact" if not HEB.search(r) else "wrong"
     if not r or not HEB.search(r):
@@ -364,8 +459,20 @@ def classify(read, truth):
         return "punct-only"
     if nikud_gate.strip_nikud(r) == nikud_gate.strip_nikud(t):
         return "nikud-only"
+    # `contains` and `clipped` are BOX faults wearing a reading's clothes, and neither is a misread:
+    #   contains -- signed IN read: the ratified box held MORE than the signature, so an arm that
+    #               transcribed everything in the crop (which is what the prompt asks for) returns the
+    #               signed span with its neighbours attached. p124:n4's box holds two Hebrew runs and
+    #               the Latin "quasi"; three arms returned the signed span intact and were scored wrong.
+    #   clipped  -- read IN signed: the ratified box held LESS than the signature, so an arm can only
+    #               return part of it. p912:n2's signature is two words and its box covers one; 14 arms
+    #               transcribed that one word correctly and were scored wrong.
+    # Both exist because the 30 span boxes and the 30 signatures were made in separate passes and were
+    # never checked against each other. Folding them into `wrong` charges the reader for the geometry.
     if t and t in r:
         return "contains"
+    if r and r in t:
+        return "clipped"
     return "wrong"
 
 
@@ -385,6 +492,21 @@ if __name__ == "__main__":
             a1 = s["A1_notebox"] and s["A1_notebox"]["size"]
             a2 = s["A2_spanbox"] and s["A2_spanbox"]["size"]
             print(f"{s['span_id']:10s} A1={a1} A2={a2} nb_status={s['note_box_status']}")
+    elif cmd == "faults":
+        # Recompute from the ratified boxes WITHOUT overwriting the crops that were actually sent.
+        out = {}
+        for s in crops(save=False, include_sealed=True):
+            d = {ap: ((s.get(ap) or {}).get("fault") or s.get(ap + "_fault"))
+                 for ap in ("A1_notebox", "A2_spanbox")}
+            if any(d.values()):
+                out[s["span_id"]] = d
+        io.open(CROPDIR / "crop_faults.json", "w", encoding="utf-8").write(
+            json.dumps(out, ensure_ascii=False, indent=1))
+        print(f"crop faults: {len(out)} span(s) (FILE pages; printed = file - 88)")
+        for sid, d in sorted(out.items()):
+            for ap, fl in d.items():
+                if fl:
+                    print(f"  {sid:10s} {ap:12s} {fl}")
     elif cmd == "run":
         run()
     elif cmd == "score":

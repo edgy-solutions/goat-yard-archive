@@ -70,6 +70,9 @@ def _arms():
     for o in L.load_c_arms(include_sealed=True):
         if o.get("aperture") == APERTURE:
             rows.append(dict(o, arm=o["model"].replace(" (C)", ""), lane="C"))
+    # Belt and braces: whatever a lane loader does, a dropped arm does not render.
+    rows = [o for o in rows if o.get("model") not in diag.DROPPED_ARMS
+            and o.get("arm") not in diag.DROPPED_ARMS]
     for o in rows:
         o["gated"] = (o.get("gated") or "").strip()
         o["truncated"] = bool(o.get("truncated"))
@@ -80,6 +83,19 @@ def _arms():
 def _crop_uri(path):
     b = Path(path).read_bytes()
     return "data:image/png;base64," + base64.b64encode(b).decode(), len(b)
+
+
+def _unsc_badge(unsc):
+    """UNSCORABLE with its cause spelled out. `crop-fault:blank:...` means the image was uniform white
+    and the 30 recorded reads of it are void -- never report that span as "no arm read it correctly"."""
+    if not unsc:
+        return ""
+    if str(unsc).startswith("crop-fault:"):
+        why = ("blank crop &mdash; NO MODEL EVER SAW THIS SPAN"
+               if "blank" in unsc else "crop fault")
+        return (f'<span class="badge un" title="{_esc(str(unsc))}">UNSCORABLE &middot; '
+                f'{why}</span>')
+    return f'<span class="badge un" title="{_esc(str(unsc))}">UNSCORABLE</span>'
 
 
 def _esc(t):
@@ -193,7 +209,10 @@ def build():
         w(f'<section class="span" id="{_esc(s)}">')
         w(f'<div class="shead"><h3>{_esc(s)}</h3>'
           f'<span class="pg">file p{meta["page"]} &middot; printed p{meta["page"] - 88}</span>'
-          f'{"<span class=badge un>UNSCORABLE</span>" if unsc else ""}{flag}</div>')
+          # The reason, not just the badge. A bare "UNSCORABLE" reads like the harness gave up; for
+          # the two blank crops the truth is that no model was ever shown the span, which is the
+          # opposite claim and the one Chris needs in front of him.
+          f'{_unsc_badge(unsc)}{flag}</div>')
         w('<div class="srow">')
         w('<div class="cropcell">')
         if uri:
