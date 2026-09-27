@@ -196,12 +196,24 @@ class QuestionResult:
 # three questions that got through. Errors out of the denominator was the right rule and it
 # held; it just cannot rescue a run whose endpoint stopped answering. Abort instead.
 RUN_LEVEL_STATUSES = {429}
+# Consecutive questions on which EVERY run was unscoreable. One such question can be
+# legitimate - a hard question that times out three times running. Two in a row means the
+# path under the harness has stopped answering, and continuing only spends requests to
+# manufacture NO-DATA. On 2026-09-27 a kubectl port-forward dropped mid-arm and the flag-off
+# run carried on through five more questions, one of which was a refusal gate; the arm looked
+# complete and was hollow exactly where the decision lived.
+MAX_CONSECUTIVE_DEAD_QUESTIONS = 2
 RUN_LEVEL_ABORT_HINT = (
     "the endpoint's rate limit is exhausted for this window (backend RATE_LIMIT, default "
     "10/day for anonymous callers). Raise it for the run or authenticate. Scored results "
     "cannot continue on this endpoint: every remaining question would be an ERROR for a "
     "reason that has nothing to do with the system under test."
 )
+
+
+def dead_question(runs: List["QuestionResult"]) -> bool:
+    """True when no run of this question produced a scoreable response."""
+    return bool(runs) and all(r.error or r.degraded for r in runs)
 
 
 def run_level_fault(result: "QuestionResult") -> Optional[str]:
@@ -677,6 +689,7 @@ def main(argv: Optional[list] = None) -> int:
     # not a False, it is an absence, and stability must be computed over what was measured.
     run_ledger: Dict[str, List[QuestionResult]] = {}
     abort_reason: Optional[str] = None
+    consecutive_dead = 0
     for i, q in enumerate(questions, 1):
         print(f"[{i:2d}/{len(questions)}] {q['id']}: {q['question'][:70]}...", flush=True)
         runs: List[QuestionResult] = []
@@ -699,6 +712,17 @@ def main(argv: Optional[list] = None) -> int:
             if abort_reason:
                 break
         run_ledger[q["id"]] = runs
+        if dead_question(runs):
+            consecutive_dead += 1
+            if not abort_reason and consecutive_dead >= MAX_CONSECUTIVE_DEAD_QUESTIONS:
+                abort_reason = (
+                    f"{consecutive_dead} consecutive questions produced no scoreable run at "
+                    f"all. The path under the harness has stopped answering; every further "
+                    f"question would be NO-DATA for a reason that has nothing to do with the "
+                    f"system under test. Last error: {runs[-1].error}"
+                )
+        else:
+            consecutive_dead = 0
         if abort_reason:
             print()
             print("ABORTED: " + abort_reason)

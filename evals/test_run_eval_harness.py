@@ -194,6 +194,31 @@ def test_rate_limited_warmup_aborts_preflight():
     assert rc == 2, rc
 
 
+# --- a dead path aborts instead of manufacturing NO-DATA --------------------------
+
+def test_dead_question_needs_every_run_unscoreable():
+    good, bad = RE.score(Q_ANSWER, GOOD, 1.0), RE.score(Q_ANSWER, {"_error": "x"}, 1.0)
+    assert RE.dead_question([bad, bad, bad]) is True
+    assert RE.dead_question([bad, good, bad]) is False, "one scoreable run is data"
+    assert RE.dead_question([]) is False
+
+
+def test_degraded_only_question_counts_as_dead():
+    deg = RE.score(Q_ANSWER, {"answer": TIMEOUT_FALLBACK_ANSWER}, 90.0)
+    assert RE.dead_question([deg, deg, deg]) is True
+
+
+def test_one_dead_question_is_tolerated_two_is_the_threshold():
+    """A single all-timeout question can be a hard question, not a dead path."""
+    assert RE.MAX_CONSECUTIVE_DEAD_QUESTIONS == 2, RE.MAX_CONSECUTIVE_DEAD_QUESTIONS
+
+
+def test_the_counter_resets_on_a_scoreable_question():
+    i_reset = SRC.index("consecutive_dead = 0", SRC.index("if dead_question(runs):"))
+    i_else = SRC.index("else:", SRC.index("if dead_question(runs):"))
+    assert i_else < i_reset, "a scoreable question must reset the run of dead ones"
+
+
 # --- preflight aborts before scoring ----------------------------------------------
 
 class _Stub:
