@@ -54,6 +54,20 @@ def _trim_strip(strip):
     sd=_dark(strip); rows=np.where(sd.sum(axis=1)>sd.shape[1]*3)[0]
     return strip.crop((0,0,strip.size[0],int(rows[-1])+8)) if len(rows) else strip
 
+def _body_region(col, x0, x1, rule_y, H):
+    """BODY region for one column = complement of the divider and that column's OWN rule.
+    y1 is the column's rule row when known (y1_source 'rule'); otherwise the page bottom, and
+    the region SAYS so via y1_source 'page_bottom_no_rule' rather than guessing a number."""
+    if rule_y is not None:
+        y1, src = int(rule_y), "rule"
+    else:
+        y1, src = int(H), "page_bottom_no_rule"
+    return {"col": col, "box": [int(x0), 0, int(x1), y1],
+            "rule_y": (int(rule_y) if rule_y is not None else None), "y1_source": src}
+
+def _body_regions(W, H, xdiv, rule_l, rule_r):
+    return [_body_region("left", 0, xdiv, rule_l, H), _body_region("right", xdiv, W, rule_r, H)]
+
 def presplit(path, upscale=2, full_width_depth=0.30):
     im=Image.open(path); W,H=im.size
     dark=_dark(im)
@@ -63,13 +77,20 @@ def presplit(path, upscale=2, full_width_depth=0.30):
     rule_r=find_hrule(dark, xdiv+int(W*0.02), W-int(W*0.03))
     info["rules"]=[rule_l,rule_r]
     y_top=min([r for r in (rule_l,rule_r) if r is not None], default=None)
-    if y_top is None: return None, info
+    if y_top is None:
+        info["page"]=[W,H]
+        info["coord"]="native_px_x0y0x1y1_topleft_exclusive"
+        info["body_regions"]=_body_regions(W,H,xdiv,rule_l,rule_r)
+        return None, info
     # STAGE-1 REROUTE (sound): split at the FOOTNOTE region's own gutter; if it has no real gap
     # (depth < threshold) the footnotes are FULL-WIDTH -> crop UNCUT so a spanning note isn't sliced
     # (fixes p546 `Pagnin nus`); a real gutter -> two-column split AT xg (fixes the body!=footnote
     # gutter unsoundness that regressed p692).
     xg, depth = find_footnote_gutter(dark, y_top)
     info["fn_gutter"]=[xg, round(float(depth),2)]
+    info["page"]=[W,H]
+    info["coord"]="native_px_x0y0x1y1_topleft_exclusive"
+    info["body_regions"]=_body_regions(W,H,xdiv,rule_l,rule_r)
     if depth < full_width_depth:
         info["mode"]="full_width"
         strip=_trim_strip(im.crop((0, y_top+6, W, H)).convert("L"))
