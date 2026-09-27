@@ -23,6 +23,11 @@ import hebrew_local_arms as L
 OUT = diag.DATA / "hebrew_span_console_20260927.html"
 APERTURE = F.APERTURE
 EX = ("exact", "punct-only")
+# Consonantally correct. `nikud-only` means the arm reproduced the signed CONSONANTS and differs
+# only in pointing -- which for most spans is what the prompt asked for ("the source is
+# UNPOINTED. Do not add nikud."). Folding it in with `wrong` is what made this console report
+# p200:n2 as having no correct candidate when 18 arms had the consonants right.
+CON = EX + ("nikud-only",)
 
 # One class per outcome. `trunc` is NOT a shade of `abstain`: an empty reply that hit the token cap is
 # a budget artifact, an empty reply that finished is a model declining to guess, and that distinction
@@ -166,18 +171,25 @@ def build():
         cnt = collections.Counter(o["gated"] for o in votes)
         ranked = cnt.most_common()
         right = {o["gated"] for o in rs if o["cls"] in EX}
+        cons = {o["gated"] for o in rs if o["cls"] in CON}
         unsc = meta["unscorable"]
         top_share = (ranked[0][1] / len(votes)) if ranked and votes else 0
         top_right = bool(ranked) and ranked[0][0] in right
+        top_cons = bool(ranked) and ranked[0][0] in cons
         # Both facts are shown when both are true. They are different failures -- "the arms converged
         # on the wrong word" and "no arm has the right word at all" -- and two spans here are both.
         flag = ""
-        if not unsc and ranked and not top_right:
-            flag += ('<span class="badge bad">top candidate WRONG &middot; '
-                     f'{ranked[0][1]}/{len(votes)} = {top_share:.0%}</span>')
-        if not unsc and not right:
-            flag += ('<span class="badge bad">no correct candidate from any of the '
+        share = f'{ranked[0][1]}/{len(votes)} = {top_share:.0%}' if ranked and votes else ""
+        if not unsc and ranked and not top_cons:
+            flag += f'<span class="badge bad">top candidate WRONG &middot; {share}</span>'
+        elif not unsc and ranked and not top_right:
+            flag += ('<span class="badge warn">top candidate: consonants right, pointing differs '
+                     f'&middot; {share}</span>')
+        if not unsc and not cons:
+            flag += ('<span class="badge bad">no consonantally correct candidate from any of the '
                      '30 recorded arms</span>')
+        elif not unsc and not right:
+            flag += '<span class="badge warn">no arm reproduces the signed pointing</span>' 
         w(f'<section class="span" id="{_esc(s)}">')
         w(f'<div class="shead"><h3>{_esc(s)}</h3>'
           f'<span class="pg">file p{meta["page"]} &middot; printed p{meta["page"] - 88}</span>'
@@ -203,8 +215,12 @@ def build():
             who = [o for o in votes if o["gated"] == g]
             fams = sorted({o["fam"] for o in who})
             ok = g in right
-            w(f'<tr class="{"ok" if ok else ""}"><td class="rk">{i}</td>'
-              f'<td>{_heb(g)}{" <span class=tick>signed</span>" if ok else ""}</td>'
+            nk = (not ok) and g in cons
+            tick = (" <span class=tick>signed</span>" if ok else
+                    " <span class=\"tick nik\">signed consonants, pointing differs</span>"
+                    if nk else "")
+            w(f'<tr class="{"ok" if ok else "nik" if nk else ""}"><td class="rk">{i}</td>'
+              f'<td>{_heb(g)}{tick}</td>'
               f'<td class="num">{c}</td><td class="num">{len(fams)}</td><td class="arms">'
               + "".join(f'<span class="chip {o["lane"].lower()}" title="{_esc(o["arm"])} '
                         f'[{o["lane"]}]">{_esc(o["arm"].split("/")[-1])}</span>' for o in who)
@@ -348,6 +364,7 @@ section.span{background:var(--pane);border:1px solid var(--line);border-radius:7
 .badge{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;
   border-radius:3px;font-weight:700}
 .badge.bad{background:#3a1c19;color:#e59b93;border:1px solid var(--wr)}
+.badge.warn{background:#2f2418;color:#e0bd86;border:1px solid var(--nik)}
 .badge.un{background:#26262c;color:#a7a7b4;border:1px solid #3c3c46}
 .srow{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
 .cropcell{flex:0 0 300px;min-width:260px}
@@ -366,6 +383,7 @@ table{border-collapse:collapse;width:100%}
   text-align:left;padding:3px 7px;border-bottom:1px solid var(--line);font-weight:600}
 .reads td{padding:4px 7px;border-bottom:1px solid #26221d;vertical-align:middle}
 .reads tr.ok{background:#16251a}
+.reads tr.nik{background:#241f16}
 .reads tr.silent td{color:var(--dim)}
 .rk{color:var(--dim);font-size:11px;width:22px}
 .num{text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,Consolas,monospace}
