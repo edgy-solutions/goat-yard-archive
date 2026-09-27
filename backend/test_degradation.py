@@ -116,6 +116,70 @@ def test_stale_60_second_message_is_gone():
     assert "timed out after 60 seconds" not in _MAIN, "message contradicted the actual wall"
 
 
+# ------------------------------------------------- the provider pin (noise floor, 2026-09-27)
+
+def test_pin_is_none_when_unset():
+    os.environ.pop(D.OPENROUTER_PROVIDER_ENV, None)
+    assert D.provider_pin() is None, "unpinned must be the default; routing is a product decision"
+
+
+def test_pin_names_the_provider_and_refuses_fallbacks():
+    os.environ[D.OPENROUTER_PROVIDER_ENV] = "StreamLake"
+    try:
+        pin = D.provider_pin()
+    finally:
+        os.environ.pop(D.OPENROUTER_PROVIDER_ENV, None)
+    assert pin == {"order": ["StreamLake"], "allow_fallbacks": False}, pin
+    assert pin["allow_fallbacks"] is False, (
+        "a pin that silently falls back to another quantization is not a pin"
+    )
+
+
+def test_pin_accepts_an_ordered_list():
+    os.environ[D.OPENROUTER_PROVIDER_ENV] = "StreamLake, DeepInfra"
+    try:
+        pin = D.provider_pin()
+    finally:
+        os.environ.pop(D.OPENROUTER_PROVIDER_ENV, None)
+    assert pin["order"] == ["StreamLake", "DeepInfra"], pin
+
+
+def test_empty_pin_fails_loud_rather_than_running_unpinned():
+    os.environ[D.OPENROUTER_PROVIDER_ENV] = " , "
+    try:
+        D.provider_pin()
+    except ValueError as e:
+        assert D.OPENROUTER_PROVIDER_ENV in str(e), str(e)
+    else:
+        raise AssertionError("an env var set to nothing must not read as 'unpinned'")
+    finally:
+        os.environ.pop(D.OPENROUTER_PROVIDER_ENV, None)
+
+
+# ---------------------------------------------------------------- the pin WIRING
+
+def test_main_puts_the_pin_in_extra_body_for_both_lms():
+    assert "provider_pin" in _MAIN, "main.py never calls provider_pin()"
+    assert _MAIN.count("extra_body=dict(_extra_body)") == 2, (
+        "both lm_auth and lm_anon must carry the pin; one pinned LM is a split arm"
+    )
+
+
+def test_main_reports_the_pin_in_the_response():
+    assert "openrouter_provider_pin: Optional[dict]" in _MAIN, (
+        "the response model must carry the pin, or the harness cannot record it"
+    )
+    assert "openrouter_provider_pin=provider_pin()" in _MAIN, (
+        "the field must be populated from the live call, not hardcoded"
+    )
+
+
+def test_main_says_out_loud_which_way_it_went():
+    assert "PINNED" in _MAIN and "UNPINNED" in _MAIN, (
+        "both branches must print; an unpinned arm that looks pinned is the failure mode"
+    )
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

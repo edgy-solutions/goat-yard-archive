@@ -39,6 +39,7 @@ from .degradation import (
     LLM_WALL_SECONDS,
     TIMEOUT_FALLBACK_ANSWER,
     lm_cache_disabled,
+    provider_pin,
 )
 
 # Rate Limiting
@@ -253,11 +254,22 @@ async def lifespan(app: FastAPI):
 
         if key_main:
             # Initialize Auth LM with usage flag
+            # deepseek/deepseek-chat has more than one OpenRouter provider at different
+            # quantizations, so an unpinned arm measures provider mix as model behaviour.
+            # See degradation.provider_pin for the measured endpoint table.
+            _extra_body = {"usage": {"include": True}}
+            _pin = provider_pin()
+            if _pin:
+                _extra_body["provider"] = _pin
+                print(f"OpenRouter provider PINNED: {_pin}  (fallbacks refused)")
+            else:
+                print("OpenRouter provider UNPINNED: routing may switch provider mid-run.")
+
             lm_auth = dspy.LM(
                 model="openai/deepseek/deepseek-chat",
                 api_key=key_main,
                 api_base="https://openrouter.ai/api/v1",
-                extra_body={"usage": {"include": True}}
+                extra_body=dict(_extra_body)
             )
             
             # Initialize Anon LM (might be same key)
@@ -265,7 +277,7 @@ async def lifespan(app: FastAPI):
                 model="openai/deepseek/deepseek-chat",
                 api_key=key_anon_check,
                 api_base="https://openrouter.ai/api/v1",
-                extra_body={"usage": {"include": True}}
+                extra_body=dict(_extra_body)
             )
             
             # An arm that claims N samples per question must actually call the model N
@@ -405,6 +417,10 @@ class SearchResponse(BaseModel):
     # Whether this process has DSPy caching on. Reported so a run that claims N samples
     # per question can assert it actually got N model calls instead of one call replayed.
     lm_cache_enabled: bool = True
+    # The OpenRouter provider pin in force for this process, or None when unpinned. Reported
+    # so a run cannot claim a pinned provider it did not actually have, and so two arms can be
+    # asserted to have run against the same numeric build of the model.
+    openrouter_provider_pin: Optional[dict] = None
     # Wall seconds spent in generation. A value near 0 on a cache-enabled process means
     # the answer was replayed, not generated.
     generation_seconds: Optional[float] = None
@@ -1118,6 +1134,7 @@ async def search(request: Request, req: SearchRequest):
         trace_id=trace_id if 'trace_id' in locals() else None,
         degraded=locals().get("degraded_reason", None),
         lm_cache_enabled=not lm_cache_disabled(),
+        openrouter_provider_pin=provider_pin(),
         generation_seconds=locals().get("generation_seconds", None),
         stages=stages_capture,
     )

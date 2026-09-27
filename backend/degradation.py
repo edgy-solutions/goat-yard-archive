@@ -55,6 +55,40 @@ def lm_cache_disabled() -> bool:
     return (os.getenv(LM_CACHE_DISABLED_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+OPENROUTER_PROVIDER_ENV = "OPENROUTER_PROVIDER_ORDER"
+
+
+def provider_pin() -> dict | None:
+    """OpenRouter `provider` routing block for this process, or None when unpinned.
+
+    `deepseek/deepseek-chat` is served by MORE THAN ONE provider, at different numeric
+    builds. Measured 2026-09-27 from OpenRouter's own endpoint metadata:
+
+        StreamLake  ctx 128000  quant unknown  status  0  uptime 99.5%
+        DeepInfra   ctx 163840  quant fp4      status -2  uptime 94.4%
+
+    Temperature 0 is deterministic within a provider, not across two. An arm that does not
+    pin one is measuring provider mix as though it were model behaviour, and the 2026-09-27
+    ON arm was observed falling back DeepInfra -> StreamLake mid-run on an upstream 429.
+    Providers are logged by OpenRouter only on errors, so a silent split on the successful
+    requests cannot be ruled out after the fact - which is the whole reason to pin up front.
+
+    Unpinned by default: production routing is a product decision, not this module's.
+    `allow_fallbacks` is FALSE whenever a pin is given, so an unavailable provider fails
+    loud instead of quietly serving a different quantization.
+    """
+    raw = (os.getenv(OPENROUTER_PROVIDER_ENV) or "").strip()
+    if not raw:
+        return None
+    order = [p.strip() for p in raw.split(",") if p.strip()]
+    if not order:
+        raise ValueError(
+            f"{OPENROUTER_PROVIDER_ENV}={raw!r} names no provider. Unset it to run unpinned "
+            f"rather than setting it to something empty."
+        )
+    return {"order": order, "allow_fallbacks": False}
+
+
 def is_degraded_answer(answer: str | None) -> bool:
     """Compatibility floor: does this answer text equal a known degradation fallback?
 

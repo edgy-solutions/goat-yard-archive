@@ -378,6 +378,76 @@ def test_flaky_detail_has_its_own_heading_and_unit():
     assert "{ratio} passed" in SRC,         "a bare fraction under the partial heading reads as a runs-scoreable count"
 
 
+# --- the provider pin must not change mid-arm (noise floor, 2026-09-27) -------------
+
+def _pinned_res(qid, pin):
+    """A scored run whose endpoint reported `pin` as its provider routing block."""
+    payload = dict(GOOD, openrouter_provider_pin=pin)
+    return RE.score(dict(Q_ANSWER, id=qid), payload, 1.0)
+
+
+_SL = {"order": ["StreamLake"], "allow_fallbacks": False}
+_DI = {"order": ["DeepInfra"], "allow_fallbacks": False}
+
+
+def test_one_pin_throughout_is_not_a_violation():
+    v = RE.check_run_integrity({"q": [_pinned_res("q", _SL), _pinned_res("q", _SL)]},
+                               allow_lm_cache=False)
+    assert not any("provider pin" in x for x in v), v
+
+
+def test_pin_changing_mid_arm_is_an_integrity_violation():
+    ledger = {"a": [_pinned_res("a", _SL), _pinned_res("a", _SL)],
+              "b": [_pinned_res("b", _DI), _pinned_res("b", _SL)]}
+    v = RE.check_run_integrity(ledger, allow_lm_cache=False)
+    assert any("provider pin" in x for x in v), v
+
+
+def test_unpinned_throughout_is_consistent_and_not_flagged_here():
+    # Unpinned is a preflight warning, not an integrity violation: the arm did not SPLIT,
+    # it was never pinned. Flagging it here would hide the case that matters.
+    v = RE.check_run_integrity({"q": [_pinned_res("q", None), _pinned_res("q", None)]},
+                               allow_lm_cache=False)
+    assert not any("provider pin" in x for x in v), v
+
+
+def test_pin_appearing_partway_through_is_a_violation():
+    ledger = {"q": [_pinned_res("q", None), _pinned_res("q", _SL)]}
+    v = RE.check_run_integrity(ledger, allow_lm_cache=False)
+    assert any("provider pin" in x for x in v), v
+
+
+def test_errored_runs_do_not_invent_a_pin_change():
+    # An errored run has no endpoint report at all; counting its absent pin as a distinct
+    # value would make every run with one timeout look like a split arm.
+    ledger = {"q": [_pinned_res("q", _SL), _res("q", 0, err="ReadTimeout")]}
+    v = RE.check_run_integrity(ledger, allow_lm_cache=False)
+    assert not any("provider pin" in x for x in v), v
+
+
+# --- the harness must record and be able to demand the pin ---------------------------
+
+def test_preflight_records_the_pin_from_the_endpoint():
+    assert 'info["openrouter_provider_pin"] = resp.get("openrouter_provider_pin")' in SRC, (
+        "a pin the harness does not record is a pin no result can cite"
+    )
+
+
+def test_summary_carries_the_pin():
+    assert '"openrouter_provider_pin": warmup_info.get("openrouter_provider_pin")' in SRC, (
+        "summary.json is what a report is written from; the pin belongs in it"
+    )
+
+
+def test_require_provider_pin_exists_and_aborts():
+    assert "--require-provider-pin" in SRC, "no way to demand a pin for a comparison arm"
+    i_flag = SRC.index("if require_provider_pin:")
+    tail = SRC[i_flag:i_flag + 400]
+    assert "ABORT" in tail and "return info, 3" in tail, (
+        "demanding a pin must stop the run before any question is scored"
+    )
+
+
 def test_fallback_constant_is_not_duplicated_here():
     assert "ink has dried" not in SRC, "harness must import the constant, not copy it"
 

@@ -158,6 +158,10 @@ class QuestionResult:
     # Reported by the backend. A run on a cache-enabled process may be a replay of an
     # earlier identical request rather than a fresh sample.
     lm_cache_enabled: Optional[bool] = None
+    # The OpenRouter provider pin the backend reports for this run. Two arms compared as a
+    # difference must agree on it: temperature 0 is deterministic within a provider, not
+    # across two, and deepseek-chat has providers at different quantizations.
+    provider_pin: Optional[object] = None
     generation_seconds: Optional[float] = None
 
     # Scoring outcomes
@@ -241,6 +245,7 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
     result.api_status = response.get("_status", 200)
     result.answer = response.get("answer", "") or ""
     result.lm_cache_enabled = response.get("lm_cache_enabled")
+    result.provider_pin = response.get("openrouter_provider_pin")
     result.generation_seconds = response.get("generation_seconds")
 
     # Degradation check goes here - before refusal detection, before citation scoring.
@@ -540,7 +545,8 @@ KEEP_ALIVE_PIN_NOTE = (
 
 
 def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
-              allow_lm_cache: bool, do_warmup: bool) -> tuple:
+              allow_lm_cache: bool, do_warmup: bool,
+              require_provider_pin: bool = False) -> tuple:
     """Warm the path and verify run integrity BEFORE any question is scored.
 
     Returns (warmup_info, exit_code). A nonzero exit_code means: do not score anything.
@@ -563,6 +569,7 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
                                    if is_degraded_answer(resp.get("answer") or "") else None))
     info["warmup_error"] = resp.get("_error")
     info["lm_cache_enabled"] = resp.get("lm_cache_enabled")
+    info["openrouter_provider_pin"] = resp.get("openrouter_provider_pin")
     print(f"            {info['warmup_seconds']}s"
           + (f"  ERROR: {info['warmup_error']}" if info["warmup_error"] else "")
           + (f"  DEGRADED: {info['warmup_degraded']}" if info["warmup_degraded"] else ""))
@@ -589,6 +596,20 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
                   f"with {LM_CACHE_DISABLED_ENV}=1, or pass --allow-lm-cache.")
             return info, 3
         print("            LM cache: DISABLED on the endpoint (N runs are N samples).")
+
+    pin = info.get("openrouter_provider_pin")
+    if pin:
+        print(f"            Provider PINNED: {pin}")
+    elif n_runs > 1:
+        # Not fatal by default: a single-arm run is still a valid measurement of itself.
+        # Fatal for a comparison, because an unpinned arm mixes providers at different
+        # quantizations and any small delta is unattributable.
+        print("            Provider: UNPINNED. deepseek-chat has providers at different "
+              "quantizations; a delta between two unpinned arms is not attributable to the "
+              "change under test. Set OPENROUTER_PROVIDER_ORDER on the server.")
+        if require_provider_pin:
+            print("\nABORT: --require-provider-pin was given and the endpoint reports no pin.")
+            return info, 3
     return info, 0
 
 
@@ -646,6 +667,15 @@ def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_ca
             cached = [r for r in scored if r.lm_cache_enabled]
             if cached:
                 violations.append(f"{qid}: {len(cached)} scored run(s) on a cache-enabled endpoint")
+    # A provider pin that CHANGES mid-run means the arm spans two numeric builds of the
+    # model. That is not a sample of one system; it is a mixture, and it was invisible
+    # before this check because OpenRouter names the provider only when it errors.
+    pins = {json.dumps(r.provider_pin, sort_keys=True)
+            for rs in run_ledger.values() for r in rs if not r.error}
+    if len(pins) > 1:
+        violations.append(
+            f"the provider pin changed during the run ({len(pins)} distinct values: "
+            f"{sorted(pins)}) - the arm spans more than one provider configuration")
     return violations
 
 
@@ -672,6 +702,9 @@ def main(argv: Optional[list] = None) -> int:
                              "own generation wall (LLM_WALL_SECONDS, 180s) so a server-side "
                              "timeout arrives as a labelled degraded response rather than as a "
                              "harness read timeout with no detail.")
+    parser.add_argument("--require-provider-pin", action="store_true",
+                        help="abort unless the endpoint reports a pinned model provider. Use for "
+                             "any arm whose result will be compared against another arm.")
     parser.add_argument("--allow-lm-cache", action="store_true",
                         help="Permit scoring against an endpoint whose LM cache is enabled. "
                              "With --runs > 1 this makes the extra runs cache replays of the "
@@ -699,7 +732,8 @@ def main(argv: Optional[list] = None) -> int:
     n_runs = max(1, args.runs)
 
     warmup_info, pre_rc = preflight(args.endpoint, args.auth_token, args.timeout, n_runs,
-                                    args.allow_lm_cache, not args.no_warmup)
+                                    args.allow_lm_cache, not args.no_warmup,
+                                    args.require_provider_pin)
     if pre_rc:
         print("Nothing was scored. Fix the condition above and rerun.")
         return pre_rc
@@ -805,6 +839,7 @@ def main(argv: Optional[list] = None) -> int:
     integrity_violations = check_run_integrity(run_ledger, args.allow_lm_cache)
     summary["integrity"] = {
         "lm_cache_allowed": bool(args.allow_lm_cache),
+        "openrouter_provider_pin": warmup_info.get("openrouter_provider_pin"),
         "min_real_generation_seconds": MIN_REAL_GENERATION_SECONDS,
         "violations": integrity_violations,
     }
