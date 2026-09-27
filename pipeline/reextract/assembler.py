@@ -100,6 +100,20 @@ def canonicalize_page(raw_lines, profile):
         n["marker"] = f"[^{i}]"
     return {"notes": notes, "dropped_furniture": dropped}
 
+# --- ADDITIVE marker passthrough for emitted records: canonical_marker (n["marker"], the [^N]
+#     bracketed form) is the untouched contract Lane B reads and stays byte-identical. marker_letter
+#     is a NEW sibling field, never a replacement -- callers that build an emitted/ingestable note
+#     record read it through this helper instead of re-deciding the key precedence themselves. ---
+def emit_marker_letter(n):
+    """The per-note printed marker letter, for the emitted record only -- reads whatever the
+    assembler already recorded for this note: canonicalize_typed_notes's marker_letter (config-v2,
+    read by the model off the page) if present, else canonicalize_page's model_letter (frozen path,
+    regex-parsed off the transcribed line). Never counted or chain-derived. '?' (recorded but the
+    reader/parser could not identify it) and no-match both collapse to None -- 'unknown' at the
+    emission boundary, not a sentinel string."""
+    v = n.get("marker_letter", n.get("model_letter"))
+    return v if v and v != "?" else None
+
 # config-v2 Seam 1: the model returns a TYPED Note[] (one note per footnote, with the printed
 # marker_letter and a self-reported status), so the line-parsing (split_note_line / strip_marker /
 # wrap-merge) is the model's job now — the assembler STAYS pure: it drops the reader's own

@@ -43,7 +43,10 @@ def main():
         m = res.get("anchor_match") or {}
         results.append({
             "page": pg, "stratum": "vol7_sample", "status": res["status"], "n_notes": res.get("n_notes"),
-            "hebrew": heb, "greek": grk, "extracted": [{"marker": n["marker"], "text": n["text"]} for n in notes],
+            "hebrew": heb, "greek": grk,
+            # marker_letter is an ADDITIVE sibling (A.emit_marker_letter) -- marker/text unchanged.
+            "extracted": [{"marker": n["marker"], "text": n["text"],
+                           "marker_letter": A.emit_marker_letter(n)} for n in notes],
             "stored": [], "anchor": {"status": m.get("status"), "n_anchors": m.get("n_anchors"),
                                      "unanchored": [{"marker": u.get("marker"), "expected": u.get("expected_letter")}
                                                     for u in m.get("unanchored", [])]},

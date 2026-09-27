@@ -124,7 +124,10 @@ def main():
                 rec = {"page": pg, "status": refine_status(r), "n_notes": r.get("n_notes"),
                        # THE INGESTABLE ARTIFACT: per-note marker + text, persisted (the 08-10 dry-run
                        # counted then discarded this — which is why it produced no ingest candidate).
-                       "notes": [{"marker": n["marker"], "text": n["text"]} for n in r.get("notes", [])],
+                       # marker_letter is an ADDITIVE sibling (A.emit_marker_letter) -- marker/text are
+                       # unchanged bytes; see assembler.py.
+                       "notes": [{"marker": n["marker"], "text": n["text"],
+                                  "marker_letter": A.emit_marker_letter(n)} for n in r.get("notes", [])],
                        "hebrew": any(re.search(r"[֐-׿]", n["text"]) for n in r.get("notes", [])),
                        "anchor_status": m.get("status"), "n_anchors": m.get("n_anchors"),
                        "unanchored": len(m.get("unanchored", [])),

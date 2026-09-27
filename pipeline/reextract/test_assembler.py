@@ -188,6 +188,57 @@ def test_anchor_match_never_guesses():
     for u in r["unanchored"]:
         assert "anchor_letter" not in u          # unanchored notes carry no guessed anchor
 
+# --- marker_letter additive passthrough (Lane A: canonical_marker must stay byte-identical) ---
+def test_canonical_marker_byte_identical_with_marker_letter_added():
+    # Real emission path: canonicalize_page (the frozen/httpx seam run_vol1.py and vol7_run.py use)
+    # -> A.emit_marker_letter -> the exact dict comprehension run_vol1.py builds for "THE INGESTABLE
+    # ARTIFACT". canonical_marker ([^N]) must be BYTE-IDENTICAL to today's output; marker_letter is a
+    # new, separate key sourced from the SAME note dict (never counted/derived).
+    r = A.canonicalize_page(P100, PROFILE)
+    emitted = [{"marker": n["marker"], "text": n["text"], "marker_letter": A.emit_marker_letter(n)}
+               for n in r["notes"]]
+    assert [e["marker"] for e in emitted] == [f"[^{i}]" for i in range(1, 10)]   # canonical_marker unchanged
+    assert [e["text"] for e in emitted] == [n["text"] for n in r["notes"]]        # text unchanged
+    expected_letters = list("abcdefghi")           # P100's real printed/transcribed letters
+    assert [e["marker_letter"] for e in emitted] == expected_letters
+    for e in emitted:
+        assert "marker_letter" in e                # present as a separate key on every record
+
+def test_marker_letter_unknown_collapses_to_none_not_question_mark():
+    # superscript/symbol marker -> strip_marker records "?" (letter unidentified); the EMITTED
+    # record must carry None there, not the internal "?" sentinel.
+    r = A.canonicalize_page(["² Nunc, Drusius."], PROFILE)
+    assert r["notes"][0]["model_letter"] == "?"                 # internal sentinel unchanged
+    assert A.emit_marker_letter(r["notes"][0]) is None           # emission boundary normalizes to None
+
+def test_marker_letter_none_when_no_marker_found_at_all():
+    # a marker-less first line: strip_marker finds neither a letter nor a symbol marker.
+    r = A.canonicalize_page(["Random text with no leading marker at all."], PROFILE)
+    assert r["notes"][0]["model_letter"] is None
+    assert A.emit_marker_letter(r["notes"][0]) is None
+    assert r["notes"][0]["marker"] == "[^1]"                     # canonical_marker still assigned by position
+
+def test_legacy_projection_is_byte_identical_json():
+    # Lane B reads these records as JSON. Dropping the new key from the new record must
+    # reproduce the OLD record byte for byte -- same keys, same values, same ORDER -- so a
+    # diff of the legacy projection is empty and marker_letter is purely additive.
+    import json
+    r = A.canonicalize_page(P100, PROFILE)
+    old = [{"marker": n["marker"], "text": n["text"]} for n in r["notes"]]
+    new = [{"marker": n["marker"], "text": n["text"], "marker_letter": A.emit_marker_letter(n)}
+           for n in r["notes"]]
+    projected = [{k: v for k, v in rec.items() if k != "marker_letter"} for rec in new]
+    assert json.dumps(projected, ensure_ascii=False) == json.dumps(old, ensure_ascii=False)
+    assert list(new[0].keys())[:2] == ["marker", "text"]   # new key appended, not interleaved
+
+def test_marker_letter_prefers_typed_marker_letter_over_model_letter():
+    # config-v2 typed-note records carry "marker_letter" directly (persisted from the model's read);
+    # emit_marker_letter must prefer it over a stale/absent model_letter, never re-derive it.
+    assert A.emit_marker_letter({"marker_letter": "q", "model_letter": "z"}) == "q"
+    assert A.emit_marker_letter({"marker_letter": "?", "model_letter": "z"}) is None
+    assert A.emit_marker_letter({"model_letter": "z"}) == "z"
+    assert A.emit_marker_letter({}) is None
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
