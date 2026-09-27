@@ -389,7 +389,18 @@ table{border-collapse:collapse;width:100%}
 .num{text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,Consolas,monospace}
 .tick{font-size:9.5px;background:var(--ex);color:#08120a;padding:1px 5px;border-radius:2px;
   text-transform:uppercase;letter-spacing:.05em;font-weight:700;vertical-align:middle}
-.arms{line-height:1.9}
+/* The reads table is auto-layout by default, so the `arms` cell (up to 26 nowrap chips) sets a
+   max-content width far wider than the column box; the browser then hands the reading column a
+   proportional share and the votes/families/arms columns fall off the right edge. Chris hit this on
+   p362:n1. Fixed layout pins the four narrow columns, lets the chips wrap, and keeps every column
+   on screen at any window width. */
+.reads{table-layout:fixed}
+.reads th:nth-child(1),.reads td:nth-child(1){width:26px}
+.reads th:nth-child(2),.reads td:nth-child(2){width:36%}
+.reads th:nth-child(3),.reads td:nth-child(3){width:50px}
+.reads th:nth-child(4),.reads td:nth-child(4){width:66px}
+.reads td:nth-child(2){overflow-wrap:anywhere}
+.arms{line-height:1.9;overflow-wrap:anywhere}
 .chip{display:inline-block;font-size:10px;font-family:ui-monospace,Consolas,monospace;
   padding:1px 5px;margin:1px 2px 1px 0;border-radius:3px;background:#262119;
   border:1px solid #3a332a;color:#c8bfae;white-space:nowrap}

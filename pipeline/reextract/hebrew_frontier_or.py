@@ -49,6 +49,7 @@ the agreement question only, and labels the C rows unrecorded-endpoint, which is
 
 Born-test: `test_hebrew_frontier_or.py`."""
 import base64
+import collections
 import io
 import json
 import os
@@ -450,6 +451,53 @@ def rows():
     return out
 
 
+# The gate table was published on 2026-09-27 from an ad-hoc script that is gone. Reproducing it took
+# two tries: the cross-family cluster is astra + opus + qwen3.7-plus, NOT the cumulative 4-arm set,
+# and read as cumulative it is unreproducible (14 agreeing spans for a 4-arm gate where the 3-arm
+# gate agrees on 13, which no all-identical rule can produce). The clusters are therefore spelled out
+# here and every published figure comes out of this function rather than out of a script that dies
+# with its session.
+#
+#   a gate AGREES on a span when every arm in it returns the identical normalized string;
+#   spans where every arm abstains are excluded (a pair of silences is not a consensus);
+#   p900:n4 is NOT excluded -- its signed truth is "not Hebrew", so ABSTAIN there is the RIGHT
+#   answer and classify() already scores it `exact`. Filtering on the literal text "ABSTAIN"
+#   instead of on the class drops it and moves the numbers.
+GATES = (("astra + opus", ("openai/gpt-6-astra", "anthropic/claude-opus-5.5")),
+         ("astra + opus + gemini-3.1-pro", ("openai/gpt-6-astra", "anthropic/claude-opus-5.5",
+                              "google/gemini-3.1-pro-preview")),
+         ("astra + opus + qwen3.7-plus", ("openai/gpt-6-astra", "anthropic/claude-opus-5.5",
+                                          "qwen/qwen3.7-plus")))
+RIGHT = ("exact", "punct-only")
+
+
+def gate():
+    rs = rows()
+    by = {(o["span_id"], o["model"]): o for o in rs}
+    spans = sorted({o["span_id"] for o in rs if o["cls"] != "UNSCORABLE"})
+    g = lambda a, sp: diag._norm((by.get((sp, a)) or {}).get("gated") or "")
+    c = lambda a, sp: (by.get((sp, a)) or {}).get("cls")
+    print(f"gate precision, A2, n={len(spans)} (FILE pages; printed = file - 88)\n")
+    print(f"{'gate':32s} {'agrees':>7s} {'right':>6s} {'precision':>10s}")
+    for name, arms in GATES:
+        ag = [sp for sp in spans if g(arms[0], sp) and len({g(a, sp) for a in arms}) == 1
+              and not all(c(a, sp) == "abstain" for a in arms)]
+        ok = [sp for sp in ag if c(arms[0], sp) in RIGHT]
+        print(f"{name:32s} {len(ag):3d}/{len(spans):<3d} {len(ok):6d} {len(ok) / len(ag):9.0%}")
+    n = ok_ = 0
+    for sp in spans:
+        v = collections.Counter(g(a, sp) for a in {m for _s, m in by} if c(a, sp) not in (None, "abstain"))
+        if not v:
+            continue
+        n += 1
+        top = v.most_common(1)[0][0]
+        ok_ += any(c(a, sp) in RIGHT for a in {m for _s, m in by} if g(a, sp) == top)
+    print(f"{'plurality across every arm':32s} {n:3d}/{len(spans):<3d} {ok_:6d} {ok_ / n:9.0%}")
+    cov = {sp for sp in spans if any(c(a, sp) in RIGHT for a in {m for _s, m in by})}
+    print(f"\ncoverage: {len(cov)}/{len(spans)} spans read correctly by at least one arm in THIS file")
+    print("never read here:", ", ".join(sorted(set(spans) - cov)) or "-")
+
+
 def score():
     rs = rows()
     errs = [o for o in diag._lines(OUT) if o.get("kind") == "call_error"]
@@ -589,6 +637,8 @@ if __name__ == "__main__":
         score()
     elif cmd == "cost":
         cost()
+    elif cmd == "gate":
+        gate()
     elif cmd == "matrix":
         matrix()
     else:
