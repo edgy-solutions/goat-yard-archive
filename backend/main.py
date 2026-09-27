@@ -34,6 +34,12 @@ from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
+from .degradation import (
+    DEGRADED_LLM_TIMEOUT,
+    LLM_WALL_SECONDS,
+    TIMEOUT_FALLBACK_ANSWER,
+    lm_cache_disabled,
+)
 
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -262,6 +268,16 @@ async def lifespan(app: FastAPI):
                 extra_body={"usage": {"include": True}}
             )
             
+            # An arm that claims N samples per question must actually call the model N
+            # times. DSPy's in-process memory cache (default 1,000,000 entries) replays
+            # an identical request, so runs 2..N come back byte-identical in ~0.000s and
+            # the arm reports zero variance it never measured. The 2026-09-20 flag-OFF
+            # arm did exactly that. Off by default here would slow ordinary serving, so
+            # it stays on unless a run explicitly asks for honest sampling.
+            if lm_cache_disabled():
+                dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
+                print('DSPy cache DISABLED (GILL_DISABLE_LM_CACHE): every request calls the model.')
+
             # Default helper configuration (just for consistency, context managers override this)
             dspy.settings.configure(lm=lm_anon) 
             
@@ -381,6 +397,17 @@ class SearchResponse(BaseModel):
     expanded_query: Optional[str] = None
     mapped_entities: Optional[List[str]] = []
     trace_id: Optional[str] = None
+    # Set when this response is NOT an answer: the pipeline degraded and returned a
+    # placeholder. None means the system did what it claims. A consumer scoring answers
+    # MUST treat a non-None value as an ERROR, never as a wrong answer - see
+    # backend/degradation.py for what scoring a timeout as FAIL cost us.
+    degraded: Optional[str] = None
+    # Whether this process has DSPy caching on. Reported so a run that claims N samples
+    # per question can assert it actually got N model calls instead of one call replayed.
+    lm_cache_enabled: bool = True
+    # Wall seconds spent in generation. A value near 0 on a cache-enabled process means
+    # the answer was replayed, not generated.
+    generation_seconds: Optional[float] = None
     # Per-stage I/O snapshot, populated only when request.debug=True. Used by
     # evals/determinism_harness.py to compare stage outputs across runs and
     # isolate which stage introduces variance.
@@ -852,6 +879,7 @@ async def search(request: Request, req: SearchRequest):
                     books = app.state.available_books
                     available_books_str = ", ".join(books) if books else "Unknown"
 
+                    degraded_reason = None
                     t7 = time.perf_counter()
                     # 90s matches the frontend's per-request timeout. The bot's
                     # LLM-generation step plus the optional LLM-repair fallback
@@ -860,9 +888,10 @@ async def search(request: Request, req: SearchRequest):
                     # repairs needed.
                     pred = await asyncio.wait_for(
                         asyncio.to_thread(bot, question=req.query, context_chunks=raw_results, available_books=available_books_str),
-                        timeout=90.0
+                        timeout=LLM_WALL_SECONDS
                     )
                     t8 = time.perf_counter()
+                    generation_seconds = t8 - t7
                     print(f"[TIMING] LLM generation (bot): {t8-t7:.3f}s")
 
                     answer = pred.answer
@@ -957,10 +986,14 @@ async def search(request: Request, req: SearchRequest):
                     trace_id = generation.trace_id if generation else None
                         
                 except asyncio.TimeoutError:
+                    # Label the degradation HERE, where it happened. A consumer must never
+                    # have to infer "the model did not answer" from the prose it was handed:
+                    # that inference is what let 14 timeouts be scored as content failures.
                     if generation:
-                        generation.update(level="ERROR", status_message="LLM generation timed out after 60 seconds")
-                    answer = "The learned Doctor's quill moves slowly, and the ink has dried before a response could be penned. Please try again."
+                        generation.update(level="ERROR", status_message=f"LLM generation timed out after {LLM_WALL_SECONDS:.0f}s")
+                    answer = TIMEOUT_FALLBACK_ANSWER
                     verified = False
+                    degraded_reason = DEGRADED_LLM_TIMEOUT
                 except Exception as e:
                     if generation:
                          generation.update(level="ERROR", status_message=str(e))
@@ -1083,6 +1116,9 @@ async def search(request: Request, req: SearchRequest):
         expanded_query=search_text,
         mapped_entities=mapped_entities,
         trace_id=trace_id if 'trace_id' in locals() else None,
+        degraded=locals().get("degraded_reason", None),
+        lm_cache_enabled=not lm_cache_disabled(),
+        generation_seconds=locals().get("generation_seconds", None),
         stages=stages_capture,
     )
 
