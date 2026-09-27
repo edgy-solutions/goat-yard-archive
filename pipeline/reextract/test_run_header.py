@@ -37,7 +37,8 @@ sys.path.insert(0, str(HERE))
 from run_header import (build_header, require_endpoint, config_sha16, endpoint_id,
                         normalize_hostport, model_digests, HeaderMissingEndpoint)
 
-OWNED = ["born_test.py", "collapse_run.py", "gemma_witness.py", "hebrew_aperture_diag.py"]
+OWNED = ["born_test.py", "collapse_run.py", "gemma_witness.py", "hebrew_aperture_diag.py",
+         "hebrew_frontier_or.py"]
 SUBSTRATE = ["run_vol1.py"]
 
 FAKE = lambda hostport, model, timeout=None: "deadbeefcafe0001"
