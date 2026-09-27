@@ -51,8 +51,22 @@ TRUTH = {
     "p102:n0": ("\u05d1\u05e8\u05d0 - \u05dc\u05e2\u05e9\u05d5\u05ea", "signed-correct:candidate-verbatim"),
     "p124:n4": ("\u05dc\u05d0 \u05db\u05df", "signed-correction:partial-span"),
     "p138:n5": ("\u05dc\u05da", "signed-correct:candidate-verbatim"),
-    "p200:n2": ("\u05d5\u05d9\u05d4\u05d9 \u05d4\u05e9\u05de\u05e9 \u05dc\u05b0\u05d1\u05b9\u05d5\u05d0",
-                "signed-correction:pointed"),
+    # RULED 2026-09-27 by Chris: "those are not in the original". The pointing is NOT on the page.
+    # The 2026-09-06 sitting showed him the candidate \u05d5\u05d9\u05d4\u05d9 \u05d4\u05e9\u05de\u05e9 \u05dc\u05b0\u05d1\u05b9\u05d0 -- pointed, and
+    # with NO vav. His correction was \u05d5\u05d9\u05d4\u05d9 \u05d4\u05e9\u05de\u05e9 \u05dc\u05b0\u05d1\u05b9\u05d5\u05d0. The edit he made was
+    # CONSONANTAL: he added the missing vav. The sheva and holam rode along from the candidate
+    # string he was editing; they were never an assertion that the page is pointed. Corroborating:
+    # p200:n2 measures the LOWEST nikud density of any span at BOTH apertures (0.179 / 0.227) and
+    # never leaves `uncertain`. Independently, 18 of 30 arms read exactly these consonants.
+    #
+    # Derived by the same rule as p253:n2 -- strip_nikud(the signed correction) -- which makes the
+    # table consistent: every entry is now the printed consonantal form. Pinned in
+    # test_hebrew_sealed_truth.py so it cannot drift back.
+    #
+    # What the old entry cost: 18 of 30 arms scored `nikud-only` instead of `exact` on this span,
+    # and two committed audits published it as having no correct candidate from any arm.
+    "p200:n2": ("\u05d5\u05d9\u05d4\u05d9 \u05d4\u05e9\u05de\u05e9 \u05dc\u05d1\u05d5\u05d0",
+                "signed-correction:vav-added-then-strip-nikud-ruled-20260927"),
     "p219:n0": ("\u05d4\u05d5\u05d0\u05dc\u05ea\u05d9 \u05dc\u05d3\u05d1\u05e8", "signed-correct:candidate-verbatim"),
     "p253:n2": ("\u05d4\u05e7\u05e8\u05d4 \u05e0\u05d0 \u05dc\u05e4\u05e0\u05d9",
                 "signed-correction:derived-strip-nikud"),

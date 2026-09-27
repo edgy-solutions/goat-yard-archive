@@ -60,6 +60,26 @@ for sid in ("p102:n0", "p138:n5", "p219:n0", "p360:n0"):
     got = D._heb_span(sitting[sid]["inputs"]["candidates"][0])
     check(f"{sid} derived == hand-written", N(got) == N(hand), f"derived={got!r} hand={hand!r}")
 
+print("\n(1b) p200:n2 carries NO pointing -- Chris's ruling of 2026-09-27")
+# The sitting showed a POINTED candidate that was missing a vav; Chris added the vav and the
+# pointing rode along with the string he was editing. He ruled on 2026-09-27 that the points are
+# not in the original. The stored truth is therefore strip_nikud(his correction) -- the same
+# derivation p253:n2 already uses -- so the table has ONE convention and an `exact` rate is
+# measured against one standard. Pinned because the cost of the pointed entry was concrete: 18 of
+# 30 arms scored `nikud-only` instead of `exact`, and two audits published the span as having no
+# correct candidate from any arm.
+_corr = sitting["p200:n2"]["disputed_span_correction"].strip()
+_want = D.TRUTH["p200:n2"][0]
+check("p200:n2 truth == strip_nikud(the signed correction)",
+      N(D.nikud_gate.strip_nikud(_corr)) == N(_want),
+      f"strip={D.nikud_gate.strip_nikud(_corr)!r} stored={_want!r}")
+check("p200:n2 truth carries no combining marks at all",
+      not any(unicodedata.combining(c) for c in _want), repr(_want))
+check("p200:n2 keeps the vav Chris added (the consonantal edit he actually made)",
+      "\u05d5" in _want.split()[-1], repr(_want))
+check("p200:n2 basis records the ruling",
+      "ruled-20260927" in D.TRUTH["p200:n2"][1], D.TRUTH["p200:n2"][1])
+
 print("\n(2) every sealed truth traces to the signature by the stated rule")
 D._assert_derivation(sitting)          # raises on any mismatch
 check("_assert_derivation passes over all 9 sealed truths", True)
