@@ -454,17 +454,25 @@ def score():
     rs = rows()
     errs = [o for o in diag._lines(OUT) if o.get("kind") == "call_error"]
     print(f"A2 aperture only, n=18 scorable (FILE pages; printed = file - 88)\n")
-    print(f"{'model':40s} {'exact':>5s} {'nik':>4s} {'wrong':>5s} {'abst':>4s} {'n':>3s}  "
-          f"{'ex/bt':>6s} {'ex/no-bt':>8s}   bt=gloss back-translatable (11 spans), no-bt (7)")
+    print(f"{'model':40s} {'exact':>5s} {'nik':>4s} {'wrong':>5s} {'abst':>4s} {'trunc':>5s} "
+          f"{'n':>3s}  {'ex/bt':>6s} {'ex/no-bt':>8s}")
+    print(f"{'':40s} {'':5s} {'':4s} {'':5s} {'':4s} {'':5s} {'':3s}  "
+          f"bt = gloss back-translatable (11 spans); no-bt (7)")
     EX = ("exact", "punct-only")
     for m in ARMS:
         mr = [o for o in rs if o["model"] == m]
         if not mr:
             continue
         t = L._tally(mr)                      # the LOCAL arms' tally: same folding, nothing re-scored
+        # TRUNCATED is reported as its own outcome, never folded into abstain. An empty reply that hit
+        # the token cap is a budget artifact; an empty reply that finished is a model declining to
+        # guess. Abstention-vs-guessing is the axis that separated the local arms, so collapsing the
+        # two would corrupt the one comparison this tally is for.
+        tc = sum(1 for o in mr if o["truncated"])
+        ab = t["abstain"] - sum(1 for o in mr if o["truncated"] and o["cls"] == "abstain")
         bt = sum(1 for o in mr if o["cls"] in EX and o["gloss_backtranslatable"])
         nb = sum(1 for o in mr if o["cls"] in EX and not o["gloss_backtranslatable"])
-        print(f"{m:40s} {t['exact']:5d} {t['nikud-only']:4d} {t['wrong']:5d} {t['abstain']:4d} "
+        print(f"{m:40s} {t['exact']:5d} {t['nikud-only']:4d} {t['wrong']:5d} {ab:4d} {tc:5d} "
               f"{len(mr):3d}  {bt:6d} {nb:8d}")
     # P3: the back-translation channel, pooled. The gate on whether `exact` means reading.
     btr = [o for o in rs if o["gloss_backtranslatable"]]
