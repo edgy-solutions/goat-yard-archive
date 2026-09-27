@@ -153,6 +153,25 @@ check("refusals on the way down are kept, not swallowed",
 check("each arm header carries its own git_head and git_dirty (a resumed arm cannot lie)",
       "_git_head(), " + chr(34) + "git_dirty" + chr(34) + ": _git_dirty()" in SRC)
 
+print("\n(4c) a token cap must not manufacture an abstention")
+# WHY. Six arms cannot have reasoning disabled at all. At a 300-token cap `openai/gpt-6-astra` spent
+# all 300 on reasoning for 4 of 18 spans and returned EMPTY content with finish_reason "length" --
+# which classify() scores `abstain`, reporting a budget artifact as a model declining to guess.
+SRC2 = (HERE / "hebrew_frontier_or.py").read_text(encoding="utf-8")
+check("the cap leaves room for forced reasoning plus an answer", F.MAX_TOKENS >= 1000,
+      str(F.MAX_TOKENS))
+check("Chris's >300 median-output FLAG is unchanged by that", F.OUT_TOKEN_FLAG == 300)
+check("a truncated read is not treated as done (it gets retried)",
+      'o.get("finish_reason") != "length"' in SRC2)
+check("an empty read is not treated as done either",
+      'and (o.get("hebrew") or "").strip()' in SRC2)
+check("scoring keeps the LAST row per (span, model) so a retry is not double-counted",
+      'keep[(o["span_id"], o["model"])] = o' in SRC2)
+check("scored rows carry a `truncated` flag so the artifact can be audited",
+      '"truncated"' in SRC2)
+check("retries are for transport and truncation only, never for a wrong answer",
+      "never a retry on a wrong answer" in SRC2)
+
 print("\n(5) the reply parser takes the Hebrew from JSON, and from prose when a model ignores JSON")
 check("parses a clean JSON reply", F._parse('{"hebrew": "ABC"}') == ("ABC", "json"))
 check("parses a fenced JSON reply", F._parse('```json\n{"hebrew": "ABC"}\n```')[0] == "ABC")

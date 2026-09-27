@@ -92,7 +92,12 @@ ARMS = [
 ]
 
 HEB = re.compile(r"[֐-׿יִ-ﭏ]+")
-MAX_TOKENS = 300
+# A cap must not manufacture an abstention. Six arms cannot have reasoning disabled at all (see the
+# ladder), and at a 300-token cap `openai/gpt-6-astra` spent all 300 on reasoning for 4 of 18 spans and
+# returned empty content with finish_reason "length" -- which `classify` would have scored `abstain`,
+# reporting a budget artifact as a model declining to guess. 1200 leaves room for forced reasoning plus
+# a one-word answer. Chris's reporting rule is unchanged: FLAG, never abort, a median output over 300.
+MAX_TOKENS = 1200
 OUT_TOKEN_FLAG = 300          # flag, never abort, a model whose median output exceeds this
 RETRIES = 3                   # transient upstream 429/5xx only -- never a retry on a wrong answer
 BACKOFF = 4.0
@@ -364,7 +369,11 @@ def run(only=None):
     cs = cells()
     done = set()
     if OUT.exists():
-        done = {(o["span_id"], o["model"]) for o in diag._lines(OUT) if o.get("kind") == "read"}
+        # A truncated or empty read is NOT done: it must be retried at the larger cap, or the artifact
+        # keeps a budget artifact where a reading belongs.
+        done = {(o["span_id"], o["model"]) for o in diag._lines(OUT)
+                if o.get("kind") == "read" and o.get("finish_reason") != "length"
+                and (o.get("hebrew") or "").strip()}
     first = not OUT.exists()
     with io.open(OUT, "a", encoding="utf-8") as f:
         if first:
@@ -424,13 +433,19 @@ def diag_sha(t):
 def rows():
     """Scored read rows. Classification is diag.classify against the signed truth — nothing else."""
     sets = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
-    out = []
+    # LAST row per (span, model) wins. A retried cell appends rather than overwriting, so without this
+    # a retry would be counted twice -- once as the truncated artifact and once as the real read.
+    keep = {}
     for o in diag._lines(OUT):
         if o.get("kind") != "read" or o.get("span_id") not in sets:
             continue
-        s = sets[o["span_id"]]
+        keep[(o["span_id"], o["model"])] = o
+    out = []
+    for (sid, _m), o in keep.items():
+        s = sets[sid]
         o["cls"] = "UNSCORABLE" if s["unscorable"] else diag.classify(o["gated"], s["truth"])
         o["gloss_backtranslatable"] = _backtranslatable(s["latin_context"], s["truth"])
+        o["truncated"] = o.get("finish_reason") == "length" or not (o.get("hebrew") or "").strip()
         out.append(o)
     return out
 
@@ -440,15 +455,36 @@ def score():
     errs = [o for o in diag._lines(OUT) if o.get("kind") == "call_error"]
     print(f"A2 aperture only, n=18 scorable (FILE pages; printed = file - 88)\n")
     print(f"{'model':40s} {'exact':>5s} {'nik':>4s} {'wrong':>5s} {'abst':>4s} {'n':>3s}  "
-          f"{'exact/bt':>8s} {'exact/no-bt':>11s}")
+          f"{'ex/bt':>6s} {'ex/no-bt':>8s}   bt=gloss back-translatable (11 spans), no-bt (7)")
+    EX = ("exact", "punct-only")
     for m in ARMS:
         mr = [o for o in rs if o["model"] == m]
         if not mr:
             continue
-        t = {k: sum(1 for o in mr if o["cls"] == k) for k in ("exact", "nikud_only", "wrong", "abstain")}
-        bt = sum(1 for o in mr if o["cls"] == "exact" and o["gloss_backtranslatable"])
-        print(f"{m:40s} {t['exact']:5d} {t['nikud_only']:4d} {t['wrong']:5d} {t['abstain']:4d} "
-              f"{len(mr):3d}  {bt:8d} {t['exact']-bt:11d}")
+        t = L._tally(mr)                      # the LOCAL arms' tally: same folding, nothing re-scored
+        bt = sum(1 for o in mr if o["cls"] in EX and o["gloss_backtranslatable"])
+        nb = sum(1 for o in mr if o["cls"] in EX and not o["gloss_backtranslatable"])
+        print(f"{m:40s} {t['exact']:5d} {t['nikud-only']:4d} {t['wrong']:5d} {t['abstain']:4d} "
+              f"{len(mr):3d}  {bt:6d} {nb:8d}")
+    # P3: the back-translation channel, pooled. The gate on whether `exact` means reading.
+    btr = [o for o in rs if o["gloss_backtranslatable"]]
+    nbr = [o for o in rs if not o["gloss_backtranslatable"]]
+    r1 = sum(1 for o in btr if o["cls"] in EX) / max(len(btr), 1)
+    r2 = sum(1 for o in nbr if o["cls"] in EX) / max(len(nbr), 1)
+    print(f"\npooled exact-rate  backtranslatable {r1:.3f} ({len(btr)} reads)   "
+          f"NOT backtranslatable {r2:.3f} ({len(nbr)} reads)   ratio "
+          f"{(r1 / r2) if r2 else float('inf'):.2f}x")
+    print(f"parsed from prose (JSON ignored): "
+          f"{sorted({o['model'] for o in rs if o.get('parsed_from') == 'text'})}")
+    print(f"arms with nonzero reasoning tokens despite the toggle: "
+          f"{sorted({o['model'] for o in rs if (o.get('reasoning_tokens') or 0) > 0})}")
+    print(f"reasoning rung actually applied: "
+          f"{sorted({(o['model'], o.get('reasoning_applied')) for o in rs}, key=str)[:0] or ''}")
+    rung = {}
+    for o in rs:
+        rung.setdefault(o.get("reasoning_applied"), set()).add(o["model"])
+    for k, v in rung.items():
+        print(f"   {str(k):16s} {len(v):2d} arms")
     if errs:
         print(f"\ncall errors: {len(errs)}")
         seen = {}
@@ -489,7 +525,11 @@ def matrix():
     rs = [dict(o) for o in rows()]
     for o in rs:
         o["model"] = o["model"] + " (OR)"
-    d = [o for o in L._built() if o.get("aperture") == APERTURE] if hasattr(L, "_built") else []
+    # L.score() returns SCORED D-arm reads. L._built() returns crops -- a different thing, and using
+    # it here would have dropped the endpoint-D arms from the matrix Chris asked for.
+    d = [dict(o) for o in L.score(include_sealed=True)[0] if o.get("aperture") == APERTURE]
+    for o in d:
+        o["model"] = o["model"] + " (D)"
     c = [o for o in L.load_c_arms(include_sealed=True) if o.get("aperture") == APERTURE]
     for o in c:
         o["model"] = o["model"].replace(" (C)", " (C:unrecorded-endpoint)")
