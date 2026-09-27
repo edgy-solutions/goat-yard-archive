@@ -592,6 +592,26 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
     return info, 0
 
 
+def run_level_tally(run_ledger: Dict[str, List["QuestionResult"]]) -> dict:
+    """Count RUNS, not questions.
+
+    summarize() reports one representative result per question, so a question that survived
+    a partial failure contributes nothing to its error/degraded counters. Predictions about
+    the harness ("<= 6 degraded runs across 168") are written in runs, and a summary that
+    cannot answer them sends you to the raw log to score your own prediction.
+    """
+    runs = [r for rs in run_ledger.values() for r in rs]
+    degraded = sum(1 for r in runs if r.degraded)
+    errored = sum(1 for r in runs if r.error and not r.degraded)
+    return {
+        "total": len(runs),
+        "scored": sum(1 for r in runs if not r.error),
+        "degraded": degraded,
+        "errored": errored,
+        "counts": "runs, not questions; degraded and errored are disjoint",
+    }
+
+
 def classify_stability(scored_passes: List[bool], n_runs: int) -> str:
     """Stability label from the SCORED runs of one question.
 
@@ -777,6 +797,11 @@ def main(argv: Optional[list] = None) -> int:
     # noisy total. FLAKY questions are the run-to-run noise band and must
     # not be counted as regressions.
     summary["warmup"] = warmup_info
+    # `errors`/`degraded` in summarize() are QUESTION-scoped: they count questions whose
+    # scored result died. A question that still classified (one timeout out of three runs)
+    # never reaches them, so run-level degradation was invisible - and predictions about
+    # this harness are written in RUNS. Count runs here, where the ledger exists.
+    summary["runs"] = run_level_tally(run_ledger)
     integrity_violations = check_run_integrity(run_ledger, args.allow_lm_cache)
     summary["integrity"] = {
         "lm_cache_allowed": bool(args.allow_lm_cache),
@@ -816,7 +841,11 @@ def main(argv: Optional[list] = None) -> int:
     print(f"Pass rate                : {summary['passed']}/{summary['total']} ({summary['pass_pct']:.1f}%)")
     print(f"Refusal correctness      : {summary['refusal_correct']}/{summary['total']}")
     print(f"must_not_cite violations : {summary['must_not_cite_violations']}")
-    print(f"Errors (excluded)        : {summary['errors']}  of which degraded: {summary['degraded']}")
+    print(f"Questions with no score  : {summary['errors']}  of which degraded: {summary['degraded']}")
+    rt = summary.get("runs")
+    if rt:
+        print(f"Runs                     : {rt['total']} total, {rt['scored']} scored, "
+              f"{rt['degraded']} degraded, {rt['errored']} errored")
     for e in summary["error_detail"]:
         print(f"    {e['id']:40} {e['degraded'] or 'error'}: {e['error']}")
     if integrity_violations:
@@ -837,8 +866,12 @@ def main(argv: Optional[list] = None) -> int:
             for qid, note in sorted(st["partial_detail"].items()):
                 print(f"      {qid:40} {note}")
         if st["flaky_detail"]:
+            # Own heading: this list is a PASS fraction, the partial list above is a
+            # RUNS-SCOREABLE fraction. Printed bare under one heading, the same qid in
+            # both read as a self-contradiction.
+            print("  FLAKY detail (runs passed / runs scored):")
             for qid, ratio in sorted(st["flaky_detail"].items()):
-                print(f"      {qid:40} {ratio}")
+                print(f"      {qid:40} {ratio} passed")
         print("  Gate a code change on STABLE-PASS->STABLE-FAIL flips (the path "
               "touched), not on the pass-rate total.")
     print(f"\nBy category:")

@@ -325,6 +325,59 @@ def test_run_aborts_on_a_run_level_fault_instead_of_reporting():
     assert i_abort < SRC.index("Written:") if "Written:" in SRC else True
 
 
+# --- reporting: runs are counted in runs, and the two detail lists stay apart ----
+
+def _degraded_res(qid):
+    """A run that timed out at the wall: the server answered, with the fallback."""
+    r = _res(qid, 12.0)
+    r.degraded = "llm_timeout"
+    r.error = "llm_timeout"
+    return r
+
+
+def test_run_tally_counts_runs_not_questions():
+    # One question, three runs, one of them degraded. The question still classifies, so the
+    # question-scoped counters see nothing - this is the defect the tally exists to close.
+    ledger = {"q": [_res("q", 10.0), _degraded_res("q"), _res("q", 11.0)]}
+    t = RE.run_level_tally(ledger)
+    assert t["total"] == 3, t
+    assert t["scored"] == 2, t
+    assert t["degraded"] == 1, t
+
+
+def test_run_tally_keeps_degraded_and_errored_disjoint():
+    hard = _res("q", 0.0, err="non-JSON response (status 500)")
+    ledger = {"q": [_degraded_res("q"), hard]}
+    t = RE.run_level_tally(ledger)
+    assert t["degraded"] == 1, t
+    assert t["errored"] == 1, t
+    assert t["degraded"] + t["errored"] == 2, "a degraded run must not also be counted errored"
+
+
+def test_run_tally_spans_every_question():
+    ledger = {"a": [_res("a", 9.0), _res("a", 9.0)], "b": [_degraded_res("b"), _res("b", 9.0)]}
+    t = RE.run_level_tally(ledger)
+    assert t["total"] == 4 and t["scored"] == 3 and t["degraded"] == 1, t
+
+
+def test_clean_ledger_tallies_zero_degraded():
+    t = RE.run_level_tally({"q": [_res("q", 9.0), _res("q", 10.0), _res("q", 11.0)]})
+    assert t["degraded"] == 0 and t["errored"] == 0 and t["scored"] == 3, t
+
+
+def test_summary_prints_runs_as_well_as_questions():
+    assert "summary[\"runs\"] = run_level_tally(run_ledger)" in SRC,         "the run tally must reach the summary dict, not just exist as a helper"
+    assert "Runs                     :" in SRC, "the run tally must be printed"
+    assert "Questions with no score  :" in SRC,         "the question-scoped line must say it is question-scoped"
+
+
+def test_flaky_detail_has_its_own_heading_and_unit():
+    i_partial = SRC.index("Partially scored (classified on fewer than N runs)")
+    i_flaky = SRC.index("FLAKY detail (runs passed / runs scored)")
+    assert i_partial < i_flaky, "the flaky list must be headed separately, after the partial list"
+    assert "{ratio} passed" in SRC,         "a bare fraction under the partial heading reads as a runs-scoreable count"
+
+
 def test_fallback_constant_is_not_duplicated_here():
     assert "ink has dried" not in SRC, "harness must import the constant, not copy it"
 
