@@ -576,6 +576,86 @@ def cost():
     print(f"\nmeasured total: ${tot:.4f}   budget now: {_budget()}")
 
 
+def _family(model):
+    """Vendor family of an arm. Two arms from one vendor are not two witnesses."""
+    return model.split("/")[0] if "/" in model else model.split(":")[0].rstrip("0123456789.")
+
+
+def support():
+    """Per span: how many arms READ it, how many agree on the top reading, and whether that reading
+    agrees WITH the signature or AGAINST it. The card list Chris asked for comes out of here.
+
+    Written because the first version of this table was an ad-hoc script -- the same mistake `gate()`
+    already carries a comment about -- and it published two figures that are now known to be false.
+    It counted the literal token "ABSTAIN" as a reading and therefore as AGREEMENT. 22 of 26 arms
+    answered "ABSTAIN" on each of the two blank crops, so silence was tallied as a 75-76% cross-family
+    consensus, and that non-finding was about to be written up as the lane's cleanest demonstration
+    that agreement measures shared priors rather than shared evidence.
+
+    It is the opposite. Shown an image with no ink, 22 of 26 frontier arms declined to read it and the
+    4 that did disagreed with each other. The honest version of the claim is narrower and duller: back-
+    translation from the Latin gloss is real but rare on the frontier (~15% of arms) and does not
+    converge. The blank crops are a control for ABSTENTION behaviour, not a consensus exhibit.
+
+    So: abstains are counted and reported, never scored; degenerate loops are excluded (see
+    diag.DROPPED_ARMS); the share is over arms that actually produced a reading; and `families` is
+    distinct vendors agreeing, because 4 OpenAI arms on one string is one witness with four voices."""
+    sets = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
+    keep = {}
+    for o in diag._lines(OUT):
+        if o.get("kind") != "read" or o.get("span_id") not in sets:
+            continue
+        if o.get("model") in diag.DROPPED_ARMS:
+            continue
+        keep.setdefault(o["span_id"], {})[o["model"]] = o
+    tab = []
+    for sid, per in keep.items():
+        s_ = sets[sid]
+        ab, live = 0, {}
+        for m, o in per.items():
+            cls = diag.classify(o.get("gated") or "", s_["truth"])
+            if cls == "abstain":
+                ab += 1
+            elif cls != "degenerate":
+                live[m] = (diag._norm(o.get("gated") or ""), cls)
+        if not live:
+            tab.append((0.0, sid, len(per), ab, 0, 0, 0, 0, "-", s_["unscorable"]))
+            continue
+        v = collections.Counter(t for t, _c in live.values())
+        top, n = v.most_common(1)[0]
+        cls = next(c for t, c in live.values() if t == top)
+        fams = len({_family(m) for m, (t, _c) in live.items() if t == top})
+        tab.append((n / len(live), sid, len(per), ab, len(live), len(v), n, fams, cls,
+                    s_["unscorable"]))
+    print(f"support for the TOP reading per span, A2, {len(tab)} spans "
+          f"(FILE pages; printed = file - 88)\n")
+    print(f"{'span':11s} {'arms':>4s} {'abst':>5s} {'read':>5s} {'distinct':>9s} {'top':>9s} "
+          f"{'fams':>5s}  {'class':11s} verdict")
+    cards = []
+    for share, sid, arms, ab, nlive, ndist, n, fams, cls, unsc in sorted(tab, reverse=True):
+        against = cls not in RIGHT
+        v = "AGAINST signature" if against else "with signature"
+        if unsc:
+            v += f"   [{unsc[:34]}]"
+        print(f"{sid:11s} {arms:4d} {ab:5d} {nlive:5d} {ndist:9d} {n:4d}={share:4.0%} {fams:5d}  "
+              f"{cls:11s} {v}")
+        if against and share >= CARD_AT and not unsc:
+            cards.append((sid, share, fams, n, nlive))
+    print(f"\ncards at >={CARD_AT:.0%} of reading arms AGAINST the signature:")
+    for sid, share, fams, n, nlive in cards or []:
+        print(f"    {sid}  {n}/{nlive} arms = {share:.0%} across {fams} families")
+    if not cards:
+        print("    none")
+    print("\nblank-crop control (no ink was sent; these arms were shown nothing):")
+    for share, sid, arms, ab, nlive, ndist, n, fams, cls, unsc in sorted(tab, reverse=True):
+        if unsc and "crop-fault" in unsc:
+            print(f"    {sid}  {ab}/{arms} abstained, {nlive} read, {ndist} distinct readings "
+                  f"among them")
+
+
+CARD_AT = 0.80
+
+
 def matrix():
     """Agreement across the frontier arms, the D arms and the C arms, on A2. Agreement only — see docstring."""
     rs = [dict(o) for o in rows()]
@@ -637,6 +717,8 @@ if __name__ == "__main__":
         score()
     elif cmd == "cost":
         cost()
+    elif cmd == "support":
+        support()
     elif cmd == "gate":
         gate()
     elif cmd == "matrix":
