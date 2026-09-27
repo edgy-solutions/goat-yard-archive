@@ -92,8 +92,23 @@ UNSCORABLE = {"p138:n6": "signed wrong, correction field empty - no signed truth
 SEALED_TRUTH = {
     "p217:n2": ("הימלא", "signed-correct:candidate-verbatim"),
     "p293:n0": ("יחמנה", "signed-correct:candidate-verbatim"),
-    "p362:n1": ("להתגללעלינו",
-                "signed-correction:verbatim"),
+    # RULED 2026-09-27 by Chris, from the rendered console card: "the signed one is correct but
+    # there should be a space between the two parts ... the models found that". The printed form is
+    # two words. Same mechanism as p200:n2 and worth naming: the 2026-09-06 sitting showed him the
+    # candidate \u05dc\u05d4\u05ea\u05d2\u05dc\u05e2\u05dc\u05d9\u05e0\u05d5 -- one lamed short AND unspaced. His correction supplied the
+    # missing lamed, a CONSONANTAL edit, and the missing word space rode along from the string he was
+    # editing. The signer never asserted that the words are joined; he inherited it.
+    #
+    # NOT retyped. Derived from the agent row of the SAME sitting
+    # (hebrew_sitting_agent_20260906.jsonl), which recorded \u05dc\u05d4\u05ea\u05d2\u05dc\u05dc \u05e2\u05dc\u05d9\u05e0\u05d5 with the space on
+    # 2026-09-06 -- so the harness has held the corroborating record for three weeks. The derivation
+    # asserts the two rows agree once spaces are removed, which proves the ruling moved word division
+    # only and not one letter. Pinned in test_hebrew_sealed_truth.py.
+    #
+    # What the old entry cost: 7 of 30 arms scored `wrong` instead of `exact`, including all four
+    # gate arms, and this span was published as having no correct candidate from any arm.
+    "p362:n1": ("\u05dc\u05d4\u05ea\u05d2\u05dc\u05dc \u05e2\u05dc\u05d9\u05e0\u05d5",
+                "signed-correction:word-space-restored-ruled-20260927"),
     "p423:n3": ("ותגע לרבליו",
                 "signed-correction:verbatim"),
     "p427:n4": ("הבאשתם", "signed-correct:candidate-verbatim"),
@@ -116,7 +131,12 @@ def _lines(p):
     return [json.loads(l) for l in io.open(p, encoding="utf-8") if l.strip()]
 
 
-def _assert_derivation(sitting):
+# Spans the signer ruled on AFTER the sitting closed. The ruling is honoured, but it still may not be
+# typed: each one names the file row it is derived from and what the ruling was allowed to change.
+RULED_POST_SITTING = {"p362:n1": "agent-row-verbatim; ruling may change word division only"}
+
+
+def _assert_derivation(sitting, agent=None):
     """The sealed truths must fall out of the sitting file, not out of my typing. Checked at import."""
     for sid, (want, basis) in SEALED_TRUTH.items():
         rec = sitting.get(sid)
@@ -125,6 +145,14 @@ def _assert_derivation(sitting):
         corr = (rec.get("disputed_span_correction") or "").strip()
         got = corr if (rec.get("chosen") == "wrong" and HEB.search(corr)) else _heb_span(
             rec["inputs"]["candidates"][0])
+        if sid in RULED_POST_SITTING:
+            arec = (agent or {}).get(sid)
+            if not arec:
+                raise AssertionError(f"{sid}: ruled post-sitting but the agent row is missing")
+            ruled = (arec.get("disputed_span_correction") or "").strip()
+            if got.replace(" ", "") != ruled.replace(" ", ""):
+                raise AssertionError(f"{sid}: the ruling changed a letter, not just word division")
+            got = ruled
         if _norm(got) != _norm(want):
             raise AssertionError(f"{sid}: derived {got!r} != recorded {want!r}")
 
@@ -153,7 +181,9 @@ def build_set(include_sealed=False):
     truth = dict(TRUTH)
     unscorable = dict(UNSCORABLE)
     if include_sealed:
-        _assert_derivation(sitting)
+        agent = {o["span_id"]: o for o in _lines(DOWN / "hebrew_sitting_agent_20260906.jsonl")
+                 if "span_id" in o}
+        _assert_derivation(sitting, agent)
         truth.update(SEALED_TRUTH)
         unscorable.update(SEALED_UNSCORABLE)
     out = []

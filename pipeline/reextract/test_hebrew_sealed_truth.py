@@ -52,6 +52,8 @@ def N(t):
 
 sitting = {o["span_id"]: o for o in D._lines(D.DOWN / "hebrew_sitting_chris_20260906.jsonl")
            if "span_id" in o}
+agent = {o["span_id"]: o for o in D._lines(D.DOWN / "hebrew_sitting_agent_20260906.jsonl")
+         if "span_id" in o}
 
 print("(1) the derivation rule reproduces the HAND-WRITTEN truths (it invents nothing)")
 # These four were derived by a human before the rule existed. They are the rule's control group.
@@ -80,8 +82,25 @@ check("p200:n2 keeps the vav Chris added (the consonantal edit he actually made)
 check("p200:n2 basis records the ruling",
       "ruled-20260927" in D.TRUTH["p200:n2"][1], D.TRUTH["p200:n2"][1])
 
+print("\n(1c) p362:n1 is TWO words -- Chris's ruling of 2026-09-27")
+# Same inherited-property failure as p200:n2. The sitting candidate \u05dc\u05d4\u05ea\u05d2\u05dc\u05e2\u05dc\u05d9\u05e0\u05d5 was one lamed
+# short AND unspaced; Chris supplied the lamed and the joined words rode along. He ruled on
+# 2026-09-27 that there is a space. The stored truth is the agent row of the SAME sitting, which
+# recorded the spaced form on 2026-09-06 -- derived from a file, not typed. The ruling is allowed to
+# move word division and nothing else, which is what the space-stripped equality asserts.
+_chris = sitting["p362:n1"]["disputed_span_correction"].strip()
+_agent = agent["p362:n1"]["disputed_span_correction"].strip()
+_p362 = D.SEALED_TRUTH["p362:n1"][0]
+check("p362:n1 truth == the agent row of the same sitting, verbatim",
+      N(_agent) == N(_p362), f"agent={_agent!r} stored={_p362!r}")
+check("p362:n1 ruling moved word division ONLY -- not one letter",
+      _chris.replace(" ", "") == _p362.replace(" ", ""), f"chris={_chris!r} stored={_p362!r}")
+check("p362:n1 truth is two words", len(_p362.split()) == 2, repr(_p362))
+check("p362:n1 basis records the ruling",
+      "ruled-20260927" in D.SEALED_TRUTH["p362:n1"][1], D.SEALED_TRUTH["p362:n1"][1])
+
 print("\n(2) every sealed truth traces to the signature by the stated rule")
-D._assert_derivation(sitting)          # raises on any mismatch
+D._assert_derivation(sitting, agent)   # raises on any mismatch
 check("_assert_derivation passes over all 9 sealed truths", True)
 for sid, (want, basis) in sorted(D.SEALED_TRUTH.items()):
     rec = sitting.get(sid)
@@ -96,7 +115,15 @@ for sid, (want, basis) in sorted(D.SEALED_TRUTH.items()):
               N(want) == N(D._heb_span(rec["inputs"]["candidates"][0])))
     elif D.HEB.search(corr):
         check(f"{sid} basis says correction", "correction" in basis, basis)
-        check(f"{sid} == the signed correction, verbatim", N(want) == N(corr), f"{want!r} vs {corr!r}")
+        if sid in D.RULED_POST_SITTING:
+            # Ruled after the sitting closed (p362:n1). The row is still derived, not typed -- section
+            # 1c pins it to the agent row and asserts the ruling moved no letter. Here we only assert
+            # that it did not silently diverge from what the signer wrote.
+            check(f"{sid} ruled post-sitting: consonants match the signed correction",
+                  want.replace(" ", "") == corr.replace(" ", ""), f"{want!r} vs {corr!r}")
+            check(f"{sid} basis names the ruling", "ruled-" in basis, basis)
+        else:
+            check(f"{sid} == the signed correction, verbatim", N(want) == N(corr), f"{want!r} vs {corr!r}")
     else:
         # p726:n3: signed `wrong`, correction text carries no Hebrew. The ONLY span allowed here, and it
         # must declare the interpretation in its basis rather than passing as an ordinary derivation.
