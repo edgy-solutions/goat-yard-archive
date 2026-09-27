@@ -162,6 +162,38 @@ def test_error_only_question_is_not_an_integrity_violation():
     assert v == [], v
 
 
+# --- a rate limit is a run-level fault, not 25 question-level errors --------------
+
+def test_rate_limited_response_is_a_run_level_fault():
+    r = RE.score(Q_ANSWER, {"_error": "HTTP 429: exhausted your daily allowance",
+                            "_status": 429}, 0.3)
+    assert r.error and r.degraded is None
+    assert r.api_status == 429, r.api_status
+    reason = RE.run_level_fault(r)
+    assert reason and "RATE_LIMIT" in reason, reason
+
+
+def test_server_error_is_a_question_level_error_and_the_run_continues():
+    """A 500 may be about this one question; only the per-day limiter poisons the rest."""
+    r = RE.score(Q_ANSWER, {"_error": "HTTP 500: boom", "_status": 500}, 0.3)
+    assert r.error and RE.run_level_fault(r) is None
+
+
+def test_timeout_is_not_a_run_level_fault():
+    r = RE.score(Q_ANSWER, {"_error": "ReadTimeout: x",
+                            "_degraded": RE.DEGRADED_HARNESS_TIMEOUT}, 200.0)
+    assert RE.run_level_fault(r) is None
+
+
+def test_good_response_is_not_a_run_level_fault():
+    assert RE.run_level_fault(RE.score(Q_ANSWER, GOOD, 1.0)) is None
+
+
+def test_rate_limited_warmup_aborts_preflight():
+    _, rc, _ = _preflight({"_error": "HTTP 429: exhausted", "_status": 429})
+    assert rc == 2, rc
+
+
 # --- preflight aborts before scoring ----------------------------------------------
 
 class _Stub:
@@ -257,6 +289,15 @@ def test_harness_never_addresses_an_ollama_host_directly():
     Ollama host, port or path - including to pin keep_alive."""
     for forbidden in ("11434", "11435", "/api/chat", "/api/embed", "api/tags"):
         assert forbidden not in SRC, "run_eval.py addresses an Ollama surface: " + forbidden
+
+
+def test_run_aborts_on_a_run_level_fault_instead_of_reporting():
+    i_check = SRC.index("abort_reason = run_level_fault(r)")
+    i_abort = SRC.index('print("ABORTED: " + abort_reason)')
+    i_write = SRC.index("def write_outputs(") if "def write_outputs(" in SRC else len(SRC)
+    assert i_check < i_abort, "the fault must be detected before the abort prints"
+    assert "return 5" in SRC, "a run-level abort needs its own exit code"
+    assert i_abort < SRC.index("Written:") if "Written:" in SRC else True
 
 
 def test_fallback_constant_is_not_duplicated_here():

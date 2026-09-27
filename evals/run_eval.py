@@ -189,6 +189,28 @@ class QuestionResult:
     overall_pass: bool = False
 
 
+# A 429 is not a property of the question, it is a property of the run. The backend's
+# anonymous limiter is a per-day window (RATE_LIMIT, default 10/day), so once it trips
+# nothing later in the arm can succeed. On 2026-09-27 the flag-off arm recorded 25 of 28
+# questions as ERROR for that one reason and still wrote a report with a pass rate over the
+# three questions that got through. Errors out of the denominator was the right rule and it
+# held; it just cannot rescue a run whose endpoint stopped answering. Abort instead.
+RUN_LEVEL_STATUSES = {429}
+RUN_LEVEL_ABORT_HINT = (
+    "the endpoint's rate limit is exhausted for this window (backend RATE_LIMIT, default "
+    "10/day for anonymous callers). Raise it for the run or authenticate. Scored results "
+    "cannot continue on this endpoint: every remaining question would be an ERROR for a "
+    "reason that has nothing to do with the system under test."
+)
+
+
+def run_level_fault(result: "QuestionResult") -> Optional[str]:
+    """Reason to stop the whole run, or None to carry on with the next question."""
+    if result.api_status in RUN_LEVEL_STATUSES:
+        return f"HTTP {result.api_status}: {RUN_LEVEL_ABORT_HINT}"
+    return None
+
+
 def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
     result = QuestionResult(
         id=q["id"],
@@ -201,6 +223,7 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
     if "_error" in response:
         result.error = response["_error"]
         result.degraded = response.get("_degraded")
+        result.api_status = response.get("_status", 0)
         return result
 
     result.api_status = response.get("_status", 200)
@@ -532,6 +555,8 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
           + (f"  ERROR: {info['warmup_error']}" if info["warmup_error"] else "")
           + (f"  DEGRADED: {info['warmup_degraded']}" if info["warmup_degraded"] else ""))
 
+    if resp.get("_status") in RUN_LEVEL_STATUSES:
+        print("            " + RUN_LEVEL_ABORT_HINT)
     if info["warmup_error"] or info["warmup_degraded"]:
         print("            Warmup did not complete. The path is not healthy; scored results "
               "would be contaminated by the same condition.")
@@ -651,6 +676,7 @@ def main(argv: Optional[list] = None) -> int:
     # Per-question run ledger. Full results, not booleans: a run that errored or degraded is
     # not a False, it is an absence, and stability must be computed over what was measured.
     run_ledger: Dict[str, List[QuestionResult]] = {}
+    abort_reason: Optional[str] = None
     for i, q in enumerate(questions, 1):
         print(f"[{i:2d}/{len(questions)}] {q['id']}: {q['question'][:70]}...", flush=True)
         runs: List[QuestionResult] = []
@@ -669,7 +695,17 @@ def main(argv: Optional[list] = None) -> int:
                 gen = ("" if r.generation_seconds is None
                        else f"  gen={r.generation_seconds:.2f}s")
                 print(f"     run {run_idx+1}/{n_runs}: {verdict}{gen}", flush=True)
+            abort_reason = run_level_fault(r)
+            if abort_reason:
+                break
         run_ledger[q["id"]] = runs
+        if abort_reason:
+            print()
+            print("ABORTED: " + abort_reason)
+            print("No report is written. The remaining questions were never asked, and a "
+                  "summary over the few that got through would describe a run that did "
+                  "not happen.")
+            return 5
 
         # Representative row: the last SCORED run. A trailing timeout used to become the row
         # for the whole question, which is how a placeholder response ended up scored as a
