@@ -89,6 +89,32 @@ def _raise_no_band(bands, y, up):
     raise ValueError(f"y={y} is past the last band (band {len(bands) - 1})")
 
 
+def _check_band_x(b, i, x, up, what):
+    """Raise when a strip x lies in the canvas PADDING beside band `b`, which has no native pre-image.
+
+    cv_footnote_presplit pastes every band at canvas x=0 into a canvas as wide as the WIDEST band, so a
+    narrower band carries `canvas_w - size[0]` px of white filler to its right. A box detected over that
+    filler is not a box on the page at all. The page-width check below catches this only when the
+    overshoot happens to cross the page edge, which depends on WHICH column is the narrow one: on p726
+    the right band is 336px narrow and the overshoot lands at native 3920 on a 3584px page (loud), while
+    on p217 the LEFT band is the narrow one and the same fault lands at native 1959 (silent, well inside
+    the page). One mechanism, loud or silent by accident of layout -- so the gate has to be the band's
+    own width, which fires either way.
+
+    Measured on all six clamped A1 note boxes (dr-voluminous reextract_vol1/audits/recut_report_20260927.md):
+    predicted native x1 from band width + padding reproduces every reported value within the 2px the box
+    detector leaves at the canvas edge.
+    """
+    band_w = (b.get("size") or [None])[0]
+    if band_w is None:
+        return
+    if x / up > band_w:
+        raise ValueError(
+            f"{what}: strip x={x} is {x / up - band_w:g}px past the right edge of band {i} "
+            f"({b.get('col')}, native width {band_w}px at native "
+            f"x={b['native'][0]}). The strip canvas is padded to the widest band, so this x falls in "
+            f"white filler that has no native pre-image. Not clamped, not mapped.")
+
 def strip_to_native(info, x, y):
     """Map ONE strip point to native page coords using presplit's persisted paste origins.
 
@@ -114,6 +140,7 @@ def strip_to_native(info, x, y):
     for i, b in enumerate(bands):
         py, end = _band_extent(b, up)
         if py <= y < end:
+            _check_band_x(b, i, x, up, "strip_to_native")
             nx = b["native"][0] + x / up
             ny = b["native"][1] + (y - py) / up
             if page_w is not None and nx > page_w:
@@ -154,6 +181,7 @@ def _box_from_persisted(strip_box, info, bands_info):
         oy0, oy1 = max(y0, py), min(y1, end)
         if oy0 >= oy1:
             continue
+        _check_band_x(b, i, x1, up, "strip_box_to_native")
         nx0 = b["native"][0] + x0 / up
         nx1 = b["native"][0] + x1 / up
         ny0 = b["native"][1] + (oy0 - py) / up

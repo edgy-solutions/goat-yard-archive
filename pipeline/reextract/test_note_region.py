@@ -241,6 +241,128 @@ def _skip(why):
     raise _Skip(why)
 
 
+
+# ---------------------------------------------------------------------------------------------------------
+# The canvas-padding fault, measured on the real pages. cv_footnote_presplit pastes each band at canvas
+# x=0 into a canvas as wide as the WIDEST band, so the narrower band has white filler beside it that is
+# not part of any column. These are the six A1 note boxes Lane B reported as "clamped past the page edge"
+# (dr-voluminous reextract_vol1/audits/recut_report_20260927.md); the geometry here is what
+# cv_footnote_presplit.presplit() actually returns for each page, read off the scans, not invented.
+#
+#     page   left_w  right_w  canvas(native)  narrow band  reported native x1
+SIX_CLAMPED = [
+    # page, left_w, right_w, narrow_col, reported_native_x1
+    (124, 1801, 1783, "right", 3600),
+    (200, 1910, 1674, "right", 3818),
+    (900, 1841, 1743, "right", 3680),
+    (596, 1923, 1661, "right", 3844),
+    (726, 1960, 1624, "right", 3918),
+    # p217 is the mirror case: on this page the LEFT column is the narrow one, so the identical fault
+    # lands at native 1955 -- INSIDE the 3584px page, where the page-width check cannot see it.
+    (217, 1625, 1959, "left", 1955),
+]
+UP = 2  # presplit(upscale=2) -- paste/size stay pre-upscale, strip x is post-upscale
+
+
+def _six_info(left_w, right_w):
+    """info as presplit persists it: band native x = 0 and left_w, band size = its OWN width."""
+    return {"mode": "two_column", "page": [PAGE_W, PAGE_H], "upscale": UP,
+            "bands": [
+                {"band": 0, "col": "left", "paste": [0, 0], "size": [left_w, 188],
+                 "native": [0, 4514]},
+                {"band": 1, "col": "right", "paste": [0, 208], "size": [right_w, 206],
+                 "native": [left_w, 4495]},
+            ]}
+
+
+def _full_canvas_box(left_w, right_w, narrow_col, reported_x1):
+    """The strip box the detector produced: it runs to the padded canvas edge, not the band edge."""
+    info = _six_info(left_w, right_w)
+    b = info["bands"][0 if narrow_col == "left" else 1]
+    x1 = (reported_x1 - b["native"][0]) * UP     # derive strip x from the value Lane B reported
+    y = b["paste"][1] * UP + 10
+    return info, b, [0, y, x1, y + 40]
+
+
+def test_all_six_clamped_boxes_now_raise_naming_the_BAND_width():
+    for page, lw, rw, col, rx1 in SIX_CLAMPED:
+        info, b, box = _full_canvas_box(lw, rw, col, rx1)
+        try:
+            NR.strip_box_to_native(box, info)
+            assert False, "p%d: expected ValueError, box %s" % (page, box)
+        except ValueError as e:
+            m = str(e)
+            assert "past the right edge of band" in m, (page, m)
+            # the band's own width, which is the actual diagnosis -- not the page width, which is a
+            # coincidence of which column happened to be narrower
+            assert str(b["size"][0]) in m, (page, b["size"][0], m)
+
+
+def test_p217_is_the_case_the_page_width_check_CANNOT_see():
+    # The companion assertion, and the reason this gate exists. On p217 the narrow band is the left one,
+    # so the padding overrun maps to native 1955 -- 1629px INSIDE the page. A page-width check passes it
+    # silently and the box is wrongly widened; only the band-width check fires. Without this test the
+    # new gate could be a restatement of the old one and nobody would know.
+    page, lw, rw, col, rx1 = SIX_CLAMPED[-1]
+    assert page == 217 and col == "left"
+    info, b, box = _full_canvas_box(lw, rw, col, rx1)
+    nx1 = b["native"][0] + box[2] / UP
+    assert nx1 == rx1 == 1955
+    assert nx1 < PAGE_W, "if this ever exceeds PAGE_W the test has stopped testing the silent case"
+    try:
+        NR.strip_box_to_native(box, info)
+        assert False, "expected ValueError -- the page-width check alone would pass this"
+    except ValueError as e:
+        assert "past the right edge of band" in str(e), e
+
+
+def test_a_box_inside_the_narrow_band_still_maps_unchanged():
+    # p726:n3 A2_spanbox, the real recut output: native x 2112..2347 in the right column. The new gate
+    # must not touch a box that is genuinely inside its band.
+    info = _six_info(1960, 1624)
+    b = info["bands"][1]
+    x0 = (2112 - b["native"][0]) * UP
+    x1 = (2347 - b["native"][0]) * UP
+    y = b["paste"][1] * UP + 10
+    rects = NR.strip_box_to_native([x0, y, x1, y + 40], info)
+    assert len(rects) == 1, rects
+    assert rects[0]["box"][0] == 2112 and rects[0]["box"][2] == 2347, rects
+    assert rects[0]["col_name"] == "right"
+
+
+def test_a_box_ending_exactly_on_the_band_edge_is_allowed():
+    # The other direction: the gate must not reject the legal boundary. A note that fills its column to
+    # the outer edge maps to native 1960+1624 = 3584 = the page edge, which is correct, not an error.
+    info = _six_info(1960, 1624)
+    b = info["bands"][1]
+    y = b["paste"][1] * UP + 10
+    rects = NR.strip_box_to_native([0, y, b["size"][0] * UP, y + 40], info)
+    assert rects[0]["box"][2] == 1960 + 1624 == PAGE_W, rects
+
+
+def test_the_point_mapper_has_the_same_gate():
+    info = _six_info(1960, 1624)
+    b = info["bands"][1]
+    y = b["paste"][1] * UP + 10
+    ok = NR.strip_to_native(info, b["size"][0] * UP, y)
+    assert ok["x"] == PAGE_W, ok
+    try:
+        NR.strip_to_native(info, b["size"][0] * UP + 2, y)
+        assert False, "expected ValueError one px past the band edge"
+    except ValueError as e:
+        assert "past the right edge of band" in str(e), e
+
+
+def test_the_gate_is_silent_when_size_is_missing():
+    # Older info without per-band size must keep working -- the check abstains rather than inventing a
+    # width, and the page-width check remains the only gate for those.
+    info = _six_info(1960, 1624)
+    del info["bands"][1]["size"]
+    try:
+        NR.strip_to_native(info, 10, 300)
+    except ValueError as e:
+        assert "past the right edge" not in str(e), e
+
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
