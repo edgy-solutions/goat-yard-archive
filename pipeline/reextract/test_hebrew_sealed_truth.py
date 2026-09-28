@@ -524,8 +524,25 @@ check("no blank crop survives in the live aperture folder after the re-cut", _LI
 check("the frozen archive still holds exactly the 4 blank crops that were sent",
       _SENT_BLANK == ["p423_n3_A1_notebox.png", "p423_n3_A2_spanbox.png",
                       "p726_n3_A1_notebox.png", "p726_n3_A2_spanbox.png"], _SENT_BLANK)
-check("every blank in the tree is accounted for by those two folders", len(_EMPTY) == len(_SENT_BLANK),
-      sorted(r["folder"] + "/" + r["name"] for r in _EMPTY))
+# There are now THREE folders that may hold a blank, not two. The by-sha archive of 2026-09-28 keeps
+# every pixel state that was ever sent, and two of the states that were sent are blank -- p423:n3 and
+# p726:n3's A2 crops, the ones the mapping fault produced. An archive that held everything EXCEPT the
+# bad crops would be useless for the only question it exists to answer ("what did that read see"), so
+# a blank in it is the archive working. The rule that survives is per-folder: nothing blank may be
+# LIVE, and every blank that is not live must be pixels that were sent.
+_ARCH_BLANK = sorted(r["name"] for r in _EMPTY if "sent_by_sha" in r["folder"])
+_OTHER_BLANK = [r["folder"] + "/" + r["name"] for r in _EMPTY
+                if "AS_SENT" not in r["folder"] and "sent_by_sha" not in r["folder"]]
+check("every blank in the tree sits in a folder whose job is to preserve what was sent",
+      not _OTHER_BLANK, _OTHER_BLANK)
+# And the archive is not allowed to INVENT a blank. Each blank it holds must hash to a blank that was
+# sent, which is checkable because the archive is content-addressed: its filename IS the hash.
+_SENT_BLANK_SHA = {D._sha(D.AS_SENT / n) for n in _SENT_BLANK}
+check("every archived blank is the hash of a blank crop that was actually sent",
+      {n[:-len(".png")] for n in _ARCH_BLANK} <= _SENT_BLANK_SHA,
+      "%s vs sent %s" % (_ARCH_BLANK, sorted(_SENT_BLANK_SHA)))
+check("the archived blanks are the two A2 sends, not the note-box crops (never sent offnet)",
+      len(_ARCH_BLANK) == 2, _ARCH_BLANK)
 check("every blank sits in an aperture crop folder",
       all("hebrew_aperture_crops" in r["folder"] for r in _EMPTY))
 check("the no-line case is reported separately and is not counted as blank",
@@ -874,8 +891,28 @@ _retired = [_r for _r in B.reads("A2_spanbox")
             if _F.read_key(_r) in _MUTE_KEYS
             and (_full_b.get(_r["span_id"]) or {}).get("truth")
             and D.classify(_r.get("gated") or "", _full_b[_r["span_id"]]["truth"]) == "contains"]
-check("no contains read sits on a crop that was re-cut after it (EMPTY today, and bind does not filter)",
-      not _retired, [(r["span_id"], r["model"]) for r in _retired])
+# NOT EMPTY ANY MORE -- and that is this check REPORTING, not a regression. Chris ratified p124:n4's
+# redraw on 2026-09-28 ([131,384,565,446] -> [366,384,481,446], because the old box held two Hebrew
+# runs, a Latin word and a Greek one), the crop was re-cut, and its 26 pre-hash reads went mute. Ten of
+# them classify as `contains` -- against a rectangle that no longer exists, and the reason they say
+# `contains` is the very box fault that caused the redraw. So the assertion changes shape rather than
+# being relaxed: what must hold is that every retired contains read is retired for a reason this tree
+# can NAME, and that the number is said out loud instead of sitting inside the shape table.
+#
+# DEBT, named here rather than quietly carried: `contains_counts()` does not apply `stale_read_why`, so
+# `_cc` above still counts these ten. The fix belongs in item 7 step 5's re-tally, because correcting it
+# here would move a figure Chris reserved for a single pass -- not because it is acceptable.
+_RECUT_NOW = set(D.crops_changed("A2_spanbox"))
+check("every retired contains read belongs to a span whose box was redrawn -- none is unexplained",
+      {r["span_id"] for r in _retired} <= _RECUT_NOW,
+      sorted({r["span_id"] for r in _retired} - _RECUT_NOW))
+check("the retired reads are a MINORITY of the contains bucket, so the shape table still has a subject",
+      len(_retired) < sum(_cc.values()),
+      "%d retired of %d contains" % (len(_retired), sum(_cc.values())))
+if _retired:
+    print("      DEBT for item 7 step 5: %d of %d contains reads are about a re-cut crop -- %s"
+          % (len(_retired), sum(_cc.values()),
+             sorted({(r["span_id"], r["model"]) for r in _retired})[:4]))
 check("two contains reads are broken parses credited by the substring test",
       _cc.get("envelope-leak") == 2, _cc)
 

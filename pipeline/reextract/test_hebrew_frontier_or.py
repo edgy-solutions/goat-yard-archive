@@ -340,16 +340,23 @@ for _sid, _h in (("p423:n3", "7059fcf05ea87bf6"), ("p726:n3", "631456a69a2da6a2"
     check(f"{_sid}: reads at the approved hash survive the void beside {_n_mute} retired reads",
           _n_live == 26 and _n_mute == 26, f"live={_n_live} mute={_n_mute}")
 # That they reach the SCORED rows is asserted below, against the approved hashes, once `_RS` exists.
-# Was 3 spans until 2026-09-28, when Chris ratified p912:n2's wider box and the crop was re-cut. The
-# set is derived from the artifact, so it grows whenever a box is redrawn -- which is the mechanism
-# working, not drifting. What is asserted is the MEMBERSHIP RULE, plus the count, so that a span
-# joining the set silently still fails here.
+# This was a literal set of span_ids, and it had to be edited on 2026-09-28 for p912:n2 and again the
+# same day for p124:n4 -- twice in one day, both times because a box was redrawn, which is the
+# mechanism WORKING. A check that must be hand-edited every time the thing it watches does its job
+# teaches you to edit it without reading it. So it derives the expectation instead: the retired-read
+# set is exactly the set of spans whose crop differs from the one their reads were taken on, and that
+# is a question `crops_changed` already answers from the files.
+_RECUT = set(diag.crops_changed(F.APERTURE))
 check("the retired-read set is exactly the spans whose A2 crop was re-cut",
-      _MUTE_SPANS == {"p423:n3", "p726:n3", "p900:n4", "p912:n2"}, sorted(_MUTE_SPANS))
-# Span-level void is "lost its reads AND has not got them back". Two of the three got them back on
-# 2026-09-27; only the span whose crop is REFUSED is still without evidence.
-check("but only p900:n4 is actually WITHOUT a live read -- a re-read repairs the span",
-      set(F.stale_spans()) == {"p900:n4"}, F.stale_spans())
+      _MUTE_SPANS == _RECUT, f"mute={sorted(_MUTE_SPANS)} recut={sorted(_RECUT)}")
+check("and that set is not empty -- a check that passes on nothing is not watching anything",
+      bool(_RECUT), "no crop has been re-cut, so the rule above is unexercised")
+# Span-level void is "lost its reads AND has not got them back". A re-read repairs a span, so this set
+# is the re-cut spans MINUS the ones re-read since -- derived for the same reason.
+_ALIVE = {o["span_id"] for o in F.live_reads()}
+_UNREPAIRED = _RECUT - _ALIVE
+check("a span without a live read is exactly a re-cut span that has not been re-read",
+      set(F.stale_spans()) == _UNREPAIRED, f"{sorted(F.stale_spans())} vs {sorted(_UNREPAIRED)}")
 check("a pre-hash read on an UNCHANGED crop is still evidence (the rule is not 'distrust the old')",
       not (_MUTE_SPANS & {"p102:n0", "p138:n5", "p217:n2"}))
 # p912:n2 was the fourth name on that list until its box was redrawn, and it is the span that shows the
@@ -395,9 +402,18 @@ check("the sendable population decomposes with no remainder: scored + voided + n
 # calls, 26 arms each, 0 errors). So the scope is empty now, and the durable claim is not "these four
 # are pending" but "these four are scored, at the hashes he approved". Pinning the hashes is what
 # keeps a later re-cut from quietly re-opening a spend he already signed off.
-check("all 19 sendable spans are scored: the 09-27 rerun scope is spent, not pending",
-      len(_SENDABLE & _SCORED) == 19 and not _VOIDED and not _NEVER,
-      f"scored={len(_SENDABLE & _SCORED)} voided={sorted(_VOIDED)} never={sorted(_NEVER)}")
+# "All 19 scored" was true between sends and false during one. It broke the moment Chris ratified
+# p124:n4's redraw, because a redrawn box is UNSCORED until its 26 calls go -- which is the pipeline
+# working, not a regression. The durable claim is the decomposition asserted just above (scored +
+# voided + never-run, no remainder); what belongs here is that nothing is voided for a reason OTHER
+# than an unsent redraw, and that a span awaiting its send is named rather than absorbed.
+_AWAITING = _VOIDED & set(diag.crops_changed(F.APERTURE))
+check("every voided span is voided because its box was redrawn and not yet re-sent",
+      _VOIDED == _AWAITING, f"voided={sorted(_VOIDED)} explained-by-redraw={sorted(_AWAITING)}")
+check("no sendable span has simply never been run",
+      not _NEVER, f"never={sorted(_NEVER)}")
+if _AWAITING:
+    print(f"    note: {sorted(_AWAITING)} awaiting the send on a redrawn box -- unscored BY DESIGN")
 _APPROVED_2609 = {"p138:n6": "292b179e978509d6", "p423:n3": "7059fcf05ea87bf6",
                   "p596:n2": "842abe52c2829e14", "p726:n3": "631456a69a2da6a2"}
 for _sid, _h in sorted(_APPROVED_2609.items()):
@@ -413,7 +429,14 @@ check("p900:n4's reads are void AND it is unsendable -- a debt, not a re-run",
 
 print("\n(9) the contact-sheet gate: approved pixels are the sent pixels")
 import tempfile                                                            # noqa: E402
-_SC = ["p138:n6", "p423:n3", "p596:n2", "p726:n3"]
+# This was the literal list of the four spans the 2026-09-27 sheet happened to carry, and it became a
+# lie the moment the sheet was rebuilt for p124:n4's redraw -- at which point `sheet_gate` RAISED here
+# and took the rest of the suite with it, the same shape of defect as the `src.index` abort below. The
+# sheet is this section's SUBJECT, so its scope is read off the sheet rather than remembered: whatever
+# the sheet approves is what the gate must pass, and a span the sheet does not carry is what it must
+# refuse. Nothing about the current build's scope is asserted here; sections (7)/(8) own that.
+_SHEET_REC = json.loads(F.SHEET.read_text(encoding="utf-8")) if F.SHEET.exists() else {"crop_sha16": {}}
+_SC = sorted(set(_SHEET_REC.get("crop_sha16", {})) & {s["span_id"] for s, _c, _x in CS})
 _cs = F.cells(_SC)
 
 
@@ -435,19 +458,36 @@ def _refuses(fn, want, label):
         check(label, want in str(e), str(e)[:110])
 
 
-check("the live sidecar exists and covers every span in the re-run scope",
-      F.SHEET.exists() and set(_SC) <= set(json.loads(F.SHEET.read_text(encoding="utf-8"))["crop_sha16"]))
-check("the gate PASSES on the real sheet (a gate that refuses everything protects nothing)",
-      F.sheet_gate(_cs)["sheet"].endswith(".html"))
+def _passes(fn, label):
+    """Run a gate that is SUPPOSED to pass, and turn a refusal into a failing check, not an abort."""
+    try:
+        check(label, bool(fn()))
+    except RuntimeError as e:
+        check(label, False, "gate REFUSED: %s" % str(e)[:140])
+
+
+check("the live sidecar exists and names the pixels it approved",
+      F.SHEET.exists() and bool(_SHEET_REC.get("crop_sha16")),
+      "sheet=%s scope=%s" % (F.SHEET.exists(), sorted(_SHEET_REC.get("crop_sha16", {}))))
+check("its scope is sendable spans -- an approval for a span that cannot be sent is not an approval",
+      set(_SHEET_REC.get("crop_sha16", {})) <= {s["span_id"] for s, _c, _x in CS},
+      sorted(set(_SHEET_REC.get("crop_sha16", {})) - {s["span_id"] for s, _c, _x in CS}))
+check("and it is not empty, so every refusal below is measured against a sheet that passes", bool(_SC),
+      "no sendable span on the sheet -- the gate checks below prove nothing")
+_passes(lambda: F.sheet_gate(_cs)["sheet"].endswith(".html"),
+        "the gate PASSES on the real sheet (a gate that refuses everything protects nothing)")
 _refuses(lambda: F.sheet_gate(_cs, pathlib.Path("no_such_sheet.json")),
          "no contact sheet", "no sheet at all -> refuse, and say to build one")
-_refuses(lambda: F.sheet_gate(_cs, _sheet(lambda r: r["crop_sha16"].pop("p596:n2"))),
+# Damaged one span at a time, and WHICH span comes off the derived scope -- naming `p596:n2` here was
+# the same pin as the scope list, and would have started asserting nothing the day it left the sheet.
+_VICTIM = _SC[0] if _SC else None
+_refuses(lambda: F.sheet_gate(_cs, _sheet(lambda r: r["crop_sha16"].pop(_VICTIM))),
          "not on the contact sheet", "a span the sheet never showed -> refuse")
-_refuses(lambda: F.sheet_gate(_cs, _sheet(lambda r: r["crop_sha16"].update({"p423:n3": "0" * 16}))),
+_refuses(lambda: F.sheet_gate(_cs, _sheet(lambda r: r["crop_sha16"].update({_VICTIM: "0" * 16}))),
          "crop changed since the sheet", "a crop re-cut after approval -> refuse, naming both hashes")
 # The one thing no check can verify is that a human looked. So it is not dressed up as verification:
 # the flag is REQUIRED, and the header records it as a claim.
-_refuses(lambda: F.run(None, _SC), "pass --approved",
+_refuses(lambda: F.run(None, _SC or ["p124:n4"]), "pass --approved",
          "no --approved -> refuse before the catalog pull, so a refusal costs nothing")
 check("the approval is recorded as a claim, never as a verification",
       "NOT machine-verifiable" in src and "RECORDED CLAIM" in src)
@@ -678,6 +718,51 @@ if F.OUT.exists():
     check("the 23:17 send of 2026-09-27 has an identity record, even if a late one",
           any(h.get("crop_sha16") for h in _hdrs + _late),
           "%d header(s), %d late" % (len(_hdrs), len(_late)))
+
+print("\n(12) BORN-TEST -- the pixels are archived before the money is spent")
+# Chris's ruling, 2026-09-28. The 26 calls on p912:n2 at 07:32 left reads whose `crop_sha16` resolved
+# to exactly ONE file: the live crop, which the next re-cut of that span would have overwritten. The
+# hash would have outlived the pixels it names. `AS_SENT` could not cover this -- it is a write-once
+# 2026-09-20 snapshot, and the whole problem is a SECOND state of the same span.
+_SHAS = {o["crop_sha16"] for _a in (F.OUT,) for o in diag._lines(_a)
+         if o.get("kind") == "read" and o.get("crop_sha16")}
+check("every crop_sha16 on a recorded read resolves to archived pixels",
+      all(diag.sent_archive_has(h) for h in _SHAS),
+      sorted(h for h in _SHAS if not diag.sent_archive_has(h)))
+check("p912:n2's 07:32 state is in the archive, not only in the live crop",
+      diag.sent_archive_has("99a6bef43a0ba2de"))
+check("and so are the two states that had the same exposure (p423:n3, p726:n3)",
+      diag.sent_archive_has("7059fcf05ea87bf6") and diag.sent_archive_has("631456a69a2da6a2"))
+
+# The archive is content-addressed, so a put is idempotent and CANNOT overwrite: same bytes, same
+# name, nothing written. That is the property that makes it evidence rather than a cache.
+import os, tempfile as _tf, shutil as _sh                                        # noqa: E402
+_any = sorted(diag.SENT_SHA.glob("*.png"))[0]
+_n_before = len(list(diag.SENT_SHA.glob("*.png")))
+_h1 = diag.sent_archive_put(_any, "test:n0", F.APERTURE, why="idempotence check")
+check("re-putting an already-archived crop writes nothing and returns its hash",
+      _h1 == _any.stem and len(list(diag.SENT_SHA.glob("*.png"))) == _n_before)
+_tmpd = _tf.mkdtemp()
+_miss = os.path.join(_tmpd, "absent.png")
+try:
+    diag.sent_archive_put(_miss, "test:n1", F.APERTURE)
+    _bad = "archived a crop that does not exist"
+except FileNotFoundError:
+    _bad = None
+check("a crop that does not exist cannot be archived -- and so cannot be silently sent", _bad is None,
+      _bad or "")
+check("the index holds one row per DISTINCT pixel state, not one per send",
+      len({r["sha16"] for r in diag.sent_archive_index()}) == len(diag.sent_archive_index()))
+check("every archived file hashes to its own name",
+      all(diag._sha(p) == p.stem for p in sorted(diag.SENT_SHA.glob("*.png"))))
+
+# And the send path must actually archive, before the catalog pull and before the header, or the
+# guarantee is only true of the backfill.
+check("run() archives before the catalog pull (a failure to archive must cost nothing)",
+      src.find("diag.sent_archive_put(") < src.find("cat = catalog(refresh=True)"))
+check("run() archives before the header, so recorded hashes name preserved pixels",
+      src.find("diag.sent_archive_put(") < src.find("hdr = build_header("))
+check("the header records what it archived", '"crops_archived": _arch' in src)
 
 print()
 if fails:

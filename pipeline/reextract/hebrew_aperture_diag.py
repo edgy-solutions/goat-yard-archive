@@ -698,6 +698,59 @@ def crop_sha(span_id, aperture="A2_spanbox", as_sent=False):
     return _sha(d / f"{span_id.replace(':', '_')}_{aperture}.png")
 
 
+# EVERY pixel state that has ever been sent, addressed by its own hash.
+#
+# `AS_SENT` above is the 2026-09-20 snapshot and is write-once by design, which was right until a span
+# was re-cut AND re-sent. p912:n2 was: Chris ratified a wider box on 2026-09-28, the crop was re-cut at
+# 07:29 and 26 calls went at 07:32. Those 26 reads were then evidence about pixels that existed in
+# exactly ONE place -- the live CROPDIR file -- protected by nothing but the `crop_sha16` in the run
+# header. One more re-cut of that span and the evidence for a $0.03 send would have been gone, with the
+# hash still in the header pointing at nothing.
+#
+# Content-addressed because the question is never "what is the current crop" but "what did THAT read
+# see", and a name that can be reused cannot answer it. A put is idempotent by construction: same bytes
+# means same filename means nothing to write. Nothing here is ever overwritten or deleted.
+SENT_SHA = CROPDIR.parent / "hebrew_aperture_crops_sent_by_sha"
+SENT_INDEX = SENT_SHA / "index.jsonl"
+
+
+def sent_archive_put(src, span_id, aperture="A2_spanbox", why=""):
+    """Archive one crop under its own hash before it is sent. Returns its sha16.
+
+    Call this BEFORE the call that spends money, not after: an archive written after the wire is an
+    archive that does not exist for the run that failed halfway. Raises if the crop is missing, because
+    a send whose pixels cannot be preserved is a send that cannot be audited later."""
+    src = Path(src)
+    if not src.exists():
+        raise FileNotFoundError("cannot archive a crop that does not exist: %s" % src)
+    h = _sha(src)
+    SENT_SHA.mkdir(parents=True, exist_ok=True)
+    dst = SENT_SHA / ("%s.png" % h)
+    if dst.exists():
+        # Content-addressed, so this is the same crop under the same hash. Verified rather than
+        # assumed: a mismatch here would mean the hash function or the directory had been tampered
+        # with, and silently trusting the name is how an archive stops being evidence.
+        if _sha(dst) != h:
+            raise RuntimeError("archive corruption: %s does not hash to its own name" % dst)
+        return h
+    dst.write_bytes(src.read_bytes())
+    with io.open(SENT_INDEX, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"sha16": h, "span_id": span_id, "aperture": aperture,
+                            "bytes": src.stat().st_size, "from": src.name, "why": why,
+                            "archived": time.strftime("%Y-%m-%dT%H:%M:%S")}, ensure_ascii=False) + "\n")
+    return h
+
+
+def sent_archive_has(sha16):
+    """True when a read's `crop_sha16` still resolves to pixels we hold."""
+    return bool(sha16) and (SENT_SHA / ("%s.png" % sha16)).exists()
+
+
+def sent_archive_index():
+    """The archive's own rows. One per DISTINCT pixel state, not one per send."""
+    return _lines(SENT_INDEX) if SENT_INDEX.exists() else []
+
+
 def stale_read_why(o, changed, cur):
     """Why this ONE read is no longer evidence about a crop we hold, or None if it still is.
 

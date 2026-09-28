@@ -591,6 +591,21 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
             f"{sheet['sheet']} ({len(cs)} span(s), {sheet.get('calls_if_approved')} calls). "
             "The flag is a RECORDED CLAIM, not a verification -- the sheet gate has already checked "
             "that the crops match; only a human can check that they are the right crops.")
+    # THIRD GATE: archive the pixels before spending on them. Chris's ruling, 2026-09-28.
+    #
+    # The 26 calls on p912:n2 at 07:32 produced reads whose `crop_sha16` pointed at exactly one file,
+    # the live crop, which the next re-cut of that span would have overwritten. The hash would have
+    # survived in the header and stopped resolving to anything. A run is answerable for its pixels
+    # only while the pixels exist.
+    #
+    # Before the catalog pull, with the other gates, so a failure to archive costs nothing; and before
+    # the header, so the `crop_sha16` map the header records is a map of things already preserved
+    # rather than a promise about them.
+    _arch = {s_["span_id"]: diag.sent_archive_put(c_, s_["span_id"], APERTURE,
+                                                  why="frontier run %s" % time.strftime("%Y-%m-%dT%H:%M:%S"))
+             for s_, c_, _x in cs}
+    print(f"  archived {len(_arch)} pixel state(s) under their hashes -> {diag.SENT_SHA.name}")
+
     cat = catalog(refresh=True)
     done = set()
     if OUT.exists():
@@ -627,6 +642,10 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                                            # the pixels it paid for.
                                            "crop_sha16": {s["span_id"]: crop_sha(c)
                                                           for s, c, _x in cs},
+                                           # Each of those hashes resolves to a file in the by-sha archive, written BEFORE this
+                                           # header. Recorded so a later reader need not take the directory on trust.
+                                           "crops_archived": _arch,
+                                           "crops_archive": diag.SENT_SHA.name,
                                            # Chris's rule, 2026-09-27: the header records the
                                            # truth in force AT SEND. The crop hash makes the run
                                            # answerable for its pixels; this makes it answerable
