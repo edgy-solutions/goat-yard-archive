@@ -161,6 +161,15 @@ def build(spans=None, out=OUT, include_a1=False):
              '"nests". A correct read there may be a translation, not a reading. '
              '<code>p596:n2</code> leans the other way &mdash; its note glosses no Hebrew at all and '
              'names a different word (\u05d4\u05d9\u05d4) than the page carries.</div>')
+    P.append('<div class="note"><b>The text beside each crop is the signed truth as it stands NOW.</b> '
+             "Chris's batch of 2026-09-27 is applied: <code>p217:n2</code> mem&rarr;pe, "
+             "<code>p423:n3</code> bet&rarr;gimel, <code>p895:n0</code> ayin&rarr;tsadi, and "
+             "<code>p726:n3</code> depointed on his verdict from the 4&times; crop. "
+             "<code>p912:n2</code>'s text is unchanged &mdash; what is outstanding there is the box. "
+             'Every one of those strings was <i>derived</i> from the string the sitting recorded by the '
+             "rule the verdict names; not one was retyped. The run header records this table's digest "
+             f"(<code>{F.truth_digest()}</code>) so a score is answerable for its standard as well as "
+             "for its pixels.</div>")
     P.append('<div class="note"><b>What approving this means.</b> That each crop below shows the '
              'Hebrew span its signed text names, and nothing else — not a neighbouring line, not '
              'margin, not half a word. It does not mean the signed text is right; that is a separate '
@@ -205,6 +214,14 @@ def build(spans=None, out=OUT, include_a1=False):
         P.append("<table>")
         P.append(f"<tr><th>span box (strip)</th><td><code>{s['span_box']}</code></td></tr>")
         P.append(f"<tr><th>native rects</th><td><code>{m.get('native_rects')}</code></td></tr>")
+        # Chris's p423 ruling turns on exactly this: "the box stands as ratified if the re-cut crop
+        # shows the span on one line". One band = one line of type. Derived, so the judgement does not
+        # depend on reading four numbers out of a list.
+        _nb = len(m.get("native_rects") or [])
+        P.append(f"<tr><th>bands in this crop</th><td><b>{_nb}</b> "
+                 + ("&mdash; the span is on ONE line, so a ratified box needs no redraw"
+                    if _nb == 1 else "&mdash; the span straddles lines; a box judgement has to account "
+                    "for every band") + "</td></tr>")
         P.append(f"<tr><th>note box status</th><td>{html.escape(str(s['note_box_status']))}"
                  f" &nbsp; overlap {s['a1_span_overlap']}</td></tr>")
         if sid in changed:
@@ -321,6 +338,10 @@ def build(spans=None, out=OUT, include_a1=False):
         "aperture": APERTURE,
         "pages": "FILE pages (printed = file - 88)",
         "crop_sha16": {sid: F.crop_sha(cells[sid][1]) for sid in want},
+        # The standard at build time. NOT a gate: Chris approves the pixels, and a truth change
+        # does not move a pixel. `run` compares this with the digest at send and records both, which
+        # is the honest shape -- a refusal would misdescribe what the approval was about.
+        "truth_digest": F.truth_digest(),
         "arms_resolved": arms_ok,
         "calls_if_approved": len(want) * len(arms_ok),
         # Recorded so the run header says which way the conditional term was decided, and on what.

@@ -445,6 +445,22 @@ def probe(model):
 SHEET = diag.CROPDIR.parent / "contact_sheet_20260927.json"
 
 
+def truth_digest():
+    """One sha16 over both truth tables, strings AND bases, canonically ordered.
+
+    Bases are in it on purpose. A basis that changes with the string unchanged is still a change of
+    standard -- p726:n3 moved from "scorable because I read a prose verdict as being about markers" to
+    "scorable because Chris signed the Hebrew" -- and a digest that ignored it would report two runs as
+    scored against the same table when they were not."""
+    tbl = {k: list(v) for k, v in list(diag.TRUTH.items()) + list(diag.SEALED_TRUTH.items())}
+    return diag_sha(json.dumps(tbl, ensure_ascii=False, sort_keys=True))
+
+
+def truth_sent(cs):
+    """The signed string and basis for each span this run sends, so a score is answerable per span."""
+    return {s["span_id"]: {"truth": s["truth"], "basis": s["truth_basis"]} for s, _c, _x in cs}
+
+
 def sheet_gate(cs, sheet=SHEET):
     """Refuse to send a crop the contact sheet did not show. Returns the sheet record for the header.
 
@@ -476,6 +492,14 @@ def run(only=None, spans=None, approved=False):
     # started. --approved records a human claim; the sheet gate verifies the pixels. Neither substitutes
     # for the other, and the header says which is which.
     sheet = sheet_gate(cs)
+    # Recorded, never enforced: the approval was about pixels, and the truth table is not a pixel.
+    # A mismatch is a fact about the run, so it goes in the header and on the console; it is not a
+    # reason to refuse a send Chris authorised on what the crops show.
+    _td_sheet, _td_now = sheet.get("truth_digest"), truth_digest()
+    if _td_sheet and _td_sheet != _td_now:
+        print(f"  note: the truth table moved since the sheet was built ({_td_sheet} -> {_td_now}). "
+              "The crops are unchanged, which is what the approval was about; both digests are "
+              "recorded in the header.")
     if not approved:
         raise RuntimeError(
             "refusing to spend: pass --approved to record that Chris approved "
@@ -508,6 +532,14 @@ def run(only=None, spans=None, approved=False):
                                                # the pixels it paid for.
                                                "crop_sha16": {s["span_id"]: crop_sha(c)
                                                               for s, c, _x in cs},
+                                               # Chris's rule, 2026-09-27: the header records the
+                                               # truth in force AT SEND. The crop hash makes the run
+                                               # answerable for its pixels; this makes it answerable
+                                               # for the standard those pixels were scored against.
+                                               # Both halves, or a run can be silently re-scored.
+                                               "truth_digest": truth_digest(),
+                                               "truth_digest_at_sheet": sheet.get("truth_digest"),
+                                               "truth_sent": truth_sent(cs),
                                                "span_scope": sorted(spans) if spans else "ALL",
                                                "contact_sheet": sheet["sheet"],
                                                "contact_sheet_built": sheet.get("built"),

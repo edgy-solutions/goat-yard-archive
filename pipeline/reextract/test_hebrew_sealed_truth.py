@@ -35,7 +35,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import re
 import hebrew_aperture_diag as D
+import nikud_gate
 
 fails = []
 
@@ -99,6 +101,68 @@ check("p362:n1 truth is two words", len(_p362.split()) == 2, repr(_p362))
 check("p362:n1 basis records the ruling",
       "ruled-20260927" in D.SEALED_TRUTH["p362:n1"][1], D.SEALED_TRUTH["p362:n1"][1])
 
+print("\n(1d) Chris's re-sign batch of 2026-09-27: four verdicts on SHAPE, none of them typed")
+# The property that matters is not "the table holds these four strings" -- that is what a literal would
+# give, and a literal is checked against nothing. It is that each string FALLS OUT of the string the
+# sitting recorded, by the rule the verdict names, and that the rule could not have been applied
+# ambiguously. p895:n0 is why: it was reported as already re-signed in a committed audit and in two
+# sessions of notes while the table still held the ayin form, and the derivation is what caught it.
+_BATCH = {
+    "p217:n2": ("mem", "pe", "the candidate was affirmed verbatim and the third glyph was never looked at"),
+    "p423:n3": ("bet", "gimel", "signed from the re-cut crop -- the first pixels this span has had"),
+    "p895:n0": ("ayin", "tsadi", "reported as already applied for a day while the table said otherwise"),
+}
+for _sid, (_a, _b, _why) in sorted(_BATCH.items()):
+    _t = D.SEALED_TRUTH.get(_sid) or D.TRUTH[_sid]
+    _frm, _to, _obs = D.GLYPH_RESIGN[_sid]
+    _rec = sitting[_sid]
+    _corr = (_rec.get("disputed_span_correction") or "").strip()
+    _base = _corr if (_rec.get("chosen") == "wrong" and D.HEB.search(_corr)) else D._heb_span(
+        _rec["inputs"]["candidates"][0])
+    check(f"{_sid} truth == the sitting string with its one {_a} replaced by {_b} ({_why})",
+          N(_t[0]) == N(D._resign(_base, _frm, _to)), f"{_t[0]!r} from {_base!r}")
+    check(f"{_sid} the substitution was unambiguous: exactly one {_a} in the base",
+          _base.count(_frm) == 1, f"{_base.count(_frm)} occurrence(s)")
+    check(f"{_sid} basis records the re-sign and its date", "resign" in _t[1] and "20260927" in _t[1], _t[1])
+    check(f"{_sid} the shape observation is recorded, not just the substitution",
+          len(_obs) > 80 and ("not a mem" in _obs or "stem" in _obs or "one line" in _obs), _obs[:60])
+# The rule must refuse when it cannot be applied. Asserted in the direction of the MISTAKE: a string
+# with two of the letter, and a depointing applied to something that was never pointed.
+try:
+    D._resign("\u05de\u05de", "\u05de", "\u05e4")
+    check("_resign refuses an ambiguous substitution", False, "it returned instead of raising")
+except AssertionError as _e:
+    check("_resign refuses an ambiguous substitution (two candidates, no 'the')", "exactly one" in str(_e))
+try:
+    D._depoint("\u05e9\u05d0\u05e8")
+    check("_depoint refuses a string that carries no points", False, "it returned instead of raising")
+except AssertionError as _e:
+    check("_depoint refuses a string that carries no points (wrong span)", "no points" in str(_e))
+
+print("\n(1e) p726:n3 is BARE -- Chris's verdict from the 4x crop, 2026-09-27")
+_p726 = D.SEALED_TRUTH["p726:n3"][0]
+_p726_base = D._heb_span(sitting["p726:n3"]["inputs"]["candidates"][0])
+check("p726:n3 truth == strip_nikud(the pointed candidate he affirmed)",
+      N(_p726) == N(nikud_gate.strip_nikud(_p726_base)), f"{_p726!r} from {_p726_base!r}")
+check("the base really was pointed, so the ruling changed something",
+      _p726_base != nikud_gate.strip_nikud(_p726_base))
+check("p726:n3 carries no combining marks at all",
+      not re.search(r"[\u0591-\u05c7]", _p726), " ".join(hex(ord(c))[2:] for c in _p726))
+check("the ruling moved POINTS only -- not one consonant",
+      nikud_gate.strip_nikud(_p726_base) == _p726, f"{_p726!r}")
+check("p726:n3 basis records the ruling", "ruled-20260927" in D.SEALED_TRUTH["p726:n3"][1],
+      D.SEALED_TRUTH["p726:n3"][1])
+# What this closes, asserted rather than asserted-in-prose: the book-wide claim the prompt makes on
+# every span, and this span's scorability, which used to rest on an interpretation of mine.
+check("NO signed truth in either table carries points any more -- the prompt's book-wide "
+      "'Gill's Hebrew is unpointed' assertion has no counter-example in the signed set",
+      not [s for s, (t, _b) in list(D.TRUTH.items()) + list(D.SEALED_TRUTH.items())
+           if isinstance(t, str) and re.search(r"[\u0591-\u05c7]", t)],
+      [s for s, (t, _b) in list(D.TRUTH.items()) + list(D.SEALED_TRUTH.items())
+       if isinstance(t, str) and re.search(r"[\u0591-\u05c7]", t)])
+check("p726:n3 no longer takes the marker-defect path, so n no longer rests on reading a prose verdict",
+      "marker-defect" not in D.SEALED_TRUTH["p726:n3"][1])
+
 print("\n(2) every sealed truth traces to the signature by the stated rule")
 D._assert_derivation(sitting, agent)   # raises on any mismatch
 check(f"_assert_derivation passes over all {len(D.SEALED_TRUTH)} sealed truths", True)
@@ -109,6 +173,22 @@ for sid, (want, basis) in sorted(D.SEALED_TRUTH.items()):
         continue
     corr = (rec.get("disputed_span_correction") or "").strip()
     chosen = rec.get("chosen")
+    if sid in D.GLYPH_RESIGN or sid in D.DEPOINTED_POST_SITTING:
+        # A span re-signed on 2026-09-27. The dispatch below is by sitting-row SHAPE, and a re-signed
+        # span still HAS its old shape -- p217:n2's row still says chosen == "correct" -- so without
+        # this branch it walks into the pin for the reading Chris overturned. Section 1d/1e carry the
+        # per-span derivation; here we only assert that the licence is declared and that the truth is
+        # not the raw sitting string any more.
+        base = corr if (chosen == "wrong" and D.HEB.search(corr)) else D._heb_span(
+            rec["inputs"]["candidates"][0])
+        want2 = D._resign(base, *D.GLYPH_RESIGN[sid][:2]) if sid in D.GLYPH_RESIGN else D._depoint(base)
+        check(f"{sid} re-signed 2026-09-27: truth == the stated rule applied to the sitting string",
+              N(want) == N(want2), f"{want!r} vs {want2!r}")
+        check(f"{sid} basis declares the ruling and its date",
+              "ruled-20260927" in basis, basis)
+        check(f"{sid} truth differs from the raw sitting string (the verdict changed something)",
+              N(want) != N(base), f"{want!r} vs {base!r}")
+        continue
     if chosen == "correct":
         check(f"{sid} basis says candidate-verbatim", basis.startswith("signed-correct"), basis)
         check(f"{sid} == the candidate's Hebrew",
@@ -452,6 +532,23 @@ biyaaqov'), which shares the prefix and is scored
     return sorted(set(_out), key=len, reverse=True)
 
 
+# THE THIRD STATE, now with no corpus instance. Chris's batch depointed the last pointed signature,
+# so `nikud-only` cannot be demonstrated from a recorded read any more -- measured: zero reads in the
+# whole corpus classify that way. The class still has to be guarded, because the carve-out it encodes
+# is a ruling: adding points to the standard does not make an unpointed read wrong, and neither does the
+# reverse. So it is pinned by a CONSTRUCTED pair, built from the pointed candidate the sitting recorded
+# against the bare truth Chris signed, and labelled constructed so nobody reads it as a measurement.
+_pointed = D._heb_span(sitting["p726:n3"]["inputs"]["candidates"][0])
+check("nikud-only is still reachable: the pointed candidate against the bare signature "
+      "(CONSTRUCTED pair -- zero corpus reads classify this way since the batch)",
+      D.classify(_pointed, D.SEALED_TRUTH["p726:n3"][0]) == "nikud-only",
+      D.classify(_pointed, D.SEALED_TRUTH["p726:n3"][0]))
+check("and it is not reachable from any recorded read, which is why the pair above is constructed",
+      not [1 for _o in D._lines(D.OUT)
+           if _o.get("aperture") == "A2_spanbox" and (_o.get("gated") or "")
+           and _o.get("span_id") in _full
+           and D.classify(_o["gated"], _full[_o["span_id"]]["truth"]) == "nikud-only"])
+
 _CASES = [
     # span      model                read as recorded                       class        why
     ("p124:n4", None, "\u05dc\u05d0 \u05db\u05df \u05d9\u05d4\u05d9\u05d4 \u05dc\u05da", "contains",
@@ -461,8 +558,10 @@ _CASES = [
     ("p596:n2", "glm-ocr:bf16",
      "* See Buxtorf. in voce \u05e0\u05d5\u05e1.\n* See Buxtorf. in voce \u05e0\u05d5\u05e1.\n* See Buxtorf.",
      "degenerate", "a repetition loop is not a reading and cannot be graded as one"),
-    ("p726:n3", "qwen3.5:122b", "\u05e9\u05d0\u05e8 \u05d0\u05d1\u05d9\u05da", "nikud-only",
-     "unpointed consonants against a pointed signature -- a third state, not wrong"),
+    ("p726:n3", "qwen3.5:122b", "\u05e9\u05d0\u05e8 \u05d0\u05d1\u05d9\u05da", "exact",
+     "the same read that was nikud-only against the pointed signature is EXACT against the bare one, "
+     "which is what Chris's verdict of 2026-09-27 means: the arm was reading the page correctly and "
+     "the standard was wrong"),
 ]
 for _sid, _model, _read, _want, _why in _CASES:
     _got = _recorded(_sid, _read, _model)
@@ -538,11 +637,38 @@ check("the corrected band rule accepts the ratified p423:n3 box",
 check("it passes although its band touches both edges",
       B.G.band_geometry(_rerat)[1]["clear_top"] == 0
       and B.G.band_geometry(_rerat)[1]["clear_bottom"] == 0, B.G.band_geometry(_rerat)[1])
-# The contains bucket, split by output shape. 9 of 22 are not a box fault in any sense, and 2 of those
-# are broken parses that a substring test CREDITS -- a free pass for the failure the typed contract
-# exists to catch. Pinned here so item 7's re-tally knows what it is absorbing; classify is untouched.
+# The contains bucket, split by output shape. Under the PRE-BATCH truth table it was 22 reads, 9 of
+# them not a box fault in any sense and 2 of those broken parses that a substring test CREDITS -- a free
+# pass for the failure the typed contract exists to catch. Chris's batch moved the strings the substring
+# test runs against, so the population moved with them; the 22 stays in this sentence because it is what
+# was measured, and the assertion below derives today's figure instead of restating it.
+#
+# Pinned so item 7's re-tally knows what it is absorbing; classify is untouched.
 _cc = B.contains_counts()
-check("all 22 contains reads are accounted for by shape", sum(_cc.values()) == 22, _cc)
+_cp = B.contains_population()
+# Derived two ways that can disagree: the shapes must total the contains reads counted independently
+# off the same corpus, and no read may be filed under two different shapes. The first catches a read
+# that fell through every branch; the second catches a branch that is not exclusive. A set-equality on
+# the (span, read) pairs would NOT work here and was tried: the population legitimately repeats a pair
+# when two arms return the same string, so uniqueness is not the invariant -- exclusivity is.
+_full_b = {x["span_id"]: x for x in D.build_set(include_sealed=True)}
+_n_contains = sum(1 for _r in B.reads("A2_spanbox")
+                  if (_full_b.get(_r["span_id"]) or {}).get("truth")
+                  and D.classify(_r.get("gated") or "",
+                                 _full_b[_r["span_id"]]["truth"]) == "contains")
+_kinds_of = {}
+for _k, _v in _cp.items():
+    for _r in _v:
+        _kinds_of.setdefault(_r, set()).add(_k)
+check("the shapes total the contains reads counted independently -- none fell through every branch",
+      sum(_cc.values()) == _n_contains, "%d by shape vs %d by classify" % (sum(_cc.values()), _n_contains))
+check("and no read is filed under two shapes -- the branches are exclusive, not merely exhaustive",
+      not [r for r, ks in _kinds_of.items() if len(ks) > 1],
+      [(r[0], sorted(ks)) for r, ks in _kinds_of.items() if len(ks) > 1])
+check("the contains population moved with the batch, and the move is reported rather than pinned",
+      sum(_cc.values()) != 22,
+      "%d today against 22 under the pre-batch table -- item 7 step 5 owns the re-tally"
+      % sum(_cc.values()))
 check("9 of the 22 contains reads are not a box fault",
       sum(v for k, v in _cc.items() if k != "extra-material") == 9, _cc)
 check("two contains reads are broken parses credited by the substring test",

@@ -209,8 +209,11 @@ def contains_population(aperture="A2_spanbox"):
     THE CLAIM IT REFUTES. The BOX QUALITY note in hebrew_glyph_card said the `contains` class is
     mechanically caused by PAD=12 pulling the lines above and below into the crop: "an arm asked to
     transcribe the crop returns the signed span with its neighbours attached and was scored wrong for
-    obeying the prompt." Measured over all 22 contains reads, vertical neighbours account for none of
-    them that can be identified as such. What is actually in the bucket:
+    obeying the prompt." Measured over all 22 contains reads AS THEY STOOD UNDER THE
+    PRE-BATCH TRUTH TABLE (Chris's re-sign batch of 2026-09-27 moved four signatures, and the
+    substring test runs against those signatures, so this population moved with them -- every
+    figure in this docstring belongs to the table that was in force when it was measured),
+    vertical neighbours account for none of them that can be identified as such. What is actually in the bucket:
 
       extra-material   whole extra words on the SAME line. 10 of 22, and 10 of those 10 are p124:n4 --
                        the widest box in the set (458px for a two-word signature), whose reads pick up
@@ -443,16 +446,29 @@ def selftest():
     rows_by = {r["span_id"]: r for r in bind_rows()}
     _cc = contains_counts()
     print("      contains population: %s" % _cc)
-    ck("all 22 contains reads are accounted for", sum(_cc.values()) == 22, _cc)
-    # 9 of the 22 are not box faults in any sense: a glued letter, a trailing colon, a stray vav, a
+    # 23 SINCE CHRIS'S RE-SIGN BATCH of 2026-09-27, 22 before it. The substring test runs against the
+    # signature, so moving a signature moves this population: one p217:n2 arm returned היפלא יהוה -- the
+    # ruled PE plus the next word of Gen 18:14 -- which scored WRONG against the mem and is `contains`
+    # against the pe. The figures in contains_population()'s docstring belong to the pre-batch table and
+    # say so; this check derives the total instead of holding a number that a ruling can falsify.
+    _cfull = {x["span_id"]: x for x in D.build_set(include_sealed=True)}
+    _cind = sum(1 for x in reads()
+                if (_cfull.get(x["span_id"]) or {}).get("truth")
+                and D.classify(x.get("gated") or "", _cfull[x["span_id"]]["truth"]) == "contains")
+    ck("every contains read is accounted for by exactly one shape",
+       sum(_cc.values()) == _cind, (_cc, _cind))
+    ck("the batch moved this population by one, and it is p217:n2 that joined",
+       sum(_cc.values()) == 23 and "p217:n2" in {sid for sid, _g in contains_population()["extra-material"]},
+       sum(_cc.values()))
+    # 9 of them are not box faults in any sense: a glued letter, a trailing colon, a stray vav, a
     # duplication loop, and two broken parses. A substring test cannot tell those from page material.
-    ck("9 of the 22 contains reads are not a box fault at all",
+    ck("9 contains reads are not a box fault at all",
        sum(v for k, v in _cc.items() if k != "extra-material") == 9, _cc)
     _em = collections.Counter(sid for sid, _g in contains_population()["extra-material"])
     ck("extra-material concentrates in p124:n4, the widest box in the set",
        _em.most_common(1)[0] == ("p124:n4", 10), _em.most_common())
-    ck("and it is not p124:n4 alone -- p138:n5 and p427:n4 contribute too",
-       set(_em) == {"p124:n4", "p138:n5", "p427:n4"}, sorted(_em))
+    ck("and it is not p124:n4 alone -- p138:n5, p427:n4 and (since the batch) p217:n2 contribute too",
+       set(_em) == {"p124:n4", "p138:n5", "p427:n4", "p217:n2"}, sorted(_em))
     # The one that matters: a broken parse gets CREDITED by `truth in read`. p293:n0 returned a JSON
     # envelope and p491:n1 returned 200 characters of deliberation with the word quoted inside it.
     ck("a broken parse is credited by the substring test", len(contains_population()["envelope-leak"]) == 2,
@@ -476,19 +492,30 @@ def selftest():
        (not by["p362:n1"]["one_band"]) and rows_by["p362:n1"]["verdict"] == "unconfirmable",
        (by["p362:n1"]["one_band"], rows_by["p362:n1"]["verdict"]))
 
-    # The candidate queue must refuse to be a verdict.
-    ck("p895:n0 reaches the candidate queue", any(c["span_id"] == "p895:n0" for c in cands),
-       [c["span_id"] for c in cands])
-    p895 = [c for c in cands if c["span_id"] == "p895:n0"][0]
-    ck("p895:n0's modal read is one letter from the signature",
-       p895["one_letter"] and p895["n_modal"] >= 20, p895)
-    # The queue must not leak into the truth. p895:n0's signature stays exactly as signed while it
-    # sits in the queue, so a later re-tally scores against the signed verdict and not against what
-    # the readers preferred.
-    ck("the signature p895:n0 is scored against is untouched by the queue",
-       by["p895:n0"]["truth"] == "ותקער נפש", by["p895:n0"]["truth"])
-    ck("the modal read is NOT what p895:n0 is scored against",
-       p895["modal"] != by["p895:n0"]["truth"], (p895["modal"], by["p895:n0"]["truth"]))
+    # THE QUEUE IS EMPTY AS OF 2026-09-27 -- which is the queue WORKING, not the queue idle. p895:n0 was
+    # its only member: the queue named a signature under suspicion, Chris read the 4x glyph card, ruled
+    # the glyph a tsadi, and the signature moved to what the readers had been returning all along. The
+    # span left by ADJUDICATION. A queue that still listed it would be re-proposing what is now signed.
+    ck("the candidate queue is empty", cands == [], [c["span_id"] for c in cands])
+    ck("p895:n0 left it because the signature moved, not because the queue changed its mind",
+       by["p895:n0"]["truth"] == "ותקצר נפש"
+       and rows_by["p895:n0"]["verdict"] == "unconfirmable", (by["p895:n0"]["truth"],
+                                                             rows_by["p895:n0"]["verdict"]))
+    # THE FLIP IS NOT A CONFIRMATION. 22 of 37 arms returned the ruled string exactly, and `unconfirmable`
+    # is precisely the verdict that refuses to read that as 22 confirmations: the arms share a context
+    # strip, so their agreement measures the shared channel. Item 6's 2x2 is what turns these into
+    # evidence or into back-translation. This check exists so nobody reads the flip as vindication.
+    ck("22 exact reads under a shared context strip are UNCONFIRMABLE, not confirmed",
+       rows_by["p895:n0"]["classes"].get("exact") == 22
+       and rows_by["p895:n0"]["verdict"] == "unconfirmable", rows_by["p895:n0"]["classes"])
+    ck("no candidate ever proposes what is already signed",
+       all(c["modal"] != D._norm(by[c["span_id"]]["truth"]) for c in cands), cands[:1])
+    # An empty queue must not pass for want of a mechanism. The detector still fires on the signature
+    # p895:n0 carried before the ruling -- derived by putting the ayin back, not retyped.
+    _frm, _to, _why = D.GLYPH_RESIGN["p895:n0"]
+    _pre = by["p895:n0"]["truth"].replace(_to, _frm)
+    ck("the detector is not vacuous: it still fires on the pre-batch signature",
+       _one_letter_apart(_pre, "ותקצר נפש") and _pre != by["p895:n0"]["truth"], _pre)
     ck("the candidate queue is not a verdict field",
        all("verdict" not in c and "correction" not in c for c in cands), cands[:1])
 

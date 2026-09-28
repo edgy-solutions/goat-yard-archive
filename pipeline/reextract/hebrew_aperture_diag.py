@@ -47,6 +47,68 @@ NOT_HEBREW = "\x00NOT-HEBREW"  # sentinel: the correct answer is "there is no He
 
 # Signed truth, span by span. Every string traces to a human verdict; `basis` says which and how.
 # See audits/hebrew_aperture_prerun_20260920.md section 1 for the derivation of each.
+# ---------------------------------------------------------------------------------------------------
+# Chris's re-sign batch of 2026-09-27. Four spans, four verdicts given on SHAPE from the pixels, and
+# not one new Hebrew string typed into this file: each is derived from the string already here by the
+# rule the verdict names. Retyping Hebrew is the plausible-word-substitution risk this lane measures at
+# 35%, and it does not stop being that risk when the typist agrees with the verdict.
+#
+# The licences are separate because they fail differently, and each guard fires in the direction of the
+# MISTAKE rather than the direction of the intent:
+#
+#   GLYPH_RESIGN    one letter overturned from the pixels. Refuses unless the letter being replaced
+#                   occurs EXACTLY ONCE, so "replace the mem" can never silently become "replace the
+#                   first of two mems".
+#   DEPOINTED       the page prints bare consonants. Refuses unless the string actually carries points,
+#                   so a depointing ruling cannot be applied to a span that was never pointed.
+GLYPH_RESIGN = {
+    # span: (from, to, the shape observation the signature rests on)
+    "p217:n2": ("\u05de", "\u05e4",
+                "mem -> pe. Chris: 'that is not a mem - I can vouch for it - looks nothing like it.' "
+                "Both mem diagnostics in this fount are absent (the top-left horn, the opening at the "
+                "bottom left); the glyph is closed and boxy, which is an ink-filled pe, pe's enclosure "
+                "being the first thing to fill on a heavy impression. The 11-arm majority for the "
+                "canonical Genesis 18:14 form is the EXPECTED output of back-translation and is not "
+                "the basis."),
+    "p423:n3": ("\u05d1", "\u05d2",
+                "bet -> gimel. Signed from the re-cut crop on 2026-09-27; the blank crop that made "
+                "this span unscorable is fixed, so the pixels exist for the first time. The span reads "
+                "on one line, which is why the ratified box stands and needs no redraw."),
+    "p895:n0": ("\u05e2", "\u05e6",
+                "ayin -> tsadi. Chris signed from the pixels: ayin is two arms meeting at a point, "
+                "tsadi has a left stem with an arm joining from the upper right and a flat foot, and "
+                "the glyph has the stem and the foot. Numbers 21:4 reads the tsadi form and the ayin "
+                "form is not a word; both are corroboration recorded after the fact."),
+}
+DEPOINTED_POST_SITTING = {
+    "p726:n3": "Chris's verdict from the 4x crop, 2026-09-27: BARE consonants, no points under or "
+               "inside the letters. This was the last pointed truth in the table and had been flagged "
+               "unruled since the p200:n2 ruling; the book-wide 'Gill's Hebrew is unpointed' "
+               "assumption the prompt asserts on every span now has no counter-example in the signed "
+               "set. It also retires a flagged interpretive risk: this span's scorability rested on "
+               "reading 'correct but should have no makers' as a verdict about MARKERS and not about "
+               "the Hebrew, and Chris has now signed the Hebrew itself.",
+}
+
+
+def _resign(s, frm, to):
+    """One letter, overturned from the pixels. Refuses when the substitution is not unambiguous."""
+    if s.count(frm) != 1:
+        raise AssertionError(
+            "resign %r -> %r: the string %r contains %d of them, and a rule that says 'the' letter "
+            "may only be applied when there is exactly one" % (frm, to, s, s.count(frm)))
+    return s.replace(frm, to)
+
+
+def _depoint(s):
+    """The page prints bare consonants. Refuses on a string that carries none, which would mean the
+    ruling is being applied to the wrong span."""
+    bare = nikud_gate.strip_nikud(s)
+    if bare == s:
+        raise AssertionError("depoint %r: it carries no points -- this ruling is on the wrong span" % s)
+    return bare
+
+
 TRUTH = {
     "p102:n0": ("\u05d1\u05e8\u05d0 - \u05dc\u05e2\u05e9\u05d5\u05ea", "signed-correct:candidate-verbatim"),
     "p124:n4": ("\u05dc\u05d0 \u05db\u05df", "signed-correction:partial-span"),
@@ -81,7 +143,16 @@ TRUTH = {
     "p253:n2": ("\u05d4\u05e7\u05e8\u05d4 \u05e0\u05d0 \u05dc\u05e4\u05e0\u05d9",
                 "signed-correction:derived-strip-nikud"),
     "p360:n0": ("\u05e9\u05d0\u05dc \u05e9\u05d0\u05dc", "signed-correct:candidate-verbatim"),
-    "p895:n0": ("\u05d5\u05ea\u05e7\u05e2\u05e8 \u05e0\u05e4\u05e9", "signed-correction:disputes-agent-printed"),
+    # RE-SIGNED 2026-09-27 (batch): ayin -> tsadi, see GLYPH_RESIGN for the shape verdict. The string
+    # below is the 2026-09-06 correction as the sitting recorded it; the signed truth is that string
+    # with its single ayin replaced, computed here rather than retyped.
+    #
+    # Worth recording plainly: this re-sign was reported as ALREADY APPLIED in this morning's batch
+    # document and in two sets of session notes, and it was not. The table still held the ayin form
+    # until this batch. A literal would have carried that error indefinitely; the derivation is what
+    # caught it.
+    "p895:n0": (_resign("\u05d5\u05ea\u05e7\u05e2\u05e8 \u05e0\u05e4\u05e9", *GLYPH_RESIGN["p895:n0"][:2]),
+                "signed-resign:ayin-to-tsadi-ruled-20260927"),
     "p900:n4": (NOT_HEBREW, "signed-correction:not-hebrew-greek"),
     "p657:n0": ("\u05d1\u05d4\u05e8", "signed-residue-correction"),
 }
@@ -103,7 +174,15 @@ UNSCORABLE = {}
 #   chosen == "wrong" + correction       -> truth is the correction string
 #   chosen == "wrong" + empty correction -> UNSCORABLE (same rule that excluded p138:n6)
 SEALED_TRUTH = {
-    "p217:n2": ("הימלא", "signed-correct:candidate-verbatim"),
+    # RE-SIGNED 2026-09-27 (batch): mem -> pe, see GLYPH_RESIGN. The base string is the 2026-09-06
+    # candidate, affirmed verbatim -- which is the whole point of this case. It is the fourth
+    # inherited-property defect and the only one where the candidate was not even edited: the
+    # machine's whole string was accepted and the third glyph was never the thing being looked at.
+    # p200:n2 inherited pointing, p362:n1 inherited word division, p895:n0 inherited a letter from an
+    # edited string, and this one inherited a letter from an unedited one. Four for four, one cause,
+    # and the cause is attention rather than editing.
+    "p217:n2": (_resign("\u05d4\u05d9\u05de\u05dc\u05d0", *GLYPH_RESIGN["p217:n2"][:2]),
+                "signed-resign:mem-to-pe-ruled-20260927"),
     "p293:n0": ("יחמנה", "signed-correct:candidate-verbatim"),
     # RULED 2026-09-27 by Chris, from the rendered console card: "the signed one is correct but
     # there should be a space between the two parts ... the models found that". The printed form is
@@ -122,8 +201,18 @@ SEALED_TRUTH = {
     # gate arms, and this span was published as having no correct candidate from any arm.
     "p362:n1": ("\u05dc\u05d4\u05ea\u05d2\u05dc\u05dc \u05e2\u05dc\u05d9\u05e0\u05d5",
                 "signed-correction:word-space-restored-ruled-20260927"),
-    "p423:n3": ("ותגע לרבליו",
-                "signed-correction:verbatim"),
+    # RE-SIGNED 2026-09-27 (batch): bet -> gimel, see GLYPH_RESIGN. Signed from the re-cut crop, the
+    # first pixels this span has ever had -- the crop sent in the frontier run was uniform white, which
+    # is why it was held UNSCORABLE and why the question "is the bet a diplomatic reading or a slip?"
+    # could not be answered then. The base string is Chris's own 2026-09-06 correction.
+    #
+    # What this costs the set: the span was going to be its best back-translation probe precisely
+    # BECAUSE its signed form differed from the biblical one -- every model reading gimel would have
+    # been substituting. The probe is gone, and the reason it is gone is that the printed page reads
+    # gimel. A probe that depends on the truth being unusual is worth exactly what the truth is.
+    "p423:n3": (_resign("\u05d5\u05ea\u05d2\u05e2 \u05dc\u05e8\u05d1\u05dc\u05d9\u05d5",
+                        *GLYPH_RESIGN["p423:n3"][:2]),
+                "signed-resign:bet-to-gimel-ruled-20260927"),
     "p427:n4": ("הבאשתם", "signed-correct:candidate-verbatim"),
     "p491:n1": ("בשמע", "signed-correct:candidate-verbatim"),
     # SIGNED 2026-09-27 by Chris (sequence item 5), same shape as p138:n6: the sitting row was
@@ -141,9 +230,29 @@ SEALED_TRUTH = {
     # verbatim. This interpretation is load-bearing for n: the prerun's arithmetic ("n goes 10 -> 19")
     # counts this span as scorable and p596:n2 as not, which is only consistent with reading it this way.
     # Flagged in every report rather than buried; if Chris reads it otherwise, n is 18 and this span drops.
-    "p726:n3": ("שְׁאָר אָבִיךְ",
-                "signed-wrong:marker-defect-not-hebrew-defect"),
+    # RULED 2026-09-27 by Chris from the 4x crop: BARE. See DEPOINTED_POST_SITTING. The base string is
+    # the pointed candidate he affirmed in 2026-09-06 -- the fifth inherited-property case and the one
+    # that had been flagged longest. The points came from the candidate he was shown, not from the page.
+    #
+    # Two things this closes. The "Gill's Hebrew is unpointed" assertion the prompt makes on every span
+    # now has no counter-example in the signed set, so it needs no book-wide footnote. And this span's
+    # scorability no longer rests on an interpretation of mine: it was scorable only if "correct but
+    # should have no makers" is read as a verdict about the note's MARKERS rather than about the
+    # Hebrew, which every report flagged as load-bearing for n. Chris has now signed the Hebrew.
+    #
+    # One consequence for the tally, not fixed here: arms that returned the pointed form will now
+    # classify `nikud-only` rather than `exact`. That is the correct third state -- adding points to
+    # the standard does not make an unpointed read wrong -- and it is item 5's business, not this
+    # patch's.
+    "p726:n3": (_depoint("\u05e9\u05b0\u05c1\u05d0\u05b8\u05e8 \u05d0\u05b8\u05d1\u05b4\u05d9\u05da\u05b0"),
+                "signed-correction:derived-strip-nikud-ruled-20260927"),
     "p897:n4": ("ענו לה", "signed-correction:verbatim"),
+    # UNCHANGED in the 2026-09-27 batch, on purpose. The open question here is word ORDER -- which
+    # word is physically to the right on the page -- and the signature already answers that; the gloss
+    # running "in Jahacob, in Israel" does not, because Gill's Hebrew and his gloss do not always run
+    # in the same order. What is outstanding is the BOX: the A2 crop scored `clipped`, so this span's
+    # reads are about a crop that cuts the span, and the box is queued for re-ratification. A box fault
+    # is not a reason to touch a signed string.
     "p912:n2": ("ביעקב בישראל",
                 "signed-correct:candidate-verbatim"),
 }
@@ -180,7 +289,8 @@ def _assert_derivation(sitting, agent=None):
     string in this module with no import-time derivation at all, which is precisely the entry a later
     reader would have no way to distinguish from something I typed."""
     todo = dict(SEALED_TRUTH)
-    todo.update({k: v for k, v in TRUTH.items() if k in RULED_POST_SITTING})
+    todo.update({k: v for k, v in TRUTH.items()
+                 if k in RULED_POST_SITTING or k in GLYPH_RESIGN or k in DEPOINTED_POST_SITTING})
     for sid, (want, basis) in todo.items():
         rec = sitting.get(sid)
         if not rec:
@@ -224,6 +334,14 @@ def _assert_derivation(sitting, agent=None):
             if got.replace(" ", "") != ruled.replace(" ", ""):
                 raise AssertionError(f"{sid}: the ruling changed a letter, not just word division")
             got = ruled
+        # The 2026-09-27 re-signs, applied to the FILE-derived string by the same rule the table
+        # entry uses. This is not a tautology: it proves the base string in the table is the one the
+        # sitting recorded. Get that base wrong -- as the p895:n0 notes did for a day -- and the
+        # transformed strings disagree here.
+        if sid in GLYPH_RESIGN:
+            got = _resign(got, *GLYPH_RESIGN[sid][:2])
+        if sid in DEPOINTED_POST_SITTING:
+            got = _depoint(got)
         if _norm(got) != _norm(want):
             raise AssertionError(f"{sid}: derived {got!r} != recorded {want!r}")
 
@@ -584,7 +702,15 @@ def a1_x_shifts():
     says whether it has: a non-zero dx anywhere means page geometry moved horizontally, which is the
     trigger. Width-only growth (dx 0, dw positive) is a clamp releasing on the right edge and is not.
     Returns span_id -> [(dx, dw), ...], one per rect, or span_id -> None when the rect count changed
-    and the rects cannot be paired at all."""
+    and the rects cannot be paired at all.
+
+    CORRECTED 2026-09-27. This docstring used to read "width-only growth (dx 0, dw positive) is a clamp
+    releasing on the right edge". That was my explanation of the +300..+450px growth here and it was
+    false: those four boxes were already OVER THE CANVAS FILLER that presplit pads a narrow band with,
+    and dc573ca merely stopped clamping them, so each crop grew by the filler it was always sitting on.
+    See `band_overshoot` below, which measures it. dx is still the right trigger for Chris's A1 clause --
+    what changed is that dw is not innocent, and a crop whose width grew is now a crop to re-examine
+    rather than a crop to wave through."""
     live = {m["span_id"]: m for m in json.loads((CROPDIR / "manifest.json").read_text(encoding="utf-8"))}
     sent = {m["span_id"]: m for m in json.loads((AS_SENT / "manifest.json").read_text(encoding="utf-8"))}
     out = {}
@@ -595,6 +721,56 @@ def a1_x_shifts():
             out[sid] = None
             continue
         out[sid] = [(b[0] - a[0], (b[2] - b[0]) - (a[2] - a[0])) for a, b in zip(o, n)]
+    return out
+
+
+def band_overshoot():
+    """Every crop rect that lies outside the BAND it was detected in: a box over canvas filler.
+
+    presplit pastes each band at canvas x=0 into a canvas as wide as the widest band, so a narrow band
+    carries (canvas_w - band_w) px of white filler on its right. A box over that filler is not on the
+    page. note_region gates the MAPPED result against page width, which catches the fault only when the
+    overshoot happens to cross the page edge -- so the same mechanism is loud in the right column and
+    silent in the left. Lane A found it (4b2e0de on body-path); this is Lane B's measurement of it, kept
+    here because a gate must be able to see the failure it is accountable for, and because the five loud
+    refusals in the fault table looked like five faults rather than nine.
+
+    Bands sit SIDE BY SIDE natively -- the strip stacks them, the page does not -- so a rect's band is
+    the one whose native x-range contains its left edge, and those ranges partition the page width
+    exactly. No tolerance is needed and none is given: a left edge outside every band is itself a fault,
+    which is how p217:n2's rect at native x=-2 is caught rather than rounded into band 0.
+
+    -> [{span_id, aperture, rect, band, band_x0, band_x1, over, kind}], kind in
+       {"overshoot", "left-of-every-band"}. Empty is the goal state, not a vacuous pass: the companion
+    check counts the rects it examined."""
+    import cv_footnote_presplit as _ps
+    man = json.loads((CROPDIR / "manifest.json").read_text(encoding="utf-8"))
+    cache, out, seen = {}, [], 0
+    for m in man:
+        pg = m.get("page") or m["span_id"].split(":")[0][1:]
+        if pg not in cache:
+            cache[pg] = _ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)[1]["bands"]
+        bands = cache[pg]
+        for ap in ("A2_spanbox", "A1_notebox"):
+            d = m.get(ap)
+            if not d:
+                continue
+            for r in d["native_rects"]:
+                seen += 1
+                hit = [(i, b) for i, b in enumerate(bands)
+                       if b["native"][0] <= r[0] < b["native"][0] + b["size"][0]]
+                if len(hit) != 1:
+                    out.append(dict(span_id=m["span_id"], aperture=ap, rect=list(r), band=None,
+                                    band_x0=None, band_x1=None, over=None,
+                                    kind="left-of-every-band"))
+                    continue
+                bi, b = hit[0]
+                x1 = b["native"][0] + b["size"][0]
+                if r[2] > x1:
+                    out.append(dict(span_id=m["span_id"], aperture=ap, rect=list(r), band=bi,
+                                    band_x0=b["native"][0], band_x1=x1, over=r[2] - x1,
+                                    kind="overshoot"))
+    band_overshoot.rects_examined = seen
     return out
 
 

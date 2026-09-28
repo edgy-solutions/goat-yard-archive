@@ -37,6 +37,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import hebrew_aperture_diag as diag
+import nikud_gate                                                            # noqa: E402
 import hebrew_frontier_or as F
 from run_header import require_endpoint, HeaderMissingEndpoint
 
@@ -110,14 +111,54 @@ raw_leaks = [s["span_id"] for s, _c, _x in CS if N(s["truth"]) in N(s["latin_con
 # (היה where the page has סנה), so back-translation actively misleads there. Recorded for item 6.
 # p726:n3 joined the leak set on 27 Sept purely by entering the population -- its gloss always leaked,
 # there was simply no crop to send it with. p423:n3 entered too and does NOT leak.
-_LEAK = {"p102:n0", "p124:n4", "p138:n5", "p219:n0", "p360:n0", "p217:n2", "p293:n0", "p427:n4",
-         "p491:n1", "p726:n3", "p912:n2"}
-check(f"the raw latin_context leaks the signed truth on exactly the known {len(_LEAK)} spans",
-      set(raw_leaks) == _LEAK, sorted(set(raw_leaks) ^ _LEAK))
-check("neither newly signed span leaks its truth into the context",
-      not ({"p138:n6", "p596:n2"} & set(raw_leaks)), sorted({"p138:n6", "p596:n2"} & set(raw_leaks)))
+# 2026-09-27, after Chris's re-sign batch: THE LITERAL TEST'S REACH SHRANK AND THE LEAKAGE DID NOT.
+# `raw_leaks` fell from 11 to 9 and not one context became safer. Both departures are artifacts of
+# asking for a literal substring of the SIGNED string:
+#   p217:n2  the body layer transcribes the word as הימלא -- with the very MEM Chris overturned. Four of
+#            five consonants and a plausible fifth are still handed over. (That the body layer carries
+#            the overturned reading is a finding in its own right and is owed a standoff record; it is
+#            NOT evidence for the mem, since it is one more reader of the same glyph.)
+#   p726:n3  the context holds the pointed form and the signature is now bare, so the points sit between
+#            the consonants. The whole word is present and no literal substring matches.
+# And the measure was already understating BEFORE today: p253:n2 was depointed at an earlier sitting and
+# has never been in this set, though its context gives the word away exactly as p726's does. So the
+# historical 11 was an artifact too. Three measures, each claim attached to the one that supports it:
+DEP = lambda t: nikud_gate.strip_nikud(N(t))
+bare_leaks = [s["span_id"] for s, _c, _x in CS if DEP(s["truth"]) in DEP(s["latin_context"])]
+
+
+def _unruled(sid, truth):
+    """Every string one occurrence of the ruled letter away from the signature -- a SET, not "the"
+    pre-batch string. Reversing a re-sign is ambiguous by construction (`diag._resign` refuses p423:n3,
+    which now holds two gimels) and the ambiguity is real, so the test quantifies over all of them."""
+    frm, to, _why = diag.GLYPH_RESIGN[sid]
+    return {truth[:i] + frm + truth[i + 1:] for i, c in enumerate(truth) if c == to}
+
+
+TRU = {s["span_id"]: s["truth"] for s, _c, _x in CS}
+over_leaks = [s["span_id"] for s, _c, _x in CS
+              if s["span_id"] in diag.GLYPH_RESIGN and s["span_id"] not in bare_leaks
+              and any(DEP(a) in DEP(s["latin_context"]) for a in _unruled(s["span_id"], s["truth"]))]
+_ALL_LEAK = set(raw_leaks) | set(bare_leaks) | set(over_leaks)
+check("the literal test sees 9 of 19 -- and that is the reach of the TEST, not the leakage",
+      len(raw_leaks) == 9 and set(raw_leaks) <= _ALL_LEAK, sorted(raw_leaks))
+check("nikud-insensitively it is 11, and the two it adds are p253:n2 and p726:n3",
+      set(bare_leaks) - set(raw_leaks) == {"p253:n2", "p726:n3"},
+      sorted(set(bare_leaks) - set(raw_leaks)))
+check("p253:n2 was never in the typed leak set, so the old figure was understated too",
+      "p253:n2" in bare_leaks and "p253:n2" not in raw_leaks)
+check("p217:n2 leaks a reading one ruled letter from the signature (the body layer's own mem)",
+      over_leaks == ["p217:n2"], sorted(over_leaks))
+check("p423:n3's re-sign is NOT reversible to one string, and it leaks under none of the two",
+      len(_unruled("p423:n3", TRU["p423:n3"])) == 2 and "p423:n3" not in _ALL_LEAK)
+check("so the population whose context gives the answer away is 12 of 19, not 9 and not 11",
+      len(_ALL_LEAK) == 12 and len(CS) == 19, f"{len(_ALL_LEAK)} of {len(CS)}")
+check("neither newly signed span leaks its truth into the context, by any of the three measures",
+      not ({"p138:n6", "p596:n2"} & _ALL_LEAK), sorted({"p138:n6", "p596:n2"} & _ALL_LEAK))
 check("the guard is load-bearing: a majority of spans would leak unguarded",
-      len(raw_leaks) >= len(CS) / 2, f"{len(raw_leaks)} of {len(CS)}")
+      len(_ALL_LEAK) >= len(CS) / 2, f"{len(_ALL_LEAK)} of {len(CS)}")
+check("and the guard does not depend on any of that -- it strips Hebrew runs, not known strings",
+      not any(F.HEB.search(x) for _s, _c, x in CS if _s["span_id"] in _ALL_LEAK))
 check(f"_ctx leaves zero Hebrew characters on all {len(CS)}",
       not any(F.HEB.search(x) for _s, _c, x in CS))
 check(f"_ctx leaves usable Latin on all {len(CS)} (not blanked)",
@@ -413,5 +454,45 @@ if fails:
     for f in fails:
         print(f"  - {f}")
     sys.exit(1)
-print(f"PASS: A2-only n={len(CS)}, {len(raw_leaks)}/{len(CS)} raw-context leaks blocked, no note-box crop reachable.")
+print("\n(11) boxes over canvas filler -- Lane A's mechanism, measured here")
+_BO = diag.band_overshoot()
+_bo_a2 = [b for b in _BO if b["aperture"] == "A2_spanbox"]
+_bo_a1 = {b["span_id"] for b in _BO if b["aperture"] == "A1_notebox"}
+# THE CHECK THAT GATES THE SPEND. presplit's filler cannot reach a crop we are about to pay for unless
+# an A2 box overshoots its band, and none does. Measured, not assumed -- and measured after the re-cut,
+# because dc573ca stopped clamping and a clamp is what was hiding this.
+check("no A2 span box overshoots its band, so no crop in the send scope is over filler",
+      _bo_a2 == [], [(b["span_id"], b["over"]) for b in _bo_a2])
+_exp_rects = sum(len(m[ap]["native_rects"]) for m in MAN.values()
+                 for ap in ("A2_spanbox", "A1_notebox") if m.get(ap))
+check("the measurement is not vacuous: it examined every rect the manifest holds",
+      diag.band_overshoot.rects_examined == _exp_rects and _exp_rects >= len(CS),
+      f"{diag.band_overshoot.rects_examined} examined, {_exp_rects} in the manifest")
+# THE TRIPWIRE. These four A1 boxes are over filler and SILENT about it -- left column, so the mapped x1
+# lands inside the 3584px page and the page-width gate cannot see them. Five more are refused loudly in
+# the fault table (right column), which is nine faulty note boxes and not the five the table shows.
+# This check FAILS the day Lane A's clip-and-flag lands, and that failure is the signal: re-cut, re-hash,
+# and re-read Chris's ruling of 2026-09-27 -- clip to band width, flag edge:band-clipped.
+check("the over-filler A1 population is exactly these four left-column boxes",
+      _bo_a1 == {"p217:n2", "p219:n0", "p293:n0", "p895:n0"}, sorted(_bo_a1))
+check("p217:n2 is not merely an overshoot -- its rect starts left of every band, so a clip cannot fix it",
+      any(b["span_id"] == "p217:n2" and b["kind"] == "left-of-every-band" for b in _BO),
+      [b for b in _BO if b["span_id"] == "p217:n2"])
+# The fault table holds SIX, and they are not one kind. Five are the loud right-column case: the mapped
+# x1 lands past the 3584px page and note_region refuses. The sixth is p217:n2, caught by the STRIP-side
+# check instead (`out-of-strip ... beyond=left2`) because its box starts at x=-2 -- a different check
+# seeing a different symptom of the same filler geometry. That is why p217:n2 is in this set AND in the
+# overshoot set: it is flagged, and it still produced a crop carrying 330px of filler.
+_a1f = diag.crop_faults("A1_notebox")
+_loud = {k for k, f in _a1f.items() if "exceeds page width" in f}
+check("the fault table holds six A1 boxes: five right-column page-width, one out-of-strip",
+      len(_a1f) == 6 and len(_loud) == 5 and "p217:n2" in set(_a1f) - _loud, sorted(_a1f))
+check("p217:n2 is flagged AND produced a crop, so a recorded fault is not a refusal",
+      "p217:n2" in _a1f and MAN["p217:n2"].get("A1_notebox"), _a1f.get("p217:n2"))
+check("three boxes are over filler with NO fault recorded at all -- nine faulty boxes, not six",
+      _bo_a1 - set(_a1f) == {"p219:n0", "p293:n0", "p895:n0"}
+      and len(_bo_a1 | set(_a1f)) == 9, sorted(_bo_a1 - set(_a1f)))
+
+print(f"PASS: A2-only n={len(CS)}, {len(_ALL_LEAK)}/{len(CS)} context leaks blocked "
+      f"({len(raw_leaks)} of them literal), no note-box crop reachable.")
 sys.exit(0)
