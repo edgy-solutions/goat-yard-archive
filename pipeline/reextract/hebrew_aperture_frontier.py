@@ -49,8 +49,18 @@ PROVIDERS = {
 
 
 def _b64_file(p, what=""):
-    """GATED -- see hebrew_aperture_diag.b64_gated."""
-    return diag.b64_gated(p, what=what or str(p)[-50:])
+    """GATED, and offnet -- see hebrew_aperture_diag.b64_gated.
+
+    This arm's bytes go to api.anthropic.com or openrouter.ai, so `offnet=True`: the gate refuses
+    anything that is not an A2 span-box crop. That has a consequence worth stating plainly rather than
+    discovering at runtime. `_body()` sends TWO images, context strip then aperture crop, and the strip
+    is not an A2 crop -- so this module as written now RAISES CropRefused on its first strip.
+
+    That is the intended state. Chris's standing rule is A2 span-box crops only, no note-box or page
+    crop leaves the network; this module was BUILT, NOT CALLED, and predates that rule. Sending a
+    context strip offnet is a new outbound class that has not been authorised. Until it is, the arm
+    fails loudly instead of quietly shipping a page strip to a hosted API."""
+    return diag.b64_gated(p, what=what or str(p)[-50:], offnet=True)
 
 
 def _body(prov, model, ctx_b64, crop_b64):

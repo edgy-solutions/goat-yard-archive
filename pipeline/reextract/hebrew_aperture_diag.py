@@ -632,25 +632,38 @@ class CropRefused(Exception):
         super().__init__(f"crop refused before send: {fault}" + (f" [{what}]" if what else ""))
 
 
-def b64_gated(src, what="", **geo):
+# The only aperture authorised to leave the network. Chris, on the A2 crops: A2 span-box crops only,
+# no note-box crop leaves the machine. A1_notebox was unreachable from the frontier caller by
+# construction; `offnet=True` makes it unreachable by refusal as well.
+OFFNET_SUFFIX = "_A2_spanbox.png"
+
+
+def b64_gated(src, what="", offnet=False, **geo):
     """base64 of an image that PASSED the gate, or CropRefused. The ONLY sanctioned encoder.
 
     Every arm routes its base64 through here -- hebrew_frontier_or, hebrew_local_arms,
     hebrew_aperture_frontier, hebrew_recrop. The gate is placed at the ENCODE rather than beside the
     post() because an arm cannot reach the wire without encoding, so this is the one step that cannot
     be skipped by forgetting. A gate an arm has to remember to call is not a gate; it is a comment."""
-    raw, fault = gate_outbound(src, **geo)
+    raw, fault = gate_outbound(src, offnet=offnet, **geo)
     if fault:
         raise CropRefused(fault, what or str(getattr(src, "name", "") or src)[-60:])
     return base64.b64encode(raw).decode()
 
 
-def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None):
+def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None, offnet=False):
     """(png_bytes, None) when it is safe to send; (None, fault) when it is refused.
 
     `src` is a path or a PIL image. Geometry arguments are optional because a recrop made in memory
     has no ratified rect to check -- but the pixel checks always run, so nothing reaches the wire
     unexamined."""
+    if offnet:
+        # Aperture check FIRST: refuse before the bytes are read, so a refused image is never held in
+        # memory on the path to the wire.
+        if hasattr(src, "convert"):
+            return None, "offnet:in-memory-image-has-no-aperture"
+        if not str(src).endswith(OFFNET_SUFFIX):
+            return None, "offnet:not-an-A2-span-box-crop:%s" % Path(src).name
     if hasattr(src, "convert"):
         im = src
         buf = io.BytesIO()
@@ -685,17 +698,40 @@ def crop_sha(span_id, aperture="A2_spanbox", as_sent=False):
     return _sha(d / f"{span_id.replace(':', '_')}_{aperture}.png")
 
 
+def stale_read_why(o, changed, cur):
+    """Why this ONE read is no longer evidence about a crop we hold, or None if it still is.
+
+    THE single staleness rule, asked by `hebrew_frontier_or.stale_reads` and by `hebrew_bind`. It lives
+    here because it lived in both of them: the read-keyed correction of 2026-09-27 was made in the
+    frontier module and did not reach bind, so bind went on asking the span-level question and voided
+    26 hash-verified p912:n2 reads along with 36 mute ones. Two copies of a rule is how one of them
+    stays wrong.
+
+    `changed` is `crops_changed(aperture)` and `cur` is {span_id: live sha}, both passed in so a caller
+    can hash the corpus once for thousands of reads.
+
+    An ABSENT hash is not a mismatched hash. A read with no `crop_sha16` predates the field, which means
+    it was taken on the as-sent crop -- still valid evidence unless that crop has since been re-cut."""
+    sid, h = o.get("span_id"), o.get("crop_sha16")
+    if h:
+        return None if h == cur.get(sid) else "crop-sha-mismatch:%s!=%s" % (h, cur.get(sid))
+    return "pre-hash-read-on-recut-crop" if sid in changed else None
+
+
 def crops_changed(aperture="A2_spanbox"):
     """span_id -> (sha_as_sent, sha_now) for crops that differ from the ones the reads were taken on.
 
-    A read is evidence about the pixels it was shown. When a crop is re-cut, every read recorded
-    against it becomes STALE -- not wrong, not confirmed, just no longer about anything on disk -- and
-    the span has to be re-run before it can be scored again.
+    A read is evidence about the pixels it was shown. When a crop is re-cut, the reads recorded against
+    it become STALE -- not wrong, not confirmed, just no longer about anything on disk.
 
-    This is the union of two causes and is the right answer for VOIDING EVIDENCE, where they are the
-    same: no read on record is about anything on disk either way. It is the wrong answer for SCOPE,
-    where they are opposites -- see `crops_recut` and `crops_gone`. It used to be described as "the
-    re-run scope" and it is not: a crop the geometry no longer produces cannot be re-run at all."""
+    NOT A VOID SET, and this docstring used to say it was: "the right answer for VOIDING EVIDENCE,
+    where they are the same: no read on record is about anything on disk either way." True while every
+    read predated hashing, and falsified on 2026-09-28 by the first span that was re-cut AND THEN
+    RE-READ. p912:n2 has 36 pre-hash reads on the retired crop and 26 carrying the live crop's hash;
+    membership here says its crop moved, and says nothing about which of its reads are mute. Ask
+    `stale_read_why` per read. It is also the wrong answer for SCOPE, where the two causes are
+    opposites -- see `crops_recut` and `crops_gone`: a crop the geometry no longer produces cannot be
+    re-run at all."""
     out = {}
     for p in sorted(AS_SENT.glob(f"*_{aperture}.png")):
         sid = p.name[:-len(f"_{aperture}.png")].replace("_n", ":n")

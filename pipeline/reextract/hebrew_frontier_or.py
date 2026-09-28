@@ -219,14 +219,11 @@ def stale_reads():
     for o in diag._lines(OUT):
         if o.get("kind") != "read" or o.get("span_id") not in sets:
             continue
-        sid, h = o["span_id"], o.get("crop_sha16")
-        if h:
-            if h != cur.get(sid):
-                out[read_key(o)] = "crop-sha-mismatch:%s!=%s" % (h, cur.get(sid))
-        elif sid in changed:
-            # No hash recorded means the row predates the hashing, which means it was taken on the
-            # as-sent crop. That is only still valid if the crop has not been re-cut since.
-            out[read_key(o)] = "pre-hash-read-on-recut-crop"
+        # The rule itself is `diag.stale_read_why` -- one copy, shared with hebrew_bind. It used to be
+        # inline here, and being inline here is why bind never got the read-keyed version of it.
+        why = diag.stale_read_why(o, changed, cur)
+        if why:
+            out[read_key(o)] = why
     return out
 
 
@@ -371,7 +368,9 @@ def call(model, s, cpath, ctx, structured, timeout=300):
     refusals that got us there."""
     # GATED: a blank or clamped crop never reaches OpenRouter. p423:n3 and p726:n3 went out to 30
     # arms as pure white before this existed, and 7 of 8 answered with Hebrew anyway.
-    img = diag.b64_gated(cpath, what="frontier crop")
+    # offnet: these bytes go to openrouter.ai. The gate refuses anything that is not an A2 span-box
+    # crop, so the A2-only rule no longer depends on `cells()` being the only caller.
+    img = diag.b64_gated(cpath, what="frontier crop", offnet=True)
     refusals, r, body, applied, secs = [], None, None, None, 0.0
     for spec, label in REASONING_LADDER:
         body = _body(model, ctx, img, structured, reasoning=spec)

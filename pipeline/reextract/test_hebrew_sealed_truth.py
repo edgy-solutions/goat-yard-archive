@@ -423,6 +423,53 @@ check("the gated encoder passes a real crop",
 check("a missing file is refused rather than crashing",
       (_gate_err(D.CROPDIR / "definitely_not_here.png") or "").startswith("missing"))
 
+# ---------------------------------------------------------------------------------------------------
+# The A2-only rule, 2026-09-28. Chris: A2 span-box crops only; no note-box crop leaves the network.
+# What had been enforcing that was `hebrew_frontier_or.cells()` returning the A2 path and nothing else.
+# MEASURED, not assumed: handed `p912_context_strip.png`, the gate returned 20358 bytes and no
+# complaint. It has never been violated, but item 6's 2x2 has a "context strip on" cell, and the only
+# thing between a page strip and OpenRouter was whoever wired that line remembering the rule.
+#
+# The distinction that matters is not which aperture, it is which NETWORK: the local arms send a
+# context strip legitimately, to Ollama on the LAN, and that aperture pair is what item 1 was built on.
+# So `offnet=True` marks an encode whose bytes leave the premises, and only that path is restricted.
+#
+# Both directions, because a gate that refuses everything is as broken as one that refuses nothing:
+_CTX_STRIP = D.CROPDIR / "p912_context_strip.png"
+check("the context strip this section reasons about is on disk, so a pass here is not vacuous",
+      _CTX_STRIP.exists(), str(_CTX_STRIP))
+_strip_off = D.gate_outbound(_CTX_STRIP, offnet=True)
+check("offnet refuses a context strip, naming the aperture",
+      _strip_off[0] is None and "not-an-A2-span-box-crop" in _strip_off[1], _strip_off[1])
+check("the SAME strip still passes on-net, so this is a network rule and not a blanket ban",
+      D.gate_outbound(_CTX_STRIP, offnet=False)[0] is not None)
+check("offnet passes the A2 crop the frontier actually sends",
+      D.gate_outbound(D.CROPDIR / "p912_n2_A2_spanbox.png", offnet=True)[0] is not None)
+# A recrop has no filename to check its aperture by. Refused rather than waved through: if an
+# in-memory image ever needs to go offnet it fails loudly and gets a decision, which is the direction
+# this should fail in.
+check("offnet refuses an in-memory image, which has no aperture to check",
+      (D.gate_outbound(Image.new("L", (80, 40), 128), offnet=True)[1] or "")
+      .startswith("offnet:in-memory"), D.gate_outbound(Image.new("L", (80, 40), 128), offnet=True)[1])
+
+# Structural: every arm whose host is not on this network must pass offnet. The two hosted arms are
+# named explicitly, because the failure mode is a THIRD arm appearing without it -- which this check
+# cannot see, and the honest scope note is that it does not claim to.
+for _a, _host in (("hebrew_frontier_or.py", "openrouter.ai"),
+                  ("hebrew_aperture_frontier.py", "api.anthropic.com / openrouter.ai")):
+    _src = io.open(_HERE / _a, encoding="utf-8").read()
+    check(f"{_a} encodes offnet (its host is {_host})", "offnet=True" in _src, _a)
+for _a in ("hebrew_local_arms.py", "hebrew_recrop.py"):
+    _src = io.open(_HERE / _a, encoding="utf-8").read()
+    check(f"{_a} does NOT, because its host is on the LAN and it needs the strip",
+          "offnet=True" not in _src, _a)
+# The consequence, stated so it is not discovered at runtime: hebrew_aperture_frontier sends two
+# images, and the first is a strip. It therefore cannot run as written. It never has -- BUILT, NOT
+# CALLED, and its output artifact does not exist -- and it predates the A2-only rule. Sending a strip
+# offnet is an outbound class Chris has not authorised, so the arm is blocked, not silently corrected.
+check("hebrew_aperture_frontier has never produced an artifact, so nothing is invalidated by blocking it",
+      not (D.DATA / "hebrew_aperture_frontier_reads_20260920.jsonl").exists())
+
 # Chris 2026-09-27: refuse a crop whose mapped rect leaves the page OR THE STRIP.
 check("a box that leaves the strip is refused",
       (D.crop_fault(Image.open(D.CROPDIR / "p912_n2_A2_spanbox.png"), [],
@@ -606,11 +653,62 @@ print("\n(12) ITEM 3 -- the binding test refuses to confirm what it cannot see")
 _brows, _bcounts, _bbroken = B.bind_report()
 print(f"      binding verdicts: {_bcounts}")
 check("no span is ever called bound", "bound" not in _bcounts, _bcounts)
-check("p912:n2 is detected broken by the sound signal only",
-      next(r for r in _brows if r["span_id"] == "p912:n2")["verdict"] == "broken:box-too-small")
+# WAS: "p912:n2 is detected broken by the sound signal only", asserting `broken:box-too-small`. The
+# signal was right and the fault was real -- 14 of 26 arms returned `clipped` on that aperture, which is
+# the aperture being refused rather than guessed at. Chris ratified the wider box on 2026-09-28
+# (x1 649 -> 810, `ביעקב` is to the RIGHT of `בישראל`), the crop was re-cut and the span re-read.
+#
+# So the claim has no instance left, and it lost it the healthy way: by the fault being REPAIRED, not by
+# a standard moving. Third time this shape has come up (p362:n1 after decision 4, the edge-clearance
+# counterexample after the p423 supersession), and recorded the same way -- unexercised, not refuted,
+# with the detector left in place.
+_p912 = next(r for r in _brows if r["span_id"] == "p912:n2")
+check("no span binds `broken` any more -- the box-too-small detector is unexercised, not retired",
+      not [r["span_id"] for r in _brows if str(r["verdict"]).startswith("broken")],
+      [r["span_id"] + ":" + str(r["verdict"]) for r in _brows if str(r["verdict"]).startswith("broken")])
+check("and p912:n2 in particular is no longer it",
+      not str(_p912["verdict"]).startswith("broken"), _p912["verdict"])
+
+# The read-keyed staleness fix of 2026-09-28. Bind asked `crops_changed()`, a SPAN-level question, so a
+# span that was re-cut AND re-read counted as having no evidence at all: p912:n2 reported `no-evidence`
+# over 62 pooled reads, 36 of them pre-hash reads on the retired crop and 26 carrying the approved hash.
+# That is the conservative direction and so was never a false confirmation, but it discarded 26
+# hash-verified reads and printed a class counter spanning two different rectangles.
+check("p912:n2's 26 live reads are evidence again, and the 36 mute ones are counted separately",
+      (_p912["verdict"], _p912["n_reads"], _p912["n_mute"]) == ("unconfirmable", 26, 36),
+      (_p912["verdict"], _p912["n_reads"], _p912["n_mute"]))
+# The filter is cross-checked against a number from OUTSIDE bind: this is what the 2026-09-28 rerun
+# scored on the ratified box. A filter that admitted the retired crop's reads could not reproduce it.
+check("and they score as the rerun scored them, so the filter kept the right rectangle's reads",
+      dict(_p912["classes"]) == {"exact": 15, "nikud-only": 2, "wrong": 7, "clipped": 1, "abstain": 1},
+      dict(_p912["classes"]))
+# Precedence, asserted because the two reasons are different facts and the wrong order would hide one:
+# a crop that was FAULTED WHEN SENT voids its reads whatever their hashes say, because the stimulus was
+# bad. p423:n3 and p726:n3 now have 26 live reads each and must still be refused on that ground.
 check("the two faulted crops supply no binding evidence",
       all(next(r for r in _brows if r["span_id"] == s)["verdict"] == "no-evidence"
           for s in ("p423:n3", "p726:n3")))
+check("and they are refused for the fault, not for staleness, although they are also re-cut",
+      all(next(r for r in _brows if r["span_id"] == s)["evidence_void"]
+          .startswith("crop-faulted-as-sent") for s in ("p423:n3", "p726:n3")),
+      [next(r for r in _brows if r["span_id"] == s)["evidence_void"] for s in ("p423:n3", "p726:n3")])
+
+# ONE RULE, TWO CALLERS. The bug was that `hebrew_frontier_or.stale_reads` had the read-keyed rule and
+# bind had its own span-keyed one; both now ask `D.stale_read_why`. Asserted behaviourally, over the
+# frontier artifact, because a structural "both import it" check would not catch a third copy appearing.
+import hebrew_frontier_or as _F                                              # noqa: E402
+_chg, _cur = D.crops_changed("A2_spanbox"), {s["span_id"]: D.crop_sha(s["span_id"], "A2_spanbox")
+                                            for s in D.build_set(include_sealed=True)}
+_own = {_F.read_key(o): D.stale_read_why(o, _chg, _cur) for o in D._lines(_F.OUT)
+        if o.get("kind") == "read" and o.get("span_id") in _cur}
+check("the frontier's mute set is exactly what the shared rule says it is",
+      _F.stale_reads() == {k: v for k, v in _own.items() if v}, len(_F.stale_reads()))
+# An absent hash is not a mismatched hash: a pre-hash read on a crop that never moved is still evidence.
+check("the rule distinguishes a missing hash from a wrong one",
+      D.stale_read_why({"span_id": "p102:n0"}, _chg, _cur) is None
+      and D.stale_read_why({"span_id": "p912:n2"}, _chg, _cur) == "pre-hash-read-on-recut-crop"
+      and (D.stale_read_why({"span_id": "p912:n2", "crop_sha16": "0" * 16}, _chg, _cur) or "")
+      .startswith("crop-sha-mismatch"))
 # WAS (3, 18). The number moved because the STANDARD was wrong, not the boxes: the old check counted
 # ink runs at 12% of peak, and pointed Hebrew is made of thin runs -- a nikud row below the baseline, an
 # ascender, a neighbour's descender inside the 12px pad. It reported 15 of 18 sound boxes as multi-line,

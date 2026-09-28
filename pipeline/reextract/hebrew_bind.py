@@ -113,14 +113,31 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
     # From the frozen archive, NOT from the live fault table: the live one describes the re-cut
     # crops, which no arm has ever seen.
     sent = D.sent_faults(aperture)
-    stale = D.crops_changed(aperture)
+    # SPAN-level "the crop moved" is not "the reads are mute" -- see D.crops_changed, whose claim to be
+    # the void set p912:n2 falsified. Each read is asked separately, and a span is void only if the crop
+    # moved and NOTHING live survived. `mine` below is the live reads alone, so a span's class counter
+    # describes one rectangle rather than pooling a retired box's verdicts with the ratified box's.
+    changed = D.crops_changed(aperture)
+    cur = {s["span_id"]: D.crop_sha(s["span_id"], aperture)
+           for s in D.build_set(include_sealed=True)}
+    mute = [D.stale_read_why(r, changed, cur) for r in rs]
+    stale = changed
     rows = []
     for s in D.build_set(include_sealed=include_sealed):
         sid = s["span_id"]
         if not s["truth"] or s["truth"] == D.NOT_HEBREW:
             continue
-        mine = [r for r in rs if r["span_id"] == sid]
+        _mine = [(r, mute[i]) for i, r in enumerate(rs) if r["span_id"] == sid]
+        mine = [r for r, why in _mine if not why]
+        n_mute = len(_mine) - len(mine)
         cls = collections.Counter(D.classify(r.get("gated") or "", s["truth"]) for r in mine)
+        # What the MUTE reads said. Not evidence -- they are about a rectangle no longer on disk -- but a
+        # record of what that rectangle showed, which is a different thing from nothing. p912:n2's
+        # retired box is only legible here: 14 clipped against 3 full recoveries, the measurement that
+        # bought the redraw. Reported so a consumed instance stays readable instead of being asserted
+        # from a comment.
+        cls_mute = collections.Counter(D.classify(r.get("gated") or "", s["truth"])
+                                       for r, why in _mine if why)
         b = bq.get(sid, {})
         # fault_fresh answers "is the box sound today?" -- a geometry and ratification question.
         # fault_sent answers "can these reads speak about the aperture?" -- an evidence question, and
@@ -132,8 +149,12 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
         # taken on was faulted when it was sent, or the crop has been re-cut since and the read is no
         # longer about any pixels we hold. A fresh geometry fault is NEITHER: it says the box is wrong
         # today, which has no bearing on whether a sound crop was shown yesterday.
+        # Order matters and is deliberate: a crop that was faulted WHEN SENT voids its reads whatever
+        # their hashes say, because the stimulus was bad. Only then does staleness apply -- and it
+        # applies when the crop moved and no live read replaced the mute ones.
         void = ("crop-faulted-as-sent:%s" % fault_sent if fault_sent else
-                "crop-changed-since-read" if sid in stale else None)
+                "crop-changed-since-read:%d-mute-0-live" % n_mute
+                if sid in stale and not mine else None)
         faulted = bool(void)
         n_clip, n_full = cls["clipped"], sum(cls[c] for c in FULL)
         if not mine:
@@ -150,6 +171,7 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
                          words=len(s["truth"].split()), fault=fault_sent or fault_fresh,
                          fault_sent=fault_sent, fault_fresh=fault_fresh, evidence_void=void,
                          crop_stale=sid in stale,
+                         n_mute=n_mute, classes_mute=dict(cls_mute),
                          lines=b.get("lines"), one_band=bool(b.get("one_band")),
                          n_reads=len(mine), n_clipped=n_clip, n_full=n_full,
                          n_wrong=cls["wrong"], n_abstain=cls["abstain"],
@@ -370,11 +392,24 @@ def selftest():
 
     # p912:n2 -- the case the asymmetry exists for. 14 clipped AND 3 full; counting the full ones
     # would have called the one box we know is broken sound.
+    #
+    # THE BOX WAS FIXED on 2026-09-28 (Chris ratified x1 649 -> 810; `ביעקב` sits to the RIGHT of
+    # `בישראל`, Hebrew being right-to-left), so the LIVE verdict is `unconfirmable` and the asymmetry no
+    # longer fires on anything. The instance is not gone, though: it is in the mute reads. Asserting it
+    # there keeps the claim anchored on a measurement rather than on this comment, and lets the same
+    # checks record that the repair worked.
     p912 = by["p912:n2"]
-    ck("p912:n2 is detected as box-too-small", p912["verdict"] == "broken:box-too-small", p912["verdict"])
-    ck("p912:n2 shows clipped reads outnumbering full recoveries",
-       p912["n_clipped"] >= 14 and p912["n_clipped"] > p912["n_full"],
-       (p912["n_clipped"], p912["n_full"]))
+    _mut = p912["classes_mute"]
+    _mut_clip, _mut_full = _mut.get("clipped", 0), sum(_mut.get(c, 0) for c in FULL)
+    ck("the retired p912:n2 box IS box-too-small by this rule, on its own 36 reads",
+       _mut_clip > _mut_full and (_mut_clip, _mut_full) == (14, 3), (_mut_clip, _mut_full))
+    ck("the ratified box is not, and that is the aperture fix showing up as a verdict change",
+       p912["verdict"] == "unconfirmable" and p912["n_clipped"] == 1, (p912["verdict"], p912["classes"]))
+    ck("no live span is box-too-small now -- the detector is unexercised, and stays in place",
+       not [r["span_id"] for r in rows if r["verdict"] == "broken:box-too-small"],
+       [r["span_id"] for r in rows if str(r["verdict"]).startswith("broken")])
+    ck("the retired box showed clipped reads outnumbering full recoveries",
+       _mut_clip >= 14 and _mut_clip > _mut_full, (_mut_clip, _mut_full))
     # This used to assert "and its crop is not one band", which was the ink-run artifact talking: the
     # crop holds ONE clean 37px band. The box is too NARROW, not multi-line, and no vertical measurement
     # can see that. The reads are the only evidence of it -- which is why the verdict is earned by the
@@ -453,10 +488,23 @@ def selftest():
     ck("the corrected rule does not reject Chris's re-ratified p423:n3 box",
        G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"])[0] == "one-band",
        G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"]))
-    # Edge clearance is REPORTED and never judged: an accept gate that required it would have thrown
-    # out that ratified box, whose crop is 35px around a 35px band and so touches both edges.
-    ck("p423:n3's ratified crop does touch both edges, and passes anyway",
-       G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"])[1]["clear_top"] == 0)
+    # Edge clearance is REPORTED and never judged. The reason used to be a live counterexample: the
+    # 2026-09-27 re-ratified p423:n3 crop was 35px around a 35px band, so an accept gate requiring
+    # clearance would have thrown out a box a human had ratified.
+    #
+    # THAT BOX IS RETIRED (ruling 2026-09-28). It was drawn one note too low, on `T. Hicros. Nedarim`,
+    # a row with no Hebrew in it, and the record it came from was superseded by the ORIGINAL ratified
+    # strip box. So the clause would indeed have rejected it -- for being tight, when what was wrong
+    # with it was the row, which the clause cannot see. Right answer, unrelated reason, and not a
+    # vindication: the clause stays out, and the counterexample is unexercised rather than disproved.
+    _rgeo = G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"])[1]
+    ck("the superseding p423:n3 crop clears both edges, so the counterexample has no instance left",
+       _rgeo["clear_top"] > 0 and _rgeo["clear_bottom"] > 0, _rgeo)
+    ck("and no measurable box touches both edges, which is what makes it unexercised and not refuted",
+       not [r["span_id"] for r in G.box_quality(True)
+            if r.get("clear_top") == 0 and r.get("clear_bottom") == 0],
+       [r["span_id"] for r in G.box_quality(True)
+        if r.get("clear_top") == 0 and r.get("clear_bottom") == 0])
     rows_by = {r["span_id"]: r for r in bind_rows()}
     _cc = contains_counts()
     print("      contains population: %s" % _cc)
@@ -511,9 +559,14 @@ def selftest():
     # the whitespace gap from 4 to 20px moves the per-span counts by up to 10. Saying "the vertical axis
     # is measured and the horizontal axis is inferred from reads" is the honest description of what this
     # harness can currently see.
-    ck("a clean band does not mean a whole read: p912:n2 is one-band and still read short",
-       by["p912:n2"]["one_band"] and rows_by["p912:n2"]["verdict"] == "broken:box-too-small",
-       (by["p912:n2"]["one_band"], rows_by["p912:n2"]["verdict"]))
+    # The instance is historical as of 2026-09-28 and the claim is unchanged by that: one clean band
+    # said nothing about a box 224px wide under a two-word signature, and only the reads caught it.
+    # Anchored on the mute counter so the argument above rests on a number, not on its own prose.
+    ck("a clean band did not mean a whole read: p912:n2 was one-band and still read short",
+       by["p912:n2"]["one_band"]
+       and rows_by["p912:n2"]["classes_mute"].get("clipped", 0)
+       > sum(rows_by["p912:n2"]["classes_mute"].get(c, 0) for c in FULL),
+       (by["p912:n2"]["one_band"], rows_by["p912:n2"]["classes_mute"]))
     # THE OTHER DIRECTION NO LONGER HAS AN INSTANCE. This check used to read "a flagged band does not
     # mean a broken read: p362:n1 fails the rule and reads whole" -- and p362:n1 was the only flagged box
     # in the corpus. Chris's decision 4 ruled it a pass, so the violator set is empty and nothing is left
