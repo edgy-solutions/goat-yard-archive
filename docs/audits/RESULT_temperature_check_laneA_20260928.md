@@ -1,3 +1,9 @@
+> **HEADLINE SUPERSEDED 2026-09-28** — a second t=0 arm returned `scapegoat_001` at 0/6.
+> Both findings that survived the reading rule in this document were that one question, and the
+> divergence is in retrieval, upstream of the answer LM. Read
+> `docs/audits/ADDENDUM_temperature_check_laneA_20260928.md` first. The findings below are left
+> exactly as published; nothing in them is edited.
+
 # Result — the temperature check, N=6 on the 13 stochastic questions
 
 Lane A. Arms run 2026-09-27 into 2026-09-28. Prediction locked beforehand at
