@@ -113,7 +113,7 @@ def main() -> int:
         out["arms"][label] = arm(temp, key)
         a = out["arms"][label]
         print(f"  distinct outputs: {a['distinct_outputs']}/{N}   identical: {a['all_identical']}")
-        print(f"  temperature in call kwargs: {a['temperature_in_call_kwargs']}")
+        print(f"  temperature on the wire: {a['temperature_on_the_wire']}")
         print(f"  provider served: {a['provider_served']}")
     unset, zero = out["arms"]["unset"], out["arms"]["zero"]
     p1 = unset["all_identical"] is False
@@ -137,6 +137,8 @@ def main() -> int:
     print(f"  temperature on the wire: unset={unset['temperature_on_the_wire'][0]!r}  "
           f"zero={zero['temperature_on_the_wire'][0]!r}")
     print(f"  distinct digests across BOTH arms: {len(all_digests)}")
+    for k, v in out["predictions"].items():
+        print(f"  {'HELD     ' if v else 'FALSIFIED'} {k}")
     dest = Path(__file__).resolve().parents[1] / "evals" / "output" / "probe_temperature_determinism.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(out, indent=2), encoding="utf-8")
