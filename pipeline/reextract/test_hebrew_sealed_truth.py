@@ -303,6 +303,143 @@ check("the no-line case is reported separately and is not counted as blank",
       _nnoline == 1 and all(r["ink"] > D.NEAR_UNIFORM_INK for r in _bad if r["kind"] == "noline"))
 check("nothing in the tree is unreadable", _nunread == 0, _nunread)
 
+print("\n(11) ITEM 4 -- the four classes, each pinned to the read that forced it")
+# Every string below is the ACTUAL recorded read, and each is checked to exist in the corpus before
+# it is classified. A born-test that asserts `classify(literal) == cls` proves the function maps a
+# string I typed; it says nothing about whether that string was ever produced. Both halves, or the
+# test passes on nothing.
+import hebrew_bind as B                                                      # noqa: E402
+_ALL = B.reads("A2_spanbox")
+def _recorded(span_id, starts, model=None):
+    """Every FULL recorded A2 read of this span that begins with `starts`, longest first.
+
+    It returns stored strings rather than comparing to one, and the caller classifies what comes back.
+    Two bugs were caught by getting this wrong, in the two opposite directions a locator can fail:
+
+      * embedding a complete literal -- my p596 copy was a 70-character prefix of a much longer
+        repetition loop, printed while looking at the data. The check was right; the copy was short.
+      * locating by prefix and classifying the FIRST hit -- `openai/gpt-5.6-sol` answered p912:n2 with
+        both words in REVERSED order ('bisrael
+biyaaqov'), which shares the prefix and is scored
+        `wrong`. One loose match silently replaced the case under test.
+
+    So: return the whole matching set and let the caller require that SOME stored read carries the
+    class. There is no second copy of the data to get wrong, and no single row can stand in for the
+    population.
+
+    B.reads() drops DROPPED_ARMS, so rows are fetched unfiltered here -- the degenerate class exists
+    BECAUSE of glm-ocr, and a test for it cannot use a feed that removes it."""
+    import json as _json
+    _out = []
+    for _lane, _fn in B.READ_FILES:
+        _p = D.DATA / _fn
+        if not _p.exists():
+            continue
+        for _ln in io.open(_p, encoding="utf-8"):
+            _ln = _ln.strip()
+            if not _ln:
+                continue
+            _o = _json.loads(_ln)
+            if _o.get("span_id") != span_id or _o.get("aperture") != "A2_spanbox":
+                continue
+            if model and _o.get("model") != model:
+                continue
+            _g = _o.get("gated") or ""
+            if _g.startswith(starts):
+                _out.append(_g)
+    return sorted(set(_out), key=len, reverse=True)
+
+
+_CASES = [
+    # span      model                read as recorded                       class        why
+    ("p124:n4", None, "\u05dc\u05d0 \u05db\u05df \u05d9\u05d4\u05d9\u05d4 \u05dc\u05da", "contains",
+     "the box held MORE than the signature, so obeying the prompt returns the neighbours too"),
+    ("p912:n2", None, "\u05d1\u05d9\u05e9\u05e8\u05d0\u05dc", "clipped",
+     "the box held LESS than the signature, so only one of two words could be returned"),
+    ("p596:n2", "glm-ocr:bf16",
+     "* See Buxtorf. in voce \u05e0\u05d5\u05e1.\n* See Buxtorf. in voce \u05e0\u05d5\u05e1.\n* See Buxtorf.",
+     "degenerate", "a repetition loop is not a reading and cannot be graded as one"),
+    ("p726:n3", "qwen3.5:122b", "\u05e9\u05d0\u05e8 \u05d0\u05d1\u05d9\u05da", "nikud-only",
+     "unpointed consonants against a pointed signature -- a third state, not wrong"),
+]
+for _sid, _model, _read, _want, _why in _CASES:
+    _got = _recorded(_sid, _read, _model)
+    check(f"{_sid} -- the {_want} read is really in the corpus", bool(_got),
+          (_sid, _model, _read[:30]))
+    if not _got:
+        continue
+    _truth = _full[_sid]["truth"]
+    _cls = [D.classify(_g, _truth) for _g in _got]
+    check(f"{_sid} -- classify calls it {_want}: {_why}", _want in _cls,
+          (_sid, sorted(set(_cls)), _want, _truth))
+
+# Nikud stripped on BOTH sides, which is the half that is easy to get half-right. The p726 case only
+# exercises pointed-truth vs unpointed-read; the mirror must behave the same or the class is
+# direction-dependent, and a signature that happens to be unpointed would then score a pointed read
+# as wrong.
+_UNP, _PTD = "\u05e9\u05d0\u05e8 \u05d0\u05d1\u05d9\u05da", "\u05e9\u05b0\u05bc\u05d0\u05b8\u05e8 \u05d0\u05b8\u05d1\u05b4\u05d9\u05da\u05b0"
+check("nikud is stripped on the READ side", D.classify(_UNP, _PTD) == "nikud-only")
+check("nikud is stripped on the TRUTH side too", D.classify(_PTD, _UNP) == "nikud-only")
+check("nikud-only is its own class, not folded into exact",
+      D.classify(_PTD, _PTD) == "exact" and D.classify(_UNP, _PTD) != "exact")
+
+# contains and clipped are opposite directions and must not collapse into one another, because they
+# indict opposite box faults: too wide versus too narrow.
+check("contains and clipped are not the same class",
+      D.classify("\u05d0\u05d1 \u05d2\u05d3", "\u05d0\u05d1") == "contains"
+      and D.classify("\u05d0\u05d1", "\u05d0\u05d1 \u05d2\u05d3") == "clipped")
+# Neither is a misread, so neither may be scored as one.
+check("neither direction is scored as wrong",
+      "wrong" not in (D.classify("\u05d0\u05d1 \u05d2\u05d3", "\u05d0\u05d1"),
+                      D.classify("\u05d0\u05d1", "\u05d0\u05d1 \u05d2\u05d3")))
+# degenerate is tested before the not-Hebrew branch on purpose: p900:n4's glm-ocr loop is LATIN, and
+# a truth of NOT_HEBREW would otherwise score that loop `exact`.
+check("a Latin repetition loop against a NOT-HEBREW truth is degenerate, not exact",
+      D.classify("est. est. est. est. est. est. est. est. est. est. est. est. est.",
+                 D.NOT_HEBREW) == "degenerate")
+
+print("\n(12) ITEM 3 -- the binding test refuses to confirm what it cannot see")
+# The whole point of item 3's design: reads arrive with a context strip, so a recovered signature is
+# evidence about the strip and is NOT counted. Asserted here as well as in hebrew_bind's own
+# selftest, because this is the claim the sealed-truth suite must not lose.
+_brows, _bcounts, _bbroken = B.bind_report()
+print(f"      binding verdicts: {_bcounts}")
+check("no span is ever called bound", "bound" not in _bcounts, _bcounts)
+check("p912:n2 is detected broken by the sound signal only",
+      next(r for r in _brows if r["span_id"] == "p912:n2")["verdict"] == "broken:box-too-small")
+check("the two faulted crops supply no binding evidence",
+      all(next(r for r in _brows if r["span_id"] == s)["verdict"] == "no-evidence"
+          for s in ("p423:n3", "p726:n3")))
+# WAS (3, 18). The number moved because the STANDARD was wrong, not the boxes: the old check counted
+# ink runs at 12% of peak, and pointed Hebrew is made of thin runs -- a nikud row below the baseline, an
+# ascender, a neighbour's descender inside the 12px pad. It reported 15 of 18 sound boxes as multi-line,
+# and those 15 were the queue held for Lane A's presplit fix. Corrected against two thresholds each
+# taken from an empty band in the measurements (MIN_BAND_PX 20: runs are 1-14px or 30-38px, nothing
+# between; MAX_BAND_PX 50: every band is 30-38px except p362:n1 at 67), the debt is one box.
+check("the one-band debt is 17 of 18 -- reported, not asserted away",
+      B.G.one_band_report()[:2] == (17, 18), B.G.one_band_report()[:2])
+check("the one loose box is p362:n1, whose band is 67px where the corpus runs 30-38",
+      B.G.one_band_report()[2] == ["p362:n1"], B.G.one_band_report()[2])
+# A tally against a wrong standard is faithful and worthless. The corrected rule is kept honest by the
+# one thing that could refuse it: an already-ratified box. Chris's re-ratified p423:n3 crop is 35px tall
+# around a 35px band, so it touches both edges -- an edge-clearance clause in the accept gate would have
+# thrown it out. It passes, and that is asserted here rather than trusted.
+_rerat = B.G.rerat_load()[0]["p423:n3"]["_crop"]
+check("the corrected band rule accepts the ratified p423:n3 box",
+      B.G.band_geometry(_rerat)[0] == "one-band", B.G.band_geometry(_rerat))
+check("it passes although its band touches both edges",
+      B.G.band_geometry(_rerat)[1]["clear_top"] == 0
+      and B.G.band_geometry(_rerat)[1]["clear_bottom"] == 0, B.G.band_geometry(_rerat)[1])
+# The contains bucket, split by output shape. 9 of 22 are not a box fault in any sense, and 2 of those
+# are broken parses that a substring test CREDITS -- a free pass for the failure the typed contract
+# exists to catch. Pinned here so item 7's re-tally knows what it is absorbing; classify is untouched.
+_cc = B.contains_counts()
+check("all 22 contains reads are accounted for by shape", sum(_cc.values()) == 22, _cc)
+check("9 of the 22 contains reads are not a box fault",
+      sum(v for k, v in _cc.items() if k != "extra-material") == 9, _cc)
+check("two contains reads are broken parses credited by the substring test",
+      _cc.get("envelope-leak") == 2, _cc)
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")

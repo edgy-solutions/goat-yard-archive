@@ -72,12 +72,30 @@ RERAT = D.DATA / "hebrew_box_reratify.jsonl"
 INK = 160            # a pixel darker than this is ink
 TARGET_BAND = 150    # every COMPARISON image is scaled so its text line is this tall
 BAND_FRAC = 0.12     # a row belongs to the line band if its ink reaches this fraction of the peak
+MIN_BAND_PX = 20     # an ink run thinner than this is not a text line
+MAX_BAND_PX = 50     # a single band thicker than this is two lines merged
+
+# BOTH NUMBERS ARE DERIVED, NOT CHOSEN -- each sits in an empty band in the measurements.
+# MIN: the ink runs over the 18 measurable span boxes fall into two populations with nothing between
+# them, 27 runs of 1 to 14px and 18 runs of 30 to 38px. 20 is in the gap. The thin population is what
+# pointed Hebrew is MADE of -- a nikud row under the baseline, an ascender-only row, a neighbour's
+# descender reaching into the 12px pad -- so counting ink runs as text lines over-counts exactly on
+# the feature this harness studies. That was the first version of this check, and it reported 15 of 18
+# good boxes as multi-line.
+# MAX: every band in the signed corpus is 30 to 38px (19 of them, including Chris's re-ratified
+# p423:n3 at 35px) except p362:n1 at 67px. A 29px gap. 50 is in it.
+# Same derivation style as D.NEAR_UNIFORM_INK (empty band 0 -> 0.02555) and hebrew_bind's clip ratio
+# (empty band 0.14 -> 4.7). A number taken from a gap has nothing to tune.
 
 # WHY THE SCALE BASIS IS THE LINE BAND AND NOT THE INK BOUNDING BOX. The first build matched crops on
 # ink-bbox height and produced a comparison that was not matched at all. Measured over the eleven
 # crops these cards use: bbox heights run 47 to 90px while the line band runs 29 to 38px. The bbox is
-# unstable because a tight crop on a closely set note picks up its NEIGHBOURS -- every crop here holds
-# 2 to 5 text lines, and 10 of 12 have ink touching an edge. So a bbox-matched pair could differ by
+# unstable because a tight crop on a closely set note picks up its NEIGHBOURS -- 16 of 18 crops have
+# ink touching an edge, since PAD=12 reaches into the lines above and below. (This comment used to say
+# "every crop here holds 2 to 5 text lines". That was the ink-run miscount described at MIN_BAND_PX:
+# the crops hold ONE text band each. The claim the comment exists to make survives -- neighbour ink in
+# the pad is what destabilises the bbox -- but the number in it was wrong.) So a bbox-matched pair
+# could differ by
 # nearly 2x in true letter size while looking deliberate, which on a shape surface is worse than an
 # obviously wrong picture.
 #
@@ -278,8 +296,64 @@ def line_band(im, frac=BAND_FRAC):
     return y0, y1 + 1
 
 
+def ink_runs(im, frac=BAND_FRAC):
+    """[(y0, y1)] for every maximal run of rows reaching `frac` of the peak ink. Positions, not a
+    count: a run's THICKNESS is the whole discriminator between a line of type and a vowel row."""
+    r = row_profile(im)
+    if not any(r):
+        return []
+    thr = max(1, max(r) * frac)
+    out, start = [], None
+    for i, v in enumerate(r):
+        if v >= thr and start is None:
+            start = i
+        elif v < thr and start is not None:
+            out.append((start, i - 1))
+            start = None
+    if start is not None:
+        out.append((start, len(r) - 1))
+    return out
+
+
+def text_bands(im, frac=BAND_FRAC):
+    """Only the ink runs thick enough to be a line of type. See MIN_BAND_PX for the derivation."""
+    return [(a, b) for a, b in ink_runs(im, frac) if b - a + 1 >= MIN_BAND_PX]
+
+
+def band_geometry(im, frac=BAND_FRAC):
+    """(verdict, info) for the crop's text bands. Verdicts, and the failure each one is for:
+
+      one-band    exactly one band, 30-38px like the rest of the corpus. The crop holds its line.
+      multi-band  two or more bands: the box spans lines, so a read cannot be attributed to a line.
+      merged      one band but thicker than MAX_BAND_PX -- two lines touching at this threshold, which
+                  a run-based method cannot separate. Fires on p362:n1 (67px) and nothing else.
+      no-band     no run survives MIN_BAND_PX. Blank or near-blank; D.crop_fault owns that case.
+
+    `info` also carries clear_top / clear_bottom, and those are REPORTED, NEVER JUDGED here. Edge
+    contact is not a fault: PAD=12 reaches into the neighbouring lines, so 16 of 18 span crops have
+    ink at an edge by construction, and a deliberately tight crop -- Chris's re-ratified p423:n3 box,
+    h=35 around a 35px band -- touches both edges because the box IS the band. An edge-clearance
+    requirement in the accept gate would have rejected that ratified box. It nearly did."""
+    bands = text_bands(im, frac)
+    h = im.size[1]
+    if not bands:
+        return "no-band", dict(n_bands=0, main=None, clear_top=None, clear_bottom=None, height=h,
+                               band_px=None)
+    main = max(bands, key=lambda t: t[1] - t[0])
+    px = main[1] - main[0] + 1
+    info = dict(n_bands=len(bands), main=list(main), clear_top=main[0],
+                clear_bottom=h - 1 - main[1], height=h, band_px=px)
+    if len(bands) > 1:
+        return "multi-band", info
+    if px > MAX_BAND_PX:
+        return "merged", info
+    return "one-band", info
+
+
 def n_lines(im, frac=BAND_FRAC):
-    """How many text lines the crop holds. Reported on the card because it explains `contains`."""
+    """How many INK RUNS the crop holds -- NOT how many text lines, despite what this used to claim.
+    Still reported on the card, because the run count is what explains a `contains` read. Any claim
+    about LINES must come from text_bands() or band_geometry(). See MIN_BAND_PX."""
     r = row_profile(im)
     if not any(r):
         return 0
@@ -418,8 +492,13 @@ def cut_native(pg, box, pad=0):
 
 
 def _one_band(im):
-    """True when the crop holds exactly one text line. See BOX QUALITY below for why this matters."""
-    return n_lines(im) == 1
+    """True when the crop holds exactly one text band of normal height. See BOX QUALITY below.
+
+    Was `n_lines(im) == 1`, which counted ink runs and so called 15 of 18 good boxes multi-line. Those
+    15 were about to enter the held redraw queue; the real count is one (p362:n1). This gate stays a
+    band-count-and-height test and says nothing about edge clearance -- see band_geometry for why
+    adding that clause would have rejected an already-ratified box."""
+    return band_geometry(im)[0] == "one-band"
 
 
 def sig_load(path=None):
@@ -454,7 +533,8 @@ def sig_load(path=None):
             if fault:
                 why = "crop fault: %s" % fault
             elif not _one_band(im):
-                why = "crop holds %d text lines -- an exemplar must be one line" % n_lines(im)
+                why = ("exemplar crop is %s (%d ink runs) -- it must hold exactly one text band"
+                       % (band_geometry(im)[0], n_lines(im)))
             else:
                 idx = int(r["letter_index_from_right"])
                 want = (1, idx)
@@ -528,8 +608,8 @@ def rerat_load(path=None):
             if fault:
                 why = "crop fault on the new box: %s" % fault
             elif not _one_band(im):
-                why = ("the new box holds %d text lines -- a span box must contain exactly one line "
-                       "band" % n_lines(im))
+                why = ("the new box is %s (%d ink runs) -- a span box must contain exactly one text "
+                       "band" % (band_geometry(im)[0], n_lines(im)))
             else:
                 r["_crop"] = im
                 good[r["span_id"]] = r
@@ -638,8 +718,16 @@ def paste_rerat(span_id, pg, box, old_state):
 # about the pad: growing the A2 pad from 12 to 32 to 57px makes edge contact worse, because the crop
 # reaches further into the lines above and below. Two consequences, both load-bearing:
 #
-#   - it is the mechanical cause of the `contains` class. An arm asked to transcribe the crop returns
-#     the signed span with its neighbours attached and was scored wrong for obeying the prompt;
+#   - it was believed to be the mechanical cause of the `contains` class -- "an arm asked to transcribe
+#     the crop returns the signed span with its neighbours attached and was scored wrong for obeying
+#     the prompt." MEASURED over all 22 contains reads (hebrew_bind.contains_population), that is not
+#     what is in the bucket. Nothing in it can be identified as a line from above or below. 13 of 22
+#     are extra material on the SAME line, 10 of those on p124:n4 alone -- the widest box in the set,
+#     458px for a two-word signature, whose reads pick up the Latin `quasi` beside the Hebrew. The
+#     other 9 are not box faults at all: a glued letter, a trailing colon, a stray vav, a duplication
+#     loop, and two broken parses that `truth in read` CREDITS. So the class names a geometric cause
+#     and implements a string relation, and the two populations barely overlap. The pad claim above is
+#     true about bbox instability and was wrong about this;
 #   - "a signed span's box contains exactly one line band" is the invariant item 3's (box, text)
 #     binding test asserts. It is implemented here (`one_band_report`) so item 3 calls a measurement
 #     that already exists rather than inventing one, and so the number is visible now.
