@@ -113,7 +113,7 @@ def build_set():
 def _native_crop(page_img, strip_box, info, bands, pad=0):
     """Un-stack a strip box to native rects and cut them. A box straddling the column gap yields TWO rects;
     they are stacked vertically with the same 20px gap presplit uses, never merged into one spanning box."""
-    rects = note_region.strip_to_native(strip_box, info, bands)
+    rects = note_region.strip_box_to_native(strip_box, info, bands)
     W, H = page_img.size
     ims = []
     for r in rects:

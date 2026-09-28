@@ -23,7 +23,7 @@ the 227 ratified boxes; the ratified boxes are all `x: 0 -> width-2`, which is w
 The module had never been wired, so nothing had ever caught it.
 
 Reading order is therefore already correct top-to-bottom through the strip. A note that starts at the
-bottom of one band and continues at the top of the next is the STITCH case; `strip_to_native` splits it
+bottom of one band and continues at the top of the next is the STITCH case; `strip_box_to_native` splits it
 into two native rects (never one spanning box) because the bands map to different page origins.
 
 WRAPPED NOTES. The Hebrew may be on a note's second line. The localizer counts Latin words from the left up
@@ -63,11 +63,36 @@ def _left_inset(a, x0, x1):
             return x0 + e + 2
     return x0
 
-def strip_bands(strip):
-    """The stacked strip's reading-order bands — one per page column, top→bottom. Filtered the same way
-    `strip_to_native` filters (height > 10) so a band index means the same thing on both sides."""
+def strip_bands(strip, info=None):
+    """The stacked strip's reading-order bands — one per page column, top→bottom. Delegates to
+    `note_region.column_bands`, the SAME exported helper `note_region` and `measure_detector` call, so a
+    band index means the same thing everywhere BY CONSTRUCTION now, not because three copies of a `>10`
+    filter were manually kept in sync (that was the fragility that let the off-by-one survive as three
+    separate bugs).
+
+    WHY THIS SITE STILL USES THE INK INFERENCE, MEASURED 2026-09-27. `info` accepts presplit's persisted
+    paste origins, and for COORDINATE MAPPING those origins are the truth -- that is what `note_region`
+    and `measure_detector` were switched to. They are NOT the truth for a DETECTION WINDOW, and the two
+    consumers were conflated. Measured over the 12 assertable ratified pages of
+    `test_region_fullwidth.py`, swapping this call to the persisted origins changed one page, and changed
+    it for the worse:
+
+      p200  ratified notes 3   inferred bands (36,132),(152,248) -> 2 regions
+                               persisted bands ( 0,132),(152,248) -> 3 regions
+
+    The third region is `[0, 0, 1908, 5]` -- a 5px ink fragment at the very top of the strip, while the
+    ratified notes sit at y 38-95, 82-135 and 174-243. It is a FALSE note-start, not the missing third
+    note (both paths still merge ratified notes 1 and 2 into one box). A paste band legitimately begins at
+    y 0 and includes leading blank and sliver rows; the ink inference was trimming the window to the first
+    real ink row at 36 and thereby hiding that `_band_notes` accepts a 5-row fragment as a note-start.
+
+    So the ordering is: give `_band_notes` a minimum-ink guard for a note-start line, validate it across
+    the ratified set, THEN switch this window to the persisted origins. Doing it in the other order trades
+    a latent wrong input for a live false positive. The coordinate path is unaffected either way -- a box
+    detected at strip y 38 maps through `strip_box_to_native`'s persisted band 0 regardless of which window
+    found it, so nothing here reintroduces the off-by-one."""
     import note_region as _NR
-    return [b for b in _NR._column_bands(strip) if b[1] - b[0] > 10]
+    return _NR.column_bands(info or {}, strip)
 
 def _band_notes(a, by0, by1, profile):
     """Note-starts and their line-bands within ONE stacked-strip band (= one page column), at full width.
@@ -98,7 +123,10 @@ def detect_regions(band, profile):
     """Every detected note-region on the page, in reading order, WITHOUT any count gate. Returns
     (regions, stitched). This is the honest output of the detector: it may over- or under-produce, and
     saying so is the caller's job, not this function's. Box x-bounds follow the RATIFIED convention — full
-    strip width — while `ins` is the content inset used for line analysis and the marker search."""
+    strip width — while `ins` is the content inset used for line analysis and the marker search.
+
+    The band windows here come from the INK inference on purpose, not from presplit's persisted paste
+    origins. `strip_bands` records the measurement that forced that choice."""
     Wd = band.width
     a = np.asarray(band.convert("L")) < INK
     spans = [(str(i), y0, y1) for i, (y0, y1) in enumerate(strip_bands(band))] or [("0", 0, band.height)]
@@ -110,7 +138,7 @@ def detect_regions(band, profile):
             # SEGMENTS, not a flat line list. The stitch tail lives in THIS band, which maps to a different
             # native page origin than the previous band — so it must stay a separate rectangle all the way
             # down. A stitched note is two rects, never one spanning box, and that has to hold in band
-            # coordinates too, not only after strip_to_native un-stacks it.
+            # coordinates too, not only after strip_box_to_native un-stacks it.
             ordered[-1]["segments"].append(dict(col=name, x0=x0, x1=x1, ins=ins, lines=list(pre)))
             ordered[-1]["lines"].extend((y0, y1) for y0, y1 in pre); stitched = True
         elif pre:

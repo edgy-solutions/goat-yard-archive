@@ -181,3 +181,61 @@ Use the main checkout's interpreter — `C:/Users/cnogr/git/goat-yard-archive/.v
   mapper; whether any of them moved is a separate diff, not part of this change.
 - It does not validate the right column's *x* origin against ratified positions — only that an
   out-of-page x now raises instead of clamping.
+
+---
+
+## Implementation addendum, 2026-09-27 (written after the change, by measurement)
+
+Sections 1 and 2 landed as specified. `presplit` persists `upscale`, `strip_size`, `band_coord` and
+`bands`; the existing `info` keys are byte-identical; `strip_to_native(info, x, y)` is the new point
+mapper, the rectangle function is `strip_box_to_native`, and `measure_detector` reads the persisted
+origins. 17 born-tests: **0 passed / 17 failed against a pristine `git worktree` at HEAD, 17 passed /
+0 failed on the change** — verified by running both, not by assertion. The 168px test is the real one:
+`test_real_p423_native_y_168px_below_old_code` calls `_column_bands` on the actual p423 image, applies
+the old `>10` filter and `bands[1][0]`, and asserts the difference is exactly 168px. It executes the
+defective inference against real pixels rather than restating the arithmetic from literals.
+
+### Section 3 is HALF done, and the other half must not be done yet
+
+`measure_detector` was switched. `note_line_region` was **not**, and the spec was wrong to ask for it
+in the same breath. Reason, measured over the 12 assertable ratified pages of
+`test_region_fullwidth.py`: swapping that call to the persisted origins changes exactly one page, and
+changes it for the worse.
+
+| p200 | bands | regions | vs 3 ratified notes at y 38-95, 82-135, 174-243 |
+|---|---|---|---|
+| ink inference | (36,132), (152,248) | 2 | merges ratified notes 1+2 |
+| persisted origins | (0,132), (152,248) | **3** | merges 1+2 **and adds `[0, 0, 1908, 5]`** |
+
+The third region is a 5px ink fragment at the top of the strip: a **false note-start**, not the
+missing third note. Neither path finds three real notes.
+
+**The two consumers were conflated.** Persisted paste origins are the truth for *coordinate mapping* —
+where a column lives on the page. They are not the truth for a *detection window*. A paste band
+legitimately begins at y 0 and includes leading blank and sliver rows; the ink inference was trimming
+the window to the first real ink row and thereby hiding that `_band_notes` accepts a 5-row fragment as
+a note-start. Threading the origins in would have traded a latent wrong input for a live false
+positive, on a page in the ratified set.
+
+Correct order, for whoever takes it: give `_band_notes` a minimum-ink guard for a note-start line,
+validate it across the ratified set, **then** switch the window. The coordinate path is unaffected
+either way — a box detected at strip y 38 maps through persisted band 0 whichever window found it — so
+nothing about deferring this reintroduces the off-by-one. `note_line_region.strip_bands` now delegates
+to the single exported `column_bands`, so the `>10` filter exists in one place even while this site
+still uses the inference, and the measurement above is recorded in its docstring.
+
+### One thing the spec did not ask for, and should have
+
+The suite counted a SKIP as a PASS. With `IMG_DIR` pointed at a nonexistent path,
+`test_note_region.py` printed **"17 passed, 0 failed"** while the two real-page tests — the only ones
+that touch a real image — never ran. Fixed: a skip raises, is reported as `SKIP`, and is counted
+separately (`15 passed, 0 failed, 2 skipped`, plus "A SKIP is not a PASS"). Born-tested in both
+directions.
+
+### Still not solved (unchanged, plus one new)
+
+- Lane B’s **+62 / +105px** residual. Mechanism here is −168 / −172 before, 0 after. Still theirs.
+- `note_line_region`’s detection window, per above, and the `_band_notes` minimum-ink guard it needs.
+- **Both paths merge p200’s ratified notes 1 and 2 into one region** (their y-ranges 38-95 and 82-135
+  overlap). That is a detector defect this work neither caused nor fixed; it was found by looking.
+- `render_note_ratify.py` still names `strip_to_native` in prose where it now means the point mapper.

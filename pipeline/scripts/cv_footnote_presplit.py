@@ -51,6 +51,8 @@ def find_footnote_gutter(dark, y_top):
     return xg, depth
 
 def _trim_strip(strip):
+    """Crop the BOTTOM only (rows[-1]+8). A band's top origin is therefore never touched by trimming —
+    confirmed by reading this function; stated here so nobody has to re-check it."""
     sd=_dark(strip); rows=np.where(sd.sum(axis=1)>sd.shape[1]*3)[0]
     return strip.crop((0,0,strip.size[0],int(rows[-1])+8)) if len(rows) else strip
 
@@ -81,6 +83,10 @@ def presplit(path, upscale=2, full_width_depth=0.30):
         info["page"]=[W,H]
         info["coord"]="native_px_x0y0x1y1_topleft_exclusive"
         info["body_regions"]=_body_regions(W,H,xdiv,rule_l,rule_r)
+        info["upscale"]=upscale
+        info["strip_size"]=None
+        info["bands"]=[]
+        info["band_coord"]="canvas_px_pre_upscale_topleft"
         return None, info
     # STAGE-1 REROUTE (sound): split at the FOOTNOTE region's own gutter; if it has no real gap
     # (depth < threshold) the footnotes are FULL-WIDTH -> crop UNCUT so a spanning note isn't sliced
@@ -94,21 +100,40 @@ def presplit(path, upscale=2, full_width_depth=0.30):
     if depth < full_width_depth:
         info["mode"]="full_width"
         strip=_trim_strip(im.crop((0, y_top+6, W, H)).convert("L"))
+        w,h=strip.size
+        info["bands"]=[{"band":0,"col":"full_width","paste":[0,0],"size":[w,h],"native":[0,int(y_top)+6]}]
+        info["upscale"]=upscale
+        info["band_coord"]="canvas_px_pre_upscale_topleft"
         if upscale and upscale!=1:
             strip=strip.resize((strip.size[0]*upscale, strip.size[1]*upscale), Image.LANCZOS)
+        info["strip_size"]=list(strip.size)
         return strip, info
-    strips=[]
-    for (x0,x1),yr in (((0,xg),rule_l),((xg,W),rule_r)):
+    strips=[]; cols=[]; natives=[]
+    for (x0,x1),yr,colname in (((0,xg),rule_l,"left"), ((xg,W),rule_r,"right")):
         if yr is None: continue
         strips.append(_trim_strip(im.crop((x0, yr+6, x1, H)).convert("L")))
-    if not strips: return None, info
+        cols.append(colname)
+        natives.append([x0, int(yr)+6])
+    if not strips:
+        info["upscale"]=upscale
+        info["strip_size"]=None
+        info["bands"]=[]
+        info["band_coord"]="canvas_px_pre_upscale_topleft"
+        return None, info
     # vertical concat (left strip above right strip) = linear reading order
     tw=max(s.size[0] for s in strips); th=sum(s.size[1] for s in strips)+20*(len(strips)-1)
     canvas=Image.new("L",(tw,th),255); y=0
-    for s in strips:
-        canvas.paste(s,(0,y)); y+=s.size[1]+20
+    bands=[]
+    for i,s in enumerate(strips):
+        w,h=s.size
+        bands.append({"band":i,"col":cols[i],"paste":[0,y],"size":[w,h],"native":natives[i]})
+        canvas.paste(s,(0,y)); y+=h+20
+    info["upscale"]=upscale
+    info["band_coord"]="canvas_px_pre_upscale_topleft"
+    info["bands"]=bands
     if upscale and upscale!=1:
         canvas=canvas.resize((canvas.size[0]*upscale, canvas.size[1]*upscale), Image.LANCZOS)
+    info["strip_size"]=list(canvas.size)
     return canvas, info
 
 if __name__=="__main__":

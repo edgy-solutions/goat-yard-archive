@@ -86,7 +86,7 @@ def page_note_crops(page, n_notes, profile, upscale=1, out_dir=None, img_dir=IMG
         for seg in reg["segments"]:
             sb = _seg_box(seg)
             segs.append({"col": seg["col"], "strip_box": sb,
-                         "native_rects": NR.strip_to_native(sb, info, cbands)})
+                         "native_rects": NR.strip_box_to_native(sb, info, cbands)})
         rec = {"k": k, "segments": segs, "stitched": len(segs) > 1,
                "native_rects": [r for s in segs for r in s["native_rects"]]}
 
@@ -104,7 +104,7 @@ def page_note_crops(page, n_notes, profile, upscale=1, out_dir=None, img_dir=IMG
             mx0, my0, mx1, my1 = mb
             msb = [fs["ins"] + mx0, fy0 + my0, fs["ins"] + mx1, fy0 + my1]
             rec["marker"] = {"strip_box": msb, "size": [msb[2] - msb[0], msb[3] - msb[1]],
-                             "native_rects": NR.strip_to_native(msb, info, cbands)}
+                             "native_rects": NR.strip_box_to_native(msb, info, cbands)}
             rec["marker_status"] = "ok"
             if want_crops and out_dir:
                 cp = out_dir / f"p{page}_note{k}_marker.png"

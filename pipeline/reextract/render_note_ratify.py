@@ -173,7 +173,7 @@ document.getElementById("reset").onclick=()=>{if(confirm("Clear all ratification
 document.getElementById("export").onclick=()=>{
   const lines=[];
   lines.push(JSON.stringify({kind:"note_box_truth_header",tolerance:"STRICT — boxes complete+tight for extraction crops; navigation fallback (note->column->page) lives downstream, NOT here",
-    coordinate_convention:"cv_footnote_presplit stacked reading-order strip, pixels; un-stack to native via note_region.strip_to_native",date:"{DATE}",door:"human-note-box-ratify"}));
+    coordinate_convention:"cv_footnote_presplit stacked reading-order strip, pixels; un-stack to native via note_region.strip_box_to_native",date:"{DATE}",door:"human-note-box-ratify"}));
   CARDS.forEach(c=>{const S=state[c.page]||{boxes:[]};
     const kept=S.boxes.filter(b=>b.st!=="reject"&&b.st!=="merged");
     const merges=S.boxes.filter(b=>b.st==="merged").length;                 // precision signal: false extra starts

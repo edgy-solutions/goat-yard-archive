@@ -10,7 +10,7 @@ from collections import Counter
 import numpy as np
 import cv_footnote_presplit as ps
 import note_start_detect as NS
-from note_region import _column_bands
+from note_region import column_bands
 
 DATA = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits")
 IMG = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
@@ -28,7 +28,7 @@ def measure(pages, truth, **kw):
     for pg in pages:
         r = truth[pg]
         strip, info = ps.presplit(str(IMG / f"page{pg}_image1.png"), upscale=1)
-        bands = [b for b in _column_bands(strip) if b[1] - b[0] > 10] or [(0, strip.height)]
+        bands = column_bands(info, strip) or [(0, strip.height)]
         det = sorted(y for _x, y in NS.page_starts(strip, **kw))
         boxes = sorted(r["notes"], key=lambda n: n["strip_box"][1])
         used = [False] * len(det); tp = 0
