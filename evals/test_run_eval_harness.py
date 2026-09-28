@@ -802,16 +802,148 @@ class _SeqStub:
         return dict(self.responses[i])
 
 
-def _run_main(responses, ids):
+def _corpus(content="a" * 64, vector="b" * 64, chunks=7294):
+    """A corpus_state record as corpus_state() returns one. Built here rather than imported so a
+    change to that shape shows up as a failure in this suite too."""
+    return {"available": True, "unavailable_reason": None, "weaviate_url": "10.0.0.1:80",
+            "include_vectors": True, "counts": {"CommentaryChunk": chunks}, "chunk_count": chunks,
+            "content_sha256": content, "vector_sha256": vector, "n_hashed": chunks,
+            "n_vectors_hashed": chunks, "seconds": 1.0}
+
+
+def _run_main(responses, ids, corpus=None, fingerprint="skip"):
+    """Drive RE.main offline.
+
+    `fingerprint` defaults to "skip" because the default ("vectors") reads the live Weaviate
+    instance twice at 80s a sample: with it, this suite hung past 120s and would fail outright
+    anywhere without a corpus. `corpus` is a list of corpus_state records handed out in order,
+    which is how a corpus that MOVES mid-run is testable without moving a real one.
+    """
     out = Path(tempfile.mkdtemp()) / "run"
     stub, orig = _SeqStub(responses), RE.call_endpoint
     RE.call_endpoint = stub
+    orig_cs = RE.corpus_state
+    if corpus is not None:
+        seq = list(corpus)
+
+        def _cs(*a, **kw):
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+
+        RE.corpus_state = _cs
+    else:
+        def _refuse(*a, **kw):
+            raise AssertionError("the offline suite must not read the live corpus")
+
+        RE.corpus_state = _refuse
     try:
         rc = RE.main(["--endpoint", "http://x/api/search", "--output-dir", str(out),
-                      "--ids"] + ids + ["--runs", "1", "--no-warmup", "--allow-dirty-tree"])
+                      "--ids"] + ids + ["--runs", "1", "--no-warmup", "--allow-dirty-tree",
+                                        "--corpus-fingerprint", fingerprint])
     finally:
         RE.call_endpoint = orig
+        RE.corpus_state = orig_cs
     return rc, out, stub
+
+
+def _summary(out):
+    return json.loads((out / "summary.json").read_text(encoding="utf-8"))
+
+
+def test_skipping_the_fingerprint_performs_NO_corpus_read_and_is_provisional():
+    # The stub in _run_main raises if corpus_state is called at all, so this asserts the cost as
+    # well as the label: `skip` must not touch the network.
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"])
+    c = _summary(out)["integrity"]["corpus"]
+    assert c["skipped"] is True, c
+    assert c["provisional"] is True, "an unstamped run cannot be cited"
+    assert c["violations"] == [], "but skipping is not a violation"
+    assert c["changed_during_run"] is None, c["changed_during_run"]
+
+
+def test_a_corpus_that_holds_still_is_recorded_clean():
+    # The companion assertion for the violation test below: an implementation that reported every
+    # run as a moved corpus would pass that test and fail every real run.
+    same = _corpus()
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"],
+                              corpus=[same, dict(same)], fingerprint="text")
+    c = _summary(out)["integrity"]["corpus"]
+    assert c["changed_during_run"] is False, c
+    assert c["provisional"] is False, c
+    assert c["at_start"]["content_sha256"] == "a" * 64, "the sample itself is recorded, not a flag"
+    assert not any("CORPUS CHANGED" in v for v in _summary(out)["integrity"]["violations"])
+
+
+def test_a_corpus_that_MOVES_mid_run_is_a_violation_and_a_nonzero_exit():
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"],
+                              corpus=[_corpus(), _corpus(content="f" * 64)], fingerprint="text")
+    s_ = _summary(out)
+    c = s_["integrity"]["corpus"]
+    assert c["changed_during_run"] is True, c
+    assert any("CORPUS CHANGED MID-RUN" in v for v in c["violations"]), c["violations"]
+    # and it must reach the run-level violation list, which is what decides the exit code
+    assert any("CORPUS CHANGED MID-RUN" in v for v in s_["integrity"]["violations"]), s_["integrity"]
+    assert rc != 0, "a run scored against a moving corpus must not exit 0"
+
+
+def test_a_revectorisation_mid_run_is_caught_by_the_wiring_too():
+    # Identical text, different embeddings. The end-to-end version of the case a text-only
+    # fingerprint cannot see.
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"],
+                              corpus=[_corpus(), _corpus(vector="f" * 64)], fingerprint="text")
+    c = _summary(out)["integrity"]["corpus"]
+    assert c["at_start"]["content_sha256"] == c["at_end"]["content_sha256"], "the premise"
+    assert c["changed_during_run"] is True, c
+    assert rc != 0
+
+
+def test_an_unreadable_corpus_is_provisional_but_does_NOT_fail_the_run():
+    unread = {"available": False, "unavailable_reason": "unavailable:read-failed:ConnectionError",
+              "weaviate_url": "10.0.0.1:80", "include_vectors": False, "counts": None,
+              "chunk_count": None, "content_sha256": None, "vector_sha256": None,
+              "n_hashed": None, "n_vectors_hashed": None, "seconds": None}
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"],
+                              corpus=[unread, dict(unread)], fingerprint="text")
+    s_ = _summary(out)
+    c = s_["integrity"]["corpus"]
+    assert c["changed_during_run"] is None, "unknowable, not unchanged"
+    assert c["provisional"] is True
+    assert c["violations"] == []
+    assert not any("CORPUS" in v for v in s_["integrity"]["violations"]), s_["integrity"]["violations"]
+
+
+def test_the_report_renders_the_corpus_row_in_both_directions():
+    clean = {"integrity": {"violations": [],
+                           "git": {"at_start": {"head": "0123456789abcdef", "dirty": False},
+                                   "at_end": {"head": "0123456789abcdef", "dirty": False},
+                                   "changed_during_run": False, "provisional": False},
+                           "corpus": RE.corpus_run_block(_corpus(), _corpus())}}
+    txt = "".join(RE.integrity_report_lines(clean))
+    assert "## Run integrity" in txt
+    assert "Clean on both axes" in txt, txt
+    assert "7294 chunks" in txt and "aaaaaaaaaaaa" in txt, txt
+    assert "PROVISIONAL" not in txt, txt
+
+    moved = {"integrity": {"violations": ["CORPUS CHANGED MID-RUN: ..."],
+                           "git": clean["integrity"]["git"],
+                           "corpus": RE.corpus_run_block(_corpus(), _corpus(content="f" * 64))}}
+    txt2 = "".join(RE.integrity_report_lines(moved))
+    assert "THIS RUN IS PROVISIONAL" in txt2, txt2
+    assert "VIOLATION" in txt2 and "CORPUS CHANGED MID-RUN" in txt2, txt2
+    assert "Clean on both axes" not in txt2
+
+
+def test_the_report_says_unknown_rather_than_False_for_an_unread_corpus():
+    unread = {"available": False, "unavailable_reason": "unavailable:read-failed:ConnectionError"}
+    summary = {"integrity": {"violations": [],
+                             "git": {"at_start": {}, "at_end": {}, "changed_during_run": False,
+                                     "provisional": False},
+                             "corpus": RE.corpus_run_block(unread, dict(unread))}}
+    txt = "".join(RE.integrity_report_lines(summary))
+    assert "unknown (not established at both ends)" in txt, txt
+    assert "unread: unavailable:read-failed:ConnectionError" in txt, txt
+    assert "THIS RUN IS PROVISIONAL" in txt
+
+
 
 
 def test_abort_writes_a_marker_and_KEEPS_the_question_files_it_already_had():

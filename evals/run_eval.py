@@ -70,6 +70,9 @@ from degradation import (  # noqa: E402
     is_degraded_answer,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from corpus_state import corpus_run_block, corpus_state  # noqa: E402
+
 # Degradation reasons this harness assigns itself (the backend assigns the rest).
 DEGRADED_HARNESS_TIMEOUT = "harness_read_timeout"
 DEGRADED_UNLABELLED = "llm_timeout_detected_by_text"
@@ -437,6 +440,50 @@ def load_reference_set(path: Path, ids: Optional[List[str]]) -> List[dict]:
     return questions
 
 
+def integrity_report_lines(summary: dict) -> List[str]:
+    """The `Run integrity` section of report.md. A separate function so it can be born-tested
+    against a hand-built summary, and because a report that renders the pass rate but not the
+    provisional flag is how a provisional arm gets quoted as a result.
+    """
+    integ = summary.get("integrity") or {}
+    git = integ.get("git") or {}
+    corpus = integ.get("corpus") or {}
+    provisional = bool(git.get("provisional") or corpus.get("provisional"))
+    out = ["\n## Run integrity\n\n"]
+    if provisional:
+        out.append("> **THIS RUN IS PROVISIONAL.** It may withdraw an earlier claim but asserts "
+                   "nothing new, and it cannot be cited in an ADR or a tier change.\n\n")
+    else:
+        out.append("Clean on both axes: the code did not move and the corpus did not move.\n\n")
+    out.append("| axis | at start | at end | moved during run |\n|---|---|---|---|\n")
+    out.append("| code | `%s`%s | `%s`%s | %s |\n" % (
+        str(git.get("at_start", {}).get("head", "?"))[:12],
+        " DIRTY" if git.get("at_start", {}).get("dirty") else "",
+        str(git.get("at_end", {}).get("head", "?"))[:12],
+        " DIRTY" if git.get("at_end", {}).get("dirty") else "",
+        git.get("changed_during_run")))
+    out.append("| corpus | %s | %s | %s |\n" % (
+        _corpus_cell(corpus.get("at_start") or {}),
+        _corpus_cell(corpus.get("at_end") or {}),
+        "unknown (not established at both ends)"
+        if corpus.get("changed_during_run") is None else corpus.get("changed_during_run")))
+    out.append("\nCorpus comparison scope: %s\n" % (corpus.get("comparison_scope") or "not recorded"))
+    if corpus.get("skipped"):
+        out.append("\nThe corpus fingerprint was SKIPPED for this run (--corpus-fingerprint skip): "
+                   "it cannot say which corpus it scored.\n")
+    for v in (integ.get("violations") or []):
+        out.append("\n- **VIOLATION:** %s\n" % v)
+    return out
+
+
+def _corpus_cell(st: dict) -> str:
+    if not st.get("available"):
+        return "unread: %s" % (st.get("unavailable_reason") or "not recorded")
+    return "%s chunks, text `%s`, vec `%s`" % (
+        st.get("chunk_count"), str(st.get("content_sha256"))[:12],
+        str(st.get("vector_sha256"))[:12] if st.get("vector_sha256") else "not hashed")
+
+
 def write_markdown_report(results: List[QuestionResult], out_path: Path, summary: dict) -> None:
     lines = ["# Eval Report\n"]
     lines.append(f"**Pass rate:** {summary['passed']}/{summary['total']} ({summary['pass_pct']:.1f}%)  \n")
@@ -448,6 +495,8 @@ def write_markdown_report(results: List[QuestionResult], out_path: Path, summary
                  f"of which degraded (placeholder, never asked): {summary['degraded']}  \n")
     lines.append(f"**Endpoint:** `{summary['endpoint']}`  \n")
     lines.append(f"**Generated:** {summary['timestamp']}\n")
+
+    lines.extend(integrity_report_lines(summary))
 
     # By-category breakdown
     lines.append("\n## By category\n\n| Category | Pass | Total | Pct |\n|---|---:|---:|---:|\n")
@@ -925,6 +974,9 @@ def main(argv: Optional[list] = None) -> int:
                              "PROVISIONAL (ruling 1): it may withdraw an earlier claim but "
                              "asserts nothing new, and cannot be cited in an ADR or a tier "
                              "change. Off by default, and the harness aborts instead.")
+    parser.add_argument("--corpus-fingerprint", choices=("vectors", "text", "skip"),
+                        default="vectors",
+                        help="Fingerprint the Weaviate corpus at run start and end and record it in integrity.corpus (ruling 1). `vectors` hashes text AND embeddings (measured 80s per sample against 7294 chunks) and is the only setting that can see a re-vectorisation; `text` hashes text only (7s) and is blind to one; `skip` records nothing and makes the run PROVISIONAL, like --allow-dirty-tree.")
     parser.add_argument("--auth-token", default=os.getenv("EVAL_AUTH_TOKEN"),
                         help="Optional Bearer token for authenticated endpoint testing.")
     args = parser.parse_args(argv)
@@ -953,6 +1005,29 @@ def main(argv: Optional[list] = None) -> int:
     if pre_rc:
         print("Nothing was scored. Fix the condition above and rerun.")
         return pre_rc
+
+    # Sampled AFTER preflight: preflight refuses runs (a missing answer_lm record, an
+    # unpinned provider, a live LM cache) and a refused run must not first spend 80s
+    # fingerprinting a corpus nothing will be scored against. It is still before the
+    # first scored question, which is the property that matters.
+    corpus_skip = args.corpus_fingerprint == "skip"
+    if corpus_skip:
+        corpus_at_start = None
+        print("Corpus    : fingerprint SKIPPED (--corpus-fingerprint skip) -- this run is "
+              "PROVISIONAL and cannot be cited.")
+    else:
+        _vec = args.corpus_fingerprint == "vectors"
+        print(f"Corpus    : fingerprinting (vectors={_vec}) ...", end=" ", flush=True)
+        corpus_at_start = corpus_state(include_vectors=_vec)
+        if corpus_at_start["available"]:
+            print(f"{corpus_at_start['chunk_count']} chunks, text "
+                  f"{str(corpus_at_start['content_sha256'])[:12]}, vec "
+                  f"{str(corpus_at_start['vector_sha256'])[:12]} "
+                  f"({corpus_at_start['seconds']}s)")
+        else:
+            print(f"UNREAD: {corpus_at_start['unavailable_reason']}")
+            print("    The run proceeds -- retrieval reaches Weaviate over gRPC and this read "
+                  "is REST -- but it is PROVISIONAL: it cannot state which corpus it scored.")
 
     results: List[QuestionResult] = []
     # Per-question run ledger. Full results, not booleans: a run that errored or degraded is
@@ -1090,6 +1165,40 @@ def main(argv: Optional[list] = None) -> int:
     }
     summary["answer_lm"] = answer_lm_tally(run_ledger)
     summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
+    if corpus_skip:
+        _unread = {"available": False,
+                   "unavailable_reason": "unavailable:--corpus-fingerprint-skip",
+                   "weaviate_url": None, "include_vectors": False, "counts": None,
+                   "chunk_count": None, "content_sha256": None, "vector_sha256": None,
+                   "n_hashed": None, "n_vectors_hashed": None, "seconds": None}
+        summary["integrity"]["corpus"] = corpus_run_block(_unread, _unread, skipped=True)
+    else:
+        summary["integrity"]["corpus"] = corpus_run_block(
+            corpus_at_start,
+            corpus_state(include_vectors=args.corpus_fingerprint == "vectors"),
+            skipped=False)
+    _c = summary["integrity"]["corpus"]
+    # A corpus that MOVED is a violation: the arm measured a moving target. A corpus that
+    # could not be READ is provisional only -- see corpus_state for why the two are not the
+    # same severity, and why neither is ever reported as "unchanged".
+    integrity_violations.extend(_c["violations"])
+    summary["integrity"]["violations"] = integrity_violations
+    if _c["changed_during_run"]:
+        print("")
+        print("*** THE CORPUS CHANGED WHILE THIS RUN WAS SCORING (ruling 1) ***")
+        for v in _c["violations"]:
+            print("    " + v)
+    elif _c["changed_during_run"] is None:
+        print("")
+        print("Corpus state was NOT established at both ends: "
+              + str(_c["at_start"].get("unavailable_reason") or "")
+              + " / " + str(_c["at_end"].get("unavailable_reason") or ""))
+        print("    This run is PROVISIONAL on the corpus axis. It is not a violation: the\n"
+              "    answers that were scored were really scored.")
+    else:
+        print(f"Corpus is UNCHANGED across the run ({_c['comparison_scope']}): "
+              f"{_c['at_start']['chunk_count']} chunks, text "
+              f"{str(_c['at_start']['content_sha256'])[:12]}.")
     _g = summary["integrity"]["git"]
     if _g["provisional"]:
         print("")
