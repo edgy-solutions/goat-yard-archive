@@ -569,12 +569,12 @@ def sheet_gate(cs, sheet=SHEET):
     return rec
 
 
-def run(only=None, spans=None, approved=False):
+def run(only=None, spans=None, approved=False, sheet_path=None):
     cs = cells(spans)
     # Gate BEFORE the catalog pull, so a refusal costs nothing and cannot be mistaken for a run that
     # started. --approved records a human claim; the sheet gate verifies the pixels. Neither substitutes
     # for the other, and the header says which is which.
-    sheet = sheet_gate(cs)
+    sheet = sheet_gate(cs, sheet_path or SHEET)
     # Second gate, same principle, different property: the hash proves the pixels, this proves that
     # what was cut away from them was on the page Chris approved. Also before the catalog pull.
     _clip = clip_gate(cs, sheet)
@@ -1018,7 +1018,11 @@ if __name__ == "__main__":
     elif cmd == "probe":
         probe(mv or ARMS[-1])
     elif cmd == "run":
-        run([mv] if mv else None, sv, approved="--approved" in a)
+        # --sheet: the contact sheet this send was approved against. A sheet is an approval
+        # record, not a scratch file -- the header stores its name, so an earlier run's header must
+        # keep pointing at the scope that was actually approved for it.
+        shv = Path(a[a.index("--sheet") + 1]) if "--sheet" in a else None
+        run([mv] if mv else None, sv, approved="--approved" in a, sheet_path=shv)
     elif cmd == "score":
         score()
     elif cmd == "cost":
