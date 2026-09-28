@@ -162,6 +162,12 @@ class QuestionResult:
     # difference must agree on it: temperature 0 is deterministic within a provider, not
     # across two, and deepseek-chat has providers at different quantizations.
     provider_pin: Optional[object] = None
+    # The endpoint's per-call witness of what served THIS run: client, model requested and
+    # returned, the temperature actually on the wire, the pin sent, the provider that answered.
+    # `provider_pin` above is the process CONFIGURATION; this is the call. A run with no record
+    # cannot be cited for a pinned comparison, which is why its absence is an integrity
+    # violation rather than a blank column.
+    answer_lm: Optional[dict] = None
     generation_seconds: Optional[float] = None
 
     # Scoring outcomes
@@ -246,6 +252,7 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
     result.answer = response.get("answer", "") or ""
     result.lm_cache_enabled = response.get("lm_cache_enabled")
     result.provider_pin = response.get("openrouter_provider_pin")
+    result.answer_lm = response.get("answer_lm")
     result.generation_seconds = response.get("generation_seconds")
 
     # Degradation check goes here - before refusal detection, before citation scoring.
@@ -570,6 +577,7 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
     info["warmup_error"] = resp.get("_error")
     info["lm_cache_enabled"] = resp.get("lm_cache_enabled")
     info["openrouter_provider_pin"] = resp.get("openrouter_provider_pin")
+    info["answer_lm"] = resp.get("answer_lm")
     print(f"            {info['warmup_seconds']}s"
           + (f"  ERROR: {info['warmup_error']}" if info["warmup_error"] else "")
           + (f"  DEGRADED: {info['warmup_degraded']}" if info["warmup_degraded"] else ""))
@@ -610,6 +618,32 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
         if require_provider_pin:
             print("\nABORT: --require-provider-pin was given and the endpoint reports no pin.")
             return info, 3
+
+    # Ruling 2: what the process is CONFIGURED with is not what served the call. The warmup
+    # response is the cheapest place to find out whether the endpoint can say, and it catches
+    # the specific hole that cost a day: the harness is run from one checkout while the SERVER
+    # was started from another, so the code under test is not the code being committed. The
+    # dirty-tree gate reads the harness's tree and is blind to the server's; this is not.
+    alm = info.get("answer_lm")
+    if not isinstance(alm, dict):
+        print("\nABORT: the endpoint did not report `answer_lm` on the warmup response. It "
+              "cannot say what model, temperature or provider served the call, so no arm from it "
+              "can be cited for a pinned comparison. The usual cause is a server started from a "
+              "different checkout than the harness. Restart the server from this working tree.")
+        return info, 3
+    print(f"            Answer LM: {alm.get('path')}/{alm.get('client')} "
+          f"model={alm.get('model_returned') or alm.get('model_requested')} "
+          f"temperature={alm.get('temperature_on_the_wire')} "
+          f"served_by={alm.get('provider_served')} pin_honored={alm.get('pin_honored')}")
+    if alm.get("pin_honored") is False:
+        print(f"\nABORT: the warmup was served by {alm.get('provider_served')!r}, which is "
+              f"OUTSIDE the pin {alm.get('provider_pin')!r}. The pin was sent and not honored; "
+              f"every run of this arm would be on an unintended provider.")
+        return info, 3
+    if alm.get("provider_served") is None:
+        print(f"            Provider served: UNREADABLE "
+              f"({alm.get('provider_served_source')}). The pin cannot be verified on this arm; "
+              f"unchecked is not honored.")
     return info, 0
 
 
@@ -649,6 +683,56 @@ def classify_stability(scored_passes: List[bool], n_runs: int) -> str:
     return "FLAKY"
 
 
+ANSWER_LM_KEYS = ("path", "client", "model_requested", "model_returned",
+                  "temperature_on_the_wire", "provider_pin", "provider_served",
+                  "provider_served_source", "pin_honored")
+
+
+def answer_lm_rows(run_ledger: Dict[str, List[QuestionResult]]) -> tuple:
+    """(records, qids missing a record) over the runs that were actually SCORED.
+
+    Errored and degraded runs are excluded: the model was never asked, so the absence of a
+    per-call record there is not a gap in the evidence, and counting it as one would make a
+    timeout read as a mis-configured endpoint.
+    """
+    rows, missing = [], []
+    for qid, runs in run_ledger.items():
+        for r in runs:
+            if r.error or r.degraded:
+                continue
+            if isinstance(r.answer_lm, dict):
+                rows.append(r.answer_lm)
+            else:
+                missing.append(qid)
+    return rows, sorted(set(missing))
+
+
+def answer_lm_tally(run_ledger: Dict[str, List[QuestionResult]]) -> dict:
+    """Distinct (client, model, temperature, pin, provider served) combinations across the arm.
+
+    Ruling 2: the arm has to be able to say what served it. One row means one configuration
+    throughout. More than one row means the arm is a mixture -- which is a fact about the arm,
+    not about the code under test, and the summary has to carry it either way.
+    """
+    rows, missing = answer_lm_rows(run_ledger)
+    counts: Dict[str, list] = {}
+    for rec in rows:
+        sub = {k: rec.get(k) for k in ANSWER_LM_KEYS}
+        key = json.dumps(sub, sort_keys=True, default=str)
+        counts.setdefault(key, [sub, 0])[1] += 1
+    distinct = [dict(sub, runs=n) for sub, n in
+                sorted(counts.values(), key=lambda pair: (-pair[1], json.dumps(pair[0], sort_keys=True, default=str)))]
+    return {
+        "scored_runs_with_a_record": len(rows),
+        "questions_missing_a_record": missing,
+        "distinct": distinct,
+        # Separate counts on purpose. False is a measured violation; None is "not checkable from
+        # what we have" -- an unpinned call, or a response whose provider could not be read.
+        "runs_pin_honored_false": sum(d["runs"] for d in distinct if d.get("pin_honored") is False),
+        "runs_pin_unchecked": sum(d["runs"] for d in distinct if d.get("pin_honored") is None),
+    }
+
+
 def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_cache: bool) -> list:
     """Post-run assertion: every scored run was its own generation, not a replay."""
     violations = []
@@ -676,6 +760,22 @@ def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_ca
         violations.append(
             f"the provider pin changed during the run ({len(pins)} distinct values: "
             f"{sorted(pins)}) - the arm spans more than one provider configuration")
+    # Ruling 2. A pin SENT is not a pin HONORED: OpenRouter echoes the serving provider, so a
+    # violation is measurable and must abort rather than be read past in a summary. `None` is
+    # not a violation -- see answer_lm_record.pin_honored for why it is a third state.
+    lm = answer_lm_tally(run_ledger)
+    if lm["runs_pin_honored_false"]:
+        served = sorted({str(d.get("provider_served")) for d in lm["distinct"]
+                         if d.get("pin_honored") is False})
+        violations.append(
+            f"{lm['runs_pin_honored_false']} scored run(s) were served by a provider OUTSIDE "
+            f"the pin ({', '.join(served)}) - the pin was sent and not honored")
+    if lm["questions_missing_a_record"]:
+        miss = lm["questions_missing_a_record"]
+        violations.append(
+            f"{len(miss)} question(s) produced a scored run with no per-call answer_lm record "
+            f"({', '.join(miss[:6])}{' ...' if len(miss) > 6 else ''}) - the endpoint cannot "
+            f"say what served them, so this arm cannot be cited for a pinned comparison")
     return violations
 
 
@@ -938,6 +1038,7 @@ def main(argv: Optional[list] = None) -> int:
         "min_real_generation_seconds": MIN_REAL_GENERATION_SECONDS,
         "violations": integrity_violations,
     }
+    summary["answer_lm"] = answer_lm_tally(run_ledger)
     summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
     _g = summary["integrity"]["git"]
     if _g["provisional"]:
@@ -991,6 +1092,24 @@ def main(argv: Optional[list] = None) -> int:
               f"{rt['degraded']} degraded, {rt['errored']} errored")
     for e in summary["error_detail"]:
         print(f"    {e['id']:40} {e['degraded'] or 'error'}: {e['error']}")
+    _lm = summary.get("answer_lm") or {}
+    if _lm.get("distinct"):
+        print(f"\nAnswer LM (per call, {_lm['scored_runs_with_a_record']} scored run(s) recorded):")
+        for d in _lm["distinct"]:
+            print(f"  {d['runs']:>3} run(s)  {d.get('path')}/{d.get('client')}  "
+                  f"model={d.get('model_returned') or d.get('model_requested')}  "
+                  f"temperature={d.get('temperature_on_the_wire')}  "
+                  f"served_by={d.get('provider_served')}  pin_honored={d.get('pin_honored')}")
+            print(f"           provider_served_source={d.get('provider_served_source')}")
+        if len(_lm["distinct"]) > 1:
+            print("  MORE THAN ONE CONFIGURATION served this arm - it is a mixture, not a sample.")
+        if _lm.get("runs_pin_unchecked"):
+            print(f"  {_lm['runs_pin_unchecked']} run(s) UNCHECKED against a pin (unpinned, or the "
+                  f"serving provider could not be read). Unchecked is not honored.")
+    elif _lm.get("questions_missing_a_record"):
+        print(f"\nAnswer LM: NO per-call record on any scored run "
+              f"({len(_lm['questions_missing_a_record'])} question(s)). The endpoint predates the "
+              f"field or is mis-deployed; this arm cannot be cited for a pinned comparison.")
     if integrity_violations:
         print("RUN INTEGRITY VIOLATIONS (results are not samples):")
         for v in integrity_violations:

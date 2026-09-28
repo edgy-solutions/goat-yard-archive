@@ -28,8 +28,17 @@ Q_REFUSE = {
     "id": "t_refuse", "question": "Did Esau eat pizza?", "category": "refusal_anachronism",
     "difficulty": "easy", "expected_behavior": "refuse",
 }
+# A per-call answer_lm record as the endpoint reports it. Shaped by backend/answer_lm_record.py;
+# its own born-tests live in backend/test_answer_lm_record.py. Present in GOOD because a response
+# from a current endpoint carries one, and its ABSENCE is now an integrity violation (ruling 2).
+LM_REC = {"path": "dspy", "client": "dspy.LM", "model_requested": "openai/deepseek/deepseek-chat",
+          "model_returned": "deepseek/deepseek-chat", "temperature_on_the_wire": 0.0,
+          "provider_pin": {"order": ["streamlake"], "allow_fallbacks": False},
+          "provider_served": "StreamLake", "provider_served_source": "dspy_response_attribute",
+          "pin_honored": True}
+
 GOOD = {"answer": "Gill holds this [GENESIS_2_8_S01].", "generation_seconds": 12.5,
-        "lm_cache_enabled": False}
+        "lm_cache_enabled": False, "answer_lm": dict(LM_REC)}
 
 
 # --- degradation is an ERROR, never a FAIL -----------------------------------------
@@ -256,6 +265,32 @@ def test_preflight_passes_when_cache_disabled():
     assert rc == 0 and stub.calls == 1
 
 
+def test_preflight_aborts_when_the_endpoint_cannot_say_what_served_it():
+    # The hole this closes: the harness runs from one checkout while the SERVER was started from
+    # another, so the code under test is not the code being committed. The dirty-tree gate reads
+    # the harness's tree and cannot see the server's; the warmup response can.
+    payload = dict(GOOD)
+    payload.pop("answer_lm")
+    _, rc, _ = _preflight(payload)
+    assert rc == 3, rc
+
+
+def test_preflight_aborts_when_the_warmup_pin_was_not_honored():
+    bad = dict(LM_REC, provider_served="DeepInfra", pin_honored=False)
+    _, rc, _ = _preflight(dict(GOOD, answer_lm=bad))
+    assert rc == 3, rc
+
+
+def test_preflight_proceeds_when_the_pin_is_merely_UNCHECKABLE():
+    # None is not False. An unpinned arm, or one whose provider could not be read, is still a
+    # valid measurement of itself -- it just cannot claim a verified provider. Aborting here
+    # would make every unpinned baseline unrunnable.
+    unk = dict(LM_REC, provider_pin=None, provider_served=None,
+               provider_served_source="unavailable:no-provider-on-dspy-response", pin_honored=None)
+    _, rc, _ = _preflight(dict(GOOD, answer_lm=unk, openrouter_provider_pin=None), n_runs=1)
+    assert rc == 0, rc
+
+
 def test_preflight_aborts_when_warmup_itself_degrades():
     _, rc, _ = _preflight({"answer": TIMEOUT_FALLBACK_ANSWER})
     assert rc == 2, rc
@@ -267,8 +302,13 @@ def test_preflight_aborts_when_warmup_errors():
 
 
 def test_single_run_tolerates_unknown_cache_state():
-    """N=1 makes no stability claim, so an unverifiable cache is not fatal there."""
-    _, rc, _ = _preflight({"answer": "ok"}, n_runs=1)
+    """N=1 makes no stability claim, so an unverifiable cache is not fatal there.
+
+    The payload carries `answer_lm` because the subject here is the CACHE state, and a missing
+    per-call record is a separate abort (ruling 2) with its own tests. Leaving it out would make
+    this test pass or fail for a reason it is not about.
+    """
+    _, rc, _ = _preflight({"answer": "ok", "answer_lm": dict(LM_REC)}, n_runs=1)
     assert rc == 0, rc
 
 
@@ -582,6 +622,101 @@ def test_run_eval_actually_calls_the_refusal_before_scoring_anything():
     src = open(RE.__file__, encoding="utf-8").read()
     assert "refusal = dirty_tree_refusal(git_at_start, args.allow_dirty_tree)" in src
     assert src.index("dirty_tree_refusal(git_at_start") < src.index("preflight(args.endpoint")
+
+
+# --- ruling 2: the arm must be able to say what served it ---------------------------
+
+def _lm_res(qid, rec, gen=12.0, err=None, degraded=None):
+    """A scored run whose endpoint reported `rec` as its per-call answer_lm record."""
+    if err:
+        return RE.score(dict(Q_ANSWER, id=qid), {"_error": err}, 1.0)
+    payload = dict(GOOD, generation_seconds=gen)
+    if degraded:
+        payload["degraded"] = degraded
+    if rec is None:
+        payload.pop("answer_lm", None)
+    else:
+        payload["answer_lm"] = rec
+    return RE.score(dict(Q_ANSWER, id=qid), payload, 1.0)
+
+
+def test_answer_lm_tally_collapses_identical_configurations_to_one_row():
+    t = RE.answer_lm_tally({"q1": [_lm_res("q1", dict(LM_REC)), _lm_res("q1", dict(LM_REC))],
+                            "q2": [_lm_res("q2", dict(LM_REC))]})
+    assert t["scored_runs_with_a_record"] == 3, t
+    assert len(t["distinct"]) == 1, t["distinct"]
+    assert t["distinct"][0]["runs"] == 3, t["distinct"]
+    assert t["distinct"][0]["provider_served"] == "StreamLake", t["distinct"]
+    assert t["questions_missing_a_record"] == [], t
+    assert t["runs_pin_honored_false"] == 0 and t["runs_pin_unchecked"] == 0, t
+
+
+def test_answer_lm_tally_can_actually_SEE_two_configurations():
+    # The companion assertion: a tally that always collapsed to one row would pass the test
+    # above and report a mixed arm as a sample.
+    hot = dict(LM_REC, temperature_on_the_wire="<absent from optional_params>")
+    t = RE.answer_lm_tally({"q1": [_lm_res("q1", dict(LM_REC)), _lm_res("q1", hot)]})
+    assert len(t["distinct"]) == 2, t["distinct"]
+    # str() because the two values are a float and a sentinel string -- which is the point:
+    # "0.0" and "never sent" are different facts and must not collapse.
+    assert {str(d["temperature_on_the_wire"]) for d in t["distinct"]} == {
+        "0.0", "<absent from optional_params>"}, t["distinct"]
+
+
+def test_a_violated_pin_is_an_integrity_violation():
+    bad = dict(LM_REC, provider_served="DeepInfra", pin_honored=False)
+    v = RE.check_run_integrity({"q": [_lm_res("q", dict(LM_REC)), _lm_res("q", bad)]},
+                               allow_lm_cache=False)
+    hits = [x for x in v if "OUTSIDE" in x]
+    assert len(hits) == 1, v
+    assert "DeepInfra" in hits[0], hits
+    assert "1 scored run" in hits[0], hits
+
+
+def test_an_unchecked_pin_is_counted_but_is_NOT_a_violation():
+    # pin_honored None means unpinned, or a provider we could not read. Treating it as a
+    # violation would abort every unpinned arm ever run; treating it as honored would hide a
+    # provider switch. It is counted, separately, and reported.
+    unk = dict(LM_REC, provider_served=None,
+               provider_served_source="unavailable:no-provider-on-dspy-response", pin_honored=None)
+    ledger = {"q": [_lm_res("q", unk), _lm_res("q", unk)]}
+    t = RE.answer_lm_tally(ledger)
+    assert t["runs_pin_unchecked"] == 2, t
+    assert t["runs_pin_honored_false"] == 0, t
+    v = RE.check_run_integrity(ledger, allow_lm_cache=False)
+    assert not any("OUTSIDE" in x for x in v), v
+
+
+def test_a_missing_record_on_a_scored_run_is_an_integrity_violation():
+    v = RE.check_run_integrity({"q": [_lm_res("q", None)]}, allow_lm_cache=False)
+    hits = [x for x in v if "no per-call answer_lm record" in x]
+    assert len(hits) == 1, v
+    assert "q" in hits[0], hits
+
+
+def test_a_good_arm_still_has_no_violations_at_all():
+    # The other half of the test above: the new checks must not fire on a clean arm, or every
+    # run aborts and the gate is worthless.
+    v = RE.check_run_integrity({"q": [_lm_res("q", dict(LM_REC)), _lm_res("q", dict(LM_REC))]},
+                               allow_lm_cache=False)
+    assert v == [], v
+
+
+def test_errored_and_degraded_runs_do_not_count_as_missing_records():
+    # An errored or degraded run was never asked the question, so it has nothing to record.
+    # Counting it as a gap made five HTTP 500s read as a mis-configured endpoint.
+    ledger = {"q1": [_lm_res("q1", None, err="ReadTimeout")],
+              "q2": [_lm_res("q2", None, degraded="llm_timeout")]}
+    t = RE.answer_lm_tally(ledger)
+    assert t["questions_missing_a_record"] == [], t
+    assert t["scored_runs_with_a_record"] == 0, t
+    assert not any("answer_lm record" in x for x in RE.check_run_integrity(ledger, False)), ledger
+
+
+def test_score_carries_the_record_off_the_response():
+    r = RE.score(Q_ANSWER, dict(GOOD), 1.0)
+    assert r.answer_lm == LM_REC, r.answer_lm
+    assert RE.score(Q_ANSWER, {"answer": "x [GENESIS_2_8_S01]."}, 1.0).answer_lm is None
 
 
 if __name__ == "__main__":

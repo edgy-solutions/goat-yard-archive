@@ -32,8 +32,17 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from baml_py import ClientRegistry, Collector
+
 from baml_client.sync_client import b as baml
 from baml_client.types import GillAnswer, GillRefusal, Zone2Phrase
+
+try:
+    from .answer_lm_record import record_from_baml_call
+    from .degradation import provider_pin
+except ImportError:  # run as a script / imported flat, same as bot.py does
+    from answer_lm_record import record_from_baml_call  # type: ignore
+    from degradation import provider_pin  # type: ignore
 
 # The canonical flat refusal. Must stay character-identical to the string in
 # bot.py's No-Free-Lunch fallback and to REFUSAL_MARKERS in evals/run_eval.py.
@@ -61,10 +70,60 @@ def _norm_sid(raw: str) -> str:
     return f"[{m.group(0)}]" if m else ""
 
 
-def generate(context: str, question: str, available_books: str) -> GillAnswer:
-    return baml.GenerateGillAnswer(
+# The model and temperature GillAnswerLM is declared with in baml_src/gill_answer.baml. Repeated
+# here because a runtime ClientRegistry entry REPLACES the declared client wholesale: omit a field
+# and it is not inherited, it is gone. Kept identical on purpose -- this pass adds a pin, it does
+# not change the model or the sampling.
+ANSWER_LM_MODEL = "deepseek/deepseek-chat"
+ANSWER_LM_TEMPERATURE = 0.0
+ANSWER_LM_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def answer_lm_registry() -> Optional[ClientRegistry]:
+    """GillAnswerLM with the OpenRouter provider pin applied, or None when nothing is pinned.
+
+    Ruling 2: pin GillAnswerLM. The pin CANNOT live in gill_answer.baml, because
+    `degradation.provider_pin()` reads OPENROUTER_PROVIDER_ORDER at call time while a .baml
+    options block is static -- a literal there would be a second source of truth able to disagree
+    silently with the pin the DSPy path is using in the same process. One source, read per call.
+
+    `add_llm_client` under the SAME NAME overrides that client only; no `set_primary`, so no other
+    BAML function in this codebase is touched. Verified on the rendered request body: the pin
+    reaches `provider` in the JSON sent to OpenRouter without set_primary.
+
+    Returns None when unpinned, so an unpinned run behaves exactly as before rather than being
+    rerouted through a registry for no reason.
+    """
+    pin = provider_pin()
+    if not pin:
+        return None
+    cr = ClientRegistry()
+    cr.add_llm_client(name="GillAnswerLM", provider="openai", options={
+        "base_url": ANSWER_LM_BASE_URL,
+        "api_key": os.getenv("OPENROUTER_API_KEY"),
+        "model": ANSWER_LM_MODEL,
+        "temperature": ANSWER_LM_TEMPERATURE,
+        "provider": pin,
+    })
+    return cr
+
+
+def generate(context: str, question: str, available_books: str) -> Tuple[GillAnswer, Dict[str, Any]]:
+    """The one BAML call, plus a per-call record of what actually served it.
+
+    Returns a tuple rather than setting module state: two concurrent requests through one process
+    would race on a module-level "last call", and the record would then be attributed to the wrong
+    answer. The caller already holds the answer; it can hold the record beside it.
+    """
+    pin = provider_pin()
+    collector = Collector(name="gill_answer")
+    client = baml.with_options(collector=collector, client_registry=answer_lm_registry())
+    ans = client.GenerateGillAnswer(
         context=context, question=question, available_books=available_books
     )
+    last = getattr(collector, "last", None)
+    calls = getattr(last, "calls", None) or []
+    return ans, record_from_baml_call(calls[-1] if calls else None, pin)
 
 
 # --------------------------------------------------------------------------

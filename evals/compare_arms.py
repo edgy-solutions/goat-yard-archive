@@ -84,6 +84,24 @@ def provider_pin_of(arm: dict):
     return (s.get("warmup") or {}).get("openrouter_provider_pin")
 
 
+# The fields of a per-call answer_lm record that make two arms a different measurement rather
+# than the same measurement twice. `provider_served_source` and `runs` are deliberately excluded:
+# reading the provider off a different field is not a difference in what served the arm.
+ANSWER_LM_COMPARED = ("client", "model_returned", "temperature_on_the_wire", "provider_served")
+
+
+def answer_lm_config_of(arm: dict) -> list:
+    """The distinct serving configurations the arm RECORDED, as sorted comparable strings.
+
+    Empty when the arm predates the field. Empty is not "the same as the other arm": an arm that
+    recorded nothing cannot be asserted to match one that did, which is why the caller reports
+    the absence rather than a silent equality.
+    """
+    rows = ((arm["summary"].get("answer_lm") or {}).get("distinct") or [])
+    return sorted(json.dumps({k: row.get(k) for k in ANSWER_LM_COMPARED},
+                             sort_keys=True, default=str) for row in rows)
+
+
 def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
     ids_a, ids_b = set(a["questions"]), set(b["questions"])
     if ids_a != ids_b:
@@ -101,6 +119,20 @@ def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
     elif not pin_a:
         notes.append("BOTH ARMS UNPINNED: deepseek-chat has providers at different "
                      "quantizations. A small delta is not attributable.")
+
+    # The pin above is what each arm was CONFIGURED with. This is what actually served it, per
+    # call. They can disagree, and one axis in particular did so invisibly for every OFF-vs-ON
+    # arm ever run: the BAML path sends temperature 0, the DSPy path sends no temperature field
+    # at all. An arm pair that differs on this is not one measurement of one change.
+    lm_a, lm_b = answer_lm_config_of(a), answer_lm_config_of(b)
+    if not lm_a or not lm_b:
+        which = [lbl for lbl, v in ((label_a, lm_a), (label_b, lm_b)) if not v]
+        notes.append(f"NO PER-CALL ANSWER-LM RECORD in {', '.join(which)}: that arm cannot state "
+                     f"what model, temperature or provider served it, so the pair is not a "
+                     f"pinned comparison.")
+    elif lm_a != lm_b:
+        notes.append(f"ANSWER-LM CONFIG DIFFERS: {label_a}={lm_a} {label_b}={lm_b}. The arms "
+                     f"differ in what served them, not only in the change under test.")
 
     changes, flips, same = [], [], 0
     for qid in sorted(ids_a):
@@ -133,6 +165,7 @@ def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
     out = {
         "labels": [label_a, label_b],
         "provider_pin": {label_a: pin_a, label_b: pin_b},
+        "answer_lm_config": {label_a: lm_a, label_b: lm_b},
         "notes": notes,
         "questions": len(ids_a),
         "class_changes": changes,

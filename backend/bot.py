@@ -1036,8 +1036,12 @@ class GroundedGillBot(dspy.Module):
         structured_payload = None
         structured_meta = None
         structured_violations: List[str] = []
+        # Ruling 2: provider/model/temperature recorded per call. Set on the ON path from the BAML
+        # collector; on the OFF path it is filled by main.py from the DSPy history, because the
+        # LM object lives there.
+        answer_lm: Optional[Dict[str, Any]] = None
         if structured_answer.structured_enabled():
-            gill_answer = structured_answer.generate(
+            gill_answer, answer_lm = structured_answer.generate(
                 context=formatted_context,
                 question=question,
                 available_books=available_books,
@@ -1319,6 +1323,7 @@ class GroundedGillBot(dspy.Module):
             structured_payload=structured_payload,
             structured_meta=structured_meta,
             structured_violations=structured_violations,
+            answer_lm=answer_lm,
         )
 
 if __name__ == "__main__":

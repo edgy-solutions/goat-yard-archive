@@ -23,8 +23,13 @@ import compare_arms as CA  # noqa: E402
 PIN = {"order": ["streamlake"], "allow_fallbacks": False}
 
 
-def _arm(root, name, questions, pin=PIN):
-    """questions: {qid: (run_passes, refusal_correct, answer, partial_match_sids)}"""
+def _arm(root, name, questions, pin=PIN, answer_lm=None):
+    """questions: {qid: (run_passes, refusal_correct, answer, partial_match_sids)}
+
+    `answer_lm` is the arm's summary-level tally block (as run_eval.answer_lm_tally writes it).
+    Default None = an arm that predates the field, which is the state of every arm run before
+    2026-09-27 and must stay representable.
+    """
     d = os.path.join(root, name)
     os.makedirs(d, exist_ok=True)
     for qid, (passes, refusal_ok, answer, partial) in questions.items():
@@ -32,8 +37,10 @@ def _arm(root, name, questions, pin=PIN):
                "score": {"id": qid, "refusal_correct": refusal_ok, "expected_behavior": "answer"},
                "response": {"answer": answer, "partial_match_sids": partial, "refused": False}}
         io.open(os.path.join(d, qid + ".json"), "w", encoding="utf-8").write(json.dumps(rec))
-    io.open(os.path.join(d, "summary.json"), "w", encoding="utf-8").write(
-        json.dumps({"openrouter_provider_pin": pin}))
+    summary = {"openrouter_provider_pin": pin}
+    if answer_lm is not None:
+        summary["answer_lm"] = answer_lm
+    io.open(os.path.join(d, "summary.json"), "w", encoding="utf-8").write(json.dumps(summary))
     return d
 
 
@@ -154,6 +161,77 @@ def test_empty_arm_directory_is_refused():
             assert "nothing to compare" in str(e), str(e)
         else:
             raise AssertionError("an empty arm must not compare as all-zero")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# --- ruling 2: what actually served each arm -----------------------------------------
+
+def _tally(temperature=0.0, served="StreamLake", client="dspy.LM", runs=3):
+    return {"scored_runs_with_a_record": runs, "questions_missing_a_record": [],
+            "runs_pin_honored_false": 0, "runs_pin_unchecked": 0,
+            "distinct": [{"path": "dspy", "client": client,
+                          "model_requested": "openai/deepseek/deepseek-chat",
+                          "model_returned": "deepseek/deepseek-chat",
+                          "temperature_on_the_wire": temperature, "provider_pin": PIN,
+                          "provider_served": served,
+                          "provider_served_source": "dspy_response_attribute",
+                          "pin_honored": True, "runs": runs}]}
+
+
+def test_identical_serving_config_raises_no_answer_lm_note():
+    root = tempfile.mkdtemp()
+    try:
+        qs = {"q1": ([True] * 3, True, "x", [])}
+        r = CA.compare(CA.load_arm(_arm(root, "a", qs, answer_lm=_tally())),
+                       CA.load_arm(_arm(root, "b", qs, answer_lm=_tally())), "a", "b")
+        assert not any("ANSWER-LM" in n for n in r["notes"]), r["notes"]
+        assert r["answer_lm_config"]["a"] == r["answer_lm_config"]["b"], r["answer_lm_config"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_temperature_difference_between_arms_is_called_out():
+    # The one that hid: BAML sends temperature 0, dspy sends no temperature field at all, so
+    # every OFF-vs-ON arm differed on this axis and no artifact said so.
+    root = tempfile.mkdtemp()
+    try:
+        qs = {"q1": ([True] * 3, True, "x", [])}
+        r = CA.compare(
+            CA.load_arm(_arm(root, "a", qs, answer_lm=_tally(temperature="<absent from optional_params>"))),
+            CA.load_arm(_arm(root, "b", qs, answer_lm=_tally(temperature=0.0, client="GillAnswerLM"))),
+            "a", "b")
+        hits = [n for n in r["notes"] if "ANSWER-LM CONFIG DIFFERS" in n]
+        assert len(hits) == 1, r["notes"]
+        assert "absent from optional_params" in hits[0], hits
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_provider_difference_between_arms_is_called_out():
+    root = tempfile.mkdtemp()
+    try:
+        qs = {"q1": ([True] * 3, True, "x", [])}
+        r = CA.compare(CA.load_arm(_arm(root, "a", qs, answer_lm=_tally(served="StreamLake"))),
+                       CA.load_arm(_arm(root, "b", qs, answer_lm=_tally(served="DeepInfra"))),
+                       "a", "b")
+        assert any("ANSWER-LM CONFIG DIFFERS" in n for n in r["notes"]), r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_an_arm_with_no_record_is_named_not_assumed_to_match():
+    # Absence is not equality. An arm that recorded nothing must not compare as identical to
+    # one that did, and the note must say WHICH arm is the one that cannot state its config.
+    root = tempfile.mkdtemp()
+    try:
+        qs = {"q1": ([True] * 3, True, "x", [])}
+        r = CA.compare(CA.load_arm(_arm(root, "a", qs, answer_lm=_tally())),
+                       CA.load_arm(_arm(root, "b", qs)), "a", "b")
+        hits = [n for n in r["notes"] if "NO PER-CALL ANSWER-LM RECORD" in n]
+        assert len(hits) == 1, r["notes"]
+        assert "in b:" in hits[0] and "in a" not in hits[0], hits
+        assert r["answer_lm_config"]["b"] == [], r["answer_lm_config"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

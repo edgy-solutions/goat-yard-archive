@@ -34,6 +34,7 @@ from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
+from .answer_lm_record import no_call_record, record_from_dspy_history
 from .degradation import (
     DEGRADED_LLM_TIMEOUT,
     LLM_WALL_SECONDS,
@@ -421,6 +422,12 @@ class SearchResponse(BaseModel):
     # so a run cannot claim a pinned provider it did not actually have, and so two arms can be
     # asserted to have run against the same numeric build of the model.
     openrouter_provider_pin: Optional[dict] = None
+    # What actually served THIS answer: client, model requested and returned, the temperature
+    # that went on the wire, the pin sent, the provider that answered, and whether the pin was
+    # honored. `openrouter_provider_pin` above is what this process was CONFIGURED with; a pin
+    # sent is not a pin honored, and the two paths disagree on temperature (BAML sends 0, dspy
+    # sends no temperature field at all). Ruling 2: recorded per call, not per run.
+    answer_lm: Optional[dict] = None
     # Wall seconds spent in generation. A value near 0 on a cache-enabled process means
     # the answer was replayed, not generated.
     generation_seconds: Optional[float] = None
@@ -815,6 +822,12 @@ async def search(request: Request, req: SearchRequest):
         try:
             target_lm = lm_auth if (hasattr(request.state, "user_id") and request.state.user_id) else lm_anon
             
+            # Ruling 2: the DSPy path's per-call record comes from target_lm.history, which is
+            # append-only and process-wide. Snapshot its length so a record can only be built
+            # from an entry this request actually added -- otherwise a request whose generation
+            # timed out would report the PREVIOUS request's provider as its own.
+            _lm_hist_before = len(getattr(target_lm, "history", None) or [])
+
             with dspy.context(lm=target_lm):
                 user_id = request.state.user_id if request.state.user_id else f"anon-{get_real_remote_address(request)}"
                 
@@ -912,6 +925,20 @@ async def search(request: Request, req: SearchRequest):
 
                     answer = pred.answer
                     citations = pred.citations
+
+                    # Ruling 2, the recording half. The ON (BAML) path carries its own record out
+                    # of bot.py, read from the Collector's HTTP request/response. The OFF (DSPy)
+                    # path cannot: the LM object lives here, so the record is built here.
+                    answer_lm = getattr(pred, "answer_lm", None)
+                    if not answer_lm:
+                        _hist = getattr(target_lm, "history", None) or []
+                        if len(_hist) > _lm_hist_before:
+                            answer_lm = record_from_dspy_history(_hist[-1], provider_pin())
+                        else:
+                            answer_lm = no_call_record(
+                                "dspy", "no-dspy-call-added-to-history-during-this-request",
+                                provider_pin())
+
                     if stages_capture is not None:
                         stages_capture["bot_raw_answer"] = getattr(pred, "raw_answer", None) or pred.answer
                         stages_capture["bot_final_answer"] = pred.answer
@@ -1135,6 +1162,7 @@ async def search(request: Request, req: SearchRequest):
         degraded=locals().get("degraded_reason", None),
         lm_cache_enabled=not lm_cache_disabled(),
         openrouter_provider_pin=provider_pin(),
+        answer_lm=locals().get("answer_lm", None),
         generation_seconds=locals().get("generation_seconds", None),
         stages=stages_capture,
     )
