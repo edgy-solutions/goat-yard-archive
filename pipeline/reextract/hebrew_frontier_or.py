@@ -77,7 +77,7 @@ from PIL import Image
 
 import hebrew_aperture_diag as diag
 import hebrew_local_arms as L
-from run_header import build_header, require_endpoint
+from run_header import build_header, require_endpoint, RunWriter
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -614,66 +614,65 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
     # -- was never written. The per-read crop_sha16 kept the pixels answerable; nothing kept the RUN
     # answerable. A file holding several runs is a log of runs; each needs its own bracket.
     _reads_before = sum(1 for _o in diag._lines(OUT) if _o.get("kind") == "read") if OUT.exists() else 0
-    write_header = True          # named for what it now is: a per-run bracket, unconditional
-    with io.open(OUT, "a", encoding="utf-8") as f:
-        if write_header:
-            hdr = build_header(host=HOST, port=PORT, model="multi:26-openrouter-arms",
-                               digest_fn=lambda hp, mo, t=None: "n/a:hosted-api",
-                               identity_extra={"aperture": APERTURE, "n_scorable": len(cs),
-                                               "arms": ARMS, "prompt_sha16": diag_sha(PROMPT_HEAD +
-                                                                                     PROMPT_TAIL),
-                                               # Chris's rule: record the hash of every crop sent, in
-                                               # the run header. A run is then answerable for exactly
-                                               # the pixels it paid for.
-                                               "crop_sha16": {s["span_id"]: crop_sha(c)
-                                                              for s, c, _x in cs},
-                                               # Chris's rule, 2026-09-27: the header records the
-                                               # truth in force AT SEND. The crop hash makes the run
-                                               # answerable for its pixels; this makes it answerable
-                                               # for the standard those pixels were scored against.
-                                               # Both halves, or a run can be silently re-scored.
-                                               "truth_digest": truth_digest(),
-                                               "truth_digest_at_sheet": sheet.get("truth_digest"),
-                                               # Where this run's reads begin in an artifact that
-                                               # already held other runs' reads. A number, so the
-                                               # boundary does not depend on reading footers in order.
-                                               "appends_to_existing": _reads_before > 0,
-                                               "reads_before": _reads_before,
-                                               "truth_sent": truth_sent(cs),
-                                               # {} means no crop in this run was amputated. Recorded
-                                               # either way: absence of the field would be silence,
-                                               # and silence is what the flag was already getting.
-                                               "clipped_sent": _clip,
-                                               "span_scope": sorted(spans) if spans else "ALL",
-                                               "contact_sheet": sheet["sheet"],
-                                               "contact_sheet_built": sheet.get("built"),
-                                               "approval": "recorded claim via --approved; "
-                                                           "human approval is NOT machine-verifiable"},
-                               extra={"privacy": {"request_filter": "provider.data_collection=deny",
-                                                  "account_toggle": "not-readable-via-api",
-                                                  "verified": "per-request filter only; "
-                                                              "account toggle NOT verifiable via API"},
-                                      "catalog_pulled": cat["pulled"],
-                                      "budget_before": _budget(),
-                                      "note_box_crops_sent": 0,
-                                      "text_context": "latin_context with Hebrew runs replaced by U+2022",
-                                      "pages": "FILE pages (printed = file - 88)"})
-            require_endpoint(hdr, "frontier run")
-            f.write(json.dumps(hdr, ensure_ascii=False) + "\n")
+    # RunWriter is the guard behind the comment above: it refuses to write a row until a header has
+    # been written, so `write_header` cannot be made conditional again by anybody, including me.
+    with RunWriter(OUT) as f:
+        hdr = build_header(host=HOST, port=PORT, model="multi:26-openrouter-arms",
+                           digest_fn=lambda hp, mo, t=None: "n/a:hosted-api",
+                           identity_extra={"aperture": APERTURE, "n_scorable": len(cs),
+                                           "arms": ARMS, "prompt_sha16": diag_sha(PROMPT_HEAD +
+                                                                                 PROMPT_TAIL),
+                                           # Chris's rule: record the hash of every crop sent, in
+                                           # the run header. A run is then answerable for exactly
+                                           # the pixels it paid for.
+                                           "crop_sha16": {s["span_id"]: crop_sha(c)
+                                                          for s, c, _x in cs},
+                                           # Chris's rule, 2026-09-27: the header records the
+                                           # truth in force AT SEND. The crop hash makes the run
+                                           # answerable for its pixels; this makes it answerable
+                                           # for the standard those pixels were scored against.
+                                           # Both halves, or a run can be silently re-scored.
+                                           "truth_digest": truth_digest(),
+                                           "truth_digest_at_sheet": sheet.get("truth_digest"),
+                                           # Where this run's reads begin in an artifact that
+                                           # already held other runs' reads. A number, so the
+                                           # boundary does not depend on reading footers in order.
+                                           "appends_to_existing": _reads_before > 0,
+                                           "reads_before": _reads_before,
+                                           "truth_sent": truth_sent(cs),
+                                           # {} means no crop in this run was amputated. Recorded
+                                           # either way: absence of the field would be silence,
+                                           # and silence is what the flag was already getting.
+                                           "clipped_sent": _clip,
+                                           "span_scope": sorted(spans) if spans else "ALL",
+                                           "contact_sheet": sheet["sheet"],
+                                           "contact_sheet_built": sheet.get("built"),
+                                           "approval": "recorded claim via --approved; "
+                                                       "human approval is NOT machine-verifiable"},
+                           extra={"privacy": {"request_filter": "provider.data_collection=deny",
+                                              "account_toggle": "not-readable-via-api",
+                                              "verified": "per-request filter only; "
+                                                          "account toggle NOT verifiable via API"},
+                                  "catalog_pulled": cat["pulled"],
+                                  "budget_before": _budget(),
+                                  "note_box_crops_sent": 0,
+                                  "text_context": "latin_context with Hebrew runs replaced by U+2022",
+                                  "pages": "FILE pages (printed = file - 88)"})
+        f.header(hdr, "frontier run")   # calls require_endpoint, then writes it FIRST
         for model in (only or ARMS):
             c = cat["models"].get(model, {})
             if c.get("status") != "ok":
-                f.write(json.dumps({"kind": "arm_skipped", "model": model,
-                                    "why": c.get("status", "ABSENT")}, ensure_ascii=False) + "\n")
+                f.row({"kind": "arm_skipped", "model": model,
+                                    "why": c.get("status", "ABSENT")})
                 print(f"SKIP {model}: {c.get('status')}")
                 continue
             print(f"\n== {model}")
             from run_header import _git_head, _git_dirty
-            f.write(json.dumps({"kind": "arm_header", "model": model, "started": time.strftime("%H:%M:%S"),
+            f.row({"kind": "arm_header", "model": model, "started": time.strftime("%H:%M:%S"),
                                 "git_head": _git_head(), "git_dirty": _git_dirty(),
                                 "pricing": {k: c[k] for k in ("prompt_per_mtok", "completion_per_mtok",
                                                               "image_per_1k")},
-                                "structured": c["structured"]}, ensure_ascii=False) + "\n")
+                                "structured": c["structured"]})
             for s, cpath, ctx in cs:
                 if (s["span_id"], model) in done:
                     continue
@@ -691,13 +690,12 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                     row = {"span_id": s["span_id"], "aperture": APERTURE, "model": model,
                            "kind": "call_error", "error": f"{type(e).__name__}: {e}"[:300],
                            "reached_wire": True}
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-                f.flush()
+                f.row(row)          # RunWriter flushes every row itself
                 tag = row.get("kind")
                 print(f"  {s['span_id']:10s} {tag:10s} {str(row.get('gated', row.get('error','')))[:44]!r}"
                       f" {row.get('provider_served') or ''}")
-        f.write(json.dumps({"kind": "run_footer", "budget_after": _budget(),
-                            "finished": time.strftime("%Y-%m-%dT%H:%M:%S")}, ensure_ascii=False) + "\n")
+        f.row({"kind": "run_footer", "budget_after": _budget(),
+                            "finished": time.strftime("%Y-%m-%dT%H:%M:%S")})
     print("\nwrote", OUT)
 
 

@@ -206,6 +206,72 @@ def require_endpoint(header, where=""):
     return True
 
 
+class HeaderlessWrite(RuntimeError):
+    """A run tried to record something before it recorded what produced it."""
+
+
+class RunWriter(object):
+    """A run artifact's only writer: the header goes down before anything else, or the run refuses.
+
+    Chris's ruling, 2026-09-28, after the 2026-09-27 23:17 send appended 104 reads under the 12:25
+    run's header: the header is written before the first outbound call, or the run refuses.
+
+    The bug that produced that was `write_header = not OUT.exists()`, which made the header a property
+    of the FILE rather than of the run. It is already fixed; this is what stops it coming back, and it
+    is a GUARD rather than a source-level assertion because the next version of the mistake will not
+    look like `not OUT.exists()`. Here it cannot look like anything: the object that writes rows will
+    not write one until it has written a header, and `require_endpoint` runs on that header first, so
+    a header that cannot name its machine blocks the run instead of labelling it.
+
+    Deliberately NOT a check on the file. An artifact holding several runs is a log of runs and each
+    needs its own bracket; the guard is per RunWriter, which is per run. Equally deliberately, the
+    underlying handle is not exposed -- every path that skipped the header was a path someone took to
+    avoid a small inconvenience.
+
+    What it does NOT do: it cannot tell whether the header is TRUE. A run that writes a header naming
+    the wrong crop hashes passes here. It enforces order and endpoint-nameability, nothing else.
+    """
+
+    def __init__(self, path, mode="a", require_endpoint_=True):
+        self._f = open(path, mode, encoding="utf-8")
+        self._header_written = False
+        self._require = require_endpoint_
+        self.path = path
+        self.n_rows = 0
+
+    def header(self, hdr, where=""):
+        if self._header_written:
+            raise HeaderlessWrite(
+                "two headers for one run (%s): a run is one bracket. Open a second RunWriter for a"
+                " second run." % (where or self.path))
+        if self._require:
+            require_endpoint(hdr, where or str(self.path))
+        self._f.write(json.dumps(hdr, ensure_ascii=False) + "\n")
+        self._f.flush()
+        self._header_written = True
+        return hdr
+
+    def row(self, obj):
+        if not self._header_written:
+            raise HeaderlessWrite(
+                "%r would be written before this run's config_header (%s).\n  A run records what"
+                " produced it BEFORE it records what it produced, so that a row which reached the"
+                " wire can never be unattributable.\n  Chris's ruling, 2026-09-28."
+                " Call .header(build_header(...)) first."
+                % (obj.get("kind", "row") if isinstance(obj, dict) else type(obj).__name__, self.path))
+        self._f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        self._f.flush()
+        self.n_rows += 1
+        return obj
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._f.close()
+        return False
+
+
 def read_header(path):
     """First record of a JSONL run artifact, or None. Reads one line — never the whole file."""
     with open(path, "r", encoding="utf-8") as f:

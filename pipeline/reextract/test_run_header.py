@@ -196,6 +196,88 @@ for script in SUBSTRATE:
     print(f"  {'WIRED' if wired else 'UNWIRED'}  {script}"
           + ("" if wired else "   header still records no endpoint — Lane A's change to make"))
 
+
+print("\n(6) BORN-TEST -- the header is written before the first outbound call, or the run refuses")
+# Chris's ruling, 2026-09-28. The 2026-09-27 23:17 send appended 104 reads under the 12:25 run's
+# header because `write_header = not OUT.exists()` made the header a property of the FILE. Those 104
+# calls reached the wire under a bracket that named a different git state, a different approval and a
+# different set of crop hashes. The defect is not that the header was late -- it is that rows became
+# unattributable, and no amount of later repair can attach them to a run that never declared itself.
+import os, tempfile, json as _json                                            # noqa: E402
+from run_header import RunWriter, HeaderlessWrite                          # noqa: E402
+
+_GOOD = {"kind": "config_header", "endpoint_id": "C", "endpoint_host": "127.0.0.1:1"}
+_tmp = tempfile.mkdtemp()
+
+def _w(name, **kw):
+    return RunWriter(os.path.join(_tmp, name), **kw)
+
+_r = _w("a.jsonl")
+try:
+    _r.row({"kind": "read", "hebrew": "x"})
+    _bad = "wrote a read with no header"
+except HeaderlessWrite as e:
+    _bad = None
+    _msg = str(e)
+check("a row written before the header raises HeaderlessWrite", _bad is None, _bad or "")
+check("and the refusal names the rule, not just the state",
+      "before" in _msg and "config_header" in _msg, _msg[:90])
+_r.header(_GOOD)
+_r.row({"kind": "read", "hebrew": "x"})
+_r.__exit__()
+_lines = [_json.loads(l) for l in io.open(os.path.join(_tmp, "a.jsonl"), encoding="utf-8") if l.strip()]
+check("after the header, rows are accepted and the header is FIRST in the file",
+      [l["kind"] for l in _lines] == ["config_header", "read"], str([l["kind"] for l in _lines]))
+
+# The guard is not just ordering: a header that cannot name its machine must block the run, because a
+# run bracketed by an unattributable header is no better off than one with no header at all.
+_r2 = _w("b.jsonl")
+try:
+    _r2.header({"kind": "config_header", "endpoint_id": "", "endpoint_host": ""})
+    _bad2 = "accepted a header that names no machine"
+except HeaderMissingEndpoint:
+    _bad2 = None
+check("a header that names no machine is refused BEFORE it is written", _bad2 is None, _bad2 or "")
+try:
+    _r2.row({"kind": "read"})
+    _bad3 = "wrote a read after its header was refused"
+except HeaderlessWrite:
+    _bad3 = None
+check("and the run stays closed to rows -- a refused header is not a written one", _bad3 is None,
+      _bad3 or "")
+check("the refused header left NO bytes behind",
+      os.path.getsize(os.path.join(_tmp, "b.jsonl")) == 0)
+_r2.__exit__()
+
+# One bracket per run. An artifact holding several runs is a log of runs, so the guard is per
+# RunWriter, not per file -- and a second header on ONE writer is the `not OUT.exists()` mistake
+# wearing the other face.
+_r3 = _w("c.jsonl")
+_r3.header(_GOOD)
+try:
+    _r3.header(_GOOD)
+    _bad4 = "accepted two headers for one run"
+except HeaderlessWrite:
+    _bad4 = None
+check("two headers on one RunWriter are refused", _bad4 is None, _bad4 or "")
+_r3.__exit__()
+_r4 = _w("c.jsonl")            # same FILE, second run -- this must be allowed
+_r4.header(_GOOD)
+_r4.row({"kind": "read"})
+_r4.__exit__()
+check("but a SECOND run appending to the same file writes its own header",
+      sum(1 for l in io.open(os.path.join(_tmp, "c.jsonl"), encoding="utf-8")
+          if l.strip() and _json.loads(l)["kind"] == "config_header") == 2)
+
+# And the sending script must actually be behind the guard, or the guard is decoration.
+_fr = (HERE / "hebrew_frontier_or.py").read_text(encoding="utf-8", errors="replace")
+check("hebrew_frontier_or opens its run through RunWriter", "with RunWriter(OUT) as f:" in _fr)
+check("hebrew_frontier_or writes its header through the guard", 'f.header(hdr, "frontier run")' in _fr)
+check("no raw f.write(json.dumps(...)) survives in the run body -- every row goes through .row()",
+      "f.write(json.dumps(" not in _fr, "a hand-rolled row write bypasses the header check")
+check("the conditional that caused the defect is gone", "not OUT.exists()" not in _fr
+      or "write_header = not OUT.exists()" not in _fr)
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")

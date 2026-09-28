@@ -340,14 +340,35 @@ for _sid, _h in (("p423:n3", "7059fcf05ea87bf6"), ("p726:n3", "631456a69a2da6a2"
     check(f"{_sid}: reads at the approved hash survive the void beside {_n_mute} retired reads",
           _n_live == 26 and _n_mute == 26, f"live={_n_live} mute={_n_mute}")
 # That they reach the SCORED rows is asserted below, against the approved hashes, once `_RS` exists.
-check("the retired-read set is exactly the 3 spans whose A2 crop was re-cut",
-      _MUTE_SPANS == {"p423:n3", "p726:n3", "p900:n4"}, sorted(_MUTE_SPANS))
+# Was 3 spans until 2026-09-28, when Chris ratified p912:n2's wider box and the crop was re-cut. The
+# set is derived from the artifact, so it grows whenever a box is redrawn -- which is the mechanism
+# working, not drifting. What is asserted is the MEMBERSHIP RULE, plus the count, so that a span
+# joining the set silently still fails here.
+check("the retired-read set is exactly the spans whose A2 crop was re-cut",
+      _MUTE_SPANS == {"p423:n3", "p726:n3", "p900:n4", "p912:n2"}, sorted(_MUTE_SPANS))
 # Span-level void is "lost its reads AND has not got them back". Two of the three got them back on
 # 2026-09-27; only the span whose crop is REFUSED is still without evidence.
 check("but only p900:n4 is actually WITHOUT a live read -- a re-read repairs the span",
       set(F.stale_spans()) == {"p900:n4"}, F.stale_spans())
 check("a pre-hash read on an UNCHANGED crop is still evidence (the rule is not 'distrust the old')",
-      not (_MUTE_SPANS & {"p102:n0", "p138:n5", "p217:n2", "p912:n2"}))
+      not (_MUTE_SPANS & {"p102:n0", "p138:n5", "p217:n2"}))
+# p912:n2 was the fourth name on that list until its box was redrawn, and it is the span that shows the
+# rule has TWO directions rather than one. Its crop moved, so its 36 pre-hash reads are muted -- and
+# its 26 reads carrying the approved hash are untouched. An ABSENT hash is not a MISMATCHED one; what
+# retires a read is the crop moving under it, never the read's age.
+_p912_live = sum(1 for o in _LIVE if o["span_id"] == "p912:n2"
+                 and o.get("crop_sha16") == "99a6bef43a0ba2de")
+_p912_mute = sum(1 for k in _MUTE if k[0] == "p912:n2")
+_p912_prehash = sum(1 for o in diag._lines(F.OUT) if o.get("kind") == "read"
+                    and o["span_id"] == "p912:n2" and not o.get("crop_sha16"))
+check("p912:n2 is muted and evidenced at once: 27 pre-hash reads retired, 26 at the approved hash kept",
+      (_p912_prehash, _p912_live) == (27, 26), f"prehash={_p912_prehash} live={_p912_live}")
+# 27 reads but 26 mute KEYS: one arm answered twice before hashing existed. The void is a set of cells,
+# so it counts cells; the evidence is a list of reads, so it counts reads. Asserting both keeps the two
+# from being quietly swapped -- the 36 quoted by `hebrew_bind` is a third number again, because bind
+# pools this artifact with the local arms' and this suite reads only its own.
+check("and the void counts CELLS while the evidence counts READS -- 27 reads on 26 arms",
+      _p912_mute == 26, f"mute keys={_p912_mute}")
 check("every void read names its cause",
       all(v.startswith(("crop-sha-mismatch:", "pre-hash-read-on-recut-crop")) for v in _MUTE.values()))
 _RS = F.rows()
@@ -430,8 +451,20 @@ _refuses(lambda: F.run(None, _SC), "pass --approved",
          "no --approved -> refuse before the catalog pull, so a refusal costs nothing")
 check("the approval is recorded as a claim, never as a verification",
       "NOT machine-verifiable" in src and "RECORDED CLAIM" in src)
-check("the gate runs BEFORE the catalog pull (a refusal must not look like a started run)",
-      src.index("sheet = sheet_gate(cs)") < src.index("cat = catalog(refresh=True)"))
+# `src.index` raised ValueError here when `--sheet` turned `sheet_gate(cs)` into
+# `sheet_gate(cs, sheet_path or SHEET)`, and a raise in a test file is not a failing check: it ABORTS
+# the run, so every assertion below this line silently stopped executing. A check that cannot see its
+# own subject must say so and let the rest of the suite proceed.
+def _before(a, b, why):
+    ia, ib = src.find(a), src.find(b)
+    if ia < 0 or ib < 0:
+        check(why, False, f"anchor missing: {a!r}" if ia < 0 else f"anchor missing: {b!r}")
+        return
+    check(why, ia < ib, f"{a!r} at {ia}, {b!r} at {ib}")
+
+
+_before("sheet = sheet_gate(", "cat = catalog(refresh=True)",
+        "the gate runs BEFORE the catalog pull (a refusal must not look like a started run)")
 
 print("\n(10) re-cut vs gone, and Chris's conditional A1 term")
 import hebrew_contact_sheet as SH                                            # noqa: E402
