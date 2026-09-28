@@ -1,5 +1,16 @@
 # Result — item (a): the noise floor, OFF vs OFF
 
+> **RETIRED AS A BASELINE — ruling 1, 2026-09-27.** Neither arm can state what it
+> measured: both ran over a dirty tree, nf1 predates `integrity.git` and `answer_lm`, and
+> neither recorded corpus state. pf1 — same day, same pin, same cache setting, same DSPy
+> path — scored 21/28 against nf1's 12/28 with no scorer-semantics commit in the window, and
+> that 9-question gap cannot be attributed. **Do not cite either arm as a baseline, a floor, or
+> the comparison point for a later run.** Superseded by the pinned pair pf1/pf2 in
+> `docs/audits/RESULT_pinned_floor_laneA_20260927.md`; the full withdrawal, including what
+> remains citable, is `docs/audits/RETIRED_noise_floor_laneA_20260927.md`. What stands
+> below: the prediction scorecard as calibration history, and the two harness faults this
+> pair exposed.
+
 Lane A, 2026-09-27/28. Prediction locked **before** the run at sha16 `5ab1cfe0ac2a6485`
 (`evals/output/noise_floor/PREDICTION_noise_floor_20260927.md`, hash re-verified unedited after the
 run). Chris's ordering item (a): *"Noise floor: run OFF vs OFF, identical settings, provider pinned

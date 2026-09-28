@@ -3,6 +3,13 @@
 Run from the goatyard-laneA worktree root. Prints one line per prediction with HELD / FALSIFIED /
 PARTIAL and the observed value. PARTIAL means the recorded artifacts cannot cover the prediction as
 worded, and it says what is missing rather than scoring the narrower thing as a pass.
+
+NOTE (ruling 1, 2026-09-27): nf1/nf2 are RETIRED as a baseline -- see
+docs/audits/RETIRED_noise_floor_laneA_20260927.md. This script still defaults to those two
+directories on purpose, because scoring that locked prediction is the one thing the pair is still
+for. Its output is calibration history, not a measurement of the system: do not carry any number
+it prints forward as a floor or a comparison point. The floor of record is pf1/pf2
+(docs/audits/RESULT_pinned_floor_laneA_20260927.md).
 """
 import io, json, os, statistics, sys
 
