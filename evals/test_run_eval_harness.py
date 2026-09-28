@@ -10,6 +10,9 @@ runs were in-process cache replays. Both conditions were invisible in the output
 
     python test_run_eval_harness.py
 """
+import contextlib
+import hashlib
+import io
 import json
 import sys
 import tempfile
@@ -247,11 +250,13 @@ class _Stub:
         return dict(self.resp)
 
 
-def _preflight(resp, n_runs=3, allow_cache=False, warmup=True):
+def _preflight(resp, n_runs=3, allow_cache=False, warmup=True, require_pin=False,
+                allow_unset_temp=False):
     stub, orig = _Stub(resp), RE.call_endpoint
     RE.call_endpoint = stub
     try:
-        info, rc = RE.preflight("http://x/api/search", None, 200.0, n_runs, allow_cache, warmup)
+        info, rc = RE.preflight("http://x/api/search", None, 200.0, n_runs, allow_cache, warmup,
+                                require_pin, allow_unset_temp)
     finally:
         RE.call_endpoint = orig
     return info, rc, stub
@@ -991,6 +996,112 @@ def test_a_COMPLETED_run_writes_no_marker_and_does_write_a_summary():
     assert not (out / "ABORTED.json").exists(), "a completed run must not be marked aborted"
     assert (out / "summary.json").is_file(), sorted(p.name for p in out.iterdir())
     assert stub.calls == 2, stub.calls
+
+
+# --- per-run answer digest (text drift is unmeasurable without it) ---------------
+
+def test_per_question_runs_entry_carries_answer_digest_fields():
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001"])
+    rec = json.loads((out / "logos_001.json").read_text(encoding="utf-8"))
+    run0 = rec["runs"][0]
+    assert "answer_sha16" in run0 and "answer_chars" in run0 and "temperature_on_the_wire" in run0, run0
+    assert run0["answer_chars"] == len(GOOD["answer"]), run0
+    assert run0["temperature_on_the_wire"] == 0.0, run0
+    assert run0["answer_sha16"] == hashlib.sha256(GOOD["answer"].encode("utf-8")).hexdigest()[:16], run0
+
+
+def test_identical_answer_text_yields_identical_sha_different_text_yields_different_sha():
+    same_a = dict(GOOD)
+    same_b = dict(GOOD)
+    different = dict(GOOD, answer="A wholly different sentence about Zion [GENESIS_2_8_S01].")
+    rc, out, stub = _run_main([same_a, same_b, different],
+                              ["logos_001", "sheep_001", "peter_001"])
+    r1 = json.loads((out / "logos_001.json").read_text(encoding="utf-8"))["runs"][0]
+    r2 = json.loads((out / "sheep_001.json").read_text(encoding="utf-8"))["runs"][0]
+    r3 = json.loads((out / "peter_001.json").read_text(encoding="utf-8"))["runs"][0]
+    assert r1["answer_sha16"] == r2["answer_sha16"], (r1, r2)
+    assert r1["answer_sha16"] != r3["answer_sha16"], (r1, r3)
+
+
+def test_answer_sha16_is_None_not_a_hash_of_the_empty_string_when_no_answer():
+    empty = dict(GOOD, answer="")
+    rc, out, stub = _run_main([empty], ["logos_001"])
+    rec = json.loads((out / "logos_001.json").read_text(encoding="utf-8"))
+    assert rec["runs"][0]["answer_sha16"] is None, rec["runs"][0]
+    assert rec["runs"][0]["answer_chars"] == 0, rec["runs"][0]
+
+
+# --- temperature recorded in integrity, and an unset temperature REFUSES ----------
+
+def test_answer_temperature_block_counts_explicit_absent_and_unrecorded():
+    explicit = _lm_res("q1", dict(LM_REC))
+    absent = _lm_res("q1", dict(LM_REC, temperature_on_the_wire="<absent from optional_params>"))
+    unrecorded = _lm_res("q1", None)
+    t = RE.answer_temperature_block({"q1": [explicit, absent, unrecorded]})
+    assert t["runs_explicit"] == 1, t
+    assert t["runs_absent"] == 1, t
+    assert t["runs_unrecorded"] == 1, t
+    assert 0.0 in t["distinct"], t["distinct"]
+    assert "<absent from optional_params>" in t["distinct"], t["distinct"]
+
+
+def test_ZERO_on_the_wire_counts_as_EXPLICIT_not_absent():
+    # The load-bearing case: 0 is falsy, and this is the exact value the new rule requires.
+    # A truthiness check (`if temp:`) would silently sort it into "absent".
+    zero = _lm_res("q", dict(LM_REC, temperature_on_the_wire=0.0))
+    t = RE.answer_temperature_block({"q": [zero]})
+    assert t["runs_explicit"] == 1, t
+    assert t["runs_absent"] == 0, t
+    assert t["runs_unrecorded"] == 0, t
+
+
+def test_degraded_and_errored_runs_are_excluded_from_the_temperature_denominator():
+    ok = _lm_res("q", dict(LM_REC))
+    bad_err = _lm_res("q", None, err="ReadTimeout")
+    bad_deg = _lm_res("q", None, degraded="llm_timeout")
+    t = RE.answer_temperature_block({"q": [ok, bad_err, bad_deg]})
+    assert t["runs_explicit"] == 1, t
+    assert t["runs_absent"] == 0 and t["runs_unrecorded"] == 0, t
+
+
+def test_check_run_integrity_flags_unset_temperature_by_default_and_the_flag_suppresses_it():
+    absent = dict(LM_REC, temperature_on_the_wire="<absent from optional_params>")
+    ledger = {"q": [_lm_res("q", absent)]}
+    v_default = RE.check_run_integrity(ledger, allow_lm_cache=False)
+    assert any("temperature" in x.lower() for x in v_default), v_default
+    v_allowed = RE.check_run_integrity(ledger, allow_lm_cache=False, allow_unset_temperature=True)
+    assert not any("temperature" in x.lower() for x in v_allowed), v_allowed
+
+
+def test_preflight_refuses_when_warmup_temperature_is_absent_and_flag_not_passed():
+    absent = dict(LM_REC, temperature_on_the_wire="<absent from optional_params>")
+    _, rc, _ = _preflight(dict(GOOD, answer_lm=absent))
+    assert rc == 3, rc
+
+
+def test_preflight_does_NOT_refuse_when_warmup_temperature_is_ZERO():
+    # Companion assertion: a refusal that always fires certifies nothing.
+    zero = dict(LM_REC, temperature_on_the_wire=0.0)
+    _, rc, _ = _preflight(dict(GOOD, answer_lm=zero))
+    assert rc == 0, rc
+
+
+def test_preflight_allows_unset_temperature_and_warns_when_the_flag_is_passed():
+    absent = dict(LM_REC, temperature_on_the_wire="<absent from optional_params>")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _, rc, _ = _preflight(dict(GOOD, answer_lm=absent), allow_unset_temp=True)
+    assert rc == 0, rc
+    out = buf.getvalue()
+    assert "WARNING" in out and "temperature" in out.lower(), out
+
+
+def test_help_still_renders_and_shows_the_new_temperature_flag():
+    import subprocess
+    r = subprocess.run([sys.executable, str(Path(RE.__file__)), "--help"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    assert r.returncode == 0, r.stderr[-800:]
+    assert "--allow-unset-temperature" in r.stdout, r.stdout[:400]
 
 
 if __name__ == "__main__":

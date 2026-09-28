@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -623,7 +624,8 @@ KEEP_ALIVE_PIN_NOTE = (
 
 def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
               allow_lm_cache: bool, do_warmup: bool,
-              require_provider_pin: bool = False) -> tuple:
+              require_provider_pin: bool = False,
+              allow_unset_temperature: bool = False) -> tuple:
     """Warm the path and verify run integrity BEFORE any question is scored.
 
     Returns (warmup_info, exit_code). A nonzero exit_code means: do not score anything.
@@ -701,10 +703,37 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
               "can be cited for a pinned comparison. The usual cause is a server started from a "
               "different checkout than the harness. Restart the server from this working tree.")
         return info, 3
+
     print(f"            Answer LM: {alm.get('path')}/{alm.get('client')} "
           f"model={alm.get('model_returned') or alm.get('model_requested')} "
           f"temperature={alm.get('temperature_on_the_wire')} "
           f"served_by={alm.get('provider_served')} pin_honored={alm.get('pin_honored')}")
+
+    # Ruling (2026-09-28, Chris): a run without an explicit temperature must refuse. The
+    # OFF (DSPy) answer path historically sent NO temperature field while the BAML path
+    # sends 0, so every OFF-vs-ON arm varied two things at once -- see
+    # docs/audits/RESULT_temperature_check_laneA_20260928.md for the measured effect. 0.0 is
+    # a valid EXPLICIT value and is falsy, so this is an isinstance check, never a
+    # truthiness check.
+    warmup_temp = alm.get("temperature_on_the_wire")
+    temp_is_explicit = isinstance(warmup_temp, (int, float)) and not isinstance(warmup_temp, bool)
+    if not temp_is_explicit:
+        if not allow_unset_temperature:
+            print(f"\nABORT: the warmup's answer_lm reported "
+                  f"temperature_on_the_wire={warmup_temp!r} -- not an explicit numeric value. "
+                  f"An unset temperature means the provider's own default applies and is not "
+                  f"recorded, which is the confound measured in "
+                  f"docs/audits/RESULT_temperature_check_laneA_20260928.md. Set "
+                  f"GILL_ANSWER_TEMPERATURE=0 on the server (read at process start inside "
+                  f"`lifespan` in backend/main.py -- the server must be RESTARTED for this to "
+                  f"take effect), or pass --allow-unset-temperature if you deliberately want an "
+                  f"unpinned-temperature run.")
+            return info, 3
+        print(f"WARNING: temperature_on_the_wire={warmup_temp!r} is not an explicit numeric "
+              f"value and --allow-unset-temperature was passed. This run's temperature is "
+              f"UNPINNED: the provider's own default applies and is not recorded, which is the "
+              f"confound measured in docs/audits/RESULT_temperature_check_laneA_20260928.md.")
+
     if alm.get("pin_honored") is False:
         print(f"\nABORT: the warmup was served by {alm.get('provider_served')!r}, which is "
               f"OUTSIDE the pin {alm.get('provider_pin')!r}. The pin was sent and not honored; "
@@ -803,7 +832,47 @@ def answer_lm_tally(run_ledger: Dict[str, List[QuestionResult]]) -> dict:
     }
 
 
-def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_cache: bool) -> list:
+def answer_temperature_block(run_ledger: Dict[str, List[QuestionResult]]) -> dict:
+    """Distinct `temperature_on_the_wire` values seen across the arm, split into explicit
+    (a number was sent -- 0.0 counts), absent (the endpoint recorded that no field was sent),
+    and unrecorded (no answer_lm record, or no `temperature_on_the_wire` key in it).
+
+    Only SCORED runs count -- see answer_lm_rows for why an errored or degraded run is not a
+    gap in the evidence. Ruling (2026-09-28, Chris): a run without an explicit temperature must
+    refuse, and 0.0 is a valid explicit value that is falsy -- every branch below is an
+    isinstance check, never a truthiness check, so the exact value now required cannot fall
+    silently into "absent".
+    """
+    values = []
+    runs_explicit = 0
+    runs_absent = 0
+    runs_unrecorded = 0
+    for runs in run_ledger.values():
+        for r in runs:
+            if r.error or r.degraded:
+                continue
+            alm = r.answer_lm
+            if isinstance(alm, dict) and "temperature_on_the_wire" in alm:
+                temp = alm["temperature_on_the_wire"]
+                values.append(temp)
+                if isinstance(temp, (int, float)) and not isinstance(temp, bool):
+                    runs_explicit += 1
+                elif temp == "<absent from optional_params>":
+                    runs_absent += 1
+                else:
+                    runs_unrecorded += 1
+            else:
+                runs_unrecorded += 1
+    return {
+        "distinct": sorted(set(values), key=repr),
+        "runs_explicit": runs_explicit,
+        "runs_absent": runs_absent,
+        "runs_unrecorded": runs_unrecorded,
+    }
+
+
+def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_cache: bool,
+                         allow_unset_temperature: bool = False) -> list:
     """Post-run assertion: every scored run was its own generation, not a replay."""
     violations = []
     for qid, runs in run_ledger.items():
@@ -846,6 +915,14 @@ def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_ca
             f"{len(miss)} question(s) produced a scored run with no per-call answer_lm record "
             f"({', '.join(miss[:6])}{' ...' if len(miss) > 6 else ''}) - the endpoint cannot "
             f"say what served them, so this arm cannot be cited for a pinned comparison")
+    temp = answer_temperature_block(run_ledger)
+    if not allow_unset_temperature and (temp["runs_absent"] + temp["runs_unrecorded"]) > 0:
+        violations.append(
+            f"{temp['runs_absent']} scored run(s) sent no explicit temperature and "
+            f"{temp['runs_unrecorded']} scored run(s) have no recorded temperature at all - an "
+            f"unpinned temperature is the confound measured in "
+            f"docs/audits/RESULT_temperature_check_laneA_20260928.md. Pass "
+            f"--allow-unset-temperature if this is deliberate.")
     return violations
 
 
@@ -978,6 +1055,16 @@ def main(argv: Optional[list] = None) -> int:
                              "PROVISIONAL (ruling 1): it may withdraw an earlier claim but "
                              "asserts nothing new, and cannot be cited in an ADR or a tier "
                              "change. Off by default, and the harness aborts instead.")
+    parser.add_argument("--allow-unset-temperature", action="store_true",
+                        help="Permit starting when the answer path sends no explicit "
+                             "temperature. Without this flag the harness REFUSES: an unset "
+                             "temperature means the provider's own default applies and is not "
+                             "recorded, so the run cannot say what generated it. This is the "
+                             "OFF-vs-ON confound (DSPy sent none, BAML sends 0) measured in "
+                             "docs/audits/RESULT_temperature_check_laneA_20260928.md, where the "
+                             "effect was large -- 0%% is a valid explicit value and is not the "
+                             "same thing as unset. Off by default, and the harness aborts "
+                             "instead.")
     parser.add_argument("--corpus-fingerprint", choices=("vectors", "text", "skip"),
                         default="vectors",
                         help="Fingerprint the Weaviate corpus at run start and end and record it in integrity.corpus (ruling 1). `vectors` hashes text AND embeddings (measured 80s per sample against 7294 chunks) and is the only setting that can see a re-vectorisation; `text` hashes text only (7s) and is blind to one; `skip` records nothing and makes the run PROVISIONAL, like --allow-dirty-tree.")
@@ -1005,7 +1092,8 @@ def main(argv: Optional[list] = None) -> int:
 
     warmup_info, pre_rc = preflight(args.endpoint, args.auth_token, args.timeout, n_runs,
                                     args.allow_lm_cache, not args.no_warmup,
-                                    args.require_provider_pin)
+                                    args.require_provider_pin,
+                                    args.allow_unset_temperature)
     if pre_rc:
         print("Nothing was scored. Fix the condition above and rerun.")
         return pre_rc
@@ -1124,7 +1212,12 @@ def main(argv: Optional[list] = None) -> int:
                         "run_passes": [bool(r.overall_pass) for r in scored_runs],
                         "runs": [{"pass": bool(r.overall_pass), "error": r.error,
                                   "degraded": r.degraded, "elapsed_s": r.elapsed_s,
-                                  "generation_seconds": r.generation_seconds}
+                                  "generation_seconds": r.generation_seconds,
+                                  "answer_sha16": (hashlib.sha256((r.answer or "").encode("utf-8")).hexdigest()[:16]
+                                                    if (r.answer or "") else None),
+                                  "answer_chars": len(r.answer or ""),
+                                  "temperature_on_the_wire": ((r.answer_lm or {}).get("temperature_on_the_wire")
+                                                                if isinstance(r.answer_lm, dict) else None)}
                                  for r in runs]},
                        indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -1160,7 +1253,8 @@ def main(argv: Optional[list] = None) -> int:
     # never reaches them, so run-level degradation was invisible - and predictions about
     # this harness are written in RUNS. Count runs here, where the ledger exists.
     summary["runs"] = run_level_tally(run_ledger)
-    integrity_violations = check_run_integrity(run_ledger, args.allow_lm_cache)
+    integrity_violations = check_run_integrity(run_ledger, args.allow_lm_cache,
+                                               args.allow_unset_temperature)
     summary["integrity"] = {
         "lm_cache_allowed": bool(args.allow_lm_cache),
         "openrouter_provider_pin": warmup_info.get("openrouter_provider_pin"),
@@ -1169,6 +1263,7 @@ def main(argv: Optional[list] = None) -> int:
     }
     summary["answer_lm"] = answer_lm_tally(run_ledger)
     summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
+    summary["integrity"]["answer_temperature"] = answer_temperature_block(run_ledger)
     if corpus_skip:
         _unread = {"available": False,
                    "unavailable_reason": "unavailable:--corpus-fingerprint-skip",
