@@ -951,7 +951,7 @@ def main(argv: Optional[list] = None) -> int:
                              "Regression claims should be made only on STABLE questions; FLAKY is "
                              "the noise band. Default 5 per ruling 1 (2026-09-27): the pinned "
                              "floor pair showed N=3 cannot discriminate a question at p~0.83 "
-                             "from a deterministic pass (3/3 about 58% of the time), and that "
+                             "from a deterministic pass (3/3 about 58%% of the time), and that "
                              "is the whole of the 10 class changes measured between two "
                              "IDENTICAL arms. N=1 classifies nothing at all.")
     parser.add_argument("--baseline", help="Path to baseline summary JSON for regression comparison.")

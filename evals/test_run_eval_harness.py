@@ -849,6 +849,24 @@ def _summary(out):
     return json.loads((out / "summary.json").read_text(encoding="utf-8"))
 
 
+def test_the_parser_can_actually_render_its_own_help():
+    # A bare "%" in an argparse help string raises at FORMAT time, not at definition time, so the
+    # parser builds fine and every test that only parses args passes. It breaks --help AND the
+    # usage message argparse prints on any bad flag, which is exactly when a user needs it. Cost
+    # me one: "58% of the time" in the --runs help crashed with
+    # "TypeError: %o format: an integer is required, not dict".
+    p = RE.build_parser() if hasattr(RE, "build_parser") else None
+    if p is None:
+        # The parser is built inside main(); drive the real path instead.
+        import subprocess
+        r = subprocess.run([sys.executable, str(Path(RE.__file__)), "--help"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        assert r.returncode == 0, r.stderr[-800:]
+        assert "--runs" in r.stdout and "--corpus-fingerprint" in r.stdout, r.stdout[:400]
+        return
+    assert "--runs" in p.format_help()
+
+
 def test_skipping_the_fingerprint_performs_NO_corpus_read_and_is_provisional():
     # The stub in _run_main raises if corpus_state is called at all, so this asserts the cost as
     # well as the label: `skip` must not touch the network.
