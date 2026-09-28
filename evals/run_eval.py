@@ -679,6 +679,61 @@ def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_ca
     return violations
 
 
+def git_state() -> Dict[str, Any]:
+    """HEAD and dirtiness of the tree the harness is running from, asked of git itself.
+
+    `git_head` alone over a dirty tree is decoration: it names a commit whose contents are not what
+    ran. So `dirty` comes from `git status --porcelain`, which already knows about autocrlf and
+    whatever else this platform does to line endings -- hand-rolling that check is how a clean tree
+    gets reported as dirty and a dirty one as clean.
+
+    Captured at run START and again at run END, because on 2026-09-27 noise-floor arm 2 had three
+    commits land mid-run and nothing in the artifact recorded it; the deviation had to be
+    reconstructed afterwards from commit timestamps. Two samples make that visible in the run's own
+    output. An error is RECORDED, not swallowed: a summary that cannot say what it ran is worse than
+    one that says it could not find out.
+    """
+    import subprocess
+    out: Dict[str, Any] = {}
+    for key, cmd in (("head", ["git", "rev-parse", "HEAD"]),
+                     ("porcelain", ["git", "status", "--porcelain"])):
+        try:
+            r = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=30)
+        except Exception as exc:  # git missing, or not a repo
+            out[key + "_error"] = f"{type(exc).__name__}: {exc}"
+            continue
+        if r.returncode != 0:
+            out[key + "_error"] = (r.stderr or "").strip()[:200] or f"rc={r.returncode}"
+            continue
+        if key == "head":
+            out["head"] = r.stdout.strip()
+        else:
+            lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+            out["dirty"] = bool(lines)
+            out["dirty_paths"] = len(lines)
+            # The paths themselves, capped: which files were dirty is the whole question when a
+            # result has to be judged provisional or not.
+            out["dirty_sample"] = [ln[:120] for ln in lines[:20]]
+    return out
+
+
+def git_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any]) -> Dict[str, Any]:
+    """The `integrity.git` block. A function rather than a dict literal inside main() so the
+    comparison can be born-tested: asserting that the SOURCE contains "changed_during_run" proves
+    nothing about whether it is ever True."""
+    return {
+        "at_start": at_start,
+        "at_end": at_end,
+        "changed_during_run": at_start != at_end,
+        "provisional": bool(at_start.get("dirty") or at_end.get("dirty")
+                            or at_start != at_end
+                            or any(k.endswith("_error") for k in at_start)),
+        "note": "provisional means this run cannot be cited in an ADR or a tier change (ruling 4): "
+                "the tree was dirty, or HEAD/the tree moved WHILE questions were being scored, or "
+                "git state could not be read at all",
+    }
+
+
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--endpoint", default=os.getenv("EVAL_ENDPOINT", DEFAULT_ENDPOINT),
@@ -721,6 +776,7 @@ def main(argv: Optional[list] = None) -> int:
 
     load_dotenv(REPO_ROOT / ".env")
 
+    git_at_start = git_state()
     questions = load_reference_set(Path(args.reference_set), args.ids)
     out_dir = Path(args.output_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -843,6 +899,7 @@ def main(argv: Optional[list] = None) -> int:
         "min_real_generation_seconds": MIN_REAL_GENERATION_SECONDS,
         "violations": integrity_violations,
     }
+    summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
     if n_runs > 1:
         # Classification is over SCORED runs only. A question with no scored run is NO-DATA:
         # not a STABLE-FAIL, not FLAKY, not anything. Calling it STABLE-FAIL is how two

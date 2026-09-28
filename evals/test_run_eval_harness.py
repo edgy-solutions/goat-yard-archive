@@ -11,6 +11,7 @@ runs were in-process cache replays. Both conditions were invisible in the output
     python test_run_eval_harness.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -450,6 +451,108 @@ def test_require_provider_pin_exists_and_aborts():
 
 def test_fallback_constant_is_not_duplicated_here():
     assert "ink has dried" not in SRC, "harness must import the constant, not copy it"
+
+
+
+# --- git state in the summary (added 2026-09-27, after the noise-floor pair) ----------------
+# Deviation 1 of the noise-floor result: arm 1 ran over a dirty tree and arm 2 had three commits
+# land mid-run, and the artifact recorded NONE of it, so the deviation had to be reconstructed from
+# commit timestamps afterwards. These tests are about whether the recorder can SEE dirt, not
+# whether it returns a dict: a detector that always answered "clean" would pass a clean-only test.
+
+def test_git_state_reports_head_and_a_boolean_dirty():
+    # Deliberately NOT "the tree is clean": this suite normally runs mid-change, and a test that
+    # demands a clean tree would just be skipped-in-effect on every real development run. The shape
+    # is what is asserted here; whether the detector can see dirt is the next test.
+    st = RE.git_state()
+    assert "head" in st, st
+    assert len(st["head"]) == 40 and all(c in "0123456789abcdef" for c in st["head"]), st
+    assert isinstance(st.get("dirty"), bool), st
+    assert isinstance(st.get("dirty_paths"), int), st
+    assert st["dirty"] == (st["dirty_paths"] > 0), ("dirty and dirty_paths disagree: %r" % (st,))
+
+
+def test_git_state_can_actually_SEE_a_newly_dirty_path():
+    # The companion assertion. Without it, a git_state() hard-coded to dirty=False would pass the
+    # test above, and a run over a dirty tree would be recorded as clean. Works whether or not the
+    # tree is already dirty, by measuring the DELTA the probe file makes.
+    before = RE.git_state()
+    probe = RE.REPO_ROOT / "_git_state_borntest_probe.tmp"
+    assert not probe.exists(), "probe file left over from an earlier run"
+    try:
+        probe.write_text("this file exists only inside this test", encoding="utf-8")
+        during = RE.git_state()
+        assert during.get("dirty") is True, ("git_state cannot see an untracked file; a dirty tree "
+                                            "would be recorded as clean. got %r" % (during,))
+        assert during["dirty_paths"] == before["dirty_paths"] + 1, (before, during)
+        assert any("_git_state_borntest_probe.tmp" in s for s in during.get("dirty_sample", [])),             during
+    finally:
+        if probe.exists():
+            probe.unlink()
+    after = RE.git_state()
+    assert after["dirty_paths"] == before["dirty_paths"], ("probe not cleaned up", before, after)
+
+
+def test_git_state_records_an_error_instead_of_swallowing_it():
+    # A summary that cannot say what it ran must say so, not report a clean tree by default.
+    orig = RE.REPO_ROOT
+    try:
+        RE.REPO_ROOT = Path(tempfile.mkdtemp())   # a real directory that is not a git repo
+        st = RE.git_state()
+        assert any(k.endswith("_error") for k in st), ("a non-repo must record an error, got %r"
+                                                       % (st,))
+        assert "dirty" not in st or st["dirty"] is not False or "porcelain_error" in st, st
+    finally:
+        RE.REPO_ROOT = orig
+
+
+def test_changed_during_run_is_the_comparison_the_summary_makes():
+    # The summary sets changed_during_run = (at_start != at_end). Assert the SEMANTICS here, so a
+    # later refactor cannot turn it into a constant False.
+    a = {"head": "a" * 40, "dirty": False, "dirty_paths": 0, "dirty_sample": []}
+    b = {"head": "b" * 40, "dirty": False, "dirty_paths": 0, "dirty_sample": []}
+    assert (a != b) is True, "differing HEADs must compare unequal"
+    c = dict(a, dirty=True, dirty_paths=1, dirty_sample=["?? x"])
+    assert (a != c) is True, "same HEAD but newly dirty must compare unequal"
+    assert (a != dict(a)) is False, "an unchanged state must compare equal"
+
+
+def test_git_run_block_flags_a_clean_unchanged_run_as_NOT_provisional():
+    clean = {"head": "a" * 40, "dirty": False, "dirty_paths": 0, "dirty_sample": []}
+    b = RE.git_run_block(clean, dict(clean))
+    assert b["changed_during_run"] is False, b
+    assert b["provisional"] is False, b
+
+
+def test_git_run_block_flags_a_dirty_run_provisional():
+    dirty = {"head": "a" * 40, "dirty": True, "dirty_paths": 2, "dirty_sample": [" M x", " M y"]}
+    b = RE.git_run_block(dirty, dict(dirty))
+    assert b["changed_during_run"] is False, "the tree never moved; only dirtiness is at issue"
+    assert b["provisional"] is True, b
+
+
+def test_git_run_block_catches_a_commit_landing_MID_RUN():
+    # Exactly what happened to noise-floor arm 2 on 2026-09-27: it started dirty and ended clean,
+    # three commits having landed while questions were being scored. Nothing recorded it.
+    start = {"head": "a" * 40, "dirty": True, "dirty_paths": 10, "dirty_sample": [" M z"]}
+    end = {"head": "b" * 40, "dirty": False, "dirty_paths": 0, "dirty_sample": []}
+    b = RE.git_run_block(start, end)
+    assert b["changed_during_run"] is True, b
+    assert b["provisional"] is True, b
+
+
+def test_git_run_block_is_provisional_when_git_could_not_be_read():
+    err = {"head_error": "not a git repository", "porcelain_error": "not a git repository"}
+    b = RE.git_run_block(err, dict(err))
+    assert b["provisional"] is True, ("a run that cannot say what it ran is provisional, got %r"
+                                      % (b,))
+
+
+def test_run_eval_records_git_in_the_integrity_block():
+    src = (Path(RE.__file__)).read_text(encoding="utf-8")
+    assert 'summary["integrity"]["git"]' in src, "git state must land in the integrity block"
+    assert "changed_during_run" in src, src[:0]
+    assert src.index("git_at_start = git_state()") < src.index("preflight(args.endpoint"), "git state must be captured BEFORE preflight spends a request"
 
 
 if __name__ == "__main__":
