@@ -833,7 +833,7 @@ def crop_faults(aperture="A2_spanbox"):
             if v.get(aperture)}
 
 
-def crops(save=True, include_sealed=False):
+def crops(save=True, include_sealed=False, allow_narrow=False):
     CROPDIR.mkdir(parents=True, exist_ok=True)
     built, page_cache = [], {}
     for s in build_set(include_sealed=include_sealed):
@@ -885,7 +885,24 @@ def crops(save=True, include_sealed=False):
         rec["context_strip"] = str(ctxp)
         built.append(rec)
     if save:
-        io.open(CROPDIR / "manifest.json", "w", encoding="utf-8").write(
+        # A WRITE THAT LOSES SPANS REFUSES. `crops()` defaults to include_sealed=False, and the CLI
+        # took that default once and rewrote the manifest over 11 of 21 spans, dropping the ten sealed
+        # ones -- three of them in the send scope. The PNGs all survived; only the index narrowed, and
+        # every downstream measurement reads the index, so the scope and the fault table quietly became
+        # statements about half the corpus. The bytes surviving is what made it silent.
+        # Narrowing is legitimate when a span really does leave the build set, which is a decision and
+        # therefore needs a word: allow_narrow=True.
+        _mf = CROPDIR / "manifest.json"
+        if _mf.exists() and not allow_narrow:
+            _was = {m["span_id"] for m in json.loads(_mf.read_text(encoding="utf-8"))}
+            _lost = _was - {m["span_id"] for m in built}
+            if _lost:
+                raise RuntimeError(
+                    "manifest write would DROP %d span(s) the index already holds: %s. The crops "
+                    "themselves are untouched, but every measurement downstream reads this file. "
+                    "Pass include_sealed=True if you meant the whole corpus, or allow_narrow=True if "
+                    "a span really has left the build set." % (len(_lost), " ".join(sorted(_lost))))
+        io.open(_mf, "w", encoding="utf-8").write(
             json.dumps(built, ensure_ascii=False, indent=1))
     return built
 
@@ -1029,7 +1046,9 @@ def score():
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "crops"
     if cmd == "crops":
-        for s in crops():
+        # include_sealed=True, explicitly: the audit set is all 21 spans. Taking the function default
+        # here is what narrowed the manifest to 11 and lost three spans of the send scope.
+        for s in crops(include_sealed=True):
             a1 = s["A1_notebox"] and s["A1_notebox"]["size"]
             a2 = s["A2_spanbox"] and s["A2_spanbox"]["size"]
             print(f"{s['span_id']:10s} A1={a1} A2={a2} nb_status={s['note_box_status']}")

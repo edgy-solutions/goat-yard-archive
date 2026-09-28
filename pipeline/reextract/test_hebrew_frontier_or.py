@@ -530,6 +530,27 @@ check("the one A1 fault left is p217:n2's ratified STRIP box at -2, not its mapp
 check("p217:n2 is flagged AND produced a crop, so a recorded fault is still not a refusal",
       "p217:n2" in _a1f and MAN["p217:n2"].get("A1_notebox"), _a1f.get("p217:n2"))
 
+print("\n(12) the manifest index cannot silently lose spans")
+# BORN-TEST. `crops()` defaults to include_sealed=False and the CLI took that default, rewriting the
+# manifest over 11 of 21 spans and dropping ten sealed ones -- p423:n3, p596:n2 and p726:n3 among them,
+# three of the four spans in the send scope. Every PNG survived, which is exactly why it was silent:
+# the bytes were fine and the INDEX was half a corpus, and every measurement downstream reads the index.
+check("the manifest on disk holds the whole build set, sealed spans included",
+      set(MAN) == {s["span_id"] for s in diag.build_set(include_sealed=True)},
+      "manifest %d spans, build set %d" % (len(MAN), len(diag.build_set(include_sealed=True))))
+check("the send scope is IN the manifest -- the exact spans the narrowing dropped",
+      all(s in MAN for s in SH.scope()[0]), sorted(set(SH.scope()[0]) - set(MAN)))
+_narrowed = None
+try:
+    diag.crops(save=True, include_sealed=False)          # the call that did the damage
+except RuntimeError as e:
+    _narrowed = str(e)
+check("and a narrowing write REFUSES, naming the spans it would have lost",
+      _narrowed and "would DROP" in _narrowed and "p726:n3" in _narrowed, _narrowed)
+check("the refusal left the index alone: it still holds every span",
+      set({m["span_id"] for m in json.loads((diag.CROPDIR / "manifest.json").read_text("utf-8"))})
+      == set(MAN))
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")
