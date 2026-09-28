@@ -40,6 +40,7 @@ from .degradation import (
     GENERATION_FAILURE_ANSWER,
     LLM_WALL_SECONDS,
     TIMEOUT_FALLBACK_ANSWER,
+    answer_temperature,
     classify_generation_exception,
     lm_cache_disabled,
     provider_pin,
@@ -268,11 +269,24 @@ async def lifespan(app: FastAPI):
             else:
                 print("OpenRouter provider UNPINNED: routing may switch provider mid-run.")
 
+            # dspy.LM leaves temperature None and litellm omits the field, so this path has
+            # always taken the provider's own default while the BAML path sends 0. Unset changes
+            # nothing here; set, it goes on BOTH LMs -- one LM at temperature 0 and one at the
+            # provider default is a split arm that reports as a single measurement.
+            _answer_temp = answer_temperature()
+            _temp_kwargs = {} if _answer_temp is None else {"temperature": _answer_temp}
+            if _answer_temp is None:
+                print("Answer temperature UNSET: no temperature field is sent; the provider "
+                      "default applies and is not recorded by us.")
+            else:
+                print(f"Answer temperature EXPLICIT: {_answer_temp} on both LMs.")
+
             lm_auth = dspy.LM(
                 model="openai/deepseek/deepseek-chat",
                 api_key=key_main,
                 api_base="https://openrouter.ai/api/v1",
-                extra_body=dict(_extra_body)
+                extra_body=dict(_extra_body),
+                **_temp_kwargs
             )
             
             # Initialize Anon LM (might be same key)
@@ -280,7 +294,8 @@ async def lifespan(app: FastAPI):
                 model="openai/deepseek/deepseek-chat",
                 api_key=key_anon_check,
                 api_base="https://openrouter.ai/api/v1",
-                extra_body=dict(_extra_body)
+                extra_body=dict(_extra_body),
+                **_temp_kwargs
             )
             
             # An arm that claims N samples per question must actually call the model N

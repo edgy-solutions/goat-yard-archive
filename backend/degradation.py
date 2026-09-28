@@ -150,6 +150,48 @@ def provider_pin() -> dict | None:
     return {"order": order, "allow_fallbacks": False}
 
 
+ANSWER_TEMPERATURE_ENV = "GILL_ANSWER_TEMPERATURE"
+
+
+def answer_temperature() -> float | None:
+    """Explicit sampling temperature for the OFF (DSPy) answer path, or None to send none.
+
+    The two answer paths have never agreed on this field. `dspy.LM(...)` leaves
+    `kwargs["temperature"] is None`, litellm omits it, and the PROVIDER's default applies --
+    unrecorded, and not necessarily the same default next month. The ON path's BAML client sends
+    `temperature: 0` (structured_answer.ANSWER_LM_TEMPERATURE). So every OFF-vs-ON arm ever run
+    varied the flag AND the temperature together, and neither arm could tell you which one moved
+    the answer. That is the confound this knob exists to remove: hold temperature equal across
+    both arms, then the flag is the only difference left.
+
+    None when unset, and unset must stay the default: setting a temperature the product does not
+    set would make every eval measure a configuration nobody serves. A value that is present but
+    unparseable raises rather than falling back to None -- an arm that asked for temperature 0 and
+    silently got the provider default is the exact failure this records against.
+
+    Measured 2026-09-27 (`evals/probe_temperature_determinism.py`, one question, N=3 per arm):
+    the unset arm was already 3/3 byte-identical, so temperature is NOT the established source of
+    the 13 stochastic questions -- but the two arms produced DIFFERENT text (digests 0f31b7b7 vs
+    3e9aed0a), so it is not inert either.
+    """
+    raw = (os.getenv(ANSWER_TEMPERATURE_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        t = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{ANSWER_TEMPERATURE_ENV}={raw!r} is not a number. Unset it to send no temperature "
+            f"at all (the provider default, which is what this path has always done) rather than "
+            f"setting it to something unparseable."
+        )
+    if not 0.0 <= t <= 2.0:
+        raise ValueError(
+            f"{ANSWER_TEMPERATURE_ENV}={raw!r} is outside the accepted 0.0-2.0 range."
+        )
+    return t
+
+
 def is_degraded_answer(answer: str | None) -> bool:
     """Compatibility floor: is this answer text a known non-answer rather than content?
 

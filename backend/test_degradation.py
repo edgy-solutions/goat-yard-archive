@@ -180,6 +180,88 @@ def test_main_says_out_loud_which_way_it_went():
     )
 
 
+# ------------------------------------------ the explicit answer temperature (2026-09-27)
+
+def test_temperature_is_none_when_unset():
+    # Unset must change nothing: this path has always sent no temperature field, and a knob that
+    # alters the default configuration makes every eval measure something nobody serves.
+    os.environ.pop(D.ANSWER_TEMPERATURE_ENV, None)
+    assert D.answer_temperature() is None
+
+
+def test_ZERO_is_a_temperature_and_not_an_absent_one():
+    # The companion assertion, and the whole reason this helper is not a one-line getenv: 0 is
+    # falsy. An implementation that treated "0" as unset would send no temperature for the exact
+    # value this knob was built to send, and the run would report a setting it never used.
+    os.environ[D.ANSWER_TEMPERATURE_ENV] = "0"
+    try:
+        t = D.answer_temperature()
+    finally:
+        os.environ.pop(D.ANSWER_TEMPERATURE_ENV, None)
+    assert t == 0.0 and t is not None, repr(t)
+    assert isinstance(t, float), "litellm sends what it is given; keep the type honest"
+
+
+def test_a_nonzero_temperature_survives():
+    os.environ[D.ANSWER_TEMPERATURE_ENV] = "0.7"
+    try:
+        assert D.answer_temperature() == 0.7
+    finally:
+        os.environ.pop(D.ANSWER_TEMPERATURE_ENV, None)
+
+
+def test_an_unparseable_temperature_fails_loud_rather_than_sending_none():
+    # Falling back to None here would mean an arm that asked for 0 silently ran at the provider
+    # default and recorded neither -- the same class of fault as an unpinned arm reading as pinned.
+    for bad in ("abc", "0.0.1", "zero"):
+        os.environ[D.ANSWER_TEMPERATURE_ENV] = bad
+        try:
+            D.answer_temperature()
+        except ValueError as e:
+            assert D.ANSWER_TEMPERATURE_ENV in str(e), str(e)
+        else:
+            raise AssertionError(f"{bad!r} must not read as 'send no temperature'")
+        finally:
+            os.environ.pop(D.ANSWER_TEMPERATURE_ENV, None)
+
+
+def test_an_out_of_range_temperature_is_refused():
+    for bad in ("-0.5", "3.5"):
+        os.environ[D.ANSWER_TEMPERATURE_ENV] = bad
+        try:
+            D.answer_temperature()
+        except ValueError as e:
+            assert "range" in str(e), str(e)
+        else:
+            raise AssertionError(f"{bad!r} must not reach the wire")
+        finally:
+            os.environ.pop(D.ANSWER_TEMPERATURE_ENV, None)
+
+
+# --------------------------------------------------- the temperature WIRING
+
+def test_main_puts_the_temperature_on_BOTH_lms():
+    assert "answer_temperature()" in _MAIN, "main.py never calls answer_temperature()"
+    assert _MAIN.count("**_temp_kwargs") == 2, (
+        "lm_auth and lm_anon must both carry it; one LM at 0 and one at the provider default is "
+        "a split arm that reports as one measurement"
+    )
+
+
+def test_main_sends_NO_temperature_field_when_unset():
+    # Not `temperature=None`: litellm forwards an explicit None as a field on some providers, and
+    # the point of unset is that the request body is byte-identical to what it was before.
+    assert "_temp_kwargs = {} if _answer_temp is None else" in _MAIN, (
+        "unset must contribute no kwarg at all"
+    )
+
+
+def test_main_says_out_loud_which_temperature_it_used():
+    assert "Answer temperature UNSET" in _MAIN and "Answer temperature EXPLICIT" in _MAIN, (
+        "both branches must print, or a run cannot tell which one it got from the log"
+    )
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
