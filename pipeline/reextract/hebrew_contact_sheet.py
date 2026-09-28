@@ -219,6 +219,12 @@ def build(spans=None, out=OUT, include_a1=False):
         # Chris's p423 ruling turns on exactly this: "the box stands as ratified if the re-cut crop
         # shows the span on one line". One band = one line of type. Derived, so the judgement does not
         # depend on reading four numbers out of a list.
+        _cut = [e for e in (m.get("rect_edges") or []) if e]
+        if _cut:
+            P.append("<tr><th>CUT</th><td><b>this crop was clipped</b> &mdash; "
+                     f"<code>{_cut}</code>, {m.get('band_overshoot_px')}px past the band. "
+                     "Part of the ratified box is NOT in these pixels; what you are approving is what "
+                     "is left.</td></tr>")
         _nb = len(m.get("native_rects") or [])
         P.append(f"<tr><th>bands in this crop</th><td><b>{_nb}</b> "
                  + ("&mdash; the span is on ONE line, so a ratified box needs no redraw"
@@ -344,6 +350,10 @@ def build(spans=None, out=OUT, include_a1=False):
         # does not move a pixel. `run` compares this with the digest at send and records both, which
         # is the honest shape -- a refusal would misdescribe what the approval was about.
         "truth_digest": F.truth_digest(),
+        # What was cut off these crops before the pixels were taken. The crop hash cannot say it -- a
+        # clipped crop is a valid PNG -- so the sheet says it, and `run`'s clip gate holds the answer
+        # to what is on this page. {} is an answer; a missing key is silence.
+        "clipped": F.clip_status(list(cells.values())),
         "arms_resolved": arms_ok,
         "calls_if_approved": len(want) * len(arms_ok),
         # Recorded so the run header says which way the conditional term was decided, and on what.

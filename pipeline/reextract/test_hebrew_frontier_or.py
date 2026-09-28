@@ -551,6 +551,39 @@ check("the refusal left the index alone: it still holds every span",
       set({m["span_id"] for m in json.loads((diag.CROPDIR / "manifest.json").read_text("utf-8"))})
       == set(MAN))
 
+print("\n(13) the clip flag is acted on, not merely recorded")
+# Lane A's point, and the real remaining gap: a clipped crop is a valid PNG, so until something acts on
+# the flag an amputation is visible only to a reader who goes looking. The gate does NOT refuse clipped
+# crops -- a box cut back to real page content may be the crop we want, and that is Chris's judgement.
+# It refuses a crop whose cut is not the cut the sheet showed, in either direction.
+_SHEETREC = json.loads(F.SHEET.read_text(encoding="utf-8"))
+_live_clip = F.clip_status(CS)
+# VACUITY, SAID OUT LOUD. No A2 rect is clipped today, so every check below that ranges over the
+# population ranges over nothing. The gate is therefore exercised on a CONSTRUCTED record instead.
+check("no crop in the send scope is clipped, so the gate's population is EMPTY today",
+      _live_clip == {}, _live_clip)
+check("the sheet on disk RECORDS the answer rather than omitting it -- {} is an answer, a missing "
+      "key is silence", "clipped" in _SHEETREC, sorted(_SHEETREC))
+check("the gate passes on the real sheet (a gate that refuses everything protects nothing)",
+      F.clip_gate(CS, _SHEETREC) == _live_clip)
+_sid = CS[0][0]["span_id"]
+_doctored = dict(_SHEETREC, clipped={_sid: [{"rect_i": 0, "edge": ["band-clipped"], "over": 42.0}]})
+try:
+    F.clip_gate(CS, _doctored)
+    check("a sheet that showed a cut which is no longer there -> REFUSE", False, "gate passed")
+except RuntimeError as e:
+    check("a sheet that showed a cut which is no longer there -> REFUSE, naming both",
+          "clip gate REFUSED" in str(e) and _sid in str(e))
+try:
+    F.clip_gate(CS, {k: v for k, v in _SHEETREC.items() if k != "clipped"})
+    check("an old sheet with no clip field passes only because nothing in scope is cut", True)
+except RuntimeError as e:
+    check("an old sheet with no clip field passes only because nothing in scope is cut", False, str(e))
+check("and the nine clipped boxes are all A1, which is why this population is empty and not because "
+      "the measurement is broken",
+      {c["aperture"] for c in diag.clipped()} == {"A1_notebox"} and len(diag.clipped()) == 9,
+      [(c["span_id"], c["aperture"]) for c in diag.clipped()])
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")

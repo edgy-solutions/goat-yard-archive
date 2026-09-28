@@ -461,6 +461,51 @@ def truth_sent(cs):
     return {s["span_id"]: {"truth": s["truth"], "basis": s["truth_basis"]} for s, _c, _x in cs}
 
 
+def clip_status(cs):
+    """span_id -> the cut this run's crops carry, as the mapper recorded it at cut time.
+
+    The crop hash makes a run answerable for its pixels and cannot see this: a clipped crop is a
+    perfectly valid PNG and hashes like any other. So the one thing a hash cannot say about a crop --
+    that part of the box was amputated before the pixels were cut -- gets its own field."""
+    cut = {}
+    for c in diag.clipped():
+        if c["aperture"] == APERTURE:
+            cut.setdefault(c["span_id"], []).append(
+                {"rect_i": c["rect_i"], "edge": c["edge"], "over": c["over"]})
+    return {s["span_id"]: cut[s["span_id"]] for s, _c, _x in cs if s["span_id"] in cut}
+
+
+def clip_gate(cs, rec):
+    """Refuse to send a crop whose amputation differs from the one the sheet showed.
+
+    NOT a refusal to send a clipped crop. A box cut back to real page content may be the crop we want,
+    and that is a box judgement -- Chris's, not a gate's. What the gate owns is that nobody is asked to
+    approve pixels without being told they were cut, and that the answer cannot change afterwards. Both
+    directions are refusals: a crop that STOPPED being clipped is also not the crop that was approved.
+
+    Sheets built before this field existed have no answer to compare against, so they are let through
+    with a console note rather than refused on a difference nobody could have recorded."""
+    shown = rec.get("clipped")
+    live = clip_status(cs)
+    if shown is None:
+        if live:
+            raise RuntimeError(
+                "the sheet predates the clip field and %d crop(s) in this scope ARE clipped: %s. "
+                "Rebuild the sheet so the cut is on the page Chris approves."
+                % (len(live), " ".join(sorted(live))))
+        print("  note: this sheet predates the clip field; no crop in scope is clipped, so there is "
+              "nothing it could have failed to show.")
+        return live
+    if {k: sorted(map(repr, v)) for k, v in shown.items()} != \
+       {k: sorted(map(repr, v)) for k, v in live.items()}:
+        raise RuntimeError(
+            "clip gate REFUSED: the cut on these crops is not the cut the sheet showed. "
+            "sheet=%s now=%s. A clipped crop hashes like any other, so the hash gate cannot catch "
+            "this; rebuild the sheet and have it approved on what the crops now show."
+            % (json.dumps(shown, ensure_ascii=False), json.dumps(live, ensure_ascii=False)))
+    return live
+
+
 def sheet_gate(cs, sheet=SHEET):
     """Refuse to send a crop the contact sheet did not show. Returns the sheet record for the header.
 
@@ -492,6 +537,9 @@ def run(only=None, spans=None, approved=False):
     # started. --approved records a human claim; the sheet gate verifies the pixels. Neither substitutes
     # for the other, and the header says which is which.
     sheet = sheet_gate(cs)
+    # Second gate, same principle, different property: the hash proves the pixels, this proves that
+    # what was cut away from them was on the page Chris approved. Also before the catalog pull.
+    _clip = clip_gate(cs, sheet)
     # Recorded, never enforced: the approval was about pixels, and the truth table is not a pixel.
     # A mismatch is a fact about the run, so it goes in the header and on the console; it is not a
     # reason to refuse a send Chris authorised on what the crops show.
@@ -540,6 +588,10 @@ def run(only=None, spans=None, approved=False):
                                                "truth_digest": truth_digest(),
                                                "truth_digest_at_sheet": sheet.get("truth_digest"),
                                                "truth_sent": truth_sent(cs),
+                                               # {} means no crop in this run was amputated. Recorded
+                                               # either way: absence of the field would be silence,
+                                               # and silence is what the flag was already getting.
+                                               "clipped_sent": _clip,
                                                "span_scope": sorted(spans) if spans else "ALL",
                                                "contact_sheet": sheet["sheet"],
                                                "contact_sheet_built": sheet.get("built"),
