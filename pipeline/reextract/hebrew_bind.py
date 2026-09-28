@@ -110,7 +110,10 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
     # The crops that were ACTUALLY SENT, read from crop_faults.json rather than re-cut. None means the
     # measurement was never made, and an unmeasured crop cannot license a read: it is treated exactly
     # like a faulted one, so an absent audit can never be mistaken for a clean one.
-    sent = D.crop_faults(aperture)
+    # From the frozen archive, NOT from the live fault table: the live one describes the re-cut
+    # crops, which no arm has ever seen.
+    sent = D.sent_faults(aperture)
+    stale = D.crops_changed(aperture)
     rows = []
     for s in D.build_set(include_sealed=include_sealed):
         sid = s["span_id"]
@@ -125,7 +128,13 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
         # a box that now cuts cleanly does not retroactively make a blank crop a valid stimulus.
         fault_fresh = b.get("fault")
         fault_sent = "unmeasured" if sent is None else sent.get(sid)
-        faulted = bool(fault_sent) or bool(fault_fresh)
+        # Two ways a read can fail to be evidence, and they are different facts. Either the crop it was
+        # taken on was faulted when it was sent, or the crop has been re-cut since and the read is no
+        # longer about any pixels we hold. A fresh geometry fault is NEITHER: it says the box is wrong
+        # today, which has no bearing on whether a sound crop was shown yesterday.
+        void = ("crop-faulted-as-sent:%s" % fault_sent if fault_sent else
+                "crop-changed-since-read" if sid in stale else None)
+        faulted = bool(void)
         n_clip, n_full = cls["clipped"], sum(cls[c] for c in FULL)
         if not mine:
             v = "no-reads"
@@ -139,7 +148,8 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
             v = "broken:no-recovery"
         rows.append(dict(span_id=sid, page=s["page"], truth=s["truth"],
                          words=len(s["truth"].split()), fault=fault_sent or fault_fresh,
-                         fault_sent=fault_sent, fault_fresh=fault_fresh,
+                         fault_sent=fault_sent, fault_fresh=fault_fresh, evidence_void=void,
+                         crop_stale=sid in stale,
                          lines=b.get("lines"), one_band=bool(b.get("one_band")),
                          n_reads=len(mine), n_clipped=n_clip, n_full=n_full,
                          n_wrong=cls["wrong"], n_abstain=cls["abstain"],

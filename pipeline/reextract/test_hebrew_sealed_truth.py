@@ -201,23 +201,32 @@ nf = sum(1 for s in full if not s["unscorable"])
 #   19 -> 17  2026-09-27  p423:n3 + p726:n3 leave: sent to all 30 arms as pure white images, so no arm
 #                         was ever shown them and none can be graded on them (crop-fault gate).
 #   17 -> 19  2026-09-27  p138:n6 + p596:n2 arrive: Chris signed both, sequence item 5.
+#   19 -> 20  2026-09-27  p423:n3 + p726:n3 come BACK. Lane A's dc573ca persists each column's paste
+#                         origin, so the strip->native map no longer re-infers it from the strip's own
+#                         ink. Same ratified boxes, same crop sizes, different pixels: the crops had
+#                         been cut from the wrong place on the page and landed in white margin. Their
+#                         exclusion was our arithmetic, never their geometry.
+#   20 -> 19  2026-09-27  p900:n4 leaves. Cause, in one line: its A2 span box maps 2 rows past the
+#                         bottom of its own strip (out-of-strip:beyond=bottom2), a geometry fault.
+# Both moves are membership, not drift, and both are named -- a count that changes by zero across a
+# two-in two-out swap is the failure mode these sets exist to prevent, and it has now happened twice.
 _BASE_SCORABLE = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p219:n0", "p253:n2",
-                  "p360:n0", "p657:n0", "p895:n0", "p900:n4"}
-_FULL_SCORABLE = _BASE_SCORABLE | {"p217:n2", "p293:n0", "p362:n1", "p427:n4", "p491:n1", "p596:n2",
-                                   "p897:n4", "p912:n2"}
+                  "p360:n0", "p657:n0", "p895:n0"}
+_FULL_SCORABLE = _BASE_SCORABLE | {"p217:n2", "p293:n0", "p362:n1", "p423:n3", "p427:n4", "p491:n1",
+                                   "p596:n2", "p726:n3", "p897:n4", "p912:n2"}
 check("default scorable set is exactly the unsealed signed spans",
       {s["span_id"] for s in base if not s["unscorable"]} == _BASE_SCORABLE,
       sorted({s["span_id"] for s in base if not s["unscorable"]} ^ _BASE_SCORABLE))
 check(f"default set is n={len(_BASE_SCORABLE)} scorable (sealed pages untouched)",
       nb == len(_BASE_SCORABLE), str(nb))
-check("carve-out scorable set is exactly the signed corpus minus the two blank crops",
+check("carve-out scorable set is exactly the signed corpus minus the one crop-faulted span",
       {s["span_id"] for s in full if not s["unscorable"]} == _FULL_SCORABLE,
       sorted({s["span_id"] for s in full if not s["unscorable"]} ^ _FULL_SCORABLE))
 check(f"carve-out set is n={len(_FULL_SCORABLE)} scorable "
       f"({len(D.TRUTH) + len(D.SEALED_TRUTH) - len(_FULL_SCORABLE)} lost to the crop-fault gate)",
       nf == len(_FULL_SCORABLE), str(nf))
-check("the two spans the crop-fault gate removes are the two blank ones",
-      {sid for sid in {**D.TRUTH, **D.SEALED_TRUTH}} - _FULL_SCORABLE == {"p423:n3", "p726:n3"},
+check("the one span the crop-fault gate removes is p900:n4, on a geometry fault",
+      {sid for sid in {**D.TRUTH, **D.SEALED_TRUTH}} - _FULL_SCORABLE == {"p900:n4"},
       sorted({sid for sid in {**D.TRUTH, **D.SEALED_TRUTH}} - _FULL_SCORABLE))
 check(f"the carve-out adds exactly {len(_FULL_SCORABLE) - len(_BASE_SCORABLE)} scorable spans",
       nf - nb == len(_FULL_SCORABLE) - len(_BASE_SCORABLE), str(nf - nb))
@@ -226,7 +235,7 @@ check("every added span is on a SEALED page",
 _A2 = {s["span_id"] for s in full if not s["unscorable"] and s["span_box"]}
 check("A2 sendable set is the carve-out set minus p657:n0, which has no span box",
       _A2 == _FULL_SCORABLE - {"p657:n0"}, sorted(_A2 ^ (_FULL_SCORABLE - {"p657:n0"})))
-check(f"A2 is n={len(_FULL_SCORABLE) - 1} (p657:n0 has no span box; 2 blank crops are unscorable)",
+check(f"A2 is n={len(_FULL_SCORABLE) - 1} (p657:n0 has no span box; p900:n4 is crop-faulted)",
       len(_A2) == len(_FULL_SCORABLE) - 1, str(len(_A2)))
 check("the default set still refuses sealed pages",
       all(not s["sealed"] for s in base))
@@ -254,10 +263,21 @@ def _gate_err(src):
         return None
     except D.CropRefused as e:
         return e.fault
+# Rewritten 27 Sept. p423:n3 and p726:n3 were held out here for a blank A2 crop; Lane A's mapping fix
+# recovered both, so the crop-fault holdout is now a different span for a different reason. Pinned as a
+# SET so the membership cannot turn over again without this failing -- which is exactly what it just did.
+_CROPFAULT = {sid for sid, s in _full.items() if (s["unscorable"] or "").startswith("crop-fault:")}
+check("exactly one span is held out by an A2 crop fault, and it is p900:n4",
+      _CROPFAULT == {"p900:n4"}, sorted(_CROPFAULT))
+check("p900:n4's cause is geometric: its A2 box maps 2 rows below its strip",
+      "out-of-strip" in (_full["p900:n4"]["unscorable"] or ""), _full["p900:n4"]["unscorable"])
 for sid in ("p423:n3", "p726:n3"):
-    u = _full[sid]["unscorable"] or ""
-    check(f"{sid} is UNSCORABLE by crop fault, not by signature", u.startswith("crop-fault:"), u)
-    check(f"{sid} names the fault as blank", "blank" in u, u)
+    check(f"{sid} is no longer held out: the blank crop was our mapping, not its box",
+          not _full[sid]["unscorable"], _full[sid]["unscorable"])
+    # The blank crop is still the truth about what was SENT, and that record must survive the fix --
+    # otherwise the 35 reads taken off a white rectangle silently become valid evidence again.
+    check(f"{sid}'s as-sent crop is still recorded blank in the frozen archive",
+          "blank" in (D.sent_faults().get(sid) or ""), D.sent_faults().get(sid))
 check("a uniform image is refused",
       D.crop_fault(Image.new("L", (60, 40), 255), [{"box": [0, 0, 60, 40]}], (3584, 5400))
       == "blank:uniform=255")
@@ -365,10 +385,22 @@ print(f"      {_nall} PNGs in {len(_per)} folders: {_nempty} EMPTY, {_nnoline} n
       f"{_nunread} unreadable")
 check("the census covers the whole tree, not one folder", len(_per) >= 5 and _nall >= 700,
       (len(_per), _nall))
-check("the blank-crop count across all artifact folders is 4", _nempty == 4,
-      sorted(r["name"] for r in _bad if r["kind"] == "empty"))
-check("every blank sits in the aperture crop folder",
-      all("hebrew_aperture_crops" in r["folder"] for r in _bad if r["kind"] == "empty"))
+# By FOLDER, not by a global count. A single total cannot say the thing that matters here, and it
+# proved it: the count went 4 -> 5 -> 4 across the re-cut while meaning something different each time.
+# The live folder must hold NO blank crop -- that is what the mapping fix bought. The archive must hold
+# exactly 4 forever -- that is the evidence of what was sent, and it is not allowed to improve.
+_EMPTY = [r for r in _bad if r["kind"] == "empty"]
+_LIVE_BLANK = [r["name"] for r in _EMPTY if r["folder"].endswith("hebrew_aperture_crops_20260920")]
+_SENT_BLANK = sorted(r["name"] for r in _EMPTY if "AS_SENT" in r["folder"])
+check("no blank crop survives in the live aperture folder after the re-cut", _LIVE_BLANK == [],
+      _LIVE_BLANK)
+check("the frozen archive still holds exactly the 4 blank crops that were sent",
+      _SENT_BLANK == ["p423_n3_A1_notebox.png", "p423_n3_A2_spanbox.png",
+                      "p726_n3_A1_notebox.png", "p726_n3_A2_spanbox.png"], _SENT_BLANK)
+check("every blank in the tree is accounted for by those two folders", len(_EMPTY) == len(_SENT_BLANK),
+      sorted(r["folder"] + "/" + r["name"] for r in _EMPTY))
+check("every blank sits in an aperture crop folder",
+      all("hebrew_aperture_crops" in r["folder"] for r in _EMPTY))
 check("the no-line case is reported separately and is not counted as blank",
       _nnoline == 1 and all(r["ink"] > D.NEAR_UNIFORM_INK for r in _bad if r["kind"] == "noline"))
 check("nothing in the tree is unreadable", _nunread == 0, _nunread)
@@ -524,5 +556,6 @@ if fails:
     sys.exit(1)
 print(f"PASS: {len(D.SEALED_TRUTH)} sealed truths trace to the signature; n={nf} scorable, "
       f"A2 n={len(_A2)} "
-      f"(p423:n3 and p726:n3 held out by the crop-fault gate).")
+      f"({', '.join(sorted(_CROPFAULT)) or 'none'} held out by the crop-fault gate, "
+      f"p657:n0 by having no span box).")
 sys.exit(0)

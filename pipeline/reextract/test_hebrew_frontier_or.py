@@ -58,14 +58,32 @@ print("(1) the set is A2 and nothing else")
 # MEMBERSHIP, not count. `len(CS) == 18` was true before AND after 2026-09-27, while two spans entered
 # (p138:n6, p596:n2 signed) and two left (p423:n3, p726:n3 blank-crop faulted). The assertion held
 # across a change to both halves of the set and reported nothing, which is what a parity proxy does.
+# 27 Sept, after the re-cut on Lane A's fixed mapping (dc573ca): the set moved in BOTH directions
+# again, which is why it is pinned as a set and the total derived from it.
+#   + p423:n3, p726:n3  their A2 crops were blank:uniform=255 because the strip->native map was wrong.
+#                       Same ratified box, same crop size, different pixels -- a pure translation
+#                       fault, so the boxes were never at issue. Both now cut clean.
+#   - p900:n4           its A2 box maps 2 rows past the bottom of its strip (out-of-strip:bottom2).
+#                       A geometry fault, which is the only cause approved for a denominator change.
 _EXPECT = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p217:n2", "p219:n0", "p253:n2",
-           "p293:n0", "p360:n0", "p362:n1", "p427:n4", "p491:n1", "p596:n2", "p895:n0", "p897:n4",
-           "p900:n4", "p912:n2"}
+           "p293:n0", "p360:n0", "p362:n1", "p423:n3", "p427:n4", "p491:n1", "p596:n2", "p726:n3",
+           "p895:n0", "p897:n4", "p912:n2"}
 _GOT = {s["span_id"] for s, _c, _x in CS}
 check("cells() yields exactly the expected span set", _GOT == _EXPECT, sorted(_GOT ^ _EXPECT))
 check(f"cells() yields {len(_EXPECT)} spans", len(CS) == len(_EXPECT), str(len(CS)))
-check("the two blank-crop spans are NOT sendable",
-      not ({"p423:n3", "p726:n3"} & _GOT), sorted({"p423:n3", "p726:n3"} & _GOT))
+# Reversed on 27 Sept, and the reversal is the point: these two were held out for a fault in OUR
+# mapping, not in their boxes. A gate that refuses a crop must also be able to stop refusing it once
+# the cause is fixed, or it silently becomes a permanent exclusion list.
+_FULL = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
+check("the two formerly-blank spans ARE sendable now that their crops cut clean",
+      {"p423:n3", "p726:n3"} <= _GOT, sorted({"p423:n3", "p726:n3"} - _GOT))
+check("p900:n4 is NOT sendable: its A2 box maps 2 rows past the bottom of its strip",
+      "p900:n4" not in _GOT and "out-of-strip" in (_FULL["p900:n4"]["unscorable"] or ""),
+      _FULL["p900:n4"]["unscorable"])
+# The crops these two were read on are gone from the live folder and live only in the frozen archive,
+# so every read on record for them is about pixels we no longer hold. They are re-run scope, not score.
+check("both formerly-blank spans are flagged as re-run scope, their old reads void",
+      set(diag.crops_changed()) >= {"p423:n3", "p726:n3"}, sorted(diag.crops_changed()))
 check("every cell is the A2 aperture", F.APERTURE == "A2_spanbox")
 check("every span is scorable", all(not s["unscorable"] for s, _c, _x in CS))
 check("every span has a ratified span box", all(s["span_box"] for s, _c, _x in CS))
@@ -87,17 +105,19 @@ raw_leaks = [s["span_id"] for s, _c, _x in CS if N(s["truth"]) in N(s["latin_con
 # a clean one: the gloss is *nidos*, "nests", and the signed answer קנים IS "nests". A model with Latin
 # reaches it without reading a pixel. p596:n2 leans the other way -- its gloss names the WRONG headword
 # (היה where the page has סנה), so back-translation actively misleads there. Recorded for item 6.
+# p726:n3 joined the leak set on 27 Sept purely by entering the population -- its gloss always leaked,
+# there was simply no crop to send it with. p423:n3 entered too and does NOT leak.
 _LEAK = {"p102:n0", "p124:n4", "p138:n5", "p219:n0", "p360:n0", "p217:n2", "p293:n0", "p427:n4",
-         "p491:n1", "p912:n2"}
-check("the raw latin_context leaks the signed truth on exactly the known 10 spans",
+         "p491:n1", "p726:n3", "p912:n2"}
+check(f"the raw latin_context leaks the signed truth on exactly the known {len(_LEAK)} spans",
       set(raw_leaks) == _LEAK, sorted(set(raw_leaks) ^ _LEAK))
 check("neither newly signed span leaks its truth into the context",
       not ({"p138:n6", "p596:n2"} & set(raw_leaks)), sorted({"p138:n6", "p596:n2"} & set(raw_leaks)))
 check("the guard is load-bearing: a majority of spans would leak unguarded",
       len(raw_leaks) >= len(CS) / 2, f"{len(raw_leaks)} of {len(CS)}")
-check("_ctx leaves zero Hebrew characters on all 18",
+check(f"_ctx leaves zero Hebrew characters on all {len(CS)}",
       not any(F.HEB.search(x) for _s, _c, x in CS))
-check("_ctx leaves usable Latin on all 18 (not blanked)",
+check(f"_ctx leaves usable Latin on all {len(CS)} (not blanked)",
       all(len(x.replace("•", "").strip()) >= 8 for _s, _c, x in CS))
 check("_ctx keeps one bullet per Hebrew run it removed",
       all(x.count("•") == len(F.HEB.findall(s["latin_context"])) for s, _c, x in CS))

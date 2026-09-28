@@ -524,6 +524,47 @@ def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None
     return raw, None
 
 
+# The crops that were actually sent to every arm, frozen before the 27-Sept re-cut. This directory
+# is written once and never again: an audit does not overwrite its own evidence, and after a re-cut the
+# live CROPDIR no longer answers the question "what did the model see?"
+AS_SENT = CROPDIR.parent / "hebrew_aperture_crops_AS_SENT_20260920"
+
+
+def _sha(p):
+    import hashlib
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()[:16] if Path(p).exists() else None
+
+
+def crop_sha(span_id, aperture="A2_spanbox", as_sent=False):
+    """sha256[:16] of one crop, live or as-sent. None when that crop does not exist."""
+    d = AS_SENT if as_sent else CROPDIR
+    return _sha(d / f"{span_id.replace(':', '_')}_{aperture}.png")
+
+
+def crops_changed(aperture="A2_spanbox"):
+    """span_id -> (sha_as_sent, sha_now) for crops that differ from the ones the reads were taken on.
+
+    A read is evidence about the pixels it was shown. When a crop is re-cut, every read recorded
+    against it becomes STALE -- not wrong, not confirmed, just no longer about anything on disk -- and
+    the span has to be re-run before it can be scored again. This set IS the re-run scope."""
+    out = {}
+    for p in sorted(AS_SENT.glob(f"*_{aperture}.png")):
+        sid = p.name[:-len(f"_{aperture}.png")].replace("_n", ":n")
+        a, b = _sha(p), _sha(CROPDIR / p.name)
+        if a != b:
+            out[sid] = (a, b)
+    return out
+
+
+def sent_faults(aperture="A2_spanbox"):
+    """The AS-SENT fault table, from the frozen archive. None when the archive has no fault file."""
+    p = AS_SENT / "crop_faults.json"
+    if not p.exists():
+        return None
+    return {k: v[aperture] for k, v in json.loads(p.read_text(encoding="utf-8")).items()
+            if v.get(aperture)}
+
+
 def crop_faults(aperture="A2_spanbox"):
     """span_id -> fault for the aperture that gets scored. {} when the fault file has not been built.
 
@@ -557,7 +598,17 @@ def crops(save=True, include_sealed=False):
             if not box:
                 rec[ap] = None
                 continue
-            im, rects = _native_crop(native, box, info, bands, pad)
+            # Since Lane A's dc573ca the strip->native map CLAMPS NOTHING: a box whose native rect
+            # falls off the page raises instead of landing somewhere plausible. That is the behaviour
+            # we asked for, but an audit of 21 spans must not die on the first bad box -- refusing a
+            # crop IS the fault table's job, so the refusal is recorded and the sweep continues. The
+            # crop is still never produced and so can never be sent.
+            try:
+                im, rects = _native_crop(native, box, info, bands, pad)
+            except ValueError as e:
+                rec[ap] = None
+                rec[ap + "_fault"] = f"map-error:{e}"
+                continue
             fault = crop_fault(im, rects, native.size, box, strip.size)
             if im is None:
                 rec[ap] = None
