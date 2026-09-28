@@ -37,8 +37,10 @@ from .bible_mapping import format_book_ranges
 from .answer_lm_record import no_call_record, record_from_dspy_history
 from .degradation import (
     DEGRADED_LLM_TIMEOUT,
+    GENERATION_FAILURE_ANSWER,
     LLM_WALL_SECONDS,
     TIMEOUT_FALLBACK_ANSWER,
+    classify_generation_exception,
     lm_cache_disabled,
     provider_pin,
 )
@@ -415,6 +417,15 @@ class SearchResponse(BaseModel):
     # MUST treat a non-None value as an ERROR, never as a wrong answer - see
     # backend/degradation.py for what scoring a timeout as FAIL cost us.
     degraded: Optional[str] = None
+    # Why it degraded, in machine words: "RateLimitError: litellm.RateLimitError: ...".
+    # Diagnostic only. Nobody renders it and nobody scores it -- it exists so a degradation
+    # can be attributed (provider outage vs our own assertion) without the exception text
+    # ever being written into `answer`, where it was read as content. See degradation.py.
+    degraded_detail: Optional[str] = None
+    # The citation verifier rejected the answer: the model cited a sentence id that is not in
+    # the retrieved context. NOT a degradation -- a content failure that stays scoreable.
+    # Replaces the "Verification Failed:" prose that main.py used to string-match.
+    verification_failure: Optional[str] = None
     # Whether this process has DSPy caching on. Reported so a run that claims N samples
     # per question can assert it actually got N model calls instead of one call replayed.
     lm_cache_enabled: bool = True
@@ -966,6 +977,25 @@ async def search(request: Request, req: SearchRequest):
                         if f.get("sentence_id")
                     } - {""})
 
+                    # The citation verifier's typed channel. It used to report itself by putting
+                    # "Verification Failed: ... Missing: [...]" in the answer, which this function
+                    # then string-matched fifty lines below (that sniff is gone). The failure is now
+                    # a declared field and the missing ids are a typed list, so they land in
+                    # unverified_sentence_ids instead of being scraped back out of prose.
+                    verification_failure = getattr(pred, "verification_failure", None)
+                    if verification_failure:
+                        verified = False
+                        _missing = {
+                            (c or "").strip().strip("[]")
+                            for c in (getattr(pred, "missing_citations", None) or [])
+                        }
+                        unverified_sentence_ids = sorted(
+                            (set(unverified_sentence_ids) | _missing) - {""}
+                        )
+                        if stages_capture is not None:
+                            stages_capture["verification_failure"] = verification_failure
+                            stages_capture["verification_missing_citations"] = sorted(_missing - {""})
+
                     # Structural refusal detection — does the answer contain any
                     # inline [SENTENCE_ID]? No SID = no verbatim Gill quote = refusal
                     # (or model paraphrase, which we also want to treat as refusal
@@ -1129,19 +1159,21 @@ async def search(request: Request, req: SearchRequest):
                         lf_client.flush()
 
         except Exception as e:
-            if "Assert" in type(e).__name__ or isinstance(e, AssertionError):
-                  answer = f"Generated answer could not be verified against sources.\nError: {e}"
-                  verified = False
-            else:
-                  answer = f"Error generating answer: {e}"
-                  verified = False
+            # Label the degradation HERE, in a structured field, exactly as the asyncio.TimeoutError
+            # branch above does. What used to happen instead: the exception text was formatted into
+            # `answer` and shipped with degraded=None, so an upstream 429 arrived at the eval harness
+            # as an HTTP 200 carrying "Error generating answer: litellm.RateLimitError: ..." and was
+            # scored as a wrong answer. The harness has a run-level gate for 429s; it never fired,
+            # because the fault was in the prose and the status line said success.
+            degraded_reason = classify_generation_exception(type(e).__name__, str(e))
+            degraded_detail = f"{type(e).__name__}: {e}"
+            answer = GENERATION_FAILURE_ANSWER
+            verified = False
+            print(f"[DEGRADED] {degraded_reason}: {degraded_detail}")
 
     tf = time.perf_counter()
     print(f"[TIMING] Total request: {tf-t0:.3f}s")
     
-    if "Verification Failed:" in answer:
-        verified = False
-        
     if evidence_objects:
         print(f"DEBUG: First Evidence Item Entities: {evidence_objects[0].entities}")
     
@@ -1160,6 +1192,8 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities=mapped_entities,
         trace_id=trace_id if 'trace_id' in locals() else None,
         degraded=locals().get("degraded_reason", None),
+        degraded_detail=locals().get("degraded_detail", None),
+        verification_failure=locals().get("verification_failure", None),
         lm_cache_enabled=not lm_cache_disabled(),
         openrouter_provider_pin=provider_pin(),
         answer_lm=locals().get("answer_lm", None),

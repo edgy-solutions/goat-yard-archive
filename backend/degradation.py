@@ -36,6 +36,67 @@ TIMEOUT_FALLBACK_ANSWER = (
 # Values for SearchResponse.degraded. None means "the system did what it claims".
 DEGRADED_LLM_TIMEOUT = "llm_timeout"
 
+# The generation raised instead of returning. Three labels, not one, because the causes are not
+# interchangeable and a report that merges them cannot act on either:
+#
+#   DEGRADED_UPSTREAM_RATE_LIMIT  the provider refused to serve. A RUN-LEVEL fault: every later
+#                                 question is likely to hit the same wall, so an eval must abort
+#                                 rather than bank the rest as results.
+#   DEGRADED_ASSERTION            our OWN verification fired. A content event, not an outage --
+#                                 worth separating so a bad week for the model is never reported
+#                                 as a bad week for the provider.
+#   DEGRADED_GENERATION_ERROR     anything else raised on the generation path.
+#
+# All three are degradations, which means NOT SCOREABLE: whatever the model had produced is gone,
+# and the answer field carries a fallback. Scoring that fallback as a wrong answer is the exact
+# fault this module was written for.
+DEGRADED_UPSTREAM_RATE_LIMIT = "upstream_rate_limit"
+DEGRADED_ASSERTION = "assertion_failed"
+DEGRADED_GENERATION_ERROR = "generation_error"
+
+# The user-facing text when generation raised. Period-voiced like TIMEOUT_FALLBACK_ANSWER, and
+# deliberately carrying NO diagnostics: the exception text used to be pasted into the `answer`
+# field ("Error generating answer: litellm.RateLimitError: ..."), where it was read by the user as
+# an answer AND mined for [SENTENCE_ID]-shaped substrings by every consumer downstream. The detail
+# belongs in `degraded_detail`, which is typed and which nobody renders.
+GENERATION_FAILURE_ANSWER = (
+    "The learned Doctor's quill was interrupted mid-stroke, and no answer was set down. "
+    "Please try again."
+)
+
+# NOT A DEGRADATION, and the distinction is the whole point of this module.
+#
+# bot.py's citation verifier fires when the model cited a sentence id that is not in the retrieved
+# context. Nothing broke: the model produced a checkable claim and the check failed. That is a
+# CONTENT failure and it must stay IN the scoring denominator -- labelling it `degraded` would pull
+# a real model fault out of the measurement, which is the mirror image of the fault in the docstring
+# above. `is_degraded_answer` must NOT match this text, and there is a test that says so.
+#
+# It lives here anyway because this module owns every string the system substitutes for an answer,
+# and because it replaces prose that WAS being string-matched: the old text was
+# f"Verification Failed: Cited sources not found in context. Missing: {missing_cits}" -- a diagnostic
+# shown to users, carrying bracketed sentence ids into an answer field that every consumer scans for
+# them. The typed replacement is `verification_failure` + `missing_citations` on the prediction.
+VERIFICATION_FAILURE_ANSWER = (
+    "The Doctor's hand cites a passage I cannot find among the extracts before me, and I will "
+    "not repeat a reference I cannot show you. Please try again, or ask more narrowly."
+)
+
+# Answer prefixes emitted by backends that PREDATE the typed channel above. Kept so a consumer
+# pointed at an older or mis-deployed backend still refuses to score machine prose as content.
+#
+# Measured incident, and the reason this list is not hypothetical: in
+# nf2_20260927/real_garden_genesis_3_24_misattribution_001.json the answer field reads
+# "Error generating answer: litellm.RateLimitError: ... Provider returned error" and the harness
+# scored it `overall_pass: False, error: None, degraded: None`. A provider rate limit was banked as
+# a content failure, in a published run, inside a harness that has an explicit run-level-fault gate
+# for 429s -- the gate never saw it, because the 429 arrived as HTTP 200 with the error in the prose.
+LEGACY_DIAGNOSTIC_ANSWER_PREFIXES = (
+    "Error generating answer:",
+    "Generated answer could not be verified against sources.",
+    "Verification Failed:",
+)
+
 # Generation wall. Raised from 90s per ruling 2026-09-21: the flag-on (typed schema) path
 # ran a 25.7s median generation with an observed 81.0s maximum, so a 90s wall sat inside the
 # real distribution's tail and cut runs that would have completed. A wall that fires on
@@ -90,10 +151,41 @@ def provider_pin() -> dict | None:
 
 
 def is_degraded_answer(answer: str | None) -> bool:
-    """Compatibility floor: does this answer text equal a known degradation fallback?
+    """Compatibility floor: is this answer text a known non-answer rather than content?
 
     Prefer the structured `degraded` field. This exists so a consumer pointed at a backend
     that predates the field still refuses to score a non-answer as an answer. Compares on
     stripped text, because that is the only normalisation the transport can introduce.
+
+    Two families. The fallbacks are matched by EQUALITY: they are fixed strings this module owns,
+    and a prefix test on them would swallow a real answer that happened to open with the same
+    sentence. The legacy diagnostics are matched by PREFIX: they were f-strings with an exception
+    message interpolated after the colon, so no two are ever byte-identical.
     """
-    return (answer or "").strip() == TIMEOUT_FALLBACK_ANSWER.strip()
+    a = (answer or "").strip()
+    if not a:
+        return False
+    if a in (TIMEOUT_FALLBACK_ANSWER.strip(), GENERATION_FAILURE_ANSWER.strip()):
+        return True
+    return any(a.startswith(pfx) for pfx in LEGACY_DIAGNOSTIC_ANSWER_PREFIXES)
+
+
+def classify_generation_exception(exc_type_name: str, detail: str) -> str:
+    """Which degradation label a raised generation exception deserves.
+
+    Substring matching on an exception message is normally a smell, and here it is the only
+    evidence available: litellm surfaces an upstream 429 as a RateLimitError whose text carries the
+    provider's words, and by the time it reaches this process the HTTP status is long gone.
+
+    The asymmetry is deliberate and it is the safe direction. A rate limit MISSED here still comes
+    back DEGRADED_GENERATION_ERROR, which still keeps it out of the scoring denominator -- it just
+    fails to abort the run. A rate limit invented here would abort a healthy run. So the markers
+    stay narrow, and the fallback is the label that costs least when it is wrong.
+    """
+    hay = f"{exc_type_name or ''} {detail or ''}".lower()
+    if any(m in hay for m in ("ratelimiterror", "rate limit", "rate_limit",
+                              "429", "too many requests")):
+        return DEGRADED_UPSTREAM_RATE_LIMIT
+    if "assert" in (exc_type_name or "").lower():
+        return DEGRADED_ASSERTION
+    return DEGRADED_GENERATION_ERROR

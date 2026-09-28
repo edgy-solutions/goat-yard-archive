@@ -23,6 +23,11 @@ try:
 except ImportError:
     import structured_answer  # type: ignore
 
+try:
+    from .degradation import VERIFICATION_FAILURE_ANSWER
+except ImportError:
+    from degradation import VERIFICATION_FAILURE_ANSWER  # type: ignore
+
 
 # ---------------------------------------------------------------------------
 # Verbatim quote verification (see ADR-0006).
@@ -1170,12 +1175,28 @@ class GroundedGillBot(dspy.Module):
                     "do not appear to address this specific inquiry. Could it be that "
                     f"you are looking for something not in the library ({available_books})?"
                 )
-                return dspy.Prediction(answer=flat_refusal, citations=[], raw_answer=pred.answer)
+                return dspy.Prediction(
+                    answer=flat_refusal,
+                    citations=[],
+                    raw_answer=pred.answer,
+                    # The reasoning has to come out on the refusal paths, not only the success
+                    # ones. main.py computes `refused` as "no inline SIDs in the answer", which is
+                    # exactly the state these returns produce -- so dropping `reasoning` here made
+                    # `refused and reasoning_text` unsatisfiable, and partial_match_sids has never
+                    # once been non-empty. The frontend panel that renders it was built and shipped
+                    # and has never had anything to render.
+                    reasoning=getattr(pred, "reasoning", "") or "",
+                )
 
             # No uncited verbatim assertion → a legitimate refusal (flat or
             # gap-statement informative). Pass it through verbatim as a Verified
             # Negative, regardless of prose wording.
-            return dspy.Prediction(answer=pred.answer, citations=[], raw_answer=pred.answer)
+            return dspy.Prediction(
+                answer=pred.answer,
+                citations=[],
+                raw_answer=pred.answer,
+                reasoning=getattr(pred, "reasoning", "") or "",
+            )
 
         # ---------------------------------------------------------
         # Standard Checks (Only run if citations exist)
@@ -1230,9 +1251,19 @@ class GroundedGillBot(dspy.Module):
             missing_cits.append(clean_cit)
         
         if not citation_found:
+             # The model cited a sentence id that is not in the retrieved context. The old answer
+             # here was a diagnostic -- "Verification Failed: Cited sources not found in context.
+             # Missing: ['GENESIS_1_1_S00']" -- shown to the user as an answer, string-matched by
+             # main.py, and carrying bracketed sentence ids into a field every consumer scans for
+             # them. Now: a period-voiced refusal with NO id-shaped text, and the facts on typed
+             # fields. This is a content failure, not a degradation: it stays scoreable.
              return dspy.Prediction(
-                 answer=f"Verification Failed: Cited sources not found in context. Missing: {missing_cits}",
-                 citations=[]
+                 answer=VERIFICATION_FAILURE_ANSWER,
+                 citations=[],
+                 reasoning=getattr(pred, "reasoning", "") or "",
+                 raw_answer=pred.answer,
+                 verification_failure="cited_sources_not_in_context",
+                 missing_citations=sorted({(c or "").strip() for c in missing_cits} - {""}),
              )
 
         # ---------------------------------------------------------
