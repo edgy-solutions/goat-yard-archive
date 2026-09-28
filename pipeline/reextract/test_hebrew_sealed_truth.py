@@ -698,16 +698,34 @@ check("exactly ONE span is merged-top-edge and the other 19 are one-band: nothin
 check("so the debt is 0 of 20 with no violators, by a ruling on the rule and no change to any box",
       B.G.one_band_report(include_sealed=True) == (20, 20, []),
       B.G.one_band_report(include_sealed=True))
-# A tally against a wrong standard is faithful and worthless. The corrected rule is kept honest by the
-# one thing that could refuse it: an already-ratified box. Chris's re-ratified p423:n3 crop is 35px tall
-# around a 35px band, so it touches both edges -- an edge-clearance clause in the accept gate would have
-# thrown it out. It passes, and that is asserted here rather than trusted.
+# A tally against a wrong standard is faithful and worthless. The corrected rule was kept honest by the
+# one thing that could refuse it: an already-ratified box. Chris's 2026-09-27 re-ratified p423:n3 crop
+# was 35px tall around a 35px band, touching both edges -- an edge-clearance clause in the accept gate
+# would have thrown it out, which is why that clause was not added.
+#
+# THAT BOX IS NOW RETIRED (ruling 2026-09-28): it was drawn one note too low, on `T. Hicros. Nedarim`,
+# a row with no Hebrew in it. The edge-clearance clause would indeed have rejected it -- for being
+# tight, when what was wrong with it was the row. A rule that gets the right answer from a property
+# unrelated to the fault has not been vindicated, so the clause stays out and this stays a caution.
+# The counterexample, though, is gone: no ratified box in the corpus touches both edges any more, and
+# the claim is unexercised rather than disproved. Asserted as the vacuity it is, below.
 _rerat = B.G.rerat_load()[0]["p423:n3"]["_crop"]
 check("the corrected band rule accepts the ratified p423:n3 box",
       B.G.band_geometry(_rerat)[0] == "one-band", B.G.band_geometry(_rerat))
-check("it passes although its band touches both edges",
-      B.G.band_geometry(_rerat)[1]["clear_top"] == 0
-      and B.G.band_geometry(_rerat)[1]["clear_bottom"] == 0, B.G.band_geometry(_rerat)[1])
+_rg = B.G.band_geometry(_rerat)[1]
+check("the superseding box is the live mapping of the ORIGINAL ratified strip box, not a redraw",
+      B.G.rerat_load()[0]["p423:n3"]["new_box"] == [1674, 4655, 1960, 4715],
+      B.G.rerat_load()[0]["p423:n3"]["new_box"])
+check("and it clears both edges, so the edge-touching counterexample has NO instance left",
+      _rg["clear_top"] > 0 and _rg["clear_bottom"] > 0, _rg)
+check("no ratified span box touches both edges now -- the claim is unexercised, not refuted",
+      [s["span_id"] for s in D.build_set(include_sealed=True) if s.get("span_box")
+       and (lambda g: g["clear_top"] == 0 and g["clear_bottom"] == 0)(
+           B.G.band_geometry(B.G.cut(s["page"], s["span_box"], D.PAD, s["column_bands"])[0])[1])] == [],
+      "a box that touches both edges would appear here")
+check("the retired box is named in the store with what was wrong with it, not merely replaced",
+      B.G.rerat_load()[0]["p423:n3"]["old_box_state"] == "wrong-row-no-hebrew",
+      B.G.rerat_load()[0]["p423:n3"].get("old_box_state"))
 # The contains bucket, split by output shape. Under the PRE-BATCH truth table it was 22 reads, 9 of
 # them not a box fault in any sense and 2 of those broken parses that a substring test CREDITS -- a free
 # pass for the failure the typed contract exists to catch. Chris's batch moved the strings the substring
