@@ -119,10 +119,62 @@ answers are on disk — and it establishes what the four regressions look like u
 reads citations instead of two phrases. Without it, (b)'s rerun cannot distinguish a fix from a
 rewording.
 
+## The re-score, run: `answered_substantively` measured on both recorded arms
+
+Done, on disk, no model call. Signal definition: the answer cites at least one Sentence ID that is
+**present in that same response's retrieved context** (`evidence[].sentence_data[].sentence_id`).
+
+| arm | lexical `is_refusal` | no grounded citation | signals disagree | cited-but-ungrounded SIDs |
+|---|---|---|---|---|
+| OFF | 1 / 28 | 3 / 28 | **2** | 1 |
+| ON | 7 / 28 | 7 / 28 | **0** | 0 |
+
+The last column counts SIDs cited in the answer text that are absent from that response's own
+context. The single OFF instance is **not** a fabrication that reached a reader; see point 3 — the
+server's verifier caught it and the "answer" is its error message.
+
+Three things this settles, and one it opens:
+
+1. **The signal is not degenerate.** My first attempt at this measurement returned "cites nothing
+   grounded" for **28 of 28** on both arms, which would have made it a useless gate. The cause was
+   in my probe, not the data: `run_eval.extract_sentence_ids` returns IDs **with brackets**
+   (`[GENESIS_6_8_S00]`) while the context stores them bare, so the intersection was empty by
+   string shape. Recorded here because it is the same failure mode this whole section is about — a
+   gate that reports a clean 0 because it is comparing the wrong strings. Whatever lands in the
+   harness must be born-tested against a response known to carry a grounded citation.
+2. **On ON the two signals agree exactly** — the same 7 questions, no disagreement. So the ON
+   refusals are refusals under both a string reading and a behavioral one, and (b)'s target is real
+   rather than an artifact of the marker list.
+3. **On OFF the two signals disagree on two questions**, and both are cases the string gate cannot
+   see:
+   - `real_gill_aquinas_001` — the already-documented gate artifact: a 65-char plain-English
+     refusal, 0 SIDs, server `refused: true`, scored by the harness as an *answer*.
+   - `logos_001` — not an answer at all. The recorded `answer` field is the **system's own error
+     string**, verbatim: `Verification Failed: Cited sources not found in context. Missing:
+     ['[JOHN_1_3_S01]']`, with `verified: false`. The model cited `JOHN_1_3_S01`; the context holds
+     `JOHN_1_6` through `JOHN_1_10` and no `JOHN_1_3` at all. **The server caught it.** What went
+     wrong is downstream of the catch.
+4. **Opened by this — and it is a different defect than it first looked.** Two things, neither of
+   them a model fabrication that slipped through:
+   - The verification-failure message is written into the `answer` field, so it is delivered to the
+     reader in the slot an answer occupies. The harness then runs `extract_sentence_ids` over it,
+     pulls `[JOHN_1_3_S01]` **out of the error text**, and records it as `cited_ids` — a failed
+     verification is scored as an answer bearing one citation (`refusal_correct: True`). Only
+     `overall_pass` went False, and only via the content gates.
+   - `unverified_sentence_ids` is `[]` on that same response while `verified` is `false` and the
+     human-readable string names the missing SID. **The typed channel is empty while the prose
+     carries the finding.** That is the same shape as (c): the structured field that exists to say
+     "here is what failed" says nothing, and the information survives only as text.
+   This is one case on one arm, so no rate is claimed. It is its own item, separate from (b),
+   because it is a delivery-and-typing defect rather than a prompt defect, and it is orthogonal to
+   the flag.
+
 ## What this does NOT solve
 
-- It does not measure how often the two signals disagree across all 28 questions; only the seven
-  refusal-relevant ones were read. The re-score above is what would answer it.
+- It does not establish any fabrication rate. `logos_001` is one case, on one arm, and it is a
+  caught failure mis-delivered, not an uncaught one — a case to read, not a frequency.
+- It does not check whether the verification-failure string reaches the UI as an answer. That is a
+  frontend question and needs its own look before the item above is written up as user-facing.
 - It does not establish that `answered_substantively` is the right signal for `expected_behavior:
   refuse` questions, where citing nothing is correct. That needs its own born-test per direction,
   since this is a binary behavior and a one-direction gate is half a gate.
