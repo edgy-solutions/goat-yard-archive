@@ -67,8 +67,10 @@ def a1_moved():
     Chris's conditional term. It is measured and reported; it does not send. Two reasons, and the
     second is the load-bearing one:
 
-      * the condition on it (Lane A's x-origin fix) has not landed -- `diag.a1_x_shifts()` shows dx=0
-        on every A1 rect that moved, so what moved was a right-edge clamp, not the page origin;
+      * the condition on it (Lane A's x-origin fix) landed on 2026-09-27 as a band clip plus a 2px
+        canvas-slop clamp, and it did NOT move the page origin: `diag.a1_x_shifts()` still shows dx=0
+        on every paired A1 rect, and the four spans this term used to hold came back byte-identical
+        to the 2026-09-20 as-sent crops, which is why the term is now empty rather than live;
       * A1 is not a sendable aperture. No note-box crop leaves the network and `F.cells()` cannot
         reach one. A span in this set was sent precisely the pixels it still holds, so its reads are
         evidence about the crop we have. Nothing is void and nothing needs re-taking.

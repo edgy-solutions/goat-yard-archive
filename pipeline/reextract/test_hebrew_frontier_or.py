@@ -421,9 +421,27 @@ check("no note-box crop is reachable from the sending path",
       all(pathlib.Path(c).name.endswith("_%s.png" % F.APERTURE) for _s, c, _x in F.cells()),
       "apertures on the wire: %s" % sorted({pathlib.Path(c).name.split("_n")[-1][2:] for _s, c, _x in F.cells()}))
 
+# RE-PINNED 2026-09-27 post-clip (laneB 2c8554a + da13758 = Lane A 4b2e0de + 36c36c4).
+# This read "the A1 term is non-empty, so the exclusion below is a decision and not a vacuous pass"
+# and it held these four: the spans whose A1 crop dc573ca had widened by the canvas filler. The clip
+# emptied it, and the reason matters -- those four A1 crops are byte-identical to the 2026-09-20
+# archive again, so there is nothing re-cut about them and their reads are evidence about the pixels
+# on disk once more. Empty because the crops came back, not because a measurement died. The term
+# stays in the code, with its vacuity stated, because the condition on it can still fire.
+_A1_WAS = {"p217:n2", "p219:n0", "p293:n0", "p895:n0"}
 _a1 = SH.a1_moved()
-check("the A1 term is non-empty, so the exclusion below is a decision and not a vacuous pass",
-      len(_a1) > 0, "%d span(s): %s" % (len(_a1), " ".join(_a1)))
+check("the A1 term is EMPTY post-clip: there is nothing for --include-a1 to fold in",
+      _a1 == [], "%d span(s): %s" % (len(_a1), " ".join(_a1)))
+check("empty because the crops came back: all four spans it held are byte-identical to as-sent",
+      all(diag.crop_sha(s, "A1_notebox") == diag.crop_sha(s, "A1_notebox", as_sent=True)
+          for s in _A1_WAS),
+      {s: (diag.crop_sha(s, "A1_notebox"), diag.crop_sha(s, "A1_notebox", as_sent=True))
+       for s in sorted(_A1_WAS)})
+check("and not because the measurement died: crops_recut still names A1 re-cuts, they are simply "
+      "not sendable-with-unchanged-A2",
+      len(diag.crops_recut("A1_notebox")) > 0, sorted(diag.crops_recut("A1_notebox")))
+# The three checks below are VACUOUS while the term is empty. Said out loud rather than left to look
+# like passes: what they assert is true of no span, and the content moved to the two checks above.
 check("every span in the A1 term has a byte-identical A2 crop -- it was sent the pixels it holds",
       all(diag.crop_sha(sid, F.APERTURE) == diag.crop_sha(sid, F.APERTURE, as_sent=True) for sid in _a1))
 check("so none of its reads are void: an A1 re-cut mutes nothing",
@@ -434,9 +452,12 @@ check("and folding it in is one flag, not a code change",
 check("the sheet on disk was built WITHOUT it, and says so",
       json.loads(F.SHEET.read_text(encoding="utf-8"))["a1_term_folded_in"] is False)
 
-# THE TRIPWIRE. Chris's condition is Lane A's x-origin fix landing. Every A1 rect that moved in the
-# re-cut grew in width at dx=0 (a right-edge clamp releasing) or moved in y alone. When that stops
-# being true this check fails, and the message is the instruction to act on.
+# THE TRIPWIRE, still armed and now measured on the far side of the fix. Chris's condition was Lane
+# A's x-origin fix landing; it landed on 2026-09-27 and it is not an x-origin change -- it clips the
+# right edge to the band and clamps a left edge inside 2px of slop. So dx is still 0 everywhere, the
+# widths moved the other way this time (dw -334 where dc573ca had given +300..+450), and the check
+# keeps its job: if a future mapper change moves a page origin, the A1 term goes live and this fails
+# with the instruction attached.
 _shifts = diag.a1_x_shifts()
 _livex = sorted(sid for sid, v in _shifts.items() if v and any(dx for dx, _dw in v))
 check("no A1 rect has moved in x, so Chris's condition has NOT fired",
@@ -449,12 +470,11 @@ check("the x-shift measurement pairs rects or refuses to, never silently mispair
       all(v is None or len(v) >= 1 for v in _shifts.values()))
 
 print()
-if fails:
-    print(f"FAIL: {len(fails)} assertion(s)")
-    for f in fails:
-        print(f"  - {f}")
-    sys.exit(1)
-print("\n(11) boxes over canvas filler -- Lane A's mechanism, measured here")
+# THE FAILURE GATE USED TO SIT HERE, above section 11, so section 11 ran only in a run where nothing
+# else had failed -- silent in exactly the runs where the page geometry is most likely to be broken.
+# A gate must be able to see the failure it is accountable for. It now sits below, where the last
+# check is still inside it. Found by reading my own patch script, which anchored on the PASS line.
+print("\n(11) the band clip -- Lane A's mechanism, measured here after the clip landed")
 _BO = diag.band_overshoot()
 _bo_a2 = [b for b in _BO if b["aperture"] == "A2_spanbox"]
 _bo_a1 = {b["span_id"] for b in _BO if b["aperture"] == "A1_notebox"}
@@ -468,31 +488,54 @@ _exp_rects = sum(len(m[ap]["native_rects"]) for m in MAN.values()
 check("the measurement is not vacuous: it examined every rect the manifest holds",
       diag.band_overshoot.rects_examined == _exp_rects and _exp_rects >= len(CS),
       f"{diag.band_overshoot.rects_examined} examined, {_exp_rects} in the manifest")
-# THE TRIPWIRE. These four A1 boxes are over filler and SILENT about it -- left column, so the mapped x1
-# lands inside the 3584px page and the page-width gate cannot see them. Five more are refused loudly in
-# the fault table (right column), which is nine faulty note boxes and not the five the table shows.
-# This check FAILS the day Lane A's clip-and-flag lands, and that failure is the signal: re-cut, re-hash,
-# and re-read Chris's ruling of 2026-09-27 -- clip to band width, flag edge:band-clipped.
-check("the over-filler A1 population is exactly these four left-column boxes",
-      _bo_a1 == {"p217:n2", "p219:n0", "p293:n0", "p895:n0"}, sorted(_bo_a1))
-check("p217:n2 is not merely an overshoot -- its rect starts left of every band, so a clip cannot fix it",
-      any(b["span_id"] == "p217:n2" and b["kind"] == "left-of-every-band" for b in _BO),
-      [b for b in _BO if b["span_id"] == "p217:n2"])
-# The fault table holds SIX, and they are not one kind. Five are the loud right-column case: the mapped
-# x1 lands past the 3584px page and note_region refuses. The sixth is p217:n2, caught by the STRIP-side
-# check instead (`out-of-strip ... beyond=left2`) because its box starts at x=-2 -- a different check
-# seeing a different symptom of the same filler geometry. That is why p217:n2 is in this set AND in the
-# overshoot set: it is flagged, and it still produced a crop carrying 330px of filler.
+# RE-PINNED 2026-09-27, post-clip. What these checks said pre-clip, kept because the history is the
+# evidence: nine A1 note boxes were over the filler. Five were refused loudly (right column, mapped x1
+# past the 3584px page) and four were SILENT (left column, overshoot inside the page, invisible to a
+# page-width gate). p217:n2 was in both populations at once -- flagged out-of-strip and still producing
+# a crop with 330px of filler in it. I wrote two of these to fail the day the clip landed. Both did.
+_NINE_PRE_CLIP = {"p124:n4", "p200:n2", "p217:n2", "p219:n0", "p293:n0",
+                  "p596:n2", "p726:n3", "p895:n0", "p900:n4"}
+_CLIP = diag.clipped()
+_clip_a1 = {c["span_id"] for c in _CLIP if c["aperture"] == "A1_notebox"}
+_clip_a2 = {c["span_id"] for c in _CLIP if c["aperture"] == "A2_spanbox"}
+# THE CHECK THAT GATES THE SPEND, now from the mapper's own flag and not only from my band arithmetic.
+# Two independent measures, and they agree: no A2 rect overshot its band, and no A2 rect was cut.
+check("not one A2 rect was CLIPPED either: the send scope's pixels are untouched by the fix",
+      _clip_a2 == set(), sorted(_clip_a2))
+check("the clip cut exactly the nine A1 boxes this lane counted pre-clip -- no more, no fewer",
+      _clip_a1 == _NINE_PRE_CLIP,
+      "cut %d: %s" % (len(_clip_a1), sorted(_clip_a1)))
+check("every band overshoot is gone, so no box is outside its band any more",
+      _BO == [], _BO)
+# CORRECTING A PREDICTION OF MINE. This check used to read "p217:n2 is not merely an overshoot -- its
+# rect starts left of every band, so a clip cannot fix it". False: Lane A's fix carries a 2px canvas
+# slop clamp as well as the band clip, and -2 is inside the slop, so the mapped rect starts at 0 and
+# the crop carries BOTH flags. I under-credited the fix and said so in the report.
+_p217 = MAN["p217:n2"]["A1_notebox"]
+check("p217:n2's -2 IS repaired -- by the 2px slop clamp, not by the band clip, and both are flagged",
+      _p217["rect_edges"][0] == ["band-clipped", "canvas-slop-clamped"]
+      and _p217["native_rects"][0][0] == 0, _p217["rect_edges"])
+# And the fault table is down to one, which is a DIFFERENT fact about the same span. My `crop_fault`
+# reports the ratified STRIP box, which still begins at -2; the clip repaired the MAPPED rect. One is
+# an editorial debt against the box, the other is the geometry that cut the pixels. Conflating them
+# would retire a debt nobody paid.
 _a1f = diag.crop_faults("A1_notebox")
-_loud = {k for k, f in _a1f.items() if "exceeds page width" in f}
-check("the fault table holds six A1 boxes: five right-column page-width, one out-of-strip",
-      len(_a1f) == 6 and len(_loud) == 5 and "p217:n2" in set(_a1f) - _loud, sorted(_a1f))
-check("p217:n2 is flagged AND produced a crop, so a recorded fault is not a refusal",
+check("the five loud page-width refusals are gone: those five A1 crops exist now",
+      not [k for k, f in _a1f.items() if "exceeds page width" in f]
+      and all(MAN[s].get("A1_notebox") for s in
+              ("p124:n4", "p200:n2", "p596:n2", "p726:n3", "p900:n4")), sorted(_a1f))
+check("the one A1 fault left is p217:n2's ratified STRIP box at -2, not its mapped rect",
+      set(_a1f) == {"p217:n2"} and "beyond=left2" in _a1f["p217:n2"]
+      and _p217["native_rects"][0][0] == 0, _a1f)
+check("p217:n2 is flagged AND produced a crop, so a recorded fault is still not a refusal",
       "p217:n2" in _a1f and MAN["p217:n2"].get("A1_notebox"), _a1f.get("p217:n2"))
-check("three boxes are over filler with NO fault recorded at all -- nine faulty boxes, not six",
-      _bo_a1 - set(_a1f) == {"p219:n0", "p293:n0", "p895:n0"}
-      and len(_bo_a1 | set(_a1f)) == 9, sorted(_bo_a1 - set(_a1f)))
 
+print()
+if fails:
+    print(f"FAIL: {len(fails)} assertion(s)")
+    for f in fails:
+        print(f"  - {f}")
+    sys.exit(1)
 print(f"PASS: A2-only n={len(CS)}, {len(_ALL_LEAK)}/{len(CS)} context leaks blocked "
       f"({len(raw_leaks)} of them literal), no note-box crop reachable.")
 sys.exit(0)

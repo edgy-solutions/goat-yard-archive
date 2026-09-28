@@ -710,7 +710,14 @@ def a1_x_shifts():
     and dc573ca merely stopped clamping them, so each crop grew by the filler it was always sitting on.
     See `band_overshoot` below, which measures it. dx is still the right trigger for Chris's A1 clause --
     what changed is that dw is not innocent, and a crop whose width grew is now a crop to re-examine
-    rather than a crop to wave through."""
+    rather than a crop to wave through.
+
+    AND THE MEASUREMENT THAT SETTLED IT, 2026-09-27. After Lane A's clip landed (36c36c4), the A1
+    crops of all four are byte-identical to the 2026-09-20 as-sent archive, and their widths equal
+    the band widths exactly (p217 1625, p219 1566, p293 1570, p895 1641). So the widening was the
+    whole of the difference and the clip is a restoration, not a new geometry. Byte equality is the
+    claim here; WHY the 09-20 mapper produced band-width boxes is not established, and I am not
+    replacing one causal story with another untested one."""
     live = {m["span_id"]: m for m in json.loads((CROPDIR / "manifest.json").read_text(encoding="utf-8"))}
     sent = {m["span_id"]: m for m in json.loads((AS_SENT / "manifest.json").read_text(encoding="utf-8"))}
     out = {}
@@ -721,6 +728,32 @@ def a1_x_shifts():
             out[sid] = None
             continue
         out[sid] = [(b[0] - a[0], (b[2] - b[0]) - (a[2] - a[0])) for a, b in zip(o, n)]
+    return out
+
+
+def clipped(flag="band-clipped"):
+    """Every crop rect that Lane A's mapper CUT, as the manifest recorded it.
+
+    The companion to `band_overshoot`, and the more trustworthy of the two: that one is my
+    re-derivation of the band geometry, this one is what the mapper itself reported at cut time. They
+    answer different questions and the pair is the point -- an empty `band_overshoot` says no box is
+    outside its band NOW, and a non-empty `clipped` says why: nine of them were outside it and were
+    cut back. If `band_overshoot` were empty because my band arithmetic had drifted, `clipped` would
+    still hold the nine.
+
+    -> [{span_id, aperture, rect_i, rect, edge, over}], one per cut rect."""
+    man = json.loads((CROPDIR / "manifest.json").read_text(encoding="utf-8"))
+    out = []
+    for m in man:
+        for ap in ("A2_spanbox", "A1_notebox"):
+            d = m.get(ap)
+            if not d:
+                continue
+            for i, (r, e) in enumerate(zip(d["native_rects"], d.get("rect_edges") or [])):
+                if e and flag in e:
+                    ov = (d.get("band_overshoot_px") or [None] * (i + 1))[i]
+                    out.append(dict(span_id=m["span_id"], aperture=ap, rect_i=i, rect=list(r),
+                                    edge=list(e), over=ov))
     return out
 
 
@@ -835,8 +868,16 @@ def crops(save=True, include_sealed=False):
             p = CROPDIR / f"{s['span_id'].replace(':', '_')}_{ap}.png"
             if save:
                 im.save(p)
+            # Lane A's clip (36c36c4) flags every rect it cuts. Recording the box and dropping
+            # the flag would leave the manifest unable to say that a crop we may pay for had been
+            # amputated -- and the crop hash cannot say it either, because a clipped crop is a
+            # perfectly valid PNG. Both fields are per-rect and positional with native_rects; a rect
+            # that was not cut carries None, because Lane A's contract omits `edge` entirely rather
+            # than sending an empty list.
             rec[ap] = dict(path=str(p), size=list(im.size),
                            native_rects=[r["box"] for r in rects], n_rects=len(rects),
+                           rect_edges=[r.get("edge") for r in rects],
+                           band_overshoot_px=[r.get("band_overshoot_px") for r in rects],
                            fault=fault)
         ctxp = CROPDIR / f"p{pg}_context_strip.png"
         if save and not ctxp.exists():
