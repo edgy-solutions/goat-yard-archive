@@ -284,36 +284,122 @@ def _full_canvas_box(left_w, right_w, narrow_col, reported_x1):
     return info, b, [0, y, x1, y + 40]
 
 
-def test_all_six_clamped_boxes_now_raise_naming_the_BAND_width():
+def test_all_six_clamped_boxes_now_CLIP_to_the_band_edge_and_say_so():
+    # Chris, 2026-09-27: "clip to band width and flag edge:band-clipped; a note cannot extend past its
+    # band." Before the ruling these six raised. The diagnosis did not change -- the branch did.
     for page, lw, rw, col, rx1 in SIX_CLAMPED:
         info, b, box = _full_canvas_box(lw, rw, col, rx1)
-        try:
-            NR.strip_box_to_native(box, info)
-            assert False, "p%d: expected ValueError, box %s" % (page, box)
-        except ValueError as e:
-            m = str(e)
-            assert "past the right edge of band" in m, (page, m)
-            # the band's own width, which is the actual diagnosis -- not the page width, which is a
-            # coincidence of which column happened to be narrower
-            assert str(b["size"][0]) in m, (page, b["size"][0], m)
+        rects = NR.strip_box_to_native(box, info)
+        assert len(rects) == 1, (page, rects)
+        r = rects[0]
+        band_w = b["size"][0]
+        assert r["box"][2] == b["native"][0] + band_w, (page, r)
+        assert "band-clipped" in r.get("edge", []), (page, r)
+        # the overshoot it lost, so an audit can still see how far into the filler the box ran
+        assert r["band_overshoot_px"] == round(rx1 - (b["native"][0] + band_w), 1), (page, r)
+        # and the clip is exact, not approximate: nothing is left hanging over the band
+        assert r["box"][2] - b["native"][0] == band_w, (page, r)
+
+
+def test_the_five_right_column_clips_land_exactly_on_the_page_edge():
+    # The measured coincidence the ruling rests on: for a right-column band, native[0] + size[0] IS the
+    # page width, so clipping a right-column overrun puts the note flush with the outer page edge.
+    # Stated separately because it is NOT true of the left-column cases, and reading it as a general
+    # property is how a page-width clip would get written next time.
+    for page, lw, rw, col, rx1 in SIX_CLAMPED:
+        if col != "right":
+            continue
+        info, b, box = _full_canvas_box(lw, rw, col, rx1)
+        r = NR.strip_box_to_native(box, info)[0]
+        assert r["box"][2] == PAGE_W == lw + rw, (page, r, lw, rw)
 
 
 def test_p217_is_the_case_the_page_width_check_CANNOT_see():
-    # The companion assertion, and the reason this gate exists. On p217 the narrow band is the left one,
-    # so the padding overrun maps to native 1955 -- 1629px INSIDE the page. A page-width check passes it
-    # silently and the box is wrongly widened; only the band-width check fires. Without this test the
-    # new gate could be a restatement of the old one and nobody would know.
+    # The companion assertion, and the reason this gate exists at all. On p217 the narrow band is the
+    # LEFT one, so the padding overrun maps to native 1955 -- 1629px INSIDE the page. A page-width check
+    # passes it silently and the box is wrongly widened; only the band-width check sees it. Without this
+    # test the gate could be a restatement of the old one and nobody would know.
     page, lw, rw, col, rx1 = SIX_CLAMPED[-1]
     assert page == 217 and col == "left"
     info, b, box = _full_canvas_box(lw, rw, col, rx1)
     nx1 = b["native"][0] + box[2] / UP
     assert nx1 == rx1 == 1955
     assert nx1 < PAGE_W, "if this ever exceeds PAGE_W the test has stopped testing the silent case"
+    r = NR.strip_box_to_native(box, info)[0]
+    assert r["box"][2] == 1625, r          # the left band's own width, not the page width
+    assert r["box"][2] < PAGE_W, r
+    assert "band-clipped" in r["edge"], r
+
+
+def test_p217_trips_BOTH_flags_because_its_real_box_starts_at_minus_2():
+    # The real recut fault string is out-of-strip:box=[-2, 109, 1955, 213]_beyond=left2, so this box runs
+    # off BOTH ends: 2px of detector slop on the left, filler on the right. Two causes, two flags, one
+    # rect -- which is why `edge` is a list. A scalar field would have to discard one of them.
+    page, lw, rw, col, rx1 = SIX_CLAMPED[-1]
+    info, b, box = _full_canvas_box(lw, rw, col, rx1)
+    box[0] = -2
+    r = NR.strip_box_to_native(box, info)[0]
+    assert r["edge"] == ["band-clipped", "canvas-slop-clamped"], r
+    assert r["box"][0] == 0, r             # clamped to the band origin, not mapped to native -1
+    assert r["box"][2] == 1625, r
+
+
+def test_a_negative_x0_deeper_than_the_measured_slop_is_refused():
+    # The other direction of the slop clamp. 2px is the detector slack that was actually measured; a box
+    # starting 40px left of its band is not slop, it is the wrong band, and clamping it would silently
+    # move a note across a column boundary. Without this test the clamp would accept any negative x.
+    info = _six_info(1625, 1959)
+    b = info["bands"][1]
+    y = b["paste"][1] * UP + 10
     try:
-        NR.strip_box_to_native(box, info)
-        assert False, "expected ValueError -- the page-width check alone would pass this"
+        NR.strip_box_to_native([-80, y, 400, y + 40], info)
+        assert False, "expected ValueError: 40px left of the band is not edge slop"
     except ValueError as e:
-        assert "past the right edge of band" in str(e), e
+        assert "not edge slop" in str(e), e
+
+
+def test_a_box_starting_past_the_band_edge_is_still_REFUSED():
+    # The companion assertion for the whole clip branch: clipping must not have become "always
+    # succeed". A box whose LEFT edge is already in the filler has no pre-image to clip back to, and
+    # emitting a zero-width rect at the band edge would be an invented region, not a repair.
+    info = _six_info(1960, 1624)
+    b = info["bands"][1]
+    y = b["paste"][1] * UP + 10
+    x0 = (b["size"][0] + 50) * UP
+    try:
+        NR.strip_box_to_native([x0, y, x0 + 200, y + 40], info)
+        assert False, "expected ValueError: box lies wholly in the canvas filler"
+    except ValueError as e:
+        m = str(e)
+        assert "WHOLLY in white filler" in m, m
+        assert "nothing to clip it to" in m, m
+
+
+def test_lane_b_three_UNFAULTED_left_column_overshoots_clip_to_the_band_edge():
+    # Lane B's manifest sweep (apparatus-next 2576bb4) found three boxes over filler with no fault
+    # recorded at all, so they had been emitting crops the whole time: FILE pages 219:n0 +450px,
+    # 293:n0 +442px, 895:n0 +300px, all left-column. Their band widths are not in my measurements, so
+    # the geometry here is synthetic and only the OVERSHOOTS are Lane B's -- what this pins is the
+    # arithmetic at those magnitudes, not those pages' layouts.
+    for page, band_w, overshoot in ((219, 1600, 450), (293, 1610, 442), (895, 1700, 300)):
+        info = _six_info(band_w, PAGE_W - band_w)
+        b = info["bands"][0]
+        y = b["paste"][1] * UP + 10
+        r = NR.strip_box_to_native([0, y, (band_w + overshoot) * UP, y + 40], info)[0]
+        assert r["box"][2] == band_w, (page, r)
+        assert r["band_overshoot_px"] == float(overshoot), (page, r)
+        assert r["edge"] == ["band-clipped"], (page, r)
+
+
+def test_an_untouched_rect_carries_NO_edge_key_at_all():
+    # Absence is the signal downstream: a rect that needed no clipping must be byte-identical to what it
+    # was before this gate existed, or every consumer has to learn to ignore an empty flag list.
+    info = _six_info(1960, 1624)
+    b = info["bands"][1]
+    y = b["paste"][1] * UP + 10
+    r = NR.strip_box_to_native([10, y, 200, y + 40], info)[0]
+    assert "edge" not in r, r
+    assert "band_overshoot_px" not in r, r
 
 
 def test_a_box_inside_the_narrow_band_still_maps_unchanged():
@@ -340,7 +426,10 @@ def test_a_box_ending_exactly_on_the_band_edge_is_allowed():
     assert rects[0]["box"][2] == 1960 + 1624 == PAGE_W, rects
 
 
-def test_the_point_mapper_has_the_same_gate():
+def test_the_point_mapper_still_REFUSES_and_does_not_clip():
+    # A point is not a region. Chris's ruling is about note boxes -- "a note cannot extend past its
+    # band" -- and clipping a single point would silently relocate it to the band edge and report that
+    # as its position. Nothing has ruled on points, so the point mapper keeps refusing.
     info = _six_info(1960, 1624)
     b = info["bands"][1]
     y = b["paste"][1] * UP + 10
