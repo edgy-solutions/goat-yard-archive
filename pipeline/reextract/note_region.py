@@ -115,6 +115,66 @@ def _check_band_x(b, i, x, up, what):
             f"x={b['native'][0]}). The strip canvas is padded to the widest band, so this x falls in "
             f"white filler that has no native pre-image. Not clamped, not mapped.")
 
+CANVAS_EDGE_SLOP_NATIVE_PX = 2
+
+
+def _clip_band_x(b, i, x0, x1, up, what):
+    """Clip a strip x-range to band `b`'s OWN native width, or refuse when there is nothing to clip to.
+
+    -> (x0, x1, flags, overshoot_native_px)
+
+    Ruling (Chris, 2026-09-27), once this gate had found the overruns and Lane B had confirmed them
+    independently from the manifest side: "For the six refused boxes, clip to band width and flag
+    edge:band-clipped; a note cannot extend past its band." So an x1 out in the canvas filler is cut
+    back to the band edge and the rect carries `edge: ["band-clipped"]` plus the overshoot it lost.
+
+    It is NINE boxes, not six. Lane B's manifest sweep (apparatus-next 2576bb4) checked every native
+    rect against its own band's x-range and found three more sitting on filler with NO fault recorded
+    at all -- file pages 219:n0 (+450px), 293:n0 (+442px), 895:n0 (+300px), every one of them
+    LEFT-column, which is precisely the orientation the page-width check below cannot see. Those three
+    had been emitting crops the whole time. A fault table is not a census.
+
+    What is still refused is a range with no pre-image to clip TO. A box that STARTS at or past the
+    band edge lies wholly in the filler, and clipping it would invent an empty region at the band edge
+    where the page has no box at all -- an empty result from a claimed region is an error, not a very
+    narrow box.
+
+    The LEFT edge is a different event with a different cause, so it gets its own flag instead of being
+    folded into the clip. p217:n2 starts at strip x=-2 (`..._beyond=left2`), which is the box detector's
+    slop at the canvas edge -- the same 2px of slack that made the predicted native x1 for all six
+    fault cases agree with Lane B's reported values only to within 2px. A small negative x is therefore
+    clamped to 0 and flagged `canvas-slop-clamped`; anything deeper is refused, because past the
+    measured slop it is not slop at all but a box attributed to the wrong band. That tolerance rests on
+    ONE observed negative instance (p217:n2) plus those six right-side agreements -- widen it only on
+    new measurements, never to make a page pass.
+    """
+    band_w = (b.get("size") or [None])[0]
+    if band_w is None:
+        return x0, x1, [], 0.0
+    flags = []
+    if x0 < 0:
+        if -x0 / up > CANVAS_EDGE_SLOP_NATIVE_PX:
+            raise ValueError(
+                f"{what}: strip x0={x0} is {-x0 / up:g}px left of band {i} ({b.get('col')}) at native "
+                f"x={b['native'][0]}, deeper than the {CANVAS_EDGE_SLOP_NATIVE_PX}px of slop the box "
+                f"detector is measured to leave at the canvas edge. That is not edge slop -- the box "
+                f"is attributed to the wrong band. Not clamped, not mapped.")
+        x0 = 0
+        flags.append("canvas-slop-clamped")
+    if x0 / up >= band_w:
+        raise ValueError(
+            f"{what}: strip x0={x0} starts {x0 / up - band_w:g}px past the right edge of band {i} "
+            f"({b.get('col')}, native width {band_w}px at native x={b['native'][0]}). The strip canvas "
+            f"is padded to the widest band, so this box lies WHOLLY in white filler with no native "
+            f"pre-image. There is nothing to clip it to. Not clamped, not mapped.")
+    overshoot = 0.0
+    if x1 / up > band_w:
+        overshoot = x1 / up - band_w
+        x1 = band_w * up
+        flags.append("band-clipped")
+    return x0, x1, flags, overshoot
+
+
 def strip_to_native(info, x, y):
     """Map ONE strip point to native page coords using presplit's persisted paste origins.
 
@@ -163,7 +223,12 @@ def strip_box_to_native(strip_box, info, column_bands=None):
     Prefers `info["bands"]` (persisted paste origins) exactly like `strip_to_native`. Only when `info` has
     no `"bands"` key at all (an older `info`, predating this change) does it fall back to the ink-band
     `column_bands` inference passed in by the caller, and every rect from that fallback path is flagged
-    `"native": False` — an inferred position is never returned marked as native."""
+    `"native": False` — an inferred position is never returned marked as native.
+
+    An x-range that runs out into the canvas padding beside a narrow band is CLIPPED to that band's own
+    width per Chris's ruling of 2026-09-27, and the rect then carries `edge` (a sorted list of
+    `"band-clipped"` / `"canvas-slop-clamped"`) and `band_overshoot_px`. Both keys are absent on a rect
+    that needed no clipping. See `_clip_band_x` for what is clipped and what is still refused."""
     x0, y0, x1, y1 = strip_box
     bands_info = info.get("bands")
     if bands_info is not None:
@@ -181,9 +246,9 @@ def _box_from_persisted(strip_box, info, bands_info):
         oy0, oy1 = max(y0, py), min(y1, end)
         if oy0 >= oy1:
             continue
-        _check_band_x(b, i, x1, up, "strip_box_to_native")
-        nx0 = b["native"][0] + x0 / up
-        nx1 = b["native"][0] + x1 / up
+        cx0, cx1, edge_flags, overshoot = _clip_band_x(b, i, x0, x1, up, "strip_box_to_native")
+        nx0 = b["native"][0] + cx0 / up
+        nx1 = b["native"][0] + cx1 / up
         ny0 = b["native"][1] + (oy0 - py) / up
         ny1 = b["native"][1] + (oy1 - py) / up
         if page_w is not None and nx1 > page_w:
@@ -193,8 +258,17 @@ def _box_from_persisted(strip_box, info, bands_info):
         # consumers index on it. `col_name` carries the persisted name. Note the deliberate asymmetry
         # with strip_to_native, whose `col` is the NAME: two fields spelled the same with different
         # types is the hazard that produced this whole audit, so both are stated in both docstrings.
-        rects.append({"box": [int(round(nx0)), int(round(ny0)), int(round(nx1)), int(round(ny1))],
-                      "col": i, "col_name": b["col"], "native": True})
+        rect = {"box": [int(round(nx0)), int(round(ny0)), int(round(nx1)), int(round(ny1))],
+                "col": i, "col_name": b["col"], "native": True}
+        if edge_flags:
+            # Present ONLY when something was cut, so a consumer filters with
+            # `"band-clipped" in r.get("edge", [])` and an untouched rect stays byte-identical to
+            # what it was before this gate existed. A list, not a scalar: p217:n2 trips both flags
+            # at once, and two causes that share one field cannot be told apart later.
+            rect["edge"] = sorted(edge_flags)
+            if overshoot:
+                rect["band_overshoot_px"] = round(overshoot, 1)
+        rects.append(rect)
     if not rects:
         raise ValueError(f"strip_box_to_native: strip_box {strip_box} y-range overlaps no persisted band")
     return rects
