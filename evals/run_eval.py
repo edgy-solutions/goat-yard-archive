@@ -942,14 +942,18 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR),
                         help="Directory to write per-question results, summary.json, report.md.")
     parser.add_argument("--ids", nargs="*", help="Run only these question IDs.")
-    parser.add_argument("--runs", type=int, default=1,
+    parser.add_argument("--runs", type=int, default=5,
                         help="Run each question N times and report per-question stability. "
                              "The eval binary carries +-several-question run-to-run noise from "
                              "generation nondeterminism at the verbatim-verification/paraphrase "
                              "boundary (ADR-0014 meta-finding). With --runs > 1 a question is "
                              "classified STABLE-PASS (N/N), STABLE-FAIL (0/N), or FLAKY (mixed). "
                              "Regression claims should be made only on STABLE questions; FLAKY is "
-                             "the noise band. Use N=3 to gate a code change.")
+                             "the noise band. Default 5 per ruling 1 (2026-09-27): the pinned "
+                             "floor pair showed N=3 cannot discriminate a question at p~0.83 "
+                             "from a deterministic pass (3/3 about 58% of the time), and that "
+                             "is the whole of the 10 class changes measured between two "
+                             "IDENTICAL arms. N=1 classifies nothing at all.")
     parser.add_argument("--baseline", help="Path to baseline summary JSON for regression comparison.")
     parser.add_argument("--timeout", type=float, default=200.0,
                         help="Per-question HARNESS timeout in seconds. Must exceed the server's "

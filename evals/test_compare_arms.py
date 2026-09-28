@@ -87,6 +87,93 @@ def test_stable_pass_to_stable_fail_is_counted_as_a_flip():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_a_flip_on_a_NON_GATING_question_is_reported_but_does_not_gate():
+    # Ruling 1 pulled three near-coin-flip questions from the gate. The flip is still a real class
+    # change and must still be visible -- what it must not do is fire the gate.
+    qid = "john_baptist_001"
+    assert qid in CA.NON_GATING, "the fixture depends on this id being excluded"
+    root = tempfile.mkdtemp()
+    try:
+        a = _arm(root, "a", {qid: ([True] * 5, True, "x" * 100, [])})
+        b = _arm(root, "b", {qid: ([False] * 5, True, "x" * 100, [])})
+        r = CA.compare(CA.load_arm(a), CA.load_arm(b), "a", "b")
+        assert r["stable_flips_n"] == 0, "a non-gating question must not fire the gate"
+        assert r["flips_excluded_from_gate_n"] == 1, r
+        assert r["flips_excluded_from_gate"][0]["id"] == qid
+        assert "p~0.5" in r["flips_excluded_from_gate"][0]["non_gating_reason"]
+        assert r["class_changes_n"] == 1, "it is still a class change"
+        # and it must be impossible to miss: an exclusion nobody sees cannot be told apart from a
+        # gate that failed to fire.
+        assert any("EXCLUDED FROM THE GATE" in n for n in r["notes"]), r["notes"]
+        assert r["non_gating_questions"] == [qid], r["non_gating_questions"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_gating_and_a_non_gating_flip_in_ONE_pair_are_separated():
+    # The companion assertion. An implementation that excluded everything, or that excluded
+    # nothing, passes one of the two tests above; only a pair containing both distinguishes them.
+    root = tempfile.mkdtemp()
+    try:
+        qs_a = {"q1": ([True] * 5, True, "x" * 100, []),
+                "scapegoat_001": ([True] * 5, True, "x" * 100, [])}
+        qs_b = {"q1": ([False] * 5, True, "x" * 100, []),
+                "scapegoat_001": ([False] * 5, True, "x" * 100, [])}
+        r = CA.compare(CA.load_arm(_arm(root, "a", qs_a)),
+                       CA.load_arm(_arm(root, "b", qs_b)), "a", "b")
+        assert r["stable_flips_n"] == 1, r["stable_flips"]
+        assert r["stable_flips"][0]["id"] == "q1"
+        assert r["flips_excluded_from_gate_n"] == 1, r["flips_excluded_from_gate"]
+        assert r["flips_excluded_from_gate"][0]["id"] == "scapegoat_001"
+        assert r["class_changes_n"] == 2, "both are class changes"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_non_gating_questions_reports_only_the_ones_in_THIS_pair():
+    # An empty list must mean "no exclusion applied here", not "the exclusion set was never
+    # consulted". Without this field those two states look identical in the output.
+    root = tempfile.mkdtemp()
+    try:
+        r = CA.compare(CA.load_arm(_arm(root, "a", {"q1": ([True] * 5, True, "x", [])})),
+                       CA.load_arm(_arm(root, "b", {"q1": ([True] * 5, True, "x", [])})), "a", "b")
+        assert r["non_gating_questions"] == [], r
+        assert r["flips_excluded_from_gate_n"] == 0
+        assert not any("EXCLUDED FROM THE GATE" in n for n in r["notes"])
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_all_three_ruling_1_exclusions_are_in_force():
+    assert set(CA.NON_GATING) == {"john_baptist_001", "scapegoat_001",
+                                  "real_imprecatory_psalms_001"}, sorted(CA.NON_GATING)
+    for qid, reason in CA.NON_GATING.items():
+        assert "/6" in reason and "2026-09-27" in reason, (qid, reason)
+
+
+def test_an_under_powered_pair_says_so():
+    root = tempfile.mkdtemp()
+    try:
+        r = CA.compare(CA.load_arm(_arm(root, "a", {"q1": ([True] * 3, True, "x", [])})),
+                       CA.load_arm(_arm(root, "b", {"q1": ([True] * 3, True, "x", [])})), "a", "b")
+        assert r["runs_per_question"] == {"a": 3, "b": 3}, r["runs_per_question"]
+        assert any("UNDER-POWERED CLASSIFICATION" in n for n in r["notes"]), r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_pair_at_N5_does_NOT_raise_the_under_powered_note():
+    # The companion assertion: a note raised unconditionally says nothing.
+    root = tempfile.mkdtemp()
+    try:
+        r = CA.compare(CA.load_arm(_arm(root, "a", {"q1": ([True] * 5, True, "x", [])})),
+                       CA.load_arm(_arm(root, "b", {"q1": ([True] * 5, True, "x", [])})), "a", "b")
+        assert r["min_classification_runs"] == 5
+        assert not any("UNDER-POWERED" in n for n in r["notes"]), r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_flaky_to_stable_is_a_change_but_not_a_flip():
     root = tempfile.mkdtemp()
     try:

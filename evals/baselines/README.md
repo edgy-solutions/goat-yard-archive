@@ -11,6 +11,8 @@ compares a fresh eval run against the baseline named in the workflow input
 ```sh
 # 1. Run the eval locally against your test/prod endpoint
 python evals/run_eval.py --output-dir evals/output/baseline-YYYY-MM-DD
+# --runs defaults to 5 (ruling 1, 2026-09-27). A baseline classified at N=1 has no
+# classification: every question is trivially STABLE and the floor is invisible.
 
 # 2. Inspect the report.md and verify the results are what you intend to baseline
 

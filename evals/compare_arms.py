@@ -32,6 +32,33 @@ import sys
 
 SP, SF, FLAKY, NO_DATA = "STABLE-PASS", "STABLE-FAIL", "FLAKY", "NO-DATA"
 
+# Questions that are MEASURED but do not decide the gate (ruling 1, 2026-09-27, Chris).
+#
+# The pinned OFF-vs-OFF floor pooled 6 runs per question across two arms with identical recorded
+# configuration. Three questions came back near a coin flip, and no N rescues a p~0.5 item as a
+# pass/fail gate: at p=0.5 the same question is STABLE-PASS, FLAKY and STABLE-FAIL on different
+# days with nothing having changed. Including them means the gate fires on the coin, and a gate
+# that fires on noise gets ignored, which is worse than not having one.
+#
+# They are still asked, still scored, and still counted in the pass rate and the class-change
+# count. What they no longer do is contribute a STABLE-PASS <-> STABLE-FAIL flip. Every excluded
+# flip is reported separately and raises a note, because an exclusion nobody sees is indistinguish-
+# able from a gate that failed to fire.
+#
+# The exit condition is a DETERMINISTIC scorer for these three, not a bigger N. Until then the
+# value here is a measurement, and the measurement is in
+# docs/audits/RESULT_pinned_floor_laneA_20260927.md.
+NON_GATING = {
+    "john_baptist_001": "pooled 4/6 on the pinned floor pair (2026-09-27) -- p~0.5",
+    "scapegoat_001": "pooled 4/6 on the pinned floor pair (2026-09-27) -- p~0.5",
+    "real_imprecatory_psalms_001": "pooled 3/6 on the pinned floor pair (2026-09-27) -- p~0.5",
+}
+
+# Runs per question below which a pair is not classifiable (ruling 1). N=3 cannot discriminate a
+# question at p~0.83 from a deterministic pass: 3/3 comes up about 58% of the time, which is the
+# whole of the 10 class changes the floor pair recorded between two identical arms.
+MIN_CLASSIFICATION_RUNS = 5
+
 # `partial_match_sids` has three real states, not two. A response dict from a backend build that
 # predates the field has no key at all -- which is a different fact from a response whose backend
 # computed the field and found nothing (key present, value `[]`). This sentinel is how load_arm()
@@ -158,7 +185,20 @@ def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
         notes.append(f"ANSWER-LM CONFIG DIFFERS: {label_a}={lm_a} {label_b}={lm_b}. The arms "
                      f"differ in what served them, not only in the change under test.")
 
-    changes, flips, same = [], [], 0
+    # Runs actually performed, per arm. A pair classified below MIN_CLASSIFICATION_RUNS is not a
+    # classification: it is the floor being read as a result, which is the fault ruling 1 names.
+    def max_runs(arm):
+        vals = [v.get("runs") or 0 for v in arm["questions"].values()]
+        return max(vals) if vals else 0
+
+    runs_a, runs_b = max_runs(a), max_runs(b)
+    if min(runs_a, runs_b) < MIN_CLASSIFICATION_RUNS:
+        notes.append(f"UNDER-POWERED CLASSIFICATION: {label_a} ran {runs_a} time(s) per question "
+                     f"and {label_b} ran {runs_b}, below the N={MIN_CLASSIFICATION_RUNS} ruling 1 "
+                     f"requires. At N=3 a question at p~0.83 shows 3/3 about 58% of the time, so a "
+                     f"class change here may be the floor rather than a difference.")
+
+    changes, flips, excluded_flips, same = [], [], [], 0
     for qid in sorted(ids_a):
         ca, cb = a["questions"][qid]["class"], b["questions"][qid]["class"]
         if ca == cb:
@@ -169,7 +209,18 @@ def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
                          f"{b['questions'][qid]['passes']}/{b['questions'][qid]['runs']}"}
         changes.append(row)
         if {ca, cb} == {SP, SF}:
-            flips.append(row)
+            # A flip on a non-gating question is recorded and reported -- just not gating.
+            if qid in NON_GATING:
+                row = dict(row, non_gating_reason=NON_GATING[qid])
+                excluded_flips.append(row)
+            else:
+                flips.append(row)
+    if excluded_flips:
+        notes.append("FLIP(S) EXCLUDED FROM THE GATE: "
+                     + "; ".join(r["id"] + " (" + r["non_gating_reason"] + ")"
+                                 for r in excluded_flips)
+                     + ". These are real class changes on questions ruling 1 pulled from the gate "
+                       "pending a deterministic scorer. The gate count below does NOT include them.")
 
     def refusal_wrong(arm):
         # NO-DATA is excluded deliberately. A question whose runs all errored has no answer to
@@ -204,6 +255,13 @@ def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
         "class_unchanged_n": same,
         "stable_flips": flips,
         "stable_flips_n": len(flips),
+        "flips_excluded_from_gate": excluded_flips,
+        "flips_excluded_from_gate_n": len(excluded_flips),
+        # Which exclusions were in force for THIS pair, so a reader can tell an empty excluded list
+        # apart from an exclusion set that was never applied.
+        "non_gating_questions": sorted(q for q in ids_a if q in NON_GATING),
+        "runs_per_question": {label_a: runs_a, label_b: runs_b},
+        "min_classification_runs": MIN_CLASSIFICATION_RUNS,
         "passed": {label_a: sum(1 for v in a["questions"].values() if v["class"] == SP),
                    label_b: sum(1 for v in b["questions"].values() if v["class"] == SP)},
         "refusal_wrong": {label_a: sorted(ra), label_b: sorted(rb)},
@@ -247,10 +305,20 @@ def main(argv=None) -> int:
     print(f"Class changes  : {res['class_changes_n']} of {res['questions']} "
           f"({res['class_unchanged_n']} unchanged)")
     print(f"STABLE-PASS <-> STABLE-FAIL flips : {res['stable_flips_n']}  <- the gate")
+    print(f"Runs per question : {la}={res['runs_per_question'][la]} {lb}="
+          f"{res['runs_per_question'][lb]}  (ruling 1 requires "
+          f"{res['min_classification_runs']})")
+    if res["non_gating_questions"]:
+        print(f"Non-gating questions in this pair : {', '.join(res['non_gating_questions'])}")
+    if res["flips_excluded_from_gate"]:
+        print(f"Flips EXCLUDED from the gate : {res['flips_excluded_from_gate_n']}")
+        for r in res["flips_excluded_from_gate"]:
+            print(f"    {r['id']}  {r[la]} -> {r[lb]}  {r['passes']}  ({r['non_gating_reason']})")
     if res["class_changes"]:
         print("\n  question                                      %-12s %-12s  runs" % (la[:12], lb[:12]))
         for r in res["class_changes"]:
-            mark = "  <== FLIP" if r in res["stable_flips"] else ""
+            mark = ("  <== FLIP" if r in res["stable_flips"]
+                    else "  <== flip, NOT GATING" if r["id"] in NON_GATING else "")
             print("  %-44s %-12s %-12s  %s%s" % (r["id"][:44], r[la], r[lb], r["passes"], mark))
     print(f"\nRefusal-incorrect set difference : {res['refusal_wrong_symmetric_difference'] or 'none'}")
     print(f"  {la}: {res['refusal_wrong'][la] or 'none'}")
