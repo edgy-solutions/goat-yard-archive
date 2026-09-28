@@ -616,17 +616,88 @@ check("the two faulted crops supply no binding evidence",
 # ascender, a neighbour's descender inside the 12px pad. It reported 15 of 18 sound boxes as multi-line,
 # and those 15 were the queue held for Lane A's presplit fix. Corrected against two thresholds each
 # taken from an empty band in the measurements (MIN_BAND_PX 20: runs are 1-14px or 30-38px, nothing
-# between; MAX_BAND_PX 50: every band is 30-38px except p362:n1 at 67), the debt is one box.
+# between; MAX_BAND_PX 50: every band is 30-38px except p362:n1 at 67), the debt was one box -- and that
+# one was ruled a pass on 2026-09-27, on the page rather than on the measurement. See decision 4 below.
 # Derived from the measured set, never typed: `(one, tot) == (17, 18)` stayed true across a two-span
 # membership change in BOTH directions once already, which is the third time a count passed while the
 # set moved underneath it. The population is 20 since Lane A's dc573ca recovered p423:n3 and p726:n3.
 _MEAS = {r["span_id"] for r in B.G.box_quality(True) if r["lines"] is not None}
-check(f"the one-band debt is {len(_MEAS) - 1} of {len(_MEAS)} -- reported, not asserted away",
-      B.G.one_band_report()[:2] == (len(_MEAS) - 1, len(_MEAS)), B.G.one_band_report()[:2])
+check(f"the one-band debt is {len(_MEAS) - B.G.one_band_report()[0]} of {len(_MEAS)} -- reported",
+      B.G.one_band_report()[1] == len(_MEAS), B.G.one_band_report()[:2])
 check("the measurable population is the 20 spans with a ratified box, p657:n0 alone excluded",
       len(_MEAS) == 20 and "p657:n0" not in _MEAS, sorted(_MEAS))
-check("the one loose box is p362:n1, whose band is 67px where the corpus runs 30-38",
-      B.G.one_band_report()[2] == ["p362:n1"], B.G.one_band_report()[2])
+
+# ---- Chris's decision 4 of 2026-09-27: the debt went to zero and NOT ONE PIXEL MOVED ----------------
+# "p362:n1: box stands; the band test needs a pass condition for 'merged at row 0, span intact below.'
+# No rerun." A violator count that falls to zero because the standard gained a clause is indistinguishable
+# -- from the count alone -- from one that falls to zero because the boxes were fixed. This block is where
+# that difference is on the record. First: the box did not change, so the change is in the rule and can be
+# nowhere else.
+check("p362:n1's box is untouched by the ruling -- it is the STANDARD that moved",
+      _full["p362:n1"]["span_box"] == [471, 125, 799, 192]
+      and _full["p362:n1"]["sealed"] is True, _full["p362:n1"]["span_box"])
+_p362im = B.G.cut(362, _full["p362:n1"]["span_box"], D.PAD,
+                  _full["p362:n1"]["column_bands"])[0]
+_v362, _i362 = B.G.band_geometry(_p362im)
+check("and it passes as merged-top-edge, not as one-band -- the crop is still unusual and says so",
+      _v362 == "merged-top-edge" and B.G._one_band(_p362im), (_v362, _i362))
+# WHY, in measured terms rather than by appeal to the ruling: the 67px band is two things. Chris read the
+# page and said descenders from the line above; the pixels agree, and the fragment is 12px, which is in
+# the thin population MIN_BAND_PX exists to reject. It is not a line of type.
+check("the 67px band is a 33px corpus-normal band plus a 12px fragment of the line above",
+      (_i362["band_px"], _i362["clear_top"]) == (67, 0)
+      and _i362["split_px"] == 33 and _i362["split_band"] == [32, 64]
+      and _i362["top_fragment_px"] == 12
+      and _i362["top_fragment_px"] < B.G.MIN_BAND_PX <= _i362["split_px"] <= B.G.MAX_BAND_PX,
+      {k: _i362.get(k) for k in ("band_px", "split_px", "split_band", "top_fragment_px")})
+
+# THE BRANCH MUST BE UNREACHABLE FOR THE FAILURE IT RESEMBLES. A box that CONTAINS two lines and a box
+# that CLIPS one both produce a single over-thick band; the pass condition is allowed to exist only
+# because it separates them. Exercised on real pixels in the failing direction -- the same ratified box
+# grown upward, so the line above moves from clipped to enclosed -- and not on a synthetic profile, which
+# would only be testing my idea of the page.
+_grown = {}
+for _g in (20, 35, 50, 70):
+    _b = list(_full["p362:n1"]["span_box"])
+    _b[1] -= _g
+    _grown[_g] = B.G.band_geometry(B.G.cut(362, _b, D.PAD, _full["p362:n1"]["column_bands"])[0])[0]
+check("growing that box upward is REFUSED at every step: clipping a line is a pass, holding one is not",
+      all(v in ("merged", "multi-band") for v in _grown.values()), _grown)
+
+# SPLIT_FRAC IS NOT LOAD-BEARING. The verdict is invariant across every threshold from 0.16 to 0.39 --
+# below that the two lines fuse, at 0.40 the span's own line starts breaking up -- and 0.28 is the middle
+# of that plateau. Asserted over the whole interval, because a number chosen from the centre of a plateau
+# is only defensible for as long as the plateau is still there.
+# Measured on `text_bands`, which is the surface the probe consumes -- NOT on band_geometry(im, f).
+# `frac` is the primary profile's threshold, so passing 0.20 to band_geometry makes the crop one-band
+# outright and the probe is never reached: the first version of this check came back "one-band" for all
+# 24 values and would have been satisfied by a build containing no probe at all.
+_plateau = {f: B.G.text_bands(_p362im, f / 100.0) for f in range(16, 40)}
+check("across the whole 0.16-0.39 plateau the split yields ONE corpus-height band clear of row 0",
+      all(len(v) == 1 and v[0][0] > 0
+          and B.G.MIN_BAND_PX <= v[0][1] - v[0][0] + 1 <= B.G.MAX_BAND_PX
+          for v in _plateau.values())
+      and 16 <= B.G.SPLIT_FRAC * 100 <= 39,
+      {f: v for f, v in _plateau.items() if not (len(v) == 1 and v[0][0] > 0)})
+check("and it is a real threshold effect: at BAND_FRAC the two lines fuse into one 67px band at row 0",
+      B.G.text_bands(_p362im, B.G.BAND_FRAC) == [(0, 66)]
+      and B.G.text_bands(_p362im, 0.40) == [],
+      (B.G.text_bands(_p362im, B.G.BAND_FRAC), B.G.text_bands(_p362im, 0.40)))
+
+# THE OTHER HALF OF THE EXERCISE: the new rule run over everything that already passed. The probe lives
+# inside the `px > MAX_BAND_PX` branch, so by construction no passing crop can reach it -- and the way
+# that claim earns its keep is by being measured rather than deduced from the control flow.
+_verdicts = {s["span_id"]: B.G.band_geometry(
+                 B.G.cut(s["page"], s["span_box"], D.PAD, s["column_bands"])[0])[0]
+             for s in D.build_set(include_sealed=True) if s.get("span_box")}
+check("exactly ONE span is merged-top-edge and the other 19 are one-band: nothing else moved",
+      sorted(_verdicts.values()).count("one-band") == 19
+      and [k for k, v in _verdicts.items() if v == "merged-top-edge"] == ["p362:n1"]
+      and len(_verdicts) == 20,
+      {k: v for k, v in _verdicts.items() if v != "one-band"})
+check("so the debt is 0 of 20 with no violators, by a ruling on the rule and no change to any box",
+      B.G.one_band_report(include_sealed=True) == (20, 20, []),
+      B.G.one_band_report(include_sealed=True))
 # A tally against a wrong standard is faithful and worthless. The corrected rule is kept honest by the
 # one thing that could refuse it: an already-ratified box. Chris's re-ratified p423:n3 crop is 35px tall
 # around a 35px band, so it touches both edges -- an edge-clearance clause in the accept gate would have
@@ -691,6 +762,68 @@ check("no contains read sits on a crop that was re-cut after it (EMPTY today, an
       not _retired, [(r["span_id"], r["model"]) for r in _retired])
 check("two contains reads are broken parses credited by the substring test",
       _cc.get("envelope-leak") == 2, _cc)
+
+print("\n(N) Chris's p217 ruling of 2026-09-27, and the door it came through")
+# THE RULING. "p217:n2: ratified box x0 = 0, no other change, no rerun." The ratified note box began at
+# x = -2, outside the page. The CROP was never wrong -- this lane clamps max(0, x0 - pad) and Lane A's
+# mapper adds a canvas-slop clamp -- and Chris's point was that two clamps agreeing is not a
+# ratification. So the box is corrected, no pixel moves, and nothing is re-sent.
+_NB = D.DATA / "note_box_truth_20260906_FINAL.jsonl"
+_nbrecs = [o for o in D._lines(_NB) if "page" in o]
+_p217 = [o for o in _nbrecs if o["page"] == 217]
+check("page 217 has an ORIGINAL and a SUPERSEDING record, both readable",
+      len(_p217) == 2, len(_p217))
+check("the loader resolves p217 to the later record (last-wins, which is what makes the door work)",
+      {s["span_id"]: s for s in D.build_set(include_sealed=True)}["p217:n2"]["note_box"]
+      == [0, 109, 1955, 213])
+if len(_p217) == 2:
+    _o, _n = _p217
+    # DERIVED, NOT RETYPED. The superseding record was built from the original in memory with one
+    # coordinate replaced. If the other five notes had been retyped, my transcription would have become
+    # an assertion about Chris's ratification; this check is what keeps it a copy.
+    _diff = [(i, j) for i in range(min(len(_o["notes"]), len(_n["notes"])))
+             for j in range(4)
+             if _o["notes"][i]["strip_box"][j] != _n["notes"][i]["strip_box"][j]]
+    check("exactly ONE coordinate differs, and it is note 2's x0: -2 -> 0",
+          _diff == [(2, 0)] and _o["notes"][2]["strip_box"][0] == -2
+          and _n["notes"][2]["strip_box"][0] == 0, _diff)
+    check("every other field of every note is unchanged -- 'no other change' means x1 stays 1955 too",
+          [{k: v for k, v in nn.items() if k != "strip_box"} for nn in _o["notes"]]
+          == [{k: v for k, v in nn.items() if k != "strip_box"} for nn in _n["notes"]]
+          and _n["notes"][2]["strip_box"][2] == 1955)
+    check("the page's own geometry is untouched: strip size, bands, counts",
+          all(_o[k] == _n[k] for k in ("strip_size", "column_bands", "mode", "n_extractor",
+                                       "n_detected", "n_ratified")))
+    check("the record names the ruling, the change, and that no pixel moved",
+          _n["provenance"]["supersedes"]["changed"] == [{"note": 2, "field": "strip_box[0]",
+                                                         "from": -2, "to": 0}]
+          and _n["provenance"]["pixels_changed"] is False
+          and "2026-09-27" in _n["provenance"]["ruling"])
+check("and the A1 fault table is now EMPTY -- the -2 was its last entry",
+      D.crop_faults("A1_notebox") == {}, D.crop_faults("A1_notebox"))
+check("while p900:n4 remains the one A2 fault, so the gate did not go quiet for the wrong reason",
+      set(D.crop_faults("A2_spanbox")) == {"p900:n4"}, D.crop_faults("A2_spanbox"))
+
+print("\n(N+1) the append-only door cannot glue a record onto a signed line")
+# This store ended WITHOUT a trailing newline, and a plain "a"-mode write put the p217 correction onto
+# the end of the last ratified page record. The whole store then failed to parse, because the loader
+# raises on the first bad line. Loud, repairable, and it must not be reachable again.
+check("the store ends with a newline, so the next append lands on its own line",
+      _NB.read_bytes().endswith(b"\n"))
+_tmp = D.CROPDIR / "_append_probe.jsonl"
+try:
+    io.open(_tmp, "w", encoding="utf-8", newline="").write('{"a": 1}')      # no terminator, on purpose
+    D.append_jsonl(_tmp, {"a": 2})
+    check("append_jsonl on a store with no trailing newline yields TWO records, not one glued line",
+          [o["a"] for o in D._lines(_tmp)] == [1, 2], D._lines(_tmp))
+    io.open(_tmp, "w", encoding="utf-8", newline="").write('{"a": 1}\r\n')
+    D.append_jsonl(_tmp, {"a": 2})
+    check("and it keeps the store's own CRLF rather than normalising 34 signed lines to append a 35th",
+          _tmp.read_bytes().count(b"\r\n") == 2 and [o["a"] for o in D._lines(_tmp)] == [1, 2],
+          _tmp.read_bytes()[:40])
+finally:
+    if _tmp.exists():
+        _tmp.unlink()
 
 print()
 if fails:

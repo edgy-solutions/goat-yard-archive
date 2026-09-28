@@ -357,6 +357,32 @@ def _heb_span(text):
     return seg if re.fullmatch(r"[֐-׿ \-]+", seg) else " ".join(toks)
 
 
+def append_jsonl(path, obj):
+    """Append one record to a JSONL store, refusing to glue it onto a line with no terminator.
+
+    THE DOOR FOR EVERY SUPERSEDING RECORD. Both box stores are loaded with `{key: rec}` comprehensions,
+    so a later record wins and a ruling reaches a signed store by appending rather than editing. That
+    only works if the append lands on its own line. `note_box_truth_20260906_FINAL.jsonl` ended without
+    a newline; a plain "a"-mode write put Chris's p217 correction onto the end of the last ratified page
+    record and the store stopped parsing -- every line of it, because the loader raises on the first bad
+    one. Nothing was lost (the pair splits cleanly with `raw_decode`) and the break was loud, but a
+    signed artifact should not depend on whoever appends last remembering to check.
+
+    The store's own line ending is preserved. These files are CRLF; normalising 34 signed lines to LF in
+    order to add a 35th produces a whole-file diff in which the one change that matters is invisible."""
+    p = Path(path)
+    nl = "\n"
+    if p.exists() and p.stat().st_size:
+        raw = p.read_bytes()
+        nl = "\r\n" if raw.count(b"\r\n") and raw.count(b"\r\n") >= raw.count(b"\n") - 1 else "\n"
+        lead = "" if raw.endswith(b"\n") else nl
+    else:
+        lead = ""
+    with io.open(p, "a", encoding="utf-8", newline="") as f:
+        f.write(lead + json.dumps(obj, ensure_ascii=False) + nl)
+    return len(_lines(p))
+
+
 def build_set(include_sealed=False):
     """The carried spans with their signed verdict, latin context, and both ratified boxes (strip coords).
 

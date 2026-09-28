@@ -74,6 +74,18 @@ TARGET_BAND = 150    # every COMPARISON image is scaled so its text line is this
 BAND_FRAC = 0.12     # a row belongs to the line band if its ink reaches this fraction of the peak
 MIN_BAND_PX = 20     # an ink run thinner than this is not a text line
 MAX_BAND_PX = 50     # a single band thicker than this is two lines merged
+SPLIT_FRAC = 0.28    # the threshold a top-edge merge is re-profiled at; see band_geometry
+
+# SPLIT_FRAC IS THE CENTRE OF A STABILITY PLATEAU, which is the same discipline as the two numbers above
+# but a different measurement: not a gap between populations, an interval over which the ANSWER does not
+# move. Sweeping every value from 0.10 to 0.44 on the p362:n1 crop (h=91):
+#   0.10-0.12  one band (0,66), 67px, touching row 0             -- fused: this is the merged verdict
+#   0.13-0.15  two bands survive MIN_BAND_PX, the upper at row 0 -- half-separated, still unusable
+#   0.16-0.39  exactly ONE band, 31-37px, top at row 30-33       -- the span's own line, intact
+#   0.40+      the span's own line itself breaks up, (33,45)(47,63); nothing survives MIN_BAND_PX
+# 24 consecutive values give the same verdict, and 0.28 is the middle of them -- as far as the data allows
+# from fusion below and from fragmenting the line being measured above. Sampling four values (the first
+# version of this) found the plateau but not its edges, and 0.20 sits two steps from fusion.
 
 # BOTH NUMBERS ARE DERIVED, NOT CHOSEN -- each sits in an empty band in the measurements.
 # MIN: the ink runs over the 18 measurable span boxes fall into two populations with nothing between
@@ -325,9 +337,24 @@ def band_geometry(im, frac=BAND_FRAC):
 
       one-band    exactly one band, 30-38px like the rest of the corpus. The crop holds its line.
       multi-band  two or more bands: the box spans lines, so a read cannot be attributed to a line.
-      merged      one band but thicker than MAX_BAND_PX -- two lines touching at this threshold, which
-                  a run-based method cannot separate. Fires on p362:n1 (67px) and nothing else.
+      merged      one band but thicker than MAX_BAND_PX and NOT touching the top edge -- two lines
+                  inside the box, touching at this threshold. A box fault: no read can be attributed.
+      merged-top-edge
+                  one band thicker than MAX_BAND_PX that touches row 0, and which separates at
+                  SPLIT_FRAC into a single band of corpus-normal height that does NOT touch row 0.
+                  A PASS. The crop holds its line; what it also holds is the bottom of the line above,
+                  cut by the box's top edge, which is a fact about the page and not about the box.
+                  Fires on p362:n1 (67px -> 33px at SPLIT_FRAC) and nothing else.
       no-band     no run survives MIN_BAND_PX. Blank or near-blank; D.crop_fault owns that case.
+
+    WHY merged-top-edge IS A PASS, from Chris's ruling of 2026-09-27 on p362:n1: "the ink touching at
+    the top is descenders from the line above, which is a fact about the page, not the box. Trimming the
+    top would cost a rerun on a sealed span for no reading gain." The distinction the verdict draws is
+    not between clean and dirty crops -- it is between a box that CONTAINS two lines (merged, the read
+    is unattributable) and a box that CLIPS one (merged-top-edge, the read is fine). Both look identical
+    to a thickness test at a single threshold, and they are told apart by where the band sits, not by how
+    thick it is. This is the same mistake the edge-clearance clause would have been: a property of the
+    page read as a property of the box.
 
     `info` also carries clear_top / clear_bottom, and those are REPORTED, NEVER JUDGED here. Edge
     contact is not a fault: PAD=12 reaches into the neighbouring lines, so 16 of 18 span crops have
@@ -346,6 +373,19 @@ def band_geometry(im, frac=BAND_FRAC):
     if len(bands) > 1:
         return "multi-band", info
     if px > MAX_BAND_PX:
+        # A merge at row 0 is the top edge cutting the line above, not two lines in the box. Re-profile
+        # once at SPLIT_FRAC: if a single band of corpus-normal height survives and it has cleared row
+        # 0, the span's own line is intact below the clipped one and this is a pass. The probe runs ONLY
+        # down this branch, so no crop that already passes can change verdict because of it.
+        if main[0] == 0:
+            sub = text_bands(im, SPLIT_FRAC)
+            if (len(sub) == 1 and sub[0][0] > 0
+                    and MIN_BAND_PX <= sub[0][1] - sub[0][0] + 1 <= MAX_BAND_PX):
+                frag = [r for r in ink_runs(im, SPLIT_FRAC) if r[1] < sub[0][0]]
+                info.update(split_frac=SPLIT_FRAC, split_band=list(sub[0]),
+                            split_px=sub[0][1] - sub[0][0] + 1,
+                            top_fragment_px=max((b - a + 1 for a, b in frag), default=0))
+                return "merged-top-edge", info
         return "merged", info
     return "one-band", info
 
@@ -497,8 +537,13 @@ def _one_band(im):
     Was `n_lines(im) == 1`, which counted ink runs and so called 15 of 18 good boxes multi-line. Those
     15 were about to enter the held redraw queue; the real count is one (p362:n1). This gate stays a
     band-count-and-height test and says nothing about edge clearance -- see band_geometry for why
-    adding that clause would have rejected an already-ratified box."""
-    return band_geometry(im)[0] == "one-band"
+    adding that clause would have rejected an already-ratified box.
+
+    merged-top-edge passes too, per Chris's ruling on p362:n1: a band that is thick only because the
+    box's top edge clips the line above, with the span's own line intact below it, is a fact about the
+    page. What stays a failure is a box holding two whole lines, where a read cannot be attributed to
+    either -- which is what `merged` now means."""
+    return band_geometry(im)[0] in ("one-band", "merged-top-edge")
 
 
 def sig_load(path=None):
@@ -740,15 +785,19 @@ def box_quality(include_sealed=True):
     for s in D.build_set(include_sealed=include_sealed):
         if not s["span_box"]:
             rows.append(dict(span_id=s["span_id"], page=s["page"], size=None, lines=None,
-                             fault="no-span-box", one_band=False))
+                             fault="no-span-box", one_band=False, band=None))
             continue
         im, rects = cut(s["page"], s["span_box"], D.PAD, s["column_bands"])
         native, _x, _y = page_bits(s["page"])
         fault = D.crop_fault(im, rects, native.size)
+        # The VERDICT as well as the bit. `one_band` is now true for two different shapes -- one-band
+        # and merged-top-edge -- and a row that says only "yes" hides which, when the second is a crop
+        # whose top edge cuts the line above. Reported, not gated: `one_band` is unchanged.
         rows.append(dict(span_id=s["span_id"], page=s["page"],
                          size=None if im is None else list(im.size),
                          lines=None if (im is None or fault) else n_lines(im),
                          fault=fault, rects=len(rects),
+                         band=None if (im is None or fault) else band_geometry(im)[0],
                          one_band=bool(im is not None and not fault and _one_band(im))))
     return rows
 

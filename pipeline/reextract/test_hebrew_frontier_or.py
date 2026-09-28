@@ -543,23 +543,37 @@ check("every band overshoot is gone, so no box is outside its band any more",
 # slop clamp as well as the band clip, and -2 is inside the slop, so the mapped rect starts at 0 and
 # the crop carries BOTH flags. I under-credited the fix and said so in the report.
 _p217 = MAN["p217:n2"]["A1_notebox"]
-check("p217:n2's -2 IS repaired -- by the 2px slop clamp, not by the band clip, and both are flagged",
-      _p217["rect_edges"][0] == ["band-clipped", "canvas-slop-clamped"]
-      and _p217["native_rects"][0][0] == 0, _p217["rect_edges"])
-# And the fault table is down to one, which is a DIFFERENT fact about the same span. My `crop_fault`
-# reports the ratified STRIP box, which still begins at -2; the clip repaired the MAPPED rect. One is
-# an editorial debt against the box, the other is the geometry that cut the pixels. Conflating them
-# would retire a debt nobody paid.
+# AND THEN THE BOX ITSELF WAS CORRECTED. Chris's decision 3 of 2026-09-27 set the ratified x0 to 0, so
+# there is no -2 left for either mechanism to repair, and `canvas-slop-clamped` has dropped off the flag
+# list while the mapped rect still starts at 0. That disappearance is the measurement worth keeping: the
+# clamp was genuinely load-bearing before the ruling and is not now, and the PIXELS are identical in both
+# worlds. Which is Chris's reason for ruling at all -- "the crop already looks right because two clamps
+# agree, and the agent is correct that two clamps agreeing isn't a ratification". A crop that survives
+# because something silently held it is not evidence about the box that produced it.
+check("the mapped rect starts at 0 -- and now by the ratified box, with the slop clamp no longer firing",
+      _p217["native_rects"][0][0] == 0 and _p217["rect_edges"][0] == ["band-clipped"],
+      _p217["rect_edges"])
+# The fault table was then down to one, which was a DIFFERENT fact about the same span. My `crop_fault`
+# reports the ratified STRIP box, which began at -2; the clip repaired the MAPPED rect. One is an
+# editorial debt against the box, the other is the geometry that cut the pixels, and conflating them
+# would have retired a debt nobody paid. It has since been paid properly, by a human ruling on the box.
 _a1f = diag.crop_faults("A1_notebox")
 check("the five loud page-width refusals are gone: those five A1 crops exist now",
       not [k for k, f in _a1f.items() if "exceeds page width" in f]
       and all(MAN[s].get("A1_notebox") for s in
               ("p124:n4", "p200:n2", "p596:n2", "p726:n3", "p900:n4")), sorted(_a1f))
-check("the one A1 fault left is p217:n2's ratified STRIP box at -2, not its mapped rect",
-      set(_a1f) == {"p217:n2"} and "beyond=left2" in _a1f["p217:n2"]
-      and _p217["native_rects"][0][0] == 0, _a1f)
-check("p217:n2 is flagged AND produced a crop, so a recorded fault is still not a refusal",
-      "p217:n2" in _a1f and MAN["p217:n2"].get("A1_notebox"), _a1f.get("p217:n2"))
+# ...and that last debt was PAID, on the box, by Chris's ruling. An emptied fault table is the one
+# result a fault check cannot celebrate on its own: it looks the same whether the debt was settled or the
+# detector went quiet. So both halves are asserted -- the live ratified truth now reads 0, which is where
+# the fault came from, and the detector still holds the fault it should.
+check("the A1 fault table is EMPTY because the ratified box was corrected to 0, not by rounding",
+      _a1f == {} and _FULL["p217:n2"]["note_box"][0] == 0,
+      (_a1f, _FULL["p217:n2"]["note_box"]))
+check("and the detector is not quiet: p900:n4 is still faulted out-of-strip on A2",
+      set(diag.crop_faults("A2_spanbox")) == {"p900:n4"}, diag.crop_faults("A2_spanbox"))
+check("p900:n4 is flagged AND produced a crop, so a recorded fault is still not a refusal",
+      bool((MAN["p900:n4"].get("A2_spanbox") or {}).get("path")),
+      diag.crop_faults("A2_spanbox").get("p900:n4"))
 
 print("\n(12) the manifest index cannot silently lose spans")
 # BORN-TEST. `crops()` defaults to include_sealed=False and the CLI took that default, rewriting the

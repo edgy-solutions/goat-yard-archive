@@ -408,8 +408,9 @@ def selftest():
     # it counted INK RUNS at 12% of peak, and pointed Hebrew is built out of thin runs -- a nikud row,
     # an ascender, a neighbour's descender inside the 12px pad. 15 of 18 sound boxes were reported
     # multi-line, and those 15 were the held redraw queue. Corrected (hebrew_glyph_card.MIN_BAND_PX /
-    # MAX_BAND_PX, both taken from empty bands in the measurements), the debt is ONE box: p362:n1,
-    # whose single band is 67px where every other band in the corpus is 30 to 38.
+    # MAX_BAND_PX, both taken from empty bands in the measurements), the debt was ONE box: p362:n1,
+    # whose single band is 67px where every other band in the corpus is 30 to 38 -- and that one was
+    # ruled a pass on 2026-09-27, the 67px being one line plus the clipped bottom of the line above.
     # PIN THE MEMBERSHIP, NOT THE TOTAL. This is the third time in one session that a 18-denominator
     # survived a change of ±2 in both directions and reported nothing. On 2026-09-27 p138:n6 and
     # p596:n2 entered the measurable population (Chris signed them, so they acquired truth) while
@@ -433,9 +434,22 @@ def selftest():
     ck("the only unmeasurable box is p657:n0, which has no ratified span box",
        {r["span_id"] for r in G.box_quality(True) if r["lines"] is None} == {"p657:n0"},
        sorted({r["span_id"] for r in G.box_quality(True) if r["lines"] is None}))
-    ck(f"the one-band debt is {len(_MEASURED) - 1} of {len(_MEASURED)} after the band rule was "
-       f"corrected", (one, tot) == (len(_MEASURED) - 1, len(_MEASURED)), (one, tot))
-    ck("the one remaining loose box is p362:n1", viol == ["p362:n1"], viol)
+    # AND THEN THE LAST ONE WAS RULED A PASS -- on the page, not on the measurement. Chris, 2026-09-27:
+    # "the ink touching at the top is descenders from the line above, which is a fact about the page, not
+    # the box." p362:n1 is now merged-top-edge: a 67px band that separates, at a stricter threshold, into
+    # a 33px band of corpus-normal height clear of row 0, with a 12px fragment of the clipped line above
+    # it. A debt reaching zero because the standard gained a clause is worth distrusting by default, so
+    # the mechanism is asserted beside the count: no box changed, and the span that moved is the one the
+    # ruling names.
+    ck(f"the one-band debt is {len(_MEASURED) - one} of {len(_MEASURED)}", (one, tot) == (20, 20),
+       (one, tot))
+    _bq = {r["span_id"]: r for r in G.box_quality(True)}
+    ck("no box is loose, and the span that moved did so by ruling: p362:n1 is merged-top-edge",
+       viol == [] and _bq["p362:n1"]["band"] == "merged-top-edge",
+       (viol, _bq["p362:n1"]["band"]))
+    ck("and it is the ONLY one: every other measurable box is a plain one-band",
+       sorted(r["band"] for r in _bq.values() if r["band"]) == ["merged-top-edge"] + ["one-band"] * 19,
+       sorted({r["band"] for r in _bq.values() if r["band"]}))    # p657:n0 has no box, so no band
     ck("the corrected rule does not reject Chris's re-ratified p423:n3 box",
        G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"])[0] == "one-band",
        G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"]))
@@ -488,7 +502,10 @@ def selftest():
     #   p912:n2 holds ONE clean band and is still read short by 14 arms. Its box is too NARROW: 224px
     #           of a two-word signature, and the arms return the second word. band_geometry is a
     #           VERTICAL measurement and is structurally silent about that.
-    #   p362:n1 fails the band rule (one 67px band, two lines merged) and is read WHOLE by 7 arms.
+    #   p362:n1 measured one 67px band and was read WHOLE by 7 arms -- the band rule flagged it and the
+    #           reads did not. Ruled a pass on 2026-09-27 (merged-top-edge: the top edge clips the line
+    #           above, and the span's own 33px line is intact below it), which is the right verdict and
+    #           also the end of the only instance this corpus had of that direction.
     # So the horizontal axis has only READ evidence behind it. A geometric horizontal test was tried --
     # count ink groups in the band and compare to the signature's word count -- and discarded: sweeping
     # the whitespace gap from 4 to 20px moves the per-span counts by up to 10. Saying "the vertical axis
@@ -497,9 +514,18 @@ def selftest():
     ck("a clean band does not mean a whole read: p912:n2 is one-band and still read short",
        by["p912:n2"]["one_band"] and rows_by["p912:n2"]["verdict"] == "broken:box-too-small",
        (by["p912:n2"]["one_band"], rows_by["p912:n2"]["verdict"]))
-    ck("and a flagged band does not mean a broken read: p362:n1 fails the rule and reads whole",
-       (not by["p362:n1"]["one_band"]) and rows_by["p362:n1"]["verdict"] == "unconfirmable",
+    # THE OTHER DIRECTION NO LONGER HAS AN INSTANCE. This check used to read "a flagged band does not
+    # mean a broken read: p362:n1 fails the rule and reads whole" -- and p362:n1 was the only flagged box
+    # in the corpus. Chris's decision 4 ruled it a pass, so the violator set is empty and nothing is left
+    # to demonstrate that half of the independence with. The claim is not refuted, it is unexercised, and
+    # the difference matters: the next box that fails the band rule and still reads whole will be the
+    # first evidence for it since the ruling. Asserted as the vacuity it now is, so it cannot pass by
+    # being empty without saying so.
+    ck("p362:n1 now passes the band rule and STILL reads whole -- the axes agree here, they do not bind",
+       by["p362:n1"]["one_band"] and rows_by["p362:n1"]["verdict"] == "unconfirmable",
        (by["p362:n1"]["one_band"], rows_by["p362:n1"]["verdict"]))
+    ck("so no span exercises flagged-band-whole-read any more (viol is EMPTY): the direction is unproven",
+       G.one_band_report()[2] == [], G.one_band_report()[2])
 
     # THE QUEUE IS EMPTY AS OF 2026-09-27 -- which is the queue WORKING, not the queue idle. p895:n0 was
     # its only member: the queue named a signature under suspicion, Chris read the 4x glyph card, ruled
