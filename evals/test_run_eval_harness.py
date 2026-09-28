@@ -10,6 +10,7 @@ runs were in-process cache replays. Both conditions were invisible in the output
 
     python test_run_eval_harness.py
 """
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -18,7 +19,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_eval as RE  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
-from degradation import TIMEOUT_FALLBACK_ANSWER, DEGRADED_LLM_TIMEOUT  # noqa: E402
+from degradation import (  # noqa: E402
+    DEGRADED_ASSERTION,
+    DEGRADED_LLM_TIMEOUT,
+    DEGRADED_UPSTREAM_RATE_LIMIT,
+    GENERATION_FAILURE_ANSWER,
+    TIMEOUT_FALLBACK_ANSWER,
+)
 
 Q_ANSWER = {
     "id": "t_answer", "question": "What does Gill say?", "category": "doctrine",
@@ -717,6 +724,123 @@ def test_score_carries_the_record_off_the_response():
     r = RE.score(Q_ANSWER, dict(GOOD), 1.0)
     assert r.answer_lm == LM_REC, r.answer_lm
     assert RE.score(Q_ANSWER, {"answer": "x [GENESIS_2_8_S01]."}, 1.0).answer_lm is None
+
+
+# --- ruling 4: an upstream rate limit is a RUN-level fault even at HTTP 200 -----------
+
+# What the backend now sends when litellm raises a rate limit inside generation. The status
+# line is 200 -- the request succeeded, the generation did not -- so the HTTP gate cannot see
+# it and the label is the only evidence there is.
+RATE_LIMITED_200 = {
+    "answer": GENERATION_FAILURE_ANSWER,
+    "degraded": DEGRADED_UPSTREAM_RATE_LIMIT,
+    "degraded_detail": ("RateLimitError: litellm.RateLimitError: RateLimitError: "
+                        "OpenAIException - Provider returned error"),
+    "generation_seconds": 1.2, "lm_cache_enabled": False, "answer_lm": dict(LM_REC),
+}
+
+
+def test_an_upstream_rate_limit_at_http_200_is_a_run_level_fault():
+    r = RE.score(Q_ANSWER, dict(RATE_LIMITED_200), 1.2)
+    assert r.api_status == 200, r.api_status
+    assert r.degraded == DEGRADED_UPSTREAM_RATE_LIMIT, r.degraded
+    assert r.error, "a degradation is an error, never a fail"
+    reason = RE.run_level_fault(r)
+    assert reason and DEGRADED_UPSTREAM_RATE_LIMIT in reason, reason
+    assert "UPSTREAM" in reason, "the abort must say whose limit it was; ours is a different fix"
+
+
+def test_the_nf2_prose_is_kept_out_of_the_denominator_but_CANNOT_abort():
+    # The honest limit of the compatibility floor, stated as a test. Against a backend that
+    # predates the typed field -- which is every already-published run -- the prose is still
+    # recognised as a non-answer and still excluded from scoring, but the label is
+    # "detected by text" and nothing can tell a rate limit from any other raised error. So the
+    # run continues. Only the typed field can abort, which is why the fix had to be in the
+    # backend and not in a smarter matcher here.
+    legacy = {"answer": ("Error generating answer: litellm.RateLimitError: RateLimitError: "
+                         "OpenAIException - Provider returned error"),
+              "lm_cache_enabled": False, "answer_lm": dict(LM_REC)}
+    r = RE.score(Q_ANSWER, legacy, 1.2)
+    assert r.degraded == RE.DEGRADED_UNLABELLED, r.degraded
+    assert r.error and not r.overall_pass
+    assert RE.run_level_fault(r) is None, (
+        "text detection must NOT be allowed to abort a run: it cannot distinguish a provider "
+        "outage from our own assertion firing, and an invented abort kills a healthy arm"
+    )
+
+
+def test_a_backend_timeout_label_is_not_a_run_level_fault():
+    # Companion assertion: the gate is narrow on purpose. One question can time out three
+    # times running without the endpoint being dead -- MAX_CONSECUTIVE_DEAD_QUESTIONS catches
+    # that pattern instead, over evidence rather than over one label.
+    r = RE.score(Q_ANSWER, {"answer": TIMEOUT_FALLBACK_ANSWER, "degraded": DEGRADED_LLM_TIMEOUT,
+                            "lm_cache_enabled": False, "answer_lm": dict(LM_REC)}, 180.0)
+    assert r.degraded == DEGRADED_LLM_TIMEOUT
+    assert RE.run_level_fault(r) is None
+
+
+def test_our_own_assertion_label_is_not_a_run_level_fault():
+    # A bad week for the model is not an outage. If this aborted, a prompt regression would
+    # look like infrastructure and the arm would never be measured.
+    r = RE.score(Q_ANSWER, {"answer": GENERATION_FAILURE_ANSWER, "degraded": DEGRADED_ASSERTION,
+                            "lm_cache_enabled": False, "answer_lm": dict(LM_REC)}, 3.0)
+    assert r.degraded == DEGRADED_ASSERTION
+    assert RE.run_level_fault(r) is None
+
+
+# --- ruling 4: an aborted directory says so, and keeps what it measured ---------------
+
+class _SeqStub:
+    """call_endpoint that returns responses[i] for call i, then repeats the last one."""
+
+    def __init__(self, responses):
+        self.responses, self.calls = responses, 0
+
+    def __call__(self, endpoint, question, auth, timeout):
+        i = min(self.calls, len(self.responses) - 1)
+        self.calls += 1
+        return dict(self.responses[i])
+
+
+def _run_main(responses, ids):
+    out = Path(tempfile.mkdtemp()) / "run"
+    stub, orig = _SeqStub(responses), RE.call_endpoint
+    RE.call_endpoint = stub
+    try:
+        rc = RE.main(["--endpoint", "http://x/api/search", "--output-dir", str(out),
+                      "--ids"] + ids + ["--runs", "1", "--no-warmup", "--allow-dirty-tree"])
+    finally:
+        RE.call_endpoint = orig
+    return rc, out, stub
+
+
+def test_abort_writes_a_marker_and_KEEPS_the_question_files_it_already_had():
+    good = dict(GOOD)
+    rc, out, stub = _run_main([good, RATE_LIMITED_200], ["logos_001", "sheep_001"])
+    assert rc == 5, rc
+    marker_path = out / "ABORTED.json"
+    assert marker_path.is_file(), sorted(p.name for p in out.iterdir())
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker["aborted"] is True
+    assert DEGRADED_UPSTREAM_RATE_LIMIT in marker["reason"], marker["reason"]
+    assert marker["at"]["question_id"] == "sheep_001", marker["at"]
+    assert marker["last_run"]["degraded"] == DEGRADED_UPSTREAM_RATE_LIMIT, marker["last_run"]
+    # The measurement that WAS taken is still on disk, and the marker names it. Deleting it
+    # would be a silent drop; leaving it unnamed is how a fragment directory gets mistaken
+    # for a run (the fault the floor report filed against this same abort path).
+    assert marker["question_files_present"] == ["logos_001"], marker["question_files_present"]
+    assert (out / "logos_001.json").is_file()
+    assert not (out / "summary.json").exists(), "an aborted attempt must write no summary"
+    assert not (out / "report.md").exists(), "and no report"
+
+
+def test_a_COMPLETED_run_writes_no_marker_and_does_write_a_summary():
+    # The companion assertion. A marker written unconditionally would pass every assertion
+    # above while telling a reader nothing, and would make every healthy run look aborted.
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"])
+    assert not (out / "ABORTED.json").exists(), "a completed run must not be marked aborted"
+    assert (out / "summary.json").is_file(), sorted(p.name for p in out.iterdir())
+    assert stub.calls == 2, stub.calls
 
 
 if __name__ == "__main__":

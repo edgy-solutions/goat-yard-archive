@@ -65,6 +65,7 @@ REFUSAL_MARKERS = (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from degradation import (  # noqa: E402
     DEGRADED_LLM_TIMEOUT,
+    DEGRADED_UPSTREAM_RATE_LIMIT,
     LM_CACHE_DISABLED_ENV,
     is_degraded_answer,
 )
@@ -213,6 +214,24 @@ RUN_LEVEL_STATUSES = {429}
 # run carried on through five more questions, one of which was a refusal gate; the arm looked
 # complete and was hollow exactly where the decision lived.
 MAX_CONSECUTIVE_DEAD_QUESTIONS = 2
+# Degradation labels that are a property of the RUN, not of the question, in exactly the sense
+# RUN_LEVEL_STATUSES means it. The UPSTREAM provider refusing to serve poisons every later
+# question the same way our own limiter does.
+#
+# Why this is a separate gate and not covered by the HTTP one: measured 2026-09-27 in
+# nf2_20260927/real_garden_genesis_3_24_misattribution_001.json, an upstream 429 reached this
+# harness as HTTP 200 with "Error generating answer: litellm.RateLimitError: ..." formatted into
+# the answer field, degraded=None, and was scored overall_pass=False. The status line said
+# success, so the gate below never looked. The backend now labels it at the point of degradation
+# (backend/degradation.py classify_generation_exception) and this set is the consumer.
+RUN_LEVEL_DEGRADATIONS = {DEGRADED_UPSTREAM_RATE_LIMIT}
+RUN_LEVEL_DEGRADATION_HINT = (
+    "the UPSTREAM provider refused to serve. This is the provider's limit, not the backend's "
+    "own limiter, so raising RATE_LIMIT will not help: wait out the window, or run against a "
+    "different provider and record that you did. Every remaining question would hit the same "
+    "wall, and each one would be an ERROR for a reason that has nothing to do with the system "
+    "under test."
+)
 RUN_LEVEL_ABORT_HINT = (
     "the endpoint's rate limit is exhausted for this window (backend RATE_LIMIT, default "
     "10/day for anonymous callers). Raise it for the run or authenticate. Scored results "
@@ -230,6 +249,8 @@ def run_level_fault(result: "QuestionResult") -> Optional[str]:
     """Reason to stop the whole run, or None to carry on with the next question."""
     if result.api_status in RUN_LEVEL_STATUSES:
         return f"HTTP {result.api_status}: {RUN_LEVEL_ABORT_HINT}"
+    if result.degraded in RUN_LEVEL_DEGRADATIONS:
+        return f"DEGRADED ({result.degraded}): {RUN_LEVEL_DEGRADATION_HINT}"
     return None
 
 
@@ -975,9 +996,38 @@ def main(argv: Optional[list] = None) -> int:
         if abort_reason:
             print()
             print("ABORTED: " + abort_reason)
-            print("No report is written. The remaining questions were never asked, and a "
-                  "summary over the few that got through would describe a run that did "
-                  "not happen.")
+            print("No report and no summary are written. The remaining questions were never "
+                  "asked, and a summary over the few that got through would describe a run "
+                  "that did not happen.")
+            # The per-question files already on disk STAY. Deleting a measurement that was
+            # actually taken is a silent drop. But the floor report's own complaint was that
+            # the leftover directory looked like a run to a later reader, so the fragments are
+            # kept AND named: a marker file, so nothing has to infer the state of this
+            # directory from what happens to be missing.
+            last = runs[-1] if runs else None
+            marker = {
+                "aborted": True,
+                "reason": abort_reason,
+                "at": {"question_id": q["id"], "question_index": i,
+                       "of_questions": len(questions),
+                       "runs_attempted_on_this_question": len(runs), "of_runs": n_runs},
+                "last_run": ({"api_status": last.api_status, "degraded": last.degraded,
+                              "error": last.error} if last else None),
+                "question_files_present": sorted(
+                    f.stem for f in out_dir.glob("*.json") if f.name != "ABORTED.json"),
+                "what_this_directory_is": (
+                    "NOT A RUN. There is no summary.json and no report.md, and there never "
+                    "will be for this attempt. The per-question files are the questions that "
+                    "were asked before the abort; they are kept because a measurement that was "
+                    "taken must not be deleted, NOT because they constitute a result. Do not "
+                    "publish this directory and do not compare against it. Rerun from the top."),
+                "ruling": "2026-09-27 ruling 4 follow-through: a run-level fault leaves a marker",
+            }
+            (out_dir / "ABORTED.json").write_text(
+                json.dumps(marker, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"Wrote {out_dir / 'ABORTED.json'}: "
+                  f"{len(marker['question_files_present'])} question file(s) kept and marked "
+                  f"as fragments, not as a run.")
             return 5
 
         # Representative row: the last SCORED run. A trailing timeout used to become the row
