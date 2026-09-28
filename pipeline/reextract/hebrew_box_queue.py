@@ -191,8 +191,9 @@ and no crop on this page leaves the network.</div>"""]
             rank = [k for k, _ in lo].index(sid) + 1
             P.append(f"<p class=d><b>Derived, not read:</b> {w}px of span box for {c} consonants = "
                      f"<b>{v} px/consonant</b>, rank {rank} of {len(lo)} one-band crops "
-                     f"(lowest = narrowest). Corpus median "
-                     f"{sorted(v3 for _, (_, _, v3) in lo)[len(lo) // 2]}; at the median this span "
+                     f"(lowest = narrowest). Corpus mid-value "
+                     f"{sorted(v3 for _, (_, _, v3) in lo)[len(lo) // 2]} (upper of the two middle values; "
+                     f"an even population has no single median); at that rate this span "
                      f"would be about {int(sorted(v3 for _, (_, _, v3) in lo)[len(lo) // 2] * c)}px "
                      f"wide. A proxy, not a reading &mdash; the pixels above are the answer.</p>")
 
