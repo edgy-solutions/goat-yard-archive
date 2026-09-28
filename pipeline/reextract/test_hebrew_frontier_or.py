@@ -8,7 +8,8 @@ THE TWO THINGS THIS EXISTS TO STOP, both of which were live defects in the obvio
 
   (1) **The answer leaking out in the prompt.** Chris asked for "the local extraction's English/Latin for
       that note" as text context. The extraction field that holds it, `latin_context`, is the footnote's
-      candidate line -- and for **11 of the 18 spans it contains the signed truth verbatim**. A runner that
+      candidate line -- and for **11 of the spans it contains the signed truth verbatim** (11 of 18 when
+      the leak was measured, 11 of 19 in today's population). A runner that
       passed that field through would have scored the arms on a prompt that told them the answer, and the
       resulting `exact` counts would have looked like frontier capability. This test asserts the count of
       leaking spans is what was measured (so the guard cannot be quietly retired as unnecessary), that
@@ -20,12 +21,14 @@ THE TWO THINGS THIS EXISTS TO STOP, both of which were live defects in the obvio
       that every outbound body carries exactly one image, and that no A1 path from the manifest appears
       in any body -- checked against the manifest's own A1 entries, not against a naming convention.
 
-ALSO ASSERTED. n=18 and no other number; temperature 0, reasoning off and `data_collection=deny` really
+ALSO ASSERTED. The population as a SET, with every printed total derived from it -- n was 18 and is 19,
+and the set is pinned because the two differ by a turnover in both directions, not by a net of one; temperature 0, reasoning off and `data_collection=deny` really
 sit in the wire body; the header passes `require_endpoint` and records the privacy posture honestly,
 including that the account toggle is NOT readable via the API. This does NOT assert the provider honoured
 the filter, that the reading is right, or that the Latin gloss did not let a model back-translate --
 that last one is a measured confound, reported as a split, not something a test can remove."""
 import json
+import pathlib
 import re
 import sys
 import unicodedata
@@ -251,6 +254,158 @@ check("the C rows are labelled unrecorded-endpoint in the matrix",
       "C:unrecorded-endpoint" in src)
 check("the key is read from the environment only, never embedded",
       "sk-or-" not in src and 'os.getenv(KEY_ENV)' in src)
+
+print("\n(8) --span bounds what is SENT; the crop hash bounds what is SCORED")
+# These are two different jobs and the suite checks them separately on purpose. A scope filter is a
+# spend control and a human types it, so it must fail loud. A hash is an evidence control and no human
+# touches it, so it must be complete.
+_SCOPE = ["p423:n3", "p726:n3", "p138:n6", "p596:n2"]
+_sc = F.cells(_SCOPE)
+check(f"--span returns exactly the {len(_SCOPE)} named spans, in the population's order",
+      [s["span_id"] for s, _c, _x in _sc] == [x for x in (s["span_id"] for s, _c, _x in F.cells())
+                                              if x in set(_SCOPE)],
+      [s["span_id"] for s, _c, _x in _sc])
+check("an empty scope is not the same as no scope: [] sends nothing",
+      F.cells([]) == [] and len(F.cells()) == len(CS))
+
+# Both directions of the fail-loud. An unknown id and a refused crop are different facts and the error
+# has to say which, because one is a typo and the other is a box that needs redrawing.
+for bad, want in (("p999:n9", "UNKNOWN span id"), ("p900:n4", "crop-fault")):
+    try:
+        F.cells([bad])
+        check(f"--span {bad} refuses to silently send zero cells", False, "no exception raised")
+    except RuntimeError as e:
+        check(f"--span {bad} raises and names the cause ({want})", want in str(e), str(e)[:90])
+
+check("every sendable crop has a hash, so the run header can never record a null",
+      all(F.crop_sha(c) for _s, c, _x in F.cells()))
+check("crop_sha of a path that does not exist is None, not a hash of nothing",
+      F.crop_sha(diag.CROPDIR / "no_such_crop.png") is None)
+
+# The evidence rule, measured against the real artifact rather than asserted about the source.
+_MUTE = F.stale_reads()
+_MUTE_SPANS = {sid for sid, _m in _MUTE}
+check("the void-read set is exactly the 3 spans whose A2 crop was re-cut",
+      _MUTE_SPANS == {"p423:n3", "p726:n3", "p900:n4"}, sorted(_MUTE_SPANS))
+check("a pre-hash read on an UNCHANGED crop is still evidence (the rule is not 'distrust the old')",
+      not (_MUTE_SPANS & {"p102:n0", "p138:n5", "p217:n2", "p912:n2"}))
+check("every void read names its cause",
+      all(v.startswith(("crop-sha-mismatch:", "pre-hash-read-on-recut-crop")) for v in _MUTE.values()))
+_RS = F.rows()
+check("no void read survives into the scored rows",
+      not ({(o["span_id"], o["model"]) for o in _RS} & set(_MUTE)))
+# The sendable population decomposes with no remainder, and the remainder IS the re-run scope. Every
+# term is derived from the artifact: a span is scored, or its reads were taken on a crop we no longer
+# hold, or it has no reads at all. A count alone would hide which.
+_SENDABLE = {s["span_id"] for s, _c, _x in CS}
+_SCORED = {o["span_id"] for o in _RS}
+_VOIDED = _SENDABLE & _MUTE_SPANS                     # crop re-cut: reads exist but are mute
+_NEVER = _SENDABLE - _SCORED - _VOIDED                # signed after the run: no reads at all
+check("the sendable population decomposes with no remainder: scored + voided + never-run",
+      len(_SENDABLE & _SCORED) + len(_VOIDED) + len(_NEVER) == len(_SENDABLE),
+      f"{len(_SENDABLE & _SCORED)} + {len(_VOIDED)} + {len(_NEVER)} != {len(_SENDABLE)}")
+check("the spans with byte-identical crops keep every read, re-scored and NOT re-sent",
+      len(_SENDABLE & _SCORED) == 15 and not (_SENDABLE & _SCORED) & _MUTE_SPANS,
+      sorted(_SENDABLE & _SCORED))
+check("the re-run scope is exactly the 4 spans Chris named: 2 re-cut crops + 2 newly signed",
+      _VOIDED | _NEVER == {"p423:n3", "p726:n3", "p138:n6", "p596:n2"}, sorted(_VOIDED | _NEVER))
+check("and the two halves of that scope are there for DIFFERENT reasons",
+      _VOIDED == {"p423:n3", "p726:n3"} and _NEVER == {"p138:n6", "p596:n2"},
+      f"voided={sorted(_VOIDED)} never-run={sorted(_NEVER)}")
+# p900:n4 is the one that cannot be repaired by re-running: its crop moved AND its crop is refused, so
+# its 26 reads go mute with no route back until the box is redrawn. That is the real cost of the
+# denominator change and it must be visible, not folded into "unscorable".
+check("p900:n4's reads are void AND it is unsendable -- a debt, not a re-run",
+      "p900:n4" in _MUTE_SPANS and "p900:n4" not in {s["span_id"] for s, _c, _x in CS})
+
+print("\n(9) the contact-sheet gate: approved pixels are the sent pixels")
+import tempfile                                                            # noqa: E402
+_SC = ["p138:n6", "p423:n3", "p596:n2", "p726:n3"]
+_cs = F.cells(_SC)
+
+
+def _sheet(mutate=None):
+    """A copy of the live sidecar, optionally damaged, written somewhere disposable."""
+    rec = json.loads(F.SHEET.read_text(encoding="utf-8")) if F.SHEET.exists() else {"crop_sha16": {}}
+    if mutate:
+        mutate(rec)
+    p = pathlib.Path(tempfile.mkdtemp()) / "sheet.json"
+    p.write_text(json.dumps(rec), encoding="utf-8")
+    return p
+
+
+def _refuses(fn, want, label):
+    try:
+        fn()
+        check(label, False, "no exception raised -- the gate did not fire")
+    except RuntimeError as e:
+        check(label, want in str(e), str(e)[:110])
+
+
+check("the live sidecar exists and covers every span in the re-run scope",
+      F.SHEET.exists() and set(_SC) <= set(json.loads(F.SHEET.read_text(encoding="utf-8"))["crop_sha16"]))
+check("the gate PASSES on the real sheet (a gate that refuses everything protects nothing)",
+      F.sheet_gate(_cs)["sheet"].endswith(".html"))
+_refuses(lambda: F.sheet_gate(_cs, pathlib.Path("no_such_sheet.json")),
+         "no contact sheet", "no sheet at all -> refuse, and say to build one")
+_refuses(lambda: F.sheet_gate(_cs, _sheet(lambda r: r["crop_sha16"].pop("p596:n2"))),
+         "not on the contact sheet", "a span the sheet never showed -> refuse")
+_refuses(lambda: F.sheet_gate(_cs, _sheet(lambda r: r["crop_sha16"].update({"p423:n3": "0" * 16}))),
+         "crop changed since the sheet", "a crop re-cut after approval -> refuse, naming both hashes")
+# The one thing no check can verify is that a human looked. So it is not dressed up as verification:
+# the flag is REQUIRED, and the header records it as a claim.
+_refuses(lambda: F.run(None, _SC), "pass --approved",
+         "no --approved -> refuse before the catalog pull, so a refusal costs nothing")
+check("the approval is recorded as a claim, never as a verification",
+      "NOT machine-verifiable" in src and "RECORDED CLAIM" in src)
+check("the gate runs BEFORE the catalog pull (a refusal must not look like a started run)",
+      src.index("sheet = sheet_gate(cs)") < src.index("cat = catalog(refresh=True)"))
+
+print("\n(10) re-cut vs gone, and Chris's conditional A1 term")
+import hebrew_contact_sheet as SH                                            # noqa: E402
+
+_rc, _gone, _ch = diag.crops_recut(F.APERTURE), diag.crops_gone(F.APERTURE), diag.crops_changed(F.APERTURE)
+check("the two causes partition 'changed' with no overlap and no remainder",
+      set(_rc) | set(_gone) == set(_ch) and not (set(_rc) & set(_gone)),
+      "recut %d + gone %d = changed %d" % (len(_rc), len(_gone), len(_ch)))
+check("'gone' means no file: every one of them has a live sha of None",
+      all(diag.crop_sha(sid, F.APERTURE) is None for sid in _gone),
+      "gone: %s" % (sorted(_gone) or "none in this aperture"))
+check("a vanished crop can never expand the send scope (nothing exists to send)",
+      not (set(diag.crops_gone(F.APERTURE)) & set(SH.scope(include_a1=True)[0])))
+
+# The sending path and the note-box aperture must not meet. Asserted structurally, not by reading
+# ARMS or trusting a comment: every crop cells() hands out is an A2 file.
+check("no note-box crop is reachable from the sending path",
+      all(pathlib.Path(c).name.endswith("_%s.png" % F.APERTURE) for _s, c, _x in F.cells()),
+      "apertures on the wire: %s" % sorted({pathlib.Path(c).name.split("_n")[-1][2:] for _s, c, _x in F.cells()}))
+
+_a1 = SH.a1_moved()
+check("the A1 term is non-empty, so the exclusion below is a decision and not a vacuous pass",
+      len(_a1) > 0, "%d span(s): %s" % (len(_a1), " ".join(_a1)))
+check("every span in the A1 term has a byte-identical A2 crop -- it was sent the pixels it holds",
+      all(diag.crop_sha(sid, F.APERTURE) == diag.crop_sha(sid, F.APERTURE, as_sent=True) for sid in _a1))
+check("so none of its reads are void: an A1 re-cut mutes nothing",
+      not ({sid for sid, _m in F.stale_reads()} & set(_a1)))
+check("the A1 term is OUT of the default scope", not (set(_a1) & set(SH.scope()[0])))
+check("and folding it in is one flag, not a code change",
+      set(SH.scope(include_a1=True)[0]) == set(SH.scope()[0]) | set(_a1))
+check("the sheet on disk was built WITHOUT it, and says so",
+      json.loads(F.SHEET.read_text(encoding="utf-8"))["a1_term_folded_in"] is False)
+
+# THE TRIPWIRE. Chris's condition is Lane A's x-origin fix landing. Every A1 rect that moved in the
+# re-cut grew in width at dx=0 (a right-edge clamp releasing) or moved in y alone. When that stops
+# being true this check fails, and the message is the instruction to act on.
+_shifts = diag.a1_x_shifts()
+_livex = sorted(sid for sid, v in _shifts.items() if v and any(dx for dx, _dw in v))
+check("no A1 rect has moved in x, so Chris's condition has NOT fired",
+      not _livex,
+      "x-origin shift now visible on %s -- Lane A's fix has landed, the A1 term is LIVE, fold it in "
+      "with --include-a1 and rebuild the sheet before sending" % " ".join(_livex) if _livex
+      else "dx=0 on all %d re-cut A1 rects; widths grew %s" % (
+          len(_shifts), sorted({dw for v in _shifts.values() if v for _dx, dw in v})))
+check("the x-shift measurement pairs rects or refuses to, never silently mispairs",
+      all(v is None or len(v) >= 1 for v in _shifts.values()))
 
 print()
 if fails:

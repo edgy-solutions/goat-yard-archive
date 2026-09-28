@@ -546,13 +546,55 @@ def crops_changed(aperture="A2_spanbox"):
 
     A read is evidence about the pixels it was shown. When a crop is re-cut, every read recorded
     against it becomes STALE -- not wrong, not confirmed, just no longer about anything on disk -- and
-    the span has to be re-run before it can be scored again. This set IS the re-run scope."""
+    the span has to be re-run before it can be scored again.
+
+    This is the union of two causes and is the right answer for VOIDING EVIDENCE, where they are the
+    same: no read on record is about anything on disk either way. It is the wrong answer for SCOPE,
+    where they are opposites -- see `crops_recut` and `crops_gone`. It used to be described as "the
+    re-run scope" and it is not: a crop the geometry no longer produces cannot be re-run at all."""
     out = {}
     for p in sorted(AS_SENT.glob(f"*_{aperture}.png")):
         sid = p.name[:-len(f"_{aperture}.png")].replace("_n", ":n")
         a, b = _sha(p), _sha(CROPDIR / p.name)
         if a != b:
             out[sid] = (a, b)
+    return out
+
+
+def crops_recut(aperture="A2_spanbox"):
+    """The re-cut half of `crops_changed`: a crop still exists, with different bytes.
+
+    THIS is the half that can put a span back on the wire. There are new pixels to show a model."""
+    return {k: v for k, v in crops_changed(aperture).items() if v[1] is not None}
+
+
+def crops_gone(aperture="A2_spanbox"):
+    """The vanished half: the current geometry no longer produces this crop at all.
+
+    A missing file is not a value and it is not a task. These spans lose their reads exactly as the
+    re-cut ones do, and unlike them they cannot be re-sent -- there is nothing to send. Keeping this
+    set separate is what stops a debt (redraw the box) being scheduled as work (re-run the span)."""
+    return {k: v[0] for k, v in crops_changed(aperture).items() if v[1] is None}
+
+
+def a1_x_shifts():
+    """Per-span x-shift of the note-box rects between as-sent and now, for spans with both.
+
+    Chris's A1 clause is conditioned on Lane A's x-origin fix landing. This is the measurement that
+    says whether it has: a non-zero dx anywhere means page geometry moved horizontally, which is the
+    trigger. Width-only growth (dx 0, dw positive) is a clamp releasing on the right edge and is not.
+    Returns span_id -> [(dx, dw), ...], one per rect, or span_id -> None when the rect count changed
+    and the rects cannot be paired at all."""
+    live = {m["span_id"]: m for m in json.loads((CROPDIR / "manifest.json").read_text(encoding="utf-8"))}
+    sent = {m["span_id"]: m for m in json.loads((AS_SENT / "manifest.json").read_text(encoding="utf-8"))}
+    out = {}
+    for sid in crops_recut("A1_notebox"):
+        o = ((sent.get(sid) or {}).get("A1_notebox") or {}).get("native_rects")
+        n = ((live.get(sid) or {}).get("A1_notebox") or {}).get("native_rects")
+        if not o or not n or len(o) != len(n):
+            out[sid] = None
+            continue
+        out[sid] = [(b[0] - a[0], (b[2] - b[0]) - (a[2] - a[0])) for a, b in zip(o, n)]
     return out
 
 

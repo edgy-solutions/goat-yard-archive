@@ -1,9 +1,17 @@
-"""Frontier arm on OpenRouter: the 18 signed Hebrew spans, A2 aperture only (Chris's authorisation).
+"""Frontier arm on OpenRouter: the signed Hebrew spans, A2 aperture only (Chris's authorisation).
+
+The sendable population is 19 as of 2026-09-27 and is NOT a constant: it was 18 when the first run went
+out, and the two figures differ by a membership turnover in both directions (p423:n3 and p726:n3 in
+once their crops stopped cutting blank, p900:n4 out on a geometry fault), not by a net of one. Every
+count printed here is derived from `cells()`; where a number is written down in prose below it belongs
+to the run that measured it and keeps its own denominator.
 
     python hebrew_frontier_or.py catalog          # resolve slugs + live pricing, no spend
     python hebrew_frontier_or.py plan             # what would be sent, byte counts, projected bill
     python hebrew_frontier_or.py probe --model X  # ONE call, to measure real tokens before the run
-    python hebrew_frontier_or.py run              # all arms, resumable
+    python hebrew_frontier_or.py run --approved   # all arms, resumable; REFUSES without the sheet
+    python hebrew_frontier_or.py run --span p423:n3,p726:n3    # bound the spend to a named scope
+    python hebrew_frontier_or.py plan --span p423:n3           # the same scope, priced, no spend
     python hebrew_frontier_or.py score
     python hebrew_frontier_or.py cost
     python hebrew_frontier_or.py matrix
@@ -17,7 +25,9 @@ path is the A2 entry. One image per request, plus text.
 
 THE TEXT CONTEXT IS STRIPPED, AND THAT IS NOT A STYLE CHOICE. Chris asked for "the local extraction's
 English/Latin for that note". The extraction's `latin_context` is the footnote's candidate line, and for
-**11 of the 18 spans it contains the signed truth verbatim** -- p102:n0's line opens with the very word
+**11 of the spans it contains the signed truth verbatim** (11 of 18 when measured; 11 of 19 today,
+because p726:n3 joined the population already leaking and p423:n3 joined not leaking) -- p102:n0's line
+opens with the very word
 being scored. Sending it raw would hand two thirds of the arms the answer and the run would measure
 nothing. `_ctx()` replaces every Hebrew run with a bullet, so the model still learns how many Hebrew words
 the note holds and what the Latin gloss says, and learns no Hebrew letter. `_no_hebrew_outbound()` is
@@ -137,8 +147,12 @@ def _backtranslatable(latin, truth):
     return _N(truth) in _N(latin)
 
 
-def cells():
-    """(span, crop_path, ctx) for the 18 A2-scorable spans. A1 is unreachable from here, by construction."""
+def cells(only=None):
+    """(span, crop_path, ctx) for the A2-scorable spans. A1 is unreachable from here, by construction.
+
+    `only` is an explicit span-id scope: the run sends these and nothing else. It FAILS LOUD on an id
+    that is not in the sendable population, because the failure mode it exists to prevent is a typo
+    that silently sends zero cells and reports a clean run."""
     man = {m["span_id"]: m for m in json.load(io.open(diag.CROPDIR / "manifest.json", encoding="utf-8"))}
     out = []
     pop = diag.build_set(include_sealed=True)
@@ -156,13 +170,55 @@ def cells():
         if not e:
             continue
         out.append((s, e["path"], _ctx(s["latin_context"])))
+    if only is not None:
+        want = set(only)
+        have = {s["span_id"] for s, _c, _x in out}
+        missing = want - have
+        if missing:
+            # Name why each one is missing. "not in the population" is three different facts --
+            # unknown id, unscorable span, refused crop -- and they call for three different actions.
+            pop = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
+            why = {sid: (pop[sid]["unscorable"] or "no span box" if sid in pop else "UNKNOWN span id")
+                   for sid in sorted(missing)}
+            raise RuntimeError("--span names %d span(s) that cannot be sent: %s"
+                               % (len(missing), json.dumps(why, ensure_ascii=False)))
+        out = [c for c in out if c[0]["span_id"] in want]
+    return out
+
+
+def crop_sha(cpath):
+    """sha256[:16] of the exact file that will be b64-encoded into the request body."""
+    return diag._sha(cpath)
+
+
+def stale_reads():
+    """(span_id, model) -> why, for every read on record that is no longer about a crop we hold.
+
+    A read is evidence about the pixels it was shown. When a crop is re-cut, the reads taken on the old
+    one do not become wrong -- they become mute, and scoring them reports a model's opinion of a
+    rectangle that no longer exists anywhere except the frozen archive."""
+    sets = {s["span_id"] for s in diag.build_set(include_sealed=True)}
+    changed = set(diag.crops_changed(APERTURE))
+    cur = {sid: diag.crop_sha(sid, APERTURE) for sid in sets}
+    out = {}
+    for o in diag._lines(OUT):
+        if o.get("kind") != "read" or o.get("span_id") not in sets:
+            continue
+        sid, h = o["span_id"], o.get("crop_sha16")
+        if h:
+            if h != cur.get(sid):
+                out[(sid, o["model"])] = "crop-sha-mismatch:%s!=%s" % (h, cur.get(sid))
+        elif sid in changed:
+            # No hash recorded means the row predates the hashing, which means it was taken on the
+            # as-sent crop. That is only still valid if the crop has not been re-cut since.
+            out[(sid, o["model"])] = "pre-hash-read-on-recut-crop"
     return out
 
 
 def _no_hebrew_outbound(body):
     """Raise if any Hebrew character is anywhere in the request body. Called before every send.
 
-    The leak this guards is not hypothetical: 11 of 18 spans carry the signed truth inside the note line
+    The leak this guards is not hypothetical: 11 spans carry the signed truth inside the note line
     the prompt is built from. A guard that ran only in the test would not have been on the wire."""
     blob = json.dumps(body, ensure_ascii=False)
     if HEB.search(blob):
@@ -320,6 +376,9 @@ def call(model, s, cpath, ctx, structured, timeout=300):
     det = u.get("completion_tokens_details") or {}
     return {
         "span_id": s["span_id"], "aperture": APERTURE, "model": model, "kind": "read",
+        # The pixels this read speaks for. Not the span id, not the fault table, not the date: the
+        # bytes. Everything downstream that decides whether this row is still evidence reads this.
+        "crop_sha16": crop_sha(cpath), "crop_path": str(cpath),
         "endpoint_id": "UNREGISTERED:openrouter.ai:443", "provider_served": d.get("provider"),
         "gen_id": d.get("id"), "raw": raw, "hebrew": heb, "parsed_from": how,
         "gated": gated, "nikud_verdict": nik, "nikud_density": round(float(dens), 3),
@@ -336,14 +395,18 @@ def call(model, s, cpath, ctx, structured, timeout=300):
     }
 
 
-def plan():
+def plan(spans=None):
     cat = catalog(refresh=False)["models"]
-    cs = cells()
+    cs = cells(spans)
     px = sum((lambda wh: wh[0] * wh[1])(Image.open(c).size) for _s, c, _x in cs)
     img_tok = px / 750.0
     txt_tok = sum(len(PROMPT_HEAD + x + PROMPT_TAIL) for _s, _c, x in cs) / 4.0
     tin, tout = img_tok + txt_tok, len(cs) * 40
     print(f"spans (A2 only) : {len(cs)}   images per request: 1   note-box crops sent: 0")
+    if spans:
+        print(f"span scope      : {' '.join(sorted(spans))}   (--span; everything else is untouched)")
+    for s, c, _x in cs:
+        print(f"    {s['span_id']:10s} {str(Image.open(c).size):12s} sha {crop_sha(c)}")
     print(f"est tokens/arm  : in ~{tin:,.0f}  out ~{tout:,.0f}   (ESTIMATE — `probe` measures the truth)")
     tot = 0.0
     for m in ARMS:
@@ -367,24 +430,71 @@ def probe(model):
     if row.get("kind") == "read":
         ti, to = row.get("tok_in") or 0, row.get("tok_out") or 0
         print(f"\nMEASURED per call: in {ti} out {to}  cost ${row.get('cost_usd')}")
+        # The population probe() extrapolates over, measured now rather than written down: the
+        # literal 18 it replaced priced a run that no longer exists.
+        _n = len(cells())
         for m in ARMS:
             c = cat.get(m, {})
             if c.get("status") != "ok":
                 continue
             per = ti / 1e6 * c["prompt_per_mtok"] + to / 1e6 * c["completion_per_mtok"]
-            print(f"  {m:40s} 18 spans ~${per*18:6.3f}   per 1000 spans ~${per*1000:8.2f}")
+            # Derived, never a literal: a hardcoded span count prices a run nobody is doing.
+            print(f"  {m:40s} {_n} spans ~${per*_n:6.3f}   per 1000 spans ~${per*1000:8.2f}")
 
 
-def run(only=None):
+SHEET = diag.CROPDIR.parent / "contact_sheet_20260927.json"
+
+
+def sheet_gate(cs, sheet=SHEET):
+    """Refuse to send a crop the contact sheet did not show. Returns the sheet record for the header.
+
+    Chris's rule is "produce a contact sheet ... Chris approves it, then spend". The approval itself is
+    a human act and no check can stand in for it. What a check CAN do is guarantee that the pixels
+    approved are the pixels sent -- including when a crop is re-cut in between, which is exactly the
+    accident this week was spent cleaning up."""
+    if not sheet.exists():
+        raise RuntimeError(f"no contact sheet at {sheet.name} -- run hebrew_contact_sheet.py first. "
+                           "Chris approves the sheet, then we spend; there is no path around it.")
+    rec = json.loads(sheet.read_text(encoding="utf-8"))
+    shown = rec.get("crop_sha16") or {}
+    bad = {}
+    for s, c, _x in cs:
+        sid, h = s["span_id"], crop_sha(c)
+        if sid not in shown:
+            bad[sid] = "not on the contact sheet"
+        elif shown[sid] != h:
+            bad[sid] = f"crop changed since the sheet: shown {shown[sid]}, now {h}"
+    if bad:
+        raise RuntimeError("contact-sheet gate REFUSED %d span(s): %s"
+                           % (len(bad), json.dumps(bad, ensure_ascii=False)))
+    return rec
+
+
+def run(only=None, spans=None, approved=False):
+    cs = cells(spans)
+    # Gate BEFORE the catalog pull, so a refusal costs nothing and cannot be mistaken for a run that
+    # started. --approved records a human claim; the sheet gate verifies the pixels. Neither substitutes
+    # for the other, and the header says which is which.
+    sheet = sheet_gate(cs)
+    if not approved:
+        raise RuntimeError(
+            "refusing to spend: pass --approved to record that Chris approved "
+            f"{sheet['sheet']} ({len(cs)} span(s), {sheet.get('calls_if_approved')} calls). "
+            "The flag is a RECORDED CLAIM, not a verification -- the sheet gate has already checked "
+            "that the crops match; only a human can check that they are the right crops.")
     cat = catalog(refresh=True)
-    cs = cells()
     done = set()
     if OUT.exists():
         # A truncated or empty read is NOT done: it must be retried at the larger cap, or the artifact
         # keeps a budget artifact where a reading belongs.
+        # Nor is a read on a crop we no longer hold: resume must not skip a cell on the strength of a
+        # read taken off different pixels. This is what makes the scope self-correcting -- a plain
+        # `run` after a re-cut re-takes exactly the spans whose crops moved, with or without --span.
+        mute = set(stale_reads())
         done = {(o["span_id"], o["model"]) for o in diag._lines(OUT)
                 if o.get("kind") == "read" and o.get("finish_reason") != "length"
-                and (o.get("hebrew") or "").strip()}
+                and (o.get("hebrew") or "").strip()
+                and (o["span_id"], o["model"]) not in mute}
     first = not OUT.exists()
     with io.open(OUT, "a", encoding="utf-8") as f:
         if first:
@@ -392,7 +502,17 @@ def run(only=None):
                                digest_fn=lambda hp, mo, t=None: "n/a:hosted-api",
                                identity_extra={"aperture": APERTURE, "n_scorable": len(cs),
                                                "arms": ARMS, "prompt_sha16": diag_sha(PROMPT_HEAD +
-                                                                                     PROMPT_TAIL)},
+                                                                                     PROMPT_TAIL),
+                                               # Chris's rule: record the hash of every crop sent, in
+                                               # the run header. A run is then answerable for exactly
+                                               # the pixels it paid for.
+                                               "crop_sha16": {s["span_id"]: crop_sha(c)
+                                                              for s, c, _x in cs},
+                                               "span_scope": sorted(spans) if spans else "ALL",
+                                               "contact_sheet": sheet["sheet"],
+                                               "contact_sheet_built": sheet.get("built"),
+                                               "approval": "recorded claim via --approved; "
+                                                           "human approval is NOT machine-verifiable"},
                                extra={"privacy": {"request_filter": "provider.data_collection=deny",
                                                   "account_toggle": "not-readable-via-api",
                                                   "verified": "per-request filter only; "
@@ -455,9 +575,15 @@ def rows():
     sets = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
     # LAST row per (span, model) wins. A retried cell appends rather than overwriting, so without this
     # a retry would be counted twice -- once as the truncated artifact and once as the real read.
+    # A read that is no longer about a crop we hold is dropped from scoring entirely. Dropping it is
+    # not a silent loss: `score` prints the tally, and a span with stale reads and no fresh ones is
+    # reported as RE-RUN SCOPE rather than as a span no arm read.
+    mute = stale_reads()
     keep = {}
     for o in diag._lines(OUT):
         if o.get("kind") != "read" or o.get("span_id") not in sets:
+            continue
+        if (o["span_id"], o["model"]) in mute:
             continue
         keep[(o["span_id"], o["model"])] = o
     out = []
@@ -520,11 +646,31 @@ def gate():
 def score():
     rs = rows()
     errs = [o for o in diag._lines(OUT) if o.get("kind") == "call_error"]
-    print(f"A2 aperture only, n=18 scorable (FILE pages; printed = file - 88)\n")
+    n = len({s["span_id"] for s, _c, _x in cells()})
+    print(f"A2 aperture only, n={n} scorable (FILE pages; printed = file - 88)")
+    mute = stale_reads()
+    if mute:
+        by = {}
+        for (sid, _m), why in mute.items():
+            by.setdefault(sid, []).append(why)
+        scored = {o["span_id"] for o in rs}
+        sendable = {s["span_id"] for s, _c, _x in cells()}
+        print(f"  {len(mute)} read(s) VOID on {len(by)} span(s): the crop was re-cut after the read.")
+        for sid in sorted(by):
+            # Three different states, and only one of them is a task. A span whose crop is REFUSED
+            # cannot be re-run at all: its reads are gone and there is no route back until the box is
+            # redrawn. Printing that as "re-run scope" would file a permanent debt as a queued job.
+            tag = ("re-scored on fresh reads" if sid in scored else
+                   "RE-RUN SCOPE, currently unscored" if sid in sendable else
+                   "DEBT: crop refused, cannot be re-run until the box is redrawn")
+            print(f"    {sid:10s} {len(by[sid]):3d} void  {tag}")
+    print()
     print(f"{'model':40s} {'exact':>5s} {'nik':>4s} {'wrong':>5s} {'abst':>4s} {'trunc':>5s} "
           f"{'n':>3s}  {'ex/bt':>6s} {'ex/no-bt':>8s}")
+    _sc = {o["span_id"]: o for o in rs}
+    _bt = sum(1 for o in _sc.values() if o["gloss_backtranslatable"])
     print(f"{'':40s} {'':5s} {'':4s} {'':5s} {'':4s} {'':5s} {'':3s}  "
-          f"bt = gloss back-translatable (11 spans); no-bt (7)")
+          f"bt = gloss back-translatable ({_bt} spans); no-bt ({len(_sc) - _bt})")
     EX = ("exact", "punct-only")
     for m in ARMS:
         mr = [o for o in rs if o["model"] == m]
@@ -720,6 +866,8 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     cmd = a[0] if a else "plan"
     mv = a[a.index("--model") + 1] if "--model" in a else None
+    # --span p423:n3,p726:n3   or   --span p423:n3 --span p726:n3
+    sv = [x for i, t in enumerate(a) if t == "--span" for x in a[i + 1].split(",") if x] or None
     if cmd == "catalog":
         c = catalog(refresh=True)
         for k, v in c["models"].items():
@@ -727,11 +875,11 @@ if __name__ == "__main__":
                   f"out {v.get('completion_per_mtok', 0):8.3f} struct={v.get('structured')}")
         print("pulled", c["pulled"], "->", CATALOG)
     elif cmd == "plan":
-        plan()
+        plan(sv)
     elif cmd == "probe":
         probe(mv or ARMS[-1])
     elif cmd == "run":
-        run([mv] if mv else None)
+        run([mv] if mv else None, sv, approved="--approved" in a)
     elif cmd == "score":
         score()
     elif cmd == "cost":
