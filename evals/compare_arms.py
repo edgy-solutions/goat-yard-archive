@@ -32,6 +32,30 @@ import sys
 
 SP, SF, FLAKY, NO_DATA = "STABLE-PASS", "STABLE-FAIL", "FLAKY", "NO-DATA"
 
+# `partial_match_sids` has three real states, not two. A response dict from a backend build that
+# predates the field has no key at all -- which is a different fact from a response whose backend
+# computed the field and found nothing (key present, value `[]`). This sentinel is how load_arm()
+# tells "key absent" apart from "key present, value falsy" (None or []); dict.get's ordinary
+# default cannot make that distinction.
+_NO_PARTIAL_FIELD = object()
+
+# The tri-state an arm's partial_match_sids can be in, once every question is considered:
+#   NOT_REPORTED     - no scored response in the arm carries the key at all (pre-field backend)
+#   [] (empty list)  - the key is present, and every value is empty (computed it, found nothing)
+#   [qid, ...]       - the key is present and non-empty on at least one question
+# A run from a pre-field backend and a run from a field-computing one must not compare equal on
+# this line: NOT_REPORTED is not []. "Computed, and empty" and "never computed" are different
+# facts about the measurement, not two spellings of the same one.
+PARTIAL_NOT_REPORTED = "NOT-REPORTED-BY-THIS-BACKEND"
+
+
+def fmt_partial(v) -> str:
+    """Render one arm's partial_match_sids_nonempty value so the three states never look alike:
+    not reported at all, reported-and-empty, reported-with-values."""
+    if v == PARTIAL_NOT_REPORTED:
+        return "NOT REPORTED (field absent from every response)"
+    return v if v else "NONE (reported, empty)"
+
 
 def classify(run_passes) -> str:
     """Stability class from the per-run pass list. Mirrors run_eval.classify_stability, but over
@@ -66,7 +90,7 @@ def load_arm(d: str) -> dict:
             "refused": resp.get("refused"),
             "expected_behavior": score.get("expected_behavior"),
             "answer_len": len(resp.get("answer") or ""),
-            "partial_match_sids": resp.get("partial_match_sids"),
+            "partial_match_sids": resp.get("partial_match_sids", _NO_PARTIAL_FIELD),
         }
     summary_path = os.path.join(d, "summary.json")
     summary = (json.load(io.open(summary_path, encoding="utf-8"))
@@ -159,7 +183,14 @@ def compare(a: dict, b: dict, label_a: str, label_b: str, floor=None) -> dict:
         return statistics.median(vals) if vals else 0
 
     def nonempty_partial(arm):
-        return sorted(q for q, v in arm["questions"].items() if v["partial_match_sids"])
+        """qids with a non-empty partial_match_sids, or PARTIAL_NOT_REPORTED if the field is
+        absent from every scored response in the arm (see the module-level comment)."""
+        values = [v["partial_match_sids"] for v in arm["questions"].values()]
+        if all(v is _NO_PARTIAL_FIELD for v in values):
+            return PARTIAL_NOT_REPORTED
+        return sorted(q for q, v in arm["questions"].items()
+                      if v["partial_match_sids"] not in (_NO_PARTIAL_FIELD, None)
+                      and v["partial_match_sids"])
 
     ra, rb = refusal_wrong(a), refusal_wrong(b)
     out = {
@@ -225,8 +256,8 @@ def main(argv=None) -> int:
     print(f"  {la}: {res['refusal_wrong'][la] or 'none'}")
     print(f"  {lb}: {res['refusal_wrong'][lb] or 'none'}")
     print(f"Median answer length : {res['median_answer_len'][la]} -> {res['median_answer_len'][lb]}")
-    print(f"partial_match_sids non-empty : {la}={res['partial_match_sids_nonempty'][la] or 'NONE'}"
-          f"  {lb}={res['partial_match_sids_nonempty'][lb] or 'NONE'}")
+    print(f"partial_match_sids non-empty : {la}={fmt_partial(res['partial_match_sids_nonempty'][la])}"
+          f"  {lb}={fmt_partial(res['partial_match_sids_nonempty'][lb])}")
     if "floor" in res:
         verdict = "ABOVE the floor" if res["above_floor"] else "AT OR BELOW the floor - NOT REPORTABLE"
         print(f"\nFloor {res['floor']} class changes: {res['class_changes_n']} observed -> {verdict}")

@@ -22,9 +22,19 @@ import compare_arms as CA  # noqa: E402
 
 PIN = {"order": ["streamlake"], "allow_fallbacks": False}
 
+# Pass this as a question's `partial_match_sids` to build a response with the key ENTIRELY
+# MISSING, distinct from a present key holding None or []. A backend build that predates the
+# field never writes the key at all, and json.dumps of a dict simply omitted at construction is
+# the only way to fixture that -- a dict with the key set to None round-trips as a PRESENT key,
+# which is a different response shape.
+OMIT = object()
+
 
 def _arm(root, name, questions, pin=PIN, answer_lm=None):
     """questions: {qid: (run_passes, refusal_correct, answer, partial_match_sids)}
+
+    `partial_match_sids` may be `OMIT` to build a response with no such key at all (see OMIT
+    above), rather than a key present with an empty or null value.
 
     `answer_lm` is the arm's summary-level tally block (as run_eval.answer_lm_tally writes it).
     Default None = an arm that predates the field, which is the state of every arm run before
@@ -33,9 +43,12 @@ def _arm(root, name, questions, pin=PIN, answer_lm=None):
     d = os.path.join(root, name)
     os.makedirs(d, exist_ok=True)
     for qid, (passes, refusal_ok, answer, partial) in questions.items():
+        response = {"answer": answer, "refused": False}
+        if partial is not OMIT:
+            response["partial_match_sids"] = partial
         rec = {"question": {"id": qid}, "run_passes": list(passes),
                "score": {"id": qid, "refusal_correct": refusal_ok, "expected_behavior": "answer"},
-               "response": {"answer": answer, "partial_match_sids": partial, "refused": False}}
+               "response": response}
         io.open(os.path.join(d, qid + ".json"), "w", encoding="utf-8").write(json.dumps(rec))
     summary = {"openrouter_provider_pin": pin}
     if answer_lm is not None:
@@ -289,6 +302,46 @@ def test_partial_match_sids_emptiness_is_reported_per_arm():
         assert r["partial_match_sids_nonempty"]["b"] == ["q1"], r
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_partial_match_sids_absent_in_both_arms_is_NOT_REPORTED_not_empty():
+    # The state a run from a backend build that predates the field produces: nothing in either
+    # arm ever carries the key. This must read as "not reported", never as "reported and empty" --
+    # otherwise a pre-field run compares as if it had computed the field and found nothing, which
+    # is a claim that backend never made.
+    root = tempfile.mkdtemp()
+    try:
+        a = _arm(root, "a", {"q1": ([True] * 3, True, "x", OMIT)})
+        b = _arm(root, "b", {"q1": ([True] * 3, True, "y", OMIT)})
+        r = CA.compare(CA.load_arm(a), CA.load_arm(b), "a", "b")
+        assert r["partial_match_sids_nonempty"]["a"] == CA.PARTIAL_NOT_REPORTED, r
+        assert r["partial_match_sids_nonempty"]["b"] == CA.PARTIAL_NOT_REPORTED, r
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_partial_match_sids_absent_in_one_arm_present_in_the_other():
+    # Mixed old-backend-vs-new-backend comparison: one side never wrote the key, the other did
+    # (and found nothing). The two arms must show DIFFERENT states on this line, not the same [].
+    root = tempfile.mkdtemp()
+    try:
+        a = _arm(root, "a", {"q1": ([True] * 3, True, "x", OMIT)})
+        b = _arm(root, "b", {"q1": ([True] * 3, True, "y", [])})
+        r = CA.compare(CA.load_arm(a), CA.load_arm(b), "a", "b")
+        assert r["partial_match_sids_nonempty"]["a"] == CA.PARTIAL_NOT_REPORTED, r
+        assert r["partial_match_sids_nonempty"]["b"] == [], r
+        assert r["partial_match_sids_nonempty"]["a"] != r["partial_match_sids_nonempty"]["b"], r
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_partial_match_sids_not_reported_is_never_equal_to_empty():
+    # Companion assertion for the two tests above: without a real tri-state, NOT_REPORTED could
+    # be implemented as `[]` (falling back to dict.get's default) and every one of these
+    # assertions on the *value itself* would still read as "falsy" -- this pins the literal
+    # inequality, not just a truthiness check.
+    assert CA.PARTIAL_NOT_REPORTED != []
+    assert CA.PARTIAL_NOT_REPORTED is not None
 
 
 def test_median_answer_length_per_arm():

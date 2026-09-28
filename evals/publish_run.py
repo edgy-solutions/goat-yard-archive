@@ -88,42 +88,109 @@ def verify(published_dir: str) -> dict:
             "verified": not mismatch and not missing}
 
 
-def publish(run_dir: str, run_id: str, dest_root: str, also: list, replace: bool) -> str:
+def _resolve_also(extra: str, run_dir: str) -> str:
+    """Resolve one --also path to an absolute source file, or exit.
+
+    Incident (2026-09-27, Lane A): the old code joined a relative --also path ONLY against
+    `os.path.dirname(run_dir)`, so a path typed relative to the shell's cwd silently missed and
+    was reported as "does not exist" -- after the run directory had already been copied. A
+    relative path is now tried against BOTH the run directory's parent (back-compat: how the
+    existing published runs were made) and the current working directory (where a shell leaves
+    you). Exactly one existing candidate wins; never a silent preference between the two.
+    """
+    if os.path.isabs(extra):
+        if not os.path.isfile(extra):
+            sys.exit(f"publish_run: --also {extra} does not exist at {extra}. Named and missing "
+                     f"is an error, not a skip.")
+        return extra
+
+    bases = []
+    for b in (os.path.dirname(run_dir), os.getcwd()):
+        if b not in bases:
+            bases.append(b)
+    found = [os.path.join(b, extra) for b in bases if os.path.isfile(os.path.join(b, extra))]
+    if not found:
+        tried = ", ".join(bases)
+        sys.exit(f"publish_run: --also {extra} does not exist under any of: {tried}. Named and "
+                 f"missing is an error, not a skip.")
+    reals = {os.path.realpath(p): p for p in found}
+    if len(reals) > 1:
+        a, b = found[0], found[1]
+        sys.exit(f"publish_run: --also {extra} is ambiguous: found at {a} and {b}, which are "
+                 f"different files. Pass an absolute path to say which one you mean.")
+    return found[0]
+
+
+def plan(run_dir: str, run_id: str, dest_root: str, also: list, replace: bool) -> dict:
+    """Resolve and validate everything a publish needs, touching nothing on disk.
+
+    Incident (2026-09-27, Lane A): a bad relative --also path was rejected -- but only after the
+    whole run directory had already been copied to the destination, because the --also loop ran
+    AFTER the copy loop. The retry then hit "already published and non-empty" and needed
+    --replace to fix its own half-publish. A half-published measurement is worse than an
+    unpublished one, so every validation now runs, and can fail, before a single byte moves.
+    """
     run_dir = os.path.abspath(run_dir)
     if not os.path.isdir(run_dir):
         sys.exit(f"publish_run: not a directory: {run_dir}")
     if not os.path.isfile(os.path.join(run_dir, "summary.json")):
         sys.exit(f"publish_run: {run_dir} has no summary.json. A run that wrote no summary is "
                  f"not a run; refusing to publish its fragments as evidence.")
+
     dest = os.path.join(dest_root, run_id)
+    must_rmtree = False
     if os.path.isdir(dest) and os.listdir(dest):
         if not replace:
             sys.exit(f"publish_run: {dest} is already published and non-empty. Pass --replace only "
                      f"if you mean to overwrite a PUBLISHED measurement with a different one.")
+        must_rmtree = True
+
+    run_files = sorted(name for name in os.listdir(run_dir)
+                        if os.path.isfile(os.path.join(run_dir, name)))
+
+    also_files = [(src, os.path.basename(src))
+                  for src in (_resolve_also(extra, run_dir) for extra in also)]
+
+    # Basename collisions: two --also files sharing a basename, or an --also basename that
+    # collides with a file already in run_dir. Either way one file would silently overwrite the
+    # other at copy time, and the manifest would only ever hash the survivor -- so both sides of
+    # the collision are named in the message, not just the one that lost the race.
+    owner_of_basename = {name: os.path.join(run_dir, name) for name in run_files}
+    for src, base in also_files:
+        if base in owner_of_basename:
+            sys.exit(f"publish_run: --also basename collision: {src} would publish as {base!r}, "
+                     f"colliding with {owner_of_basename[base]}. One would silently overwrite the "
+                     f"other and the manifest would hash only the survivor; rename one of them.")
+        owner_of_basename[base] = src
+
+    return {
+        "run_dir": run_dir,
+        "dest": dest,
+        "must_rmtree": must_rmtree,
+        "run_files": run_files,
+        "also_files": also_files,
+        "copied": run_files + [base for _, base in also_files],
+    }
+
+
+def publish(run_dir: str, run_id: str, dest_root: str, also: list, replace: bool) -> str:
+    p = plan(run_dir, run_id, dest_root, also, replace)
+    dest = p["dest"]
+    if p["must_rmtree"]:
         shutil.rmtree(dest)
     os.makedirs(dest, exist_ok=True)
 
-    copied = []
-    for name in sorted(os.listdir(run_dir)):
-        src = os.path.join(run_dir, name)
-        if os.path.isfile(src):
-            shutil.copy2(src, os.path.join(dest, name))
-            copied.append(name)
-    for extra in also:
-        src = extra if os.path.isabs(extra) else os.path.join(os.path.dirname(run_dir), extra)
-        if not os.path.isfile(src):
-            sys.exit(f"publish_run: --also {extra} does not exist at {src}. Named and missing is "
-                     f"an error, not a skip.")
-        base = os.path.basename(src)
+    for name in p["run_files"]:
+        shutil.copy2(os.path.join(p["run_dir"], name), os.path.join(dest, name))
+    for src, base in p["also_files"]:
         shutil.copy2(src, os.path.join(dest, base))
-        copied.append(base)
 
     manifest = {
         "run_id": run_id,
         "published_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "source_dir": run_dir,
-        "files": {name: sha256_of(os.path.join(dest, name)) for name in copied},
-        "integrity_git": integrity_git_of(run_dir),
+        "source_dir": p["run_dir"],
+        "files": {name: sha256_of(os.path.join(dest, name)) for name in p["copied"]},
+        "integrity_git": integrity_git_of(p["run_dir"]),
         "ruling": "ruling 3, 2026-09-27: published before the report, committed by explicit path",
     }
     io.open(os.path.join(dest, "PUBLISHED.json"), "w", encoding="utf-8").write(
