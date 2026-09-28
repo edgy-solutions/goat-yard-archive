@@ -141,7 +141,15 @@ def cells():
     """(span, crop_path, ctx) for the 18 A2-scorable spans. A1 is unreachable from here, by construction."""
     man = {m["span_id"]: m for m in json.load(io.open(diag.CROPDIR / "manifest.json", encoding="utf-8"))}
     out = []
-    for s in diag.build_set(include_sealed=True):
+    pop = diag.build_set(include_sealed=True)
+    # An unmeasured crop is not a sound crop. Without crop_faults.json every span looks scorable,
+    # which is how a blank or clamped crop reaches the wire and gets charged to a model as a wrong
+    # read. Refuse the whole population rather than send part of it.
+    if any(s.get("crop_unmeasured") for s in pop):
+        raise RuntimeError(
+            "crop faults are UNMEASURED (no crop_faults.json) -- refusing to build a send "
+            "population. Run the `faults` command first; an unmeasured crop is not a sound one.")
+    for s in pop:
         if s["unscorable"] or not s["span_box"]:
             continue
         e = (man.get(s["span_id"]) or {}).get(APERTURE)

@@ -32,16 +32,17 @@ def main(run=DEFAULT_RUN):
     run = Path(run)
     if not run.exists():
         print(f"SKIP: no run jsonl at {run}")
-        return 0
+        print("      Nothing was asserted, so this is NOT a pass. Exit 3 means unmeasured.")
+        return 3
     records, offset = FA.load_records()
     print(f"born-test fixture assertion vs ratified marker_resets_observed.json")
     print(f"  run: {run.name}   file_page = printed_page + {offset}\n")
 
-    results, hard_fail = [], []
+    results, hard_fail, skipped = [], [], []
     for pg in FIXTURES:
         obs = FA.letters_from_run(run, pg)
         if obs is None:
-            print(f"p{pg}: NOT IN RUN — skipped"); continue
+            print(f"p{pg}: NOT IN RUN — skipped"); skipped.append(pg); continue
         r = FA.check_page(pg, obs, records)
         results.append(r)
         if r["ok"] is None:
@@ -61,6 +62,16 @@ def main(run=DEFAULT_RUN):
 
     failing = [r["page"] for r in results if r["ok"] is False]
     passing = [r["page"] for r in results if r["ok"] is True]
+    unassertable = [r["page"] for r in results if r["ok"] is None]
+    # A fixture that was skipped or unassertable is not a fixture that passed. If NONE of them could
+    # be asserted the suite measured nothing, and it says so with its own exit code instead of
+    # returning the 0 that means green.
+    if skipped or unassertable:
+        print(f"--- SKIPPED (not in run): {skipped or 'none'}   "
+              f"UNASSERTABLE: {unassertable or 'none'} ---")
+    if not failing and not passing:
+        print("STATUS: NOTHING ASSERTED -- every fixture was skipped or unassertable. Exit 3.")
+        return 3
     print(f"--- letters FAIL: {failing or 'none'}   PASS: {passing or 'none'} ---")
     if set(failing) == EXPECTED_RED and not hard_fail:
         print("STATUS: EXPECTED-RED, unchanged. The per-note crop path is what turns this green.")

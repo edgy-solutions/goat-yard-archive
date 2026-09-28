@@ -5,6 +5,11 @@ import numpy as np
 from PIL import Image
 import crop_quality as CQ
 
+class Skip(Exception):
+    """Raised when a fixture real page image is absent. Counted and printed as its own state -- a
+    test that asserted nothing must never be reported as a test that passed."""
+    pass
+
 def _line_crop(H=120, ink_rows=40):
     a = np.full((H, 400), 255, np.uint8); a[20:20 + ink_rows, 20:380] = 0  # a real line of text
     return Image.fromarray(a)
@@ -59,7 +64,7 @@ def test_p219_fixture_sliver_gated():
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
     img = Path("c:/Users/cnogr/git/dr-voluminous/commentary/volume1/page219_image1.png")
-    if not img.exists(): return
+    if not img.exists(): raise Skip(f"no page image at {img.name}")
     import cv_footnote_presplit as ps, hanging_indent as hi, blind_retry as BR
     strip, _ = ps.presplit(str(img), upscale=4)
     _cv, starts, _conf = hi.count_notes(strip, upscale=4)
@@ -69,8 +74,11 @@ def test_p219_fixture_sliver_gated():
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    p = f = 0
+    p = f = sk = 0
     for fn in fns:
         try: fn(); p += 1; print(f"  PASS {fn.__name__}")
+        except Skip as e: sk += 1; print(f"  SKIP {fn.__name__} -- {e}")
         except Exception: f += 1; print(f"  FAIL {fn.__name__}"); traceback.print_exc()
-    print(f"\n{p} passed, {f} failed"); raise SystemExit(1 if f else 0)
+    print(f"\n{p} passed, {f} failed, {sk} skipped")
+    if sk: print("  NOTE: a SKIP asserted nothing. It is not a pass.")
+    raise SystemExit(1 if f else 0)

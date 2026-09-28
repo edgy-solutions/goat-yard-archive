@@ -486,8 +486,14 @@ check("the two faulted crops supply no binding evidence",
 # and those 15 were the queue held for Lane A's presplit fix. Corrected against two thresholds each
 # taken from an empty band in the measurements (MIN_BAND_PX 20: runs are 1-14px or 30-38px, nothing
 # between; MAX_BAND_PX 50: every band is 30-38px except p362:n1 at 67), the debt is one box.
-check("the one-band debt is 17 of 18 -- reported, not asserted away",
-      B.G.one_band_report()[:2] == (17, 18), B.G.one_band_report()[:2])
+# Derived from the measured set, never typed: `(one, tot) == (17, 18)` stayed true across a two-span
+# membership change in BOTH directions once already, which is the third time a count passed while the
+# set moved underneath it. The population is 20 since Lane A's dc573ca recovered p423:n3 and p726:n3.
+_MEAS = {r["span_id"] for r in B.G.box_quality(True) if r["lines"] is not None}
+check(f"the one-band debt is {len(_MEAS) - 1} of {len(_MEAS)} -- reported, not asserted away",
+      B.G.one_band_report()[:2] == (len(_MEAS) - 1, len(_MEAS)), B.G.one_band_report()[:2])
+check("the measurable population is the 20 spans with a ratified box, p657:n0 alone excluded",
+      len(_MEAS) == 20 and "p657:n0" not in _MEAS, sorted(_MEAS))
 check("the one loose box is p362:n1, whose band is 67px where the corpus runs 30-38",
       B.G.one_band_report()[2] == ["p362:n1"], B.G.one_band_report()[2])
 # A tally against a wrong standard is faithful and worthless. The corrected rule is kept honest by the

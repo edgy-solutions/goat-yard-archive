@@ -4,6 +4,11 @@ import numpy as np
 from PIL import Image
 import crop_gate as G
 
+class Skip(Exception):
+    """Raised when a fixture real page image is absent. Counted and printed as its own state -- a
+    test that asserted nothing must never be reported as a test that passed."""
+    pass
+
 def _blank(): return Image.new("L", (400, 300), 255)
 def _inked(frac_rows=0.2):
     a = np.full((300, 400), 255, np.uint8); a[:int(300*frac_rows), :] = 0
@@ -52,7 +57,7 @@ def test_p86_regression_if_present():
     import sys; sys.path.insert(0, "../scripts"); sys.path.insert(0, ".")
     from pathlib import Path
     img = Path("c:/Users/cnogr/git/dr-voluminous/commentary/volume1/page86_image1.png")
-    if not img.exists(): return
+    if not img.exists(): raise Skip(f"no page image at {img.name}")
     import cv_footnote_presplit as ps
     strip, _ = ps.presplit(str(img), upscale=1)
     assert G.check(strip, 18)[0] == "fabrication_suspect", "p86 blank crop must gate as fabrication"
@@ -60,8 +65,11 @@ def test_p86_regression_if_present():
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    p = f = 0
+    p = f = sk = 0
     for fn in fns:
         try: fn(); p += 1; print(f"  PASS {fn.__name__}")
+        except Skip as e: sk += 1; print(f"  SKIP {fn.__name__} -- {e}")
         except Exception: f += 1; print(f"  FAIL {fn.__name__}"); traceback.print_exc()
-    print(f"\n{p} passed, {f} failed"); raise SystemExit(1 if f else 0)
+    print(f"\n{p} passed, {f} failed, {sk} skipped")
+    if sk: print("  NOTE: a SKIP asserted nothing. It is not a pass.")
+    raise SystemExit(1 if f else 0)

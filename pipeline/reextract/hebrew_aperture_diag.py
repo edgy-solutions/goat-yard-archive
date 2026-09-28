@@ -299,7 +299,11 @@ def build_set(include_sealed=False):
     # which is a different thing from "no arm read it correctly" and must never be reported as that.
     faults = crop_faults()
     for rec in out:
-        if faults.get(rec["span_id"]) and not rec["unscorable"]:
+        # Stamped on every record so no consumer can read an absent measurement as a sound crop.
+        # `unscorable` stays None in that case -- it is not a known fault -- which is precisely why
+        # the unmeasured flag has to travel separately from it.
+        rec["crop_unmeasured"] = faults is None
+        if faults and faults.get(rec["span_id"]) and not rec["unscorable"]:
             rec["unscorable"] = f"crop-fault:{faults[rec['span_id']]}"
     return out
 
@@ -307,7 +311,7 @@ def build_set(include_sealed=False):
 def _native_crop(page_img, strip_box, info, bands, pad=0):
     """Un-stack a strip box to native rects and cut them. A box straddling the column gap yields TWO rects;
     they are stacked vertically with the same 20px gap presplit uses, never merged into one spanning box."""
-    rects = note_region.strip_to_native(strip_box, info, bands)
+    rects = note_region.strip_box_to_native(strip_box, info, bands)
     W, H = page_img.size
     ims = []
     for r in rects:
@@ -528,7 +532,11 @@ def crop_faults(aperture="A2_spanbox"):
     evidence."""
     p = CROPDIR / "crop_faults.json"
     if not p.exists():
-        return {}
+        # None, NOT {}. An empty dict reads as "measured, nothing faulted" -- a clean bill of health
+        # nobody earned. Absence of the measurement is its own state and every caller must branch on
+        # it, because the consumer below turns this into `unscorable`: a missing file would silently
+        # declare the whole population sound.
+        return None
     return {k: v[aperture] for k, v in json.loads(p.read_text(encoding="utf-8")).items()
             if v.get(aperture)}
 

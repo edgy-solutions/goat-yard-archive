@@ -107,6 +107,10 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
     if local_only:
         rs = [r for r in rs if r["lane"] in LOCAL_LANES]
     bq = {r["span_id"]: r for r in G.box_quality(include_sealed=include_sealed)}
+    # The crops that were ACTUALLY SENT, read from crop_faults.json rather than re-cut. None means the
+    # measurement was never made, and an unmeasured crop cannot license a read: it is treated exactly
+    # like a faulted one, so an absent audit can never be mistaken for a clean one.
+    sent = D.crop_faults(aperture)
     rows = []
     for s in D.build_set(include_sealed=include_sealed):
         sid = s["span_id"]
@@ -115,7 +119,13 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
         mine = [r for r in rs if r["span_id"] == sid]
         cls = collections.Counter(D.classify(r.get("gated") or "", s["truth"]) for r in mine)
         b = bq.get(sid, {})
-        faulted = bool(b.get("fault"))
+        # fault_fresh answers "is the box sound today?" -- a geometry and ratification question.
+        # fault_sent answers "can these reads speak about the aperture?" -- an evidence question, and
+        # the only one that may decide the verdict. They came apart the moment the mapping was fixed:
+        # a box that now cuts cleanly does not retroactively make a blank crop a valid stimulus.
+        fault_fresh = b.get("fault")
+        fault_sent = "unmeasured" if sent is None else sent.get(sid)
+        faulted = bool(fault_sent) or bool(fault_fresh)
         n_clip, n_full = cls["clipped"], sum(cls[c] for c in FULL)
         if not mine:
             v = "no-reads"
@@ -128,7 +138,8 @@ def bind_rows(aperture="A2_spanbox", local_only=False, include_sealed=True):
         else:
             v = "broken:no-recovery"
         rows.append(dict(span_id=sid, page=s["page"], truth=s["truth"],
-                         words=len(s["truth"].split()), fault=b.get("fault"),
+                         words=len(s["truth"].split()), fault=fault_sent or fault_fresh,
+                         fault_sent=fault_sent, fault_fresh=fault_fresh,
                          lines=b.get("lines"), one_band=bool(b.get("one_band")),
                          n_reads=len(mine), n_clipped=n_clip, n_full=n_full,
                          n_wrong=cls["wrong"], n_abstain=cls["abstain"],
@@ -367,9 +378,16 @@ def selftest():
        p124["verdict"] == "unconfirmable", p124["verdict"])
 
     # The two blank crops cannot supply binding evidence, however much Hebrew came back from them.
+    # This is asserted against the AS-SENT fault on purpose. Lane A's mapping fix made both boxes cut
+    # cleanly, and for one turn bind called p423:n3 `broken:no-recovery` -- indicting a box for reads
+    # taken off a white rectangle. A fixed box does not retroactively validate a blank stimulus.
     for sid in ("p423:n3", "p726:n3"):
-        ck("%s yields no binding evidence (crop faulted)" % sid,
-           by[sid]["verdict"] == "no-evidence" and by[sid]["fault"], by[sid]["fault"])
+        ck("%s yields no binding evidence (crop AS SENT was faulted)" % sid,
+           by[sid]["verdict"] == "no-evidence" and by[sid]["fault_sent"],
+           (by[sid]["verdict"], by[sid]["fault_sent"], by[sid]["fault_fresh"]))
+    ck("both blank crops now cut clean, so the two fault questions genuinely disagree",
+       all(by[sid]["fault_fresh"] is None and by[sid]["fault_sent"] for sid in ("p423:n3", "p726:n3")),
+       {sid: (by[sid]["fault_sent"], by[sid]["fault_fresh"]) for sid in ("p423:n3", "p726:n3")})
 
     # Geometry is separate from, and stricter than, the read evidence.
     one, tot, viol = G.one_band_report()
@@ -386,15 +404,21 @@ def selftest():
     # `(one, tot) == (17, 18)` stayed true across all four moves. Both new boxes measure one clean band
     # of 30 and 31px, which is an out-of-sample confirmation of MIN_BAND_PX rather than a coincidence:
     # neither was used to derive the 20px threshold.
+    # 20 since Lane A's dc573ca (paste origins persisted). p423:n3 and p726:n3 joined because
+    # box_quality cuts FRESH from the page -- it never reads the stored PNG -- so a mapping fix moves
+    # this population immediately, while crop_faults.json still describes the crops actually sent.
+    # Those two numbers are allowed to disagree until the re-cut; they measure different things.
     _MEASURED = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p217:n2", "p219:n0",
-                 "p253:n2", "p293:n0", "p360:n0", "p362:n1", "p427:n4", "p491:n1", "p596:n2",
-                 "p895:n0", "p897:n4", "p900:n4", "p912:n2"}
+                 "p253:n2", "p293:n0", "p360:n0", "p362:n1", "p423:n3", "p427:n4", "p491:n1",
+                 "p596:n2", "p726:n3", "p895:n0", "p897:n4", "p900:n4", "p912:n2"}
     _got = {r["span_id"] for r in G.box_quality(True) if r["lines"] is not None}
     ck("the measurable box population is exactly the expected set", _got == _MEASURED,
        sorted(_got ^ _MEASURED))
-    ck("the three unmeasurable boxes are p657:n0 (no box) and the two blank crops",
-       {r["span_id"] for r in G.box_quality(True) if r["lines"] is None}
-       == {"p657:n0", "p423:n3", "p726:n3"},
+    # One, not three: the mapping fix recovered both previously-blank crops. p657:n0 stays
+    # unmeasurable for a different and unfixed reason -- it has no ratified span box at all -- so this
+    # set shrinking to a single id is the headline, and it is asserted rather than narrated.
+    ck("the only unmeasurable box is p657:n0, which has no ratified span box",
+       {r["span_id"] for r in G.box_quality(True) if r["lines"] is None} == {"p657:n0"},
        sorted({r["span_id"] for r in G.box_quality(True) if r["lines"] is None}))
     ck(f"the one-band debt is {len(_MEASURED) - 1} of {len(_MEASURED)} after the band rule was "
        f"corrected", (one, tot) == (len(_MEASURED) - 1, len(_MEASURED)), (one, tot))
