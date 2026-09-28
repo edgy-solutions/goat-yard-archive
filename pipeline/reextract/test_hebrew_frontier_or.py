@@ -54,21 +54,47 @@ CS = F.cells()
 SETS = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
 MAN = {m["span_id"]: m for m in json.load(open(diag.CROPDIR / "manifest.json", encoding="utf-8"))}
 
-print("(1) the set is A2, n=18, and nothing else")
-check("cells() yields 18 spans", len(CS) == 18, str(len(CS)))
+print("(1) the set is A2 and nothing else")
+# MEMBERSHIP, not count. `len(CS) == 18` was true before AND after 2026-09-27, while two spans entered
+# (p138:n6, p596:n2 signed) and two left (p423:n3, p726:n3 blank-crop faulted). The assertion held
+# across a change to both halves of the set and reported nothing, which is what a parity proxy does.
+_EXPECT = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p217:n2", "p219:n0", "p253:n2",
+           "p293:n0", "p360:n0", "p362:n1", "p427:n4", "p491:n1", "p596:n2", "p895:n0", "p897:n4",
+           "p900:n4", "p912:n2"}
+_GOT = {s["span_id"] for s, _c, _x in CS}
+check("cells() yields exactly the expected span set", _GOT == _EXPECT, sorted(_GOT ^ _EXPECT))
+check(f"cells() yields {len(_EXPECT)} spans", len(CS) == len(_EXPECT), str(len(CS)))
+check("the two blank-crop spans are NOT sendable",
+      not ({"p423:n3", "p726:n3"} & _GOT), sorted({"p423:n3", "p726:n3"} & _GOT))
 check("every cell is the A2 aperture", F.APERTURE == "A2_spanbox")
 check("every span is scorable", all(not s["unscorable"] for s, _c, _x in CS))
 check("every span has a ratified span box", all(s["span_box"] for s, _c, _x in CS))
 check("p657:n0 is absent (no ratified span box, so not A2-scorable)",
       "p657:n0" not in {s["span_id"] for s, _c, _x in CS})
-check("the A1-only span count is the difference (19 scorable - 18 A2)",
-      sum(1 for s in SETS.values() if not s["unscorable"]) - len(CS) == 1)
+check("the A1-only span count is the difference (scorable - A2 sendable == 1, p657:n0)",
+      sum(1 for s in SETS.values() if not s["unscorable"]) - len(CS) == 1,
+      str(sum(1 for s in SETS.values() if not s["unscorable"]) - len(CS)))
 check("every A2 crop exists on disk", all(Path(c).exists() for _s, c, _x in CS))
 
 print("\n(2) the answer does NOT leave the network")
 raw_leaks = [s["span_id"] for s, _c, _x in CS if N(s["truth"]) in N(s["latin_context"])]
-check("the raw latin_context leaks the signed truth on 11 of 18 spans (the guard is load-bearing)",
-      len(raw_leaks) == 11, f"{len(raw_leaks)}: {raw_leaks}")
+# 11 -> 10 on 2026-09-27, and the membership is the point, not the tally: the two blank-crop spans
+# that left (p423:n3, p726:n3) both leaked, and NEITHER of the two signed spans that arrived does.
+# p138:n6's note reads "לך nidos, Pagninus, Montanus." and p596:n2's "See Buxtorf. in voce היה." --
+# both carry Hebrew, but not the SIGNED Hebrew, so a literal-substring leak test correctly clears them.
+#
+# That makes p138:n6 the sharpest back-translation probe in the corpus and it must not be mistaken for
+# a clean one: the gloss is *nidos*, "nests", and the signed answer קנים IS "nests". A model with Latin
+# reaches it without reading a pixel. p596:n2 leans the other way -- its gloss names the WRONG headword
+# (היה where the page has סנה), so back-translation actively misleads there. Recorded for item 6.
+_LEAK = {"p102:n0", "p124:n4", "p138:n5", "p219:n0", "p360:n0", "p217:n2", "p293:n0", "p427:n4",
+         "p491:n1", "p912:n2"}
+check("the raw latin_context leaks the signed truth on exactly the known 10 spans",
+      set(raw_leaks) == _LEAK, sorted(set(raw_leaks) ^ _LEAK))
+check("neither newly signed span leaks its truth into the context",
+      not ({"p138:n6", "p596:n2"} & set(raw_leaks)), sorted({"p138:n6", "p596:n2"} & set(raw_leaks)))
+check("the guard is load-bearing: a majority of spans would leak unguarded",
+      len(raw_leaks) >= len(CS) / 2, f"{len(raw_leaks)} of {len(CS)}")
 check("_ctx leaves zero Hebrew characters on all 18",
       not any(F.HEB.search(x) for _s, _c, x in CS))
 check("_ctx leaves usable Latin on all 18 (not blanked)",
@@ -212,5 +238,5 @@ if fails:
     for f in fails:
         print(f"  - {f}")
     sys.exit(1)
-print(f"PASS: A2-only n={len(CS)}, 11/18 raw-context leaks blocked, no note-box crop reachable.")
+print(f"PASS: A2-only n={len(CS)}, {len(raw_leaks)}/{len(CS)} raw-context leaks blocked, no note-box crop reachable.")
 sys.exit(0)

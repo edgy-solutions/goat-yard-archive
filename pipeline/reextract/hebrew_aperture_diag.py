@@ -51,6 +51,16 @@ TRUTH = {
     "p102:n0": ("\u05d1\u05e8\u05d0 - \u05dc\u05e2\u05e9\u05d5\u05ea", "signed-correct:candidate-verbatim"),
     "p124:n4": ("\u05dc\u05d0 \u05db\u05df", "signed-correction:partial-span"),
     "p138:n5": ("\u05dc\u05da", "signed-correct:candidate-verbatim"),
+    # SIGNED 2026-09-27 by Chris (sequence item 5). The 2026-09-06 sitting left this span with
+    # chosen == "wrong" and an EMPTY correction, which is what UNSCORABLE recorded: he could see the
+    # candidate was wrong and did not supply the right string. The ruling supplies it.
+    #
+    # NOT retyped by me. The agent row of the SAME sitting recorded קנים on 2026-09-06, so the string
+    # is derived from a file row and the derivation is asserted at import (_assert_derivation) under
+    # the SUPPLIED licence. Corroborated independently by the candidate line itself, which reads
+    # "לך nidos, Pagninus, Montanus." -- the Latin gloss is *nidos*, "nests", and קנים is "nests".
+    # The candidate's Hebrew was לך, a different note's span entirely.
+    "p138:n6": ("קנים", "signed-post-sitting:agent-row-verbatim-supplied-20260927"),
     # RULED 2026-09-27 by Chris: "those are not in the original". The pointing is NOT on the page.
     # The 2026-09-06 sitting showed him the candidate \u05d5\u05d9\u05d4\u05d9 \u05d4\u05e9\u05de\u05e9 \u05dc\u05b0\u05d1\u05b9\u05d0 -- pointed, and
     # with NO vav. His correction was \u05d5\u05d9\u05d4\u05d9 \u05d4\u05e9\u05de\u05e9 \u05dc\u05b0\u05d1\u05b9\u05d5\u05d0. The edit he made was
@@ -75,7 +85,10 @@ TRUTH = {
     "p900:n4": (NOT_HEBREW, "signed-correction:not-hebrew-greek"),
     "p657:n0": ("\u05d1\u05d4\u05e8", "signed-residue-correction"),
 }
-UNSCORABLE = {"p138:n6": "signed wrong, correction field empty - no signed truth string"}
+# Empty since 2026-09-27: p138:n6 was the only member and Chris signed it (see TRUTH above). Kept as a
+# table rather than deleted, because "the signer marked it wrong and supplied nothing" is a state this
+# harness must be able to represent -- a span with no signed string is not a span that scored zero.
+UNSCORABLE = {}
 
 # ---------------------------------------------------------------------------------------------------
 # The SEALED-page half of the same signed sitting. Chris's ruling 2 (2026-09-20) opens sealed pages for
@@ -113,6 +126,16 @@ SEALED_TRUTH = {
                 "signed-correction:verbatim"),
     "p427:n4": ("הבאשתם", "signed-correct:candidate-verbatim"),
     "p491:n1": ("בשמע", "signed-correct:candidate-verbatim"),
+    # SIGNED 2026-09-27 by Chris (sequence item 5), same shape as p138:n6: the sitting row was
+    # chosen == "wrong" with an EMPTY correction, and the ruling supplies the string. Derived from the
+    # agent row of the same sitting (סנה), asserted at import under the SUPPLIED licence.
+    #
+    # Worth recording because THREE different strings have been attached to this span: the candidate
+    # line says "See Buxtorf. in voce היה.", the glm-ocr:bf16 arm looped "in voce נוס." forty times,
+    # and the signed answer is סנה -- the burning bush of Exodus 3:2, which is what Buxtorf's lexicon
+    # entry actually is. The candidate mis-transcribed the headword; the degenerate arm invented a
+    # third. Neither is the page.
+    "p596:n2": ("סנה", "signed-post-sitting:agent-row-verbatim-supplied-20260927"),
     # Chris marked this `wrong` but wrote "correct but should have no makers" - an adjudication about the
     # note's MARKERS, not about the Hebrew string, which he affirms. Truth is therefore the candidate
     # verbatim. This interpretation is load-bearing for n: the prerun's arithmetic ("n goes 10 -> 19")
@@ -124,7 +147,8 @@ SEALED_TRUTH = {
     "p912:n2": ("ביעקב בישראל",
                 "signed-correct:candidate-verbatim"),
 }
-SEALED_UNSCORABLE = {"p596:n2": "signed wrong, correction field empty - no signed truth string"}
+# Empty since 2026-09-27, same ruling: p596:n2 was its only member. See the note on UNSCORABLE.
+SEALED_UNSCORABLE = {}
 
 
 def _lines(p):
@@ -133,16 +157,63 @@ def _lines(p):
 
 # Spans the signer ruled on AFTER the sitting closed. The ruling is honoured, but it still may not be
 # typed: each one names the file row it is derived from and what the ruling was allowed to change.
-RULED_POST_SITTING = {"p362:n1": "agent-row-verbatim; ruling may change word division only"}
+RULED_POST_SITTING = {
+    "p362:n1": "agent-row-verbatim; ruling may change word division only",
+    "p138:n6": "agent-row-verbatim; ruling SUPPLIES a string the sitting left empty",
+    "p596:n2": "agent-row-verbatim; ruling SUPPLIES a string the sitting left empty",
+}
+# Two different licences are now in play and they check differently, so they are named rather than
+# inferred. A CORRECTION ruling (p362:n1) edits a string the signer already wrote, so the check is
+# "the ruling moved word division only" -- letters must match. A SUPPLIED ruling fills a field the
+# signer left EMPTY, so there is no earlier string to compare against and the check is the opposite
+# one: the sitting row must really be empty (otherwise this is a silent overwrite of a signed string,
+# which is the failure mode worth guarding), and the recorded truth must equal the agent row VERBATIM,
+# not modulo spaces -- nothing rode along from an edit here, so nothing is allowed to differ.
+SUPPLIED_POST_SITTING = ("p138:n6", "p596:n2")
 
 
 def _assert_derivation(sitting, agent=None):
-    """The sealed truths must fall out of the sitting file, not out of my typing. Checked at import."""
-    for sid, (want, basis) in SEALED_TRUTH.items():
+    """Signed truths must fall out of the sitting file, not out of my typing. Checked at import.
+
+    Covers SEALED_TRUTH **and** any TRUTH entry carrying a post-sitting ruling. That second clause is
+    not tidiness: p138:n6 is on an unsealed page, so without it that span would be the one signed
+    string in this module with no import-time derivation at all, which is precisely the entry a later
+    reader would have no way to distinguish from something I typed."""
+    todo = dict(SEALED_TRUTH)
+    todo.update({k: v for k, v in TRUTH.items() if k in RULED_POST_SITTING})
+    for sid, (want, basis) in todo.items():
         rec = sitting.get(sid)
         if not rec:
             raise AssertionError(f"{sid}: not in the signed sitting")
         corr = (rec.get("disputed_span_correction") or "").strip()
+        if sid in SUPPLIED_POST_SITTING:
+            # The licence is "fills a field the signer left EMPTY". So the guard that matters runs in
+            # the opposite direction from the correction case: if the field is NOT empty, this ruling
+            # would be silently overwriting a string the signer actually wrote.
+            # The correction field has THREE states in this sitting, not two, and the first version of
+            # this guard tested for the wrong one. Measured over the signed corpus:
+            #   a Hebrew string   -> the signer transcribed the right answer (p362:n1, p423:n3, ...)
+            #   English PROSE     -> the signer wrote an instruction: "not hebrew" (p900:n4), "same as
+            #                        extracted but without markers" (p253:n2), "correct but should have
+            #                        no makers" (p726:n3). That is a verdict WITH content.
+            #   genuinely empty   -> the signer supplied nothing at all (p138:n6, p596:n2).
+            # Only the third licenses a fill. Testing `not HEB.search(corr)`, which is what this guard
+            # did first, would have let a SUPPLIED ruling silently overwrite all three of the prose
+            # rows -- precisely the failure the licence exists to prevent.
+            if rec.get("chosen") != "wrong" or corr:
+                raise AssertionError(
+                    f"{sid}: licensed SUPPLIED, but the sitting row carries chosen="
+                    f"{rec.get('chosen')!r} correction={corr!r} -- that is an overwrite, not a fill")
+            arec = (agent or {}).get(sid)
+            if not arec:
+                raise AssertionError(f"{sid}: ruled post-sitting but the agent row is missing")
+            got = (arec.get("disputed_span_correction") or "").strip()
+            if not got:
+                raise AssertionError(f"{sid}: the agent row is empty too - nothing to derive from")
+            if _norm(got) != _norm(want):
+                raise AssertionError(
+                    f"{sid}: derived {got!r} != recorded {want!r} (SUPPLIED requires verbatim)")
+            continue
         got = corr if (rec.get("chosen") == "wrong" and HEB.search(corr)) else _heb_span(
             rec["inputs"]["candidates"][0])
         if sid in RULED_POST_SITTING:
@@ -171,8 +242,10 @@ def _heb_span(text):
 def build_set(include_sealed=False):
     """The carried spans with their signed verdict, latin context, and both ratified boxes (strip coords).
 
-    n=10 scorable by default. `include_sealed=True` adds the sealed half of the SAME signed sitting under
-    Chris's ruling-2 carve-out -> n=19 scorable. A sealed page is opened here for a READ only; no
+    n = len(TRUTH) scorable by default -- 11 since Chris signed p138:n6 on 2026-09-27, 10 before it.
+    `include_sealed=True` adds the sealed half of the SAME signed sitting under Chris's ruling-2
+    carve-out -> n = len(TRUTH) + len(SEALED_TRUTH), 21 since p596:n2 was signed the same day, 19
+    before. Counts already MEASURED at n=19 keep their own denominator; see the audits. A sealed page is opened here for a READ only; no
     alignment evidence is re-scored and the gate stays frozen."""
     sitting = {o["span_id"]: o for o in _lines(DOWN / "hebrew_sitting_chris_20260906.jsonl") if "span_id" in o}
     resid = {o["span_id"]: o for o in _lines(DATA / "chris_sitting_b_residue_20260823.jsonl") if "span_id" in o}

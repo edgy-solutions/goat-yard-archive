@@ -379,8 +379,25 @@ def selftest():
     # multi-line, and those 15 were the held redraw queue. Corrected (hebrew_glyph_card.MIN_BAND_PX /
     # MAX_BAND_PX, both taken from empty bands in the measurements), the debt is ONE box: p362:n1,
     # whose single band is 67px where every other band in the corpus is 30 to 38.
-    ck("the one-band debt is 17 of 18 after the band rule was corrected", (one, tot) == (17, 18),
-       (one, tot))
+    # PIN THE MEMBERSHIP, NOT THE TOTAL. This is the third time in one session that a 18-denominator
+    # survived a change of ±2 in both directions and reported nothing. On 2026-09-27 p138:n6 and
+    # p596:n2 entered the measurable population (Chris signed them, so they acquired truth) while
+    # p423:n3 and p726:n3 left it (their A2 crops are blank, so there is nothing to measure) -- and
+    # `(one, tot) == (17, 18)` stayed true across all four moves. Both new boxes measure one clean band
+    # of 30 and 31px, which is an out-of-sample confirmation of MIN_BAND_PX rather than a coincidence:
+    # neither was used to derive the 20px threshold.
+    _MEASURED = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p217:n2", "p219:n0",
+                 "p253:n2", "p293:n0", "p360:n0", "p362:n1", "p427:n4", "p491:n1", "p596:n2",
+                 "p895:n0", "p897:n4", "p900:n4", "p912:n2"}
+    _got = {r["span_id"] for r in G.box_quality(True) if r["lines"] is not None}
+    ck("the measurable box population is exactly the expected set", _got == _MEASURED,
+       sorted(_got ^ _MEASURED))
+    ck("the three unmeasurable boxes are p657:n0 (no box) and the two blank crops",
+       {r["span_id"] for r in G.box_quality(True) if r["lines"] is None}
+       == {"p657:n0", "p423:n3", "p726:n3"},
+       sorted({r["span_id"] for r in G.box_quality(True) if r["lines"] is None}))
+    ck(f"the one-band debt is {len(_MEASURED) - 1} of {len(_MEASURED)} after the band rule was "
+       f"corrected", (one, tot) == (len(_MEASURED) - 1, len(_MEASURED)), (one, tot))
     ck("the one remaining loose box is p362:n1", viol == ["p362:n1"], viol)
     ck("the corrected rule does not reject Chris's re-ratified p423:n3 box",
        G.band_geometry(G.rerat_load()[0]["p423:n3"]["_crop"])[0] == "one-band",

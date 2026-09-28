@@ -101,7 +101,7 @@ check("p362:n1 basis records the ruling",
 
 print("\n(2) every sealed truth traces to the signature by the stated rule")
 D._assert_derivation(sitting, agent)   # raises on any mismatch
-check("_assert_derivation passes over all 9 sealed truths", True)
+check(f"_assert_derivation passes over all {len(D.SEALED_TRUTH)} sealed truths", True)
 for sid, (want, basis) in sorted(D.SEALED_TRUTH.items()):
     rec = sitting.get(sid)
     check(f"{sid} is in the signed sitting", rec is not None)
@@ -124,40 +124,110 @@ for sid, (want, basis) in sorted(D.SEALED_TRUTH.items()):
             check(f"{sid} basis names the ruling", "ruled-" in basis, basis)
         else:
             check(f"{sid} == the signed correction, verbatim", N(want) == N(corr), f"{want!r} vs {corr!r}")
+    elif sid in D.SUPPLIED_POST_SITTING:
+        # Signed `wrong` with an EMPTY correction, then filled by a post-sitting ruling (p596:n2 since
+        # 2026-09-27). This branch exists because such a span looks identical, from the sitting row
+        # alone, to the p726:n3 case below and to the UNSCORABLE state it used to be in. What separates
+        # it is a SECOND file row, so that is what gets asserted -- not the basis text, which I wrote.
+        check(f"{sid} basis names the supplied ruling", "supplied-20260927" in basis, basis)
+        check(f"{sid} the sitting row really is empty (a fill, not an overwrite)",
+              not D.HEB.search(corr), corr)
+        _ar = (agent.get(sid) or {}).get("disputed_span_correction", "")
+        check(f"{sid} == the agent row of the same sitting, VERBATIM", N(want) == N(_ar.strip()),
+              f"{want!r} vs {_ar!r}")
+        # Verbatim, not modulo spaces: nothing rode along from an earlier edit, so unlike p362:n1 there
+        # is no licence to differ by word division either.
+        check(f"{sid} is not merely space-equal to the agent row", want.strip() == _ar.strip(),
+              f"{want!r} vs {_ar!r}")
     else:
-        # p726:n3: signed `wrong`, correction text carries no Hebrew. The ONLY span allowed here, and it
-        # must declare the interpretation in its basis rather than passing as an ordinary derivation.
+        # p726:n3: signed `wrong`, correction text carries no Hebrew, and NO post-sitting ruling. The
+        # only span allowed here, and it must declare the interpretation in its basis rather than
+        # passing as an ordinary derivation.
         check(f"{sid} declares the marker-defect interpretation in its basis",
               basis == "signed-wrong:marker-defect-not-hebrew-defect", basis)
         check(f"{sid} is the only span taking that path", sid == "p726:n3", sid)
 
-print("\n(3) a signed `wrong` with an empty correction is UNSCORABLE, never guessed")
+print("\n(3) a signed `wrong` with an empty correction is never GUESSED")
+# CHANGED 2026-09-27. p138:n6 and p596:n2 were the two members of the UNSCORABLE tables and Chris
+# signed both (sequence item 5), so both tables are now empty. The assertion that must not be lost is
+# not "these two spans are unscorable" -- that was a fact about a date. It is the RULE: a span whose
+# signer wrote `wrong` and left the correction blank gets a truth string ONLY from a licensed
+# post-sitting ruling backed by a second file row. Anything else is a guess wearing a signature.
+check("both UNSCORABLE tables are empty", not D.UNSCORABLE and not D.SEALED_UNSCORABLE,
+      (D.UNSCORABLE, D.SEALED_UNSCORABLE))
+# The correction field holds THREE states and only one of them licenses a fill. Written out because
+# the first version of this check tested "carries no Hebrew", which lumps the prose rows in with the
+# empty ones -- and the guard in hebrew_aperture_diag had the same defect until this assertion caught
+# it. A signer who wrote "not hebrew" HAS given a verdict; a signer who wrote nothing has not.
+_wrong = [sid for sid in {**D.TRUTH, **D.SEALED_TRUTH}
+          if sitting.get(sid) and sitting[sid].get("chosen") == "wrong"]
+_corrof = lambda sid: (sitting[sid].get("disputed_span_correction") or "").strip()
+_blank = sorted(sid for sid in _wrong if not _corrof(sid))
+_prose = sorted(sid for sid in _wrong if _corrof(sid) and not D.HEB.search(_corrof(sid)))
+check("exactly two spans have a GENUINELY EMPTY correction, and they are the supplied pair",
+      _blank == ["p138:n6", "p596:n2"], _blank)
+check("the blank pair is exactly the SUPPLIED pair",
+      _blank == sorted(D.SUPPLIED_POST_SITTING), (_blank, sorted(D.SUPPLIED_POST_SITTING)))
+check("three spans carry an English instruction instead of a Hebrew string",
+      _prose == ["p253:n2", "p726:n3", "p900:n4"], _prose)
+check("no prose-instruction span is licensed as SUPPLIED (that would be an overwrite)",
+      not (set(_prose) & set(D.SUPPLIED_POST_SITTING)), sorted(set(_prose) & set(D.SUPPLIED_POST_SITTING)))
 for sid in ("p138:n6", "p596:n2"):
-    rec = sitting.get(sid)
-    unsc = {**D.UNSCORABLE, **D.SEALED_UNSCORABLE}
-    check(f"{sid} is UNSCORABLE", sid in unsc)
-    check(f"{sid} has no truth string", sid not in D.TRUTH and sid not in D.SEALED_TRUTH)
-    if rec:
-        check(f"{sid} really is signed wrong with no Hebrew correction",
-              rec.get("chosen") == "wrong" and not D.HEB.search(
-                  (rec.get("disputed_span_correction") or "")))
+    check(f"{sid} carries a SUPPLIED licence", sid in D.SUPPLIED_POST_SITTING)
+    check(f"{sid} is registered as ruled post-sitting", sid in D.RULED_POST_SITTING)
+    check(f"{sid} has an agent row to derive from",
+          bool((agent.get(sid) or {}).get("disputed_span_correction", "").strip()))
+    check(f"{sid} really is signed wrong with no Hebrew correction",
+          sitting[sid].get("chosen") == "wrong" and not D.HEB.search(
+              (sitting[sid].get("disputed_span_correction") or "")))
+# p726:n3 is the counter-example that keeps the rule honest: empty correction, NO supplied licence, and
+# it gets its truth from the candidate under a declared interpretation instead. If it ever drifts into
+# SUPPLIED, the licence has become a way to type anything.
+check("p726:n3 is NOT supplied -- it takes the declared-interpretation path",
+      "p726:n3" not in D.SUPPLIED_POST_SITTING)
 
 print("\n(4) n is what the reports claim it is")
 base = D.build_set()
 full = D.build_set(include_sealed=True)
 nb = sum(1 for s in base if not s["unscorable"])
 nf = sum(1 for s in full if not s["unscorable"])
-check("default set is n=10 scorable (sealed pages untouched)", nb == 10, str(nb))
-# 19 -> 17 and 18 -> 16 on 2026-09-27, and the two that left are not a retune: p423:n3 and p726:n3
-# were sent to all 30 arms as pure white images, so no arm was ever shown them and no arm can be
-# graded on them. The numbers below move only when the CROP FAULT GATE says they may.
-check("carve-out set is n=17 scorable (2 lost to the crop-fault gate)", nf == 17, str(nf))
-check("the carve-out adds exactly 7 scorable spans", nf - nb == 7, str(nf - nb))
+# COUNTS ARE PINNED BY MEMBERSHIP, NOT BY TOTAL, and that is not pedantry -- it is a bug this suite
+# already let through once. On 2026-09-27 two spans entered the scorable set (p138:n6, p596:n2 signed)
+# while two left it (p423:n3, p726:n3 blank-crop faulted), so `len(cells()) == 18` stayed TRUE across a
+# change of membership in both directions and the assertion reported nothing. A count is a parity
+# proxy; the set is the claim.
+#
+# History of these numbers, so a later reader can tell a ruling from a drift:
+#   19 -> 17  2026-09-27  p423:n3 + p726:n3 leave: sent to all 30 arms as pure white images, so no arm
+#                         was ever shown them and none can be graded on them (crop-fault gate).
+#   17 -> 19  2026-09-27  p138:n6 + p596:n2 arrive: Chris signed both, sequence item 5.
+_BASE_SCORABLE = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p219:n0", "p253:n2",
+                  "p360:n0", "p657:n0", "p895:n0", "p900:n4"}
+_FULL_SCORABLE = _BASE_SCORABLE | {"p217:n2", "p293:n0", "p362:n1", "p427:n4", "p491:n1", "p596:n2",
+                                   "p897:n4", "p912:n2"}
+check("default scorable set is exactly the unsealed signed spans",
+      {s["span_id"] for s in base if not s["unscorable"]} == _BASE_SCORABLE,
+      sorted({s["span_id"] for s in base if not s["unscorable"]} ^ _BASE_SCORABLE))
+check(f"default set is n={len(_BASE_SCORABLE)} scorable (sealed pages untouched)",
+      nb == len(_BASE_SCORABLE), str(nb))
+check("carve-out scorable set is exactly the signed corpus minus the two blank crops",
+      {s["span_id"] for s in full if not s["unscorable"]} == _FULL_SCORABLE,
+      sorted({s["span_id"] for s in full if not s["unscorable"]} ^ _FULL_SCORABLE))
+check(f"carve-out set is n={len(_FULL_SCORABLE)} scorable "
+      f"({len(D.TRUTH) + len(D.SEALED_TRUTH) - len(_FULL_SCORABLE)} lost to the crop-fault gate)",
+      nf == len(_FULL_SCORABLE), str(nf))
+check("the two spans the crop-fault gate removes are the two blank ones",
+      {sid for sid in {**D.TRUTH, **D.SEALED_TRUTH}} - _FULL_SCORABLE == {"p423:n3", "p726:n3"},
+      sorted({sid for sid in {**D.TRUTH, **D.SEALED_TRUTH}} - _FULL_SCORABLE))
+check(f"the carve-out adds exactly {len(_FULL_SCORABLE) - len(_BASE_SCORABLE)} scorable spans",
+      nf - nb == len(_FULL_SCORABLE) - len(_BASE_SCORABLE), str(nf - nb))
 check("every added span is on a SEALED page",
       all(s["sealed"] for s in full if s["span_id"] not in {b["span_id"] for b in base}))
-check("A2 is n=16 (p657:n0 has no span box; 2 blank crops are unscorable)",
-      sum(1 for s in full if not s["unscorable"] and s["span_box"]) == 16,
-      str(sum(1 for s in full if not s["unscorable"] and s["span_box"])))
+_A2 = {s["span_id"] for s in full if not s["unscorable"] and s["span_box"]}
+check("A2 sendable set is the carve-out set minus p657:n0, which has no span box",
+      _A2 == _FULL_SCORABLE - {"p657:n0"}, sorted(_A2 ^ (_FULL_SCORABLE - {"p657:n0"})))
+check(f"A2 is n={len(_FULL_SCORABLE) - 1} (p657:n0 has no span box; 2 blank crops are unscorable)",
+      len(_A2) == len(_FULL_SCORABLE) - 1, str(len(_A2)))
 check("the default set still refuses sealed pages",
       all(not s["sealed"] for s in base))
 
@@ -446,6 +516,7 @@ if fails:
     for f in fails:
         print(f"  - {f}")
     sys.exit(1)
-print(f"PASS: {len(D.SEALED_TRUTH)} sealed truths trace to the signature; n=17 scorable, A2 n=16 "
+print(f"PASS: {len(D.SEALED_TRUTH)} sealed truths trace to the signature; n={nf} scorable, "
+      f"A2 n={len(_A2)} "
       f"(p423:n3 and p726:n3 held out by the crop-fault gate).")
 sys.exit(0)
