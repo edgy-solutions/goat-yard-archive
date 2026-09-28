@@ -555,6 +555,35 @@ def test_run_eval_records_git_in_the_integrity_block():
     assert src.index("git_at_start = git_state()") < src.index("preflight(args.endpoint"), "git state must be captured BEFORE preflight spends a request"
 
 
+def test_dirty_tree_refusal_lets_a_clean_tree_proceed():
+    assert RE.dirty_tree_refusal({"head": "a" * 40, "dirty": False, "dirty_paths": 0}, False) is None
+
+
+def test_dirty_tree_refusal_ABORTS_a_dirty_tree_by_default():
+    # The gate ruling 1 asked for. Recording dirtiness was already implemented on 2026-09-27 and
+    # both noise-floor arms still ran dirty, so the START half is now a refusal, not a note.
+    msg = RE.dirty_tree_refusal(
+        {"head": "a" * 40, "dirty": True, "dirty_paths": 2,
+         "dirty_sample": [" M evals/run_eval.py", "?? scratch.txt"]}, False)
+    assert msg and "REFUSING to start" in msg, msg
+    assert "evals/run_eval.py" in msg, "the refusal must name what is dirty, not just the count"
+    assert "--allow-dirty-tree" in msg, msg
+
+
+def test_dirty_tree_refusal_allows_an_explicitly_provisional_run():
+    msg = RE.dirty_tree_refusal({"head": "a" * 40, "dirty": True, "dirty_paths": 1,
+                                 "dirty_sample": [" M x.py"]}, True)
+    assert msg is None, "an explicit --allow-dirty-tree must proceed, labelled provisional"
+
+
+def test_run_eval_actually_calls_the_refusal_before_scoring_anything():
+    # Source-order check: the gate is worthless if it runs after the first question. Paired with
+    # the unit tests above, which prove the gate itself can fire.
+    src = open(RE.__file__, encoding="utf-8").read()
+    assert "refusal = dirty_tree_refusal(git_at_start, args.allow_dirty_tree)" in src
+    assert src.index("dirty_tree_refusal(git_at_start") < src.index("preflight(args.endpoint")
+
+
 if __name__ == "__main__":
     passed = failed = 0
     for name, fn in sorted(globals().items()):

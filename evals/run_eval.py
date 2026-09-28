@@ -717,6 +717,35 @@ def git_state() -> Dict[str, Any]:
     return out
 
 
+def dirty_tree_refusal(at_start: Dict[str, Any], allow_dirty: bool) -> Optional[str]:
+    """The message that aborts a run over a dirty tree, or None to proceed.
+
+    Ruling 1 (2026-09-27, Chris), binding on both lanes: a run is clean only if git_state() at
+    start and at end are both clean and identical. The END half cannot be a gate -- by then the
+    run has happened -- so it is recorded in `integrity.git.provisional` and printed loudly. The
+    START half can be, and is: on 2026-09-27 both noise-floor arms ran over a dirty tree and the
+    pair is permanently provisional as a result. Recording the fact was not enough to prevent it.
+
+    A pure function returning a string rather than an inline sys.exit, so the refusal can be
+    born-tested without running an eval.
+    """
+    if not at_start.get("dirty"):
+        return None
+    n = at_start.get("dirty_paths", "?")
+    sample = "\n".join("    " + ln for ln in at_start.get("dirty_sample", [])[:10])
+    if allow_dirty:
+        print(f"WARNING: tree is DIRTY ({n} path(s)) and --allow-dirty-tree was passed. This run "
+              f"is PROVISIONAL: it may withdraw an earlier claim but asserts nothing new, and it "
+              f"cannot be cited in an ADR or a tier change.")
+        return None
+    return (f"REFUSING to start: the working tree is DIRTY ({n} path(s))."
+            f"\n{sample}\n"
+            f"Ruling 1: a run is clean only if git_state() at start and end are both clean and "
+            f"identical. Commit (or stash) first, then rerun -- a provisional arm cannot be "
+            f"compared against a clean one. Pass --allow-dirty-tree if you deliberately want a "
+            f"provisional run, and expect it to be labelled one.")
+
+
 def git_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any]) -> Dict[str, Any]:
     """The `integrity.git` block. A function rather than a dict literal inside main() so the
     comparison can be born-tested: asserting that the SOURCE contains "changed_during_run" proves
@@ -770,6 +799,11 @@ def main(argv: Optional[list] = None) -> int:
                              "carries any model cold-start in its latency.")
     parser.add_argument("--regression-threshold", type=float, default=5.0,
                         help="Pass-rate drop (percentage points) that triggers a hard fail vs baseline.")
+    parser.add_argument("--allow-dirty-tree", action="store_true",
+                        help="Permit starting over a dirty working tree. The run is then "
+                             "PROVISIONAL (ruling 1): it may withdraw an earlier claim but "
+                             "asserts nothing new, and cannot be cited in an ADR or a tier "
+                             "change. Off by default, and the harness aborts instead.")
     parser.add_argument("--auth-token", default=os.getenv("EVAL_AUTH_TOKEN"),
                         help="Optional Bearer token for authenticated endpoint testing.")
     args = parser.parse_args(argv)
@@ -777,6 +811,11 @@ def main(argv: Optional[list] = None) -> int:
     load_dotenv(REPO_ROOT / ".env")
 
     git_at_start = git_state()
+    refusal = dirty_tree_refusal(git_at_start, args.allow_dirty_tree)
+    if refusal:
+        print(refusal)
+        print("Nothing was scored.")
+        return 2
     questions = load_reference_set(Path(args.reference_set), args.ids)
     out_dir = Path(args.output_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -900,6 +939,18 @@ def main(argv: Optional[list] = None) -> int:
         "violations": integrity_violations,
     }
     summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
+    _g = summary["integrity"]["git"]
+    if _g["provisional"]:
+        print("")
+        print("*** THIS RUN IS PROVISIONAL (ruling 1) ***")
+        print(f"    dirty at start: {_g['at_start'].get('dirty')}   "
+              f"dirty at end: {_g['at_end'].get('dirty')}   "
+              f"HEAD or tree moved mid-run: {_g['changed_during_run']}")
+        print("    It may withdraw an earlier claim but asserts nothing new, and cannot be cited")
+        print("    in an ADR or a tier change.")
+    else:
+        print("")
+        print("Run is CLEAN: tree clean and identical at start and end (ruling 1).")
     if n_runs > 1:
         # Classification is over SCORED runs only. A question with no scored run is NO-DATA:
         # not a STABLE-FAIL, not FLAKY, not anything. Calling it STABLE-FAIL is how two
