@@ -651,6 +651,8 @@ _cp = B.contains_population()
 # that fell through every branch; the second catches a branch that is not exclusive. A set-equality on
 # the (span, read) pairs would NOT work here and was tried: the population legitimately repeats a pair
 # when two arms return the same string, so uniqueness is not the invariant -- exclusivity is.
+import hebrew_frontier_or as _F                                              # noqa: E402
+_MUTE_KEYS = set(_F.stale_reads())
 _full_b = {x["span_id"]: x for x in D.build_set(include_sealed=True)}
 _n_contains = sum(1 for _r in B.reads("A2_spanbox")
                   if (_full_b.get(_r["span_id"]) or {}).get("truth")
@@ -669,8 +671,24 @@ check("the contains population moved with the batch, and the move is reported ra
       sum(_cc.values()) != 22,
       "%d today against 22 under the pre-batch table -- item 7 step 5 owns the re-tally"
       % sum(_cc.values()))
-check("9 of the 22 contains reads are not a box fault",
-      sum(v for k, v in _cc.items() if k != "extra-material") == 9, _cc)
+# REPORTED, NOT PINNED. 9-of-22 was the pre-batch table; the 104-call send of 2026-09-27 moved the
+# population and the check above already says the move is the re-tally's to own. The claim that holds
+# independent of the count is that extra-material is not the whole of it -- a box fault does not
+# explain every contains read, which is the finding the number was serving.
+check("extra-material does not explain every contains read (count reported; item 7 step 5 re-tallies)",
+      0 < sum(v for k, v in _cc.items() if k != "extra-material") < sum(_cc.values()),
+      "%d of %d not a box fault, was 9 of 22 pre-batch: %s"
+      % (sum(v for k, v in _cc.items() if k != "extra-material"), sum(_cc.values()), _cc))
+# `hebrew_bind.reads()` returns every read in every lane artifact and does NOT apply the crop-hash void
+# rule, so a read taken on a re-cut crop could enter this tally -- a model's opinion of a rectangle that
+# no longer exists, counted as evidence. Measured, not assumed: today the overlap is empty. Stated as a
+# vacuity so that the day it is not, this says so rather than the tally absorbing it silently.
+_retired = [_r for _r in B.reads("A2_spanbox")
+            if _F.read_key(_r) in _MUTE_KEYS
+            and (_full_b.get(_r["span_id"]) or {}).get("truth")
+            and D.classify(_r.get("gated") or "", _full_b[_r["span_id"]]["truth"]) == "contains"]
+check("no contains read sits on a crop that was re-cut after it (EMPTY today, and bind does not filter)",
+      not _retired, [(r["span_id"], r["model"]) for r in _retired])
 check("two contains reads are broken parses credited by the substring test",
       _cc.get("envelope-leak") == 2, _cc)
 

@@ -457,13 +457,22 @@ def selftest():
                 and D.classify(x.get("gated") or "", _cfull[x["span_id"]]["truth"]) == "contains")
     ck("every contains read is accounted for by exactly one shape",
        sum(_cc.values()) == _cind, (_cc, _cind))
-    ck("the batch moved this population by one, and it is p217:n2 that joined",
-       sum(_cc.values()) == 23 and "p217:n2" in {sid for sid, _g in contains_population()["extra-material"]},
-       sum(_cc.values()))
-    # 9 of them are not box faults in any sense: a glued letter, a trailing colon, a stray vav, a
+    # MOVED TWICE, AND NOT RE-PINNED. 22 pre-batch, 23 after the 09-27 re-sign batch, 28 after the
+    # 104-call send of 09-27 -- the five new ones all on p596:n2, which had no reads at all before it
+    # was sent, so they are new evidence rather than a reclassification. The surviving claim is which
+    # span the batch put in this population, not what the total happens to be today; item 7 step 5
+    # owns the number, and it re-tallies once.
+    ck("p217:n2 is in the extra-material population, which is what the batch changed here",
+       "p217:n2" in {sid for sid, _g in contains_population()["extra-material"]},
+       "total %d today: 22 pre-batch, 23 post-batch, +5 on p596:n2 from the send"
+       % sum(_cc.values()))
+    # Some of them are not box faults in any sense: a glued letter, a trailing colon, a stray vav, a
     # duplication loop, and two broken parses. A substring test cannot tell those from page material.
-    ck("9 contains reads are not a box fault at all",
-       sum(v for k, v in _cc.items() if k != "extra-material") == 9, _cc)
+    # The count was 9 of 22 under the pre-batch table and is reported rather than pinned now.
+    ck("extra-material does not explain every contains read (count reported, not pinned)",
+       0 < sum(v for k, v in _cc.items() if k != "extra-material") < sum(_cc.values()),
+       "%d of %d, was 9 of 22 pre-batch: %s"
+       % (sum(v for k, v in _cc.items() if k != "extra-material"), sum(_cc.values()), _cc))
     _em = collections.Counter(sid for sid, _g in contains_population()["extra-material"])
     ck("extra-material concentrates in p124:n4, the widest box in the set",
        _em.most_common(1)[0] == ("p124:n4", 10), _em.most_common())

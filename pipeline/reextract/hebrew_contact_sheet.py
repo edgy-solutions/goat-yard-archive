@@ -94,8 +94,13 @@ def scope(include_a1=False):
     debt, never as work. `include_a1` folds in Chris's conditional term -- off by default, because its
     condition has not been met and because an A1-only change cannot have changed a sent pixel."""
     sendable = {s["span_id"] for s, _c, _x in F.cells()}
-    voided = sendable & {sid for sid, _m in F.stale_reads()}
     scored = {o["span_id"] for o in F.rows()}
+    # A span that lost its reads and GOT THEM BACK is not re-run scope. `stale_spans()` is "has a mute
+    # read and no live one"; the old `sid in stale_reads()` test would have listed p423:n3 and p726:n3
+    # as unsent work on 09-28, the day after they were sent, because their retired reads never leave
+    # the artifact. The three terms are also disjoint now, so the decomposition is a partition and not
+    # an arithmetic coincidence.
+    voided = (sendable & set(F.stale_spans())) - scored
     never = sendable - scored - voided
     a1 = set(a1_moved()) if include_a1 else set()
     return sorted(voided | never | a1), sorted(voided), sorted(never), sorted(a1)
@@ -312,7 +317,7 @@ def build(spans=None, out=OUT, include_a1=False):
                  % (len(pending), len(arms_ok), len(pending) * len(arms_ok)))
 
     mute = F.stale_reads()
-    debt = sorted({sid for sid, _m in mute} - {s["span_id"] for s, _c, _x in F.cells()})
+    debt = sorted({sid for sid, _m, _h in mute} - {s["span_id"] for s, _c, _x in F.cells()})
     if debt:
         P.append("<h2>Void reads with no route back</h2>")
         P.append('<p class="sub">These spans lost their reads to the re-cut AND cannot be re-sent, '

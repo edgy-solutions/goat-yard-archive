@@ -325,9 +325,27 @@ check("crop_sha of a path that does not exist is None, not a hash of nothing",
 
 # The evidence rule, measured against the real artifact rather than asserted about the source.
 _MUTE = F.stale_reads()
-_MUTE_SPANS = {sid for sid, _m in _MUTE}
-check("the void-read set is exactly the 3 spans whose A2 crop was re-cut",
+_MUTE_SPANS = {sid for sid, _m, _h in _MUTE}
+# THE KEY IS THE READ. Keyed on (span, model) this muted a live read because a dead one shared its
+# cell, and 52 approved, sent, paid-for reads on p423:n3 and p726:n3 were dropped from scoring while
+# `run()` would have re-sent them. Asserted on the shape AND on the consequence.
+check("the void is keyed on the read -- cell plus the pixels it was shown, not the cell alone",
+      all(isinstance(k, tuple) and len(k) == 3 for k in _MUTE), sorted(_MUTE)[:2])
+_LIVE = F.live_reads()
+check("a cell holding a dead read AND a live read keeps the live one",
+      all(F.read_key(o) not in _MUTE for o in _LIVE))
+for _sid, _h in (("p423:n3", "7059fcf05ea87bf6"), ("p726:n3", "631456a69a2da6a2")):
+    _n_live = sum(1 for o in _LIVE if o["span_id"] == _sid and o.get("crop_sha16") == _h)
+    _n_mute = sum(1 for k in _MUTE if k[0] == _sid)
+    check(f"{_sid}: reads at the approved hash survive the void beside {_n_mute} retired reads",
+          _n_live == 26 and _n_mute == 26, f"live={_n_live} mute={_n_mute}")
+# That they reach the SCORED rows is asserted below, against the approved hashes, once `_RS` exists.
+check("the retired-read set is exactly the 3 spans whose A2 crop was re-cut",
       _MUTE_SPANS == {"p423:n3", "p726:n3", "p900:n4"}, sorted(_MUTE_SPANS))
+# Span-level void is "lost its reads AND has not got them back". Two of the three got them back on
+# 2026-09-27; only the span whose crop is REFUSED is still without evidence.
+check("but only p900:n4 is actually WITHOUT a live read -- a re-read repairs the span",
+      set(F.stale_spans()) == {"p900:n4"}, F.stale_spans())
 check("a pre-hash read on an UNCHANGED crop is still evidence (the rule is not 'distrust the old')",
       not (_MUTE_SPANS & {"p102:n0", "p138:n5", "p217:n2", "p912:n2"}))
 check("every void read names its cause",
@@ -340,19 +358,32 @@ check("no void read survives into the scored rows",
 # hold, or it has no reads at all. A count alone would hide which.
 _SENDABLE = {s["span_id"] for s, _c, _x in CS}
 _SCORED = {o["span_id"] for o in _RS}
-_VOIDED = _SENDABLE & _MUTE_SPANS                     # crop re-cut: reads exist but are mute
-_NEVER = _SENDABLE - _SCORED - _VOIDED                # signed after the run: no reads at all
+_VOIDED = (_SENDABLE & set(F.stale_spans())) - _SCORED   # reads retired and not yet retaken
+_NEVER = _SENDABLE - _SCORED - _VOIDED                  # no reads at all
+# A PARTITION, asserted as one. The count identity held on 2026-09-28 while the sets OVERLAPPED --
+# `_VOIDED` still contained two spans that were also in `_SCORED`, and 17 + 2 + 0 = 19 came out right
+# for the wrong reason. A decomposition check that only adds up cannot see a double-counted term.
+check("the three terms are DISJOINT, not merely summing to the population",
+      not ((_SENDABLE & _SCORED) & _VOIDED) and not (_VOIDED & _NEVER)
+      and not ((_SENDABLE & _SCORED) & _NEVER),
+      f"scored={sorted(_SENDABLE & _SCORED)} voided={sorted(_VOIDED)} never={sorted(_NEVER)}")
 check("the sendable population decomposes with no remainder: scored + voided + never-run",
       len(_SENDABLE & _SCORED) + len(_VOIDED) + len(_NEVER) == len(_SENDABLE),
       f"{len(_SENDABLE & _SCORED)} + {len(_VOIDED)} + {len(_NEVER)} != {len(_SENDABLE)}")
-check("the spans with byte-identical crops keep every read, re-scored and NOT re-sent",
-      len(_SENDABLE & _SCORED) == 15 and not (_SENDABLE & _SCORED) & _MUTE_SPANS,
-      sorted(_SENDABLE & _SCORED))
-check("the re-run scope is exactly the 4 spans Chris named: 2 re-cut crops + 2 newly signed",
-      _VOIDED | _NEVER == {"p423:n3", "p726:n3", "p138:n6", "p596:n2"}, sorted(_VOIDED | _NEVER))
-check("and the two halves of that scope are there for DIFFERENT reasons",
-      _VOIDED == {"p423:n3", "p726:n3"} and _NEVER == {"p138:n6", "p596:n2"},
-      f"voided={sorted(_VOIDED)} never-run={sorted(_NEVER)}")
+# Chris's rerun scope of 2026-09-27 -- p138:n6, p423:n3, p596:n2, p726:n3 -- was SENT on 09-27 (104
+# calls, 26 arms each, 0 errors). So the scope is empty now, and the durable claim is not "these four
+# are pending" but "these four are scored, at the hashes he approved". Pinning the hashes is what
+# keeps a later re-cut from quietly re-opening a spend he already signed off.
+check("all 19 sendable spans are scored: the 09-27 rerun scope is spent, not pending",
+      len(_SENDABLE & _SCORED) == 19 and not _VOIDED and not _NEVER,
+      f"scored={len(_SENDABLE & _SCORED)} voided={sorted(_VOIDED)} never={sorted(_NEVER)}")
+_APPROVED_2609 = {"p138:n6": "292b179e978509d6", "p423:n3": "7059fcf05ea87bf6",
+                  "p596:n2": "842abe52c2829e14", "p726:n3": "631456a69a2da6a2"}
+for _sid, _h in sorted(_APPROVED_2609.items()):
+    _live = [o for o in _RS if o["span_id"] == _sid]
+    check(f"{_sid} is scored on the pixels Chris approved ({_h})",
+          len(_live) == 26 and {o.get("crop_sha16") for o in _live} == {_h},
+          f"n={len(_live)} hashes={sorted({o.get('crop_sha16') for o in _live})}")
 # p900:n4 is the one that cannot be repaired by re-running: its crop moved AND its crop is refused, so
 # its 26 reads go mute with no route back until the box is redrawn. That is the real cost of the
 # denominator change and it must be visible, not folded into "unscorable".
@@ -445,7 +476,7 @@ check("and not because the measurement died: crops_recut still names A1 re-cuts,
 check("every span in the A1 term has a byte-identical A2 crop -- it was sent the pixels it holds",
       all(diag.crop_sha(sid, F.APERTURE) == diag.crop_sha(sid, F.APERTURE, as_sent=True) for sid in _a1))
 check("so none of its reads are void: an A1 re-cut mutes nothing",
-      not ({sid for sid, _m in F.stale_reads()} & set(_a1)))
+      not (_MUTE_SPANS & set(_a1)))
 check("the A1 term is OUT of the default scope", not (set(_a1) & set(SH.scope()[0])))
 check("and folding it in is one flag, not a code change",
       set(SH.scope(include_a1=True)[0]) == set(SH.scope()[0]) | set(_a1))
@@ -583,6 +614,23 @@ check("and the nine clipped boxes are all A1, which is why this population is em
       "the measurement is broken",
       {c["aperture"] for c in diag.clipped()} == {"A1_notebox"} and len(diag.clipped()) == 9,
       [(c["span_id"], c["aperture"]) for c in diag.clipped()])
+
+print("\n(14) every run writes its own header, not one per artifact")
+# BORN-TEST. The 104-call send appended to an existing artifact and wrote no header, so the only
+# config_header in that file belongs to an earlier run: the send's git state, approval flag, truth
+# digest and crop-hash map went unrecorded while every read still carried its own crop_sha16. The
+# pixels stayed answerable and the RUN did not.
+_src = pathlib.Path(F.__file__).read_text(encoding="utf-8")
+check("the header is no longer conditioned on the artifact not existing",
+      "first = not OUT.exists()" not in _src)
+check("a run over an existing artifact records where its own reads begin",
+      '"reads_before": _reads_before' in _src and "_reads_before = sum(" in _src)
+if F.OUT.exists():
+    _hdrs = [o for o in diag._lines(F.OUT) if o.get("kind") == "config_header"]
+    _late = [o for o in diag._lines(F.OUT) if o.get("kind") == "config_header_late"]
+    check("the 23:17 send of 2026-09-27 has an identity record, even if a late one",
+          any(h.get("crop_sha16") for h in _hdrs + _late),
+          "%d header(s), %d late" % (len(_hdrs), len(_late)))
 
 print()
 if fails:

@@ -191,12 +191,27 @@ def crop_sha(cpath):
     return diag._sha(cpath)
 
 
+def read_key(o):
+    """The identity of a READ: which cell, and which pixels. `crop_sha16` is part of it, not metadata.
+
+    Two reads can share a (span, model) cell and be about different rectangles -- that is precisely
+    what happens when a box is re-ratified and the span is re-sent. A key without the hash cannot tell
+    them apart, and every rule that used one treated the pair as the unit of evidence."""
+    return (o.get("span_id"), o.get("model"), o.get("crop_sha16"))
+
+
 def stale_reads():
-    """(span_id, model) -> why, for every read on record that is no longer about a crop we hold.
+    """(span_id, model, crop_sha16) -> why, for every read no longer about a crop we hold.
 
     A read is evidence about the pixels it was shown. When a crop is re-cut, the reads taken on the old
     one do not become wrong -- they become mute, and scoring them reports a model's opinion of a
-    rectangle that no longer exists anywhere except the frozen archive."""
+    rectangle that no longer exists anywhere except the frozen archive.
+
+    KEYED ON THE READ, and that is the whole correction. This returned `(span_id, model) -> why` until
+    2026-09-27, and consumers muted the pair. After the 104-call send, p423:n3 and p726:n3 each held 26
+    fresh reads at the approved hash beside 26 pre-hash reads on the retired crop; the pair key put the
+    dead read's verdict over the live one, `rows()` scored neither span, and `run()`'s resume set would
+    have re-sent all 52 cells. The void is a statement about pixels, so its key carries the hash."""
     sets = {s["span_id"] for s in diag.build_set(include_sealed=True)}
     changed = set(diag.crops_changed(APERTURE))
     cur = {sid: diag.crop_sha(sid, APERTURE) for sid in sets}
@@ -207,12 +222,35 @@ def stale_reads():
         sid, h = o["span_id"], o.get("crop_sha16")
         if h:
             if h != cur.get(sid):
-                out[(sid, o["model"])] = "crop-sha-mismatch:%s!=%s" % (h, cur.get(sid))
+                out[read_key(o)] = "crop-sha-mismatch:%s!=%s" % (h, cur.get(sid))
         elif sid in changed:
             # No hash recorded means the row predates the hashing, which means it was taken on the
             # as-sent crop. That is only still valid if the crop has not been re-cut since.
-            out[(sid, o["model"])] = "pre-hash-read-on-recut-crop"
+            out[read_key(o)] = "pre-hash-read-on-recut-crop"
     return out
+
+
+def live_reads():
+    """Reads that still speak for a crop we hold -- the complement of `stale_reads()` over the artifact."""
+    mute = stale_reads()
+    sets = {s["span_id"] for s in diag.build_set(include_sealed=True)}
+    return [o for o in diag._lines(OUT)
+            if o.get("kind") == "read" and o.get("span_id") in sets and read_key(o) not in mute]
+
+
+def stale_spans():
+    """{span_id: n_void} for spans that lost their reads and have NOT got them back.
+
+    Span-level "void" is not "appears in the mute set". A span whose crop was re-cut and then re-read
+    has live evidence and no void problem; the contact sheet counted it as re-run scope anyway, which
+    is how p423:n3 and p726:n3 would have appeared as unsent work the day after they were sent."""
+    mute = stale_reads()
+    alive = {o["span_id"] for o in live_reads()}
+    n = {}
+    for sid, _m, _h in mute:
+        if sid not in alive:
+            n[sid] = n.get(sid, 0) + 1
+    return n
 
 
 def _no_hebrew_outbound(body):
@@ -562,14 +600,24 @@ def run(only=None, spans=None, approved=False):
         # Nor is a read on a crop we no longer hold: resume must not skip a cell on the strength of a
         # read taken off different pixels. This is what makes the scope self-correcting -- a plain
         # `run` after a re-cut re-takes exactly the spans whose crops moved, with or without --span.
+        # PER READ, not per cell. A cell that holds a dead read from before a re-cut AND a live read
+        # from after it is DONE -- the live read is evidence about the crop we hold. Testing the cell
+        # instead put the dead read's staleness over the live read and would have re-sent 52 paid-for
+        # cells on p423:n3 and p726:n3 the day after they were approved and sent.
         mute = set(stale_reads())
         done = {(o["span_id"], o["model"]) for o in diag._lines(OUT)
                 if o.get("kind") == "read" and o.get("finish_reason") != "length"
                 and (o.get("hebrew") or "").strip()
-                and (o["span_id"], o["model"]) not in mute}
-    first = not OUT.exists()
+                and read_key(o) not in mute}
+    # ONE HEADER PER RUN, not per file. `not OUT.exists()` made the header a property of the
+    # artifact instead of the run, so the 23:17 send on 2026-09-27 appended 104 reads under the 12:25
+    # run's header and its own identity -- git state, approval, truth digest, crop hashes, clip status
+    # -- was never written. The per-read crop_sha16 kept the pixels answerable; nothing kept the RUN
+    # answerable. A file holding several runs is a log of runs; each needs its own bracket.
+    _reads_before = sum(1 for _o in diag._lines(OUT) if _o.get("kind") == "read") if OUT.exists() else 0
+    write_header = True          # named for what it now is: a per-run bracket, unconditional
     with io.open(OUT, "a", encoding="utf-8") as f:
-        if first:
+        if write_header:
             hdr = build_header(host=HOST, port=PORT, model="multi:26-openrouter-arms",
                                digest_fn=lambda hp, mo, t=None: "n/a:hosted-api",
                                identity_extra={"aperture": APERTURE, "n_scorable": len(cs),
@@ -587,6 +635,11 @@ def run(only=None, spans=None, approved=False):
                                                # Both halves, or a run can be silently re-scored.
                                                "truth_digest": truth_digest(),
                                                "truth_digest_at_sheet": sheet.get("truth_digest"),
+                                               # Where this run's reads begin in an artifact that
+                                               # already held other runs' reads. A number, so the
+                                               # boundary does not depend on reading footers in order.
+                                               "appends_to_existing": _reads_before > 0,
+                                               "reads_before": _reads_before,
                                                "truth_sent": truth_sent(cs),
                                                # {} means no crop in this run was amputated. Recorded
                                                # either way: absence of the field would be silence,
@@ -667,7 +720,9 @@ def rows():
     for o in diag._lines(OUT):
         if o.get("kind") != "read" or o.get("span_id") not in sets:
             continue
-        if (o["span_id"], o["model"]) in mute:
+        # The read is dropped for ITS OWN pixels. Dropping the whole cell discarded 52 reads that had
+        # been approved, sent and paid for, because an older read on the retired crop shared the cell.
+        if read_key(o) in mute:
             continue
         keep[(o["span_id"], o["model"])] = o
     out = []
@@ -735,7 +790,7 @@ def score():
     mute = stale_reads()
     if mute:
         by = {}
-        for (sid, _m), why in mute.items():
+        for (sid, _m, _h), why in mute.items():
             by.setdefault(sid, []).append(why)
         scored = {o["span_id"] for o in rs}
         sendable = {s["span_id"] for s, _c, _x in cells()}
