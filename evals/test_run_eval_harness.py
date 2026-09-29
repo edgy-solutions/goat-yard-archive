@@ -1104,6 +1104,70 @@ def test_help_still_renders_and_shows_the_new_temperature_flag():
     assert "--allow-unset-temperature" in r.stdout, r.stdout[:400]
 
 
+# --- stage health: BAML query expansion / entity lookup / verifier, rolled up per run ----
+
+def _stage_res(qid, stages, gen=12.0, err=None, degraded=None):
+    """A scored run whose endpoint reported `stages` as its debug stage-capture block."""
+    if err:
+        return RE.score(dict(Q_ANSWER, id=qid), {"_error": err}, 1.0)
+    payload = dict(GOOD, generation_seconds=gen)
+    if degraded:
+        payload["degraded"] = degraded
+    if stages is not None:
+        payload["stages"] = stages
+    return RE.score(dict(Q_ANSWER, id=qid), payload, 1.0)
+
+
+def test_healthy_stage_ledger_has_no_expansion_errors_or_violations():
+    ok = _stage_res("q", {"entity_lookup_mode": "full"})
+    h = RE.stage_health_block({"q": [ok]})
+    assert h["expansion"]["errored"] == 0, h
+    v = RE.check_run_integrity({"q": [ok]}, allow_lm_cache=False)
+    assert not any("expansion" in x.lower() for x in v), v
+
+
+def test_one_erroring_scored_run_is_counted_and_flagged():
+    bad = _stage_res("q", {"baml_error": "missing LITELLM_PROXY_URL", "baml_fallback": "some_fallback"})
+    h = RE.stage_health_block({"q": [bad]})
+    assert h["expansion"]["errored"] == 1, h
+    v = RE.check_run_integrity({"q": [bad]}, allow_lm_cache=False)
+    assert any("expansion" in x.lower() for x in v), v
+
+
+def test_degraded_or_errored_stage_runs_are_excluded_from_stage_health():
+    bad_deg = _stage_res("q", {"baml_error": "x"}, degraded="llm_timeout")
+    h_deg = RE.stage_health_block({"q": [bad_deg]})
+    assert h_deg["scored_runs"] == 0, h_deg
+    assert h_deg["expansion"]["errored"] == 0, h_deg
+
+    bad_err = _stage_res("q", None, err="ReadTimeout")
+    h_err = RE.stage_health_block({"q": [bad_err]})
+    assert h_err["scored_runs"] == 0, h_err
+    assert h_err["expansion"]["errored"] == 0, h_err
+
+
+def test_missing_stages_key_does_not_raise_and_counts_as_not_errored():
+    no_stages = _stage_res("q", None)
+    h = RE.stage_health_block({"q": [no_stages]})
+    assert h["scored_runs"] == 1, h
+    assert h["expansion"]["errored"] == 0, h
+
+
+def test_distinct_fallback_renders_none_as_placeholder_and_sorts():
+    with_fallback = _stage_res("q", {"baml_error": "x", "baml_fallback": "keyword_only"})
+    no_fallback_key = _stage_res("q", {"baml_fallback": None})
+    h = RE.stage_health_block({"q": [with_fallback, no_fallback_key]})
+    assert h["expansion"]["distinct_fallback"] == ["<none>", "keyword_only"], h["expansion"]
+
+
+def test_entity_lookup_counts_tally_distinct_modes_across_runs():
+    full = _stage_res("q", {"entity_lookup_mode": "full"})
+    degraded_mode = _stage_res("q", {"entity_lookup_mode": "degraded_no_vector"})
+    h = RE.stage_health_block({"q": [full, degraded_mode]})
+    assert h["entity_lookup"]["counts"] == {"full": 1, "degraded_no_vector": 1}, h["entity_lookup"]
+    assert set(h["entity_lookup"]["distinct_mode"]) == {"full", "degraded_no_vector"}, h["entity_lookup"]
+
+
 if __name__ == "__main__":
     passed = failed = 0
     for name, fn in sorted(globals().items()):

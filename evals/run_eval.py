@@ -175,6 +175,18 @@ class QuestionResult:
     answer_lm: Optional[dict] = None
     generation_seconds: Optional[float] = None
 
+    # BAML pipeline stage health for THIS run (query expansion, entity lookup, verifier).
+    # `stages` on the wire is only populated when the backend honors debug=True and even then
+    # is Optional[dict] -- absent entirely on an older backend -- so these are always read
+    # defensively in score() and never raise. Without this, an arm where BAML query expansion
+    # is erroring on every call (e.g. a missing LITELLM_PROXY_URL) still reported
+    # integrity.violations == [] because the signal existed only on the one response written
+    # to the per-question artifact, never per run and never rolled up.
+    expansion_error: bool = False
+    expansion_fallback: Optional[str] = None
+    entity_lookup_mode: Optional[str] = None
+    verification_failure: bool = False
+
     # Scoring outcomes
     refusal_correct: bool = False
     must_cite_recall: float = 0.0  # fraction of must_cite present
@@ -279,6 +291,13 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
     result.provider_pin = response.get("openrouter_provider_pin")
     result.answer_lm = response.get("answer_lm")
     result.generation_seconds = response.get("generation_seconds")
+
+    stages = response.get("stages")
+    if isinstance(stages, dict):
+        result.expansion_error = bool(stages.get("baml_error"))
+        result.expansion_fallback = stages.get("baml_fallback")
+        result.entity_lookup_mode = stages.get("entity_lookup_mode")
+        result.verification_failure = bool(stages.get("verification_failure"))
 
     # Degradation check goes here - before refusal detection, before citation scoring.
     # Order is the whole point: a timeout fallback contains no [SID] citations, so a
@@ -650,6 +669,15 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
     info["lm_cache_enabled"] = resp.get("lm_cache_enabled")
     info["openrouter_provider_pin"] = resp.get("openrouter_provider_pin")
     info["answer_lm"] = resp.get("answer_lm")
+    # Query-expansion health is visible on the warmup response too, not just per scored run --
+    # this is the cheapest place to catch it, before any question is asked. Loud, not fatal:
+    # see check_run_integrity / stage_health_block for why this must never abort.
+    warmup_stages = resp.get("stages")
+    if isinstance(warmup_stages, dict) and warmup_stages.get("baml_error"):
+        print(f"WARNING: the warmup response shows a BAML query-expansion error: "
+              f"{warmup_stages.get('baml_error')!r} "
+              f"(fallback={warmup_stages.get('baml_fallback')!r}). Every scored run in this arm "
+              f"may be silently falling back. Check LITELLM_PROXY_URL on the server.")
     print(f"            {info['warmup_seconds']}s"
           + (f"  ERROR: {info['warmup_error']}" if info["warmup_error"] else "")
           + (f"  DEGRADED: {info['warmup_degraded']}" if info["warmup_degraded"] else ""))
@@ -871,6 +899,40 @@ def answer_temperature_block(run_ledger: Dict[str, List[QuestionResult]]) -> dic
     }
 
 
+def stage_health_block(run_ledger: Dict[str, List[QuestionResult]]) -> dict:
+    """Per-stage LM health across the arm: BAML query expansion, entity lookup mode, and the
+    quote-placement verifier -- the pipeline stages between the answer LM and the score. Query
+    expansion has been erroring on this machine (missing LITELLM_PROXY_URL) on nearly every
+    call, and every published arm still reported integrity.violations == [] because the signal
+    lived only on the single response written to the per-question artifact and was never rolled
+    up across runs. See QuestionResult.expansion_error / score() for where this is captured.
+
+    Only SCORED runs count -- see answer_temperature_block for why an errored or degraded run
+    is not a gap in the evidence, it is simply not a measurement.
+    """
+    scored = [r for runs in run_ledger.values() for r in runs if not r.error and not r.degraded]
+    errored = sum(1 for r in scored if r.expansion_error)
+    fallbacks = sorted({(r.expansion_fallback if r.expansion_fallback is not None else "<none>")
+                         for r in scored})
+    modes = sorted({r.entity_lookup_mode for r in scored}, key=repr)
+    mode_counts: Dict[str, int] = {}
+    for r in scored:
+        mode_counts[r.entity_lookup_mode] = mode_counts.get(r.entity_lookup_mode, 0) + 1
+    return {
+        "scored_runs": len(scored),
+        "expansion": {
+            "errored": errored,
+            "healthy": len(scored) - errored,
+            "distinct_fallback": fallbacks,
+        },
+        "entity_lookup": {
+            "distinct_mode": modes,
+            "counts": mode_counts,
+        },
+        "verifier": {"failures": sum(1 for r in scored if r.verification_failure)},
+    }
+
+
 def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_cache: bool,
                          allow_unset_temperature: bool = False) -> list:
     """Post-run assertion: every scored run was its own generation, not a replay."""
@@ -923,6 +985,17 @@ def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_ca
             f"unpinned temperature is the confound measured in "
             f"docs/audits/RESULT_temperature_check_laneA_20260928.md. Pass "
             f"--allow-unset-temperature if this is deliberate.")
+    # Not an abort, and not gated behind a flag: the BAML query-expansion path is down on
+    # this machine right now (missing LITELLM_PROXY_URL) and aborting every run over it would
+    # brick the harness while that's true. This only records the arm as not-clean and names
+    # the count, so it can never be silently compared against an arm with different expansion
+    # health -- see stage_health_block.
+    stage_health = stage_health_block(run_ledger)
+    if stage_health["expansion"]["errored"] > 0:
+        violations.append(
+            f"{stage_health['expansion']['errored']}/{stage_health['scored_runs']} scored "
+            f"run(s) had a BAML query-expansion error - this arm is not comparable against "
+            f"an arm with different expansion health")
     return violations
 
 
@@ -1217,7 +1290,11 @@ def main(argv: Optional[list] = None) -> int:
                                                     if (r.answer or "") else None),
                                   "answer_chars": len(r.answer or ""),
                                   "temperature_on_the_wire": ((r.answer_lm or {}).get("temperature_on_the_wire")
-                                                                if isinstance(r.answer_lm, dict) else None)}
+                                                                if isinstance(r.answer_lm, dict) else None),
+                                  "expansion_error": r.expansion_error,
+                                  "expansion_fallback": r.expansion_fallback,
+                                  "entity_lookup_mode": r.entity_lookup_mode,
+                                  "verification_failure": r.verification_failure}
                                  for r in runs]},
                        indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -1264,6 +1341,7 @@ def main(argv: Optional[list] = None) -> int:
     summary["answer_lm"] = answer_lm_tally(run_ledger)
     summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
     summary["integrity"]["answer_temperature"] = answer_temperature_block(run_ledger)
+    summary["integrity"]["stage_health"] = stage_health_block(run_ledger)
     if corpus_skip:
         _unread = {"available": False,
                    "unavailable_reason": "unavailable:--corpus-fingerprint-skip",
