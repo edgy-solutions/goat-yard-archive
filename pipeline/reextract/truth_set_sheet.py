@@ -274,6 +274,8 @@ H.append('<h2>How to record a signature</h2><div class="sub">A skeleton with one
 H.append('<div class="sub" style="margin-top:18px">Flagged rows: %d of %d, shown first. Sheet built '
          'from <code>%s</code>.</div>' % (nflag, SET_N, CUT.name))
 doc = "\n".join(H)
+by_id = {r["span_id"]: r for r in rows}
+assert set(by_id) >= set(shown), "a span is shown without a row to badge it from"
 
 # ---- the withholding, asserted over the bytes that will be written --------------------------------
 assert READABLE.search(_PROBE), "the withholding pattern cannot match Hebrew at all -- it would pass " \
@@ -302,7 +304,18 @@ assert doc.count("<div class=\"row\">") == SET_N, \
 # The name must address EVERY pixel the sheet shows. It addressed only the parent crops, so when
 # the clip rule was corrected on 2026-10-04 the sheet kept its old name and the clobber guard had
 # to refuse it -- the guard caught what the name should have expressed.
-sig = ";".join("%s:%s:%s" % (s, shown[s]["A2_spanbox"], shown[s].get("A2_bandclip") or "-")
+#
+# AND IT MUST ADDRESS WHAT THE SIGNER IS TOLD. Found the same day by watching this script
+# overwrite its own output: the OVER-FULL badges were added, the crops did not change, so the
+# digest did not change and the badge-less sheet was replaced in place with the clobber guard
+# satisfied -- it compares crop hashes and the crops were identical. Nothing was lost here (that
+# sheet had never been shown to anybody) but the mechanism is the one that lost the 19-span
+# approval. A sheet is not a set of pictures, it is a reading TASK: the badge on a row tells the
+# signer that the box is over-full and to sign only what they can see, and a signature given
+# with that instruction is not the same record as one given without it. So the badges are in the
+# address.
+sig = ";".join("%s:%s:%s:%s" % (s, shown[s]["A2_spanbox"], shown[s].get("A2_bandclip") or "-",
+                               ",".join(n for n, _ in badges(by_id[s])) or "-")
                for s in sorted(shown))
 DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
 OUT = HAD.DATA / ("truthset_sheet_%s_%dspan_%s.html" % (SET, len(shown), DIG))
