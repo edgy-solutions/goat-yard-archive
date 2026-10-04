@@ -107,6 +107,10 @@ def _views(path):
     return _uri(path), _uri_im(cmp_im), scale, band, im.size
 
 
+OVERFULL = {x["span_id"]: x for x in flags.get("runs_not_measurable", [])}
+assert all(x["lines_of_type"] > 1 for x in OVERFULL.values()),     "a span is listed as not-measurable without covering more than one line of type"
+
+
 def badges(r):
     out = []
     if r["span_id"] in NOTYPE:
@@ -122,6 +126,20 @@ def badges(r):
         out.append(("SHORT-BOX", "unpadded box is %dpx tall, under the %dpx floor for a line of type; "
                                  "this crop may be passing the blank gate on its PAD"
                     % (SHORT[r["span_id"]], G.MIN_BAND_PX)))
+    if r["span_id"] in OVERFULL:
+        # THE SIGNER IS THE ONLY THING THAT CAN SEE THIS. The box covers more than one line of type, so
+        # the crop holds a whole extra line of print that is not the span. No tally sees it: `word_runs`
+        # is a column ink profile and MERGES stacked lines, which is why these 18 are excluded from the
+        # runs-vs-words count rather than passing it. The band-clip used to trim some of them and was
+        # withdrawn as a set recipe (2026-10-04) because on p677:n13 it chose the wrong line by 4px of
+        # centre proximity and deleted the Hebrew. Untrimmed is the honest state; it is a redraw
+        # question for the localizer, and until then the signing rule carries it.
+        out.append(("OVER-FULL", "this box covers %d lines of type (%s px), so there is a whole extra "
+                                 "line of print in the crop that is not this span. Sign every Hebrew "
+                                 "span you can SEE here and nothing you cannot; a box holding more than "
+                                 "its span is a redraw, not a reading question."
+                    % (OVERFULL[r["span_id"]]["lines_of_type"],
+                       ", ".join(str(x) for x in OVERFULL[r["span_id"]].get("bands", [])) or "measured at cut time")))
     if r.get("clip") and len(r["clip"]["word_runs"]) != len(r["crop"]["word_runs"]):
         out.append(("RECIPE", "PAD=12 resolves %d word run(s), band-clip %d -- the pair below is the "
                               "recipe question, and it is yours to call"
@@ -143,6 +161,7 @@ table.sum{border-collapse:collapse;margin:10px 0 18px} table.sum td{padding:2px 
  padding:1px 6px;margin:2px 4px 2px 0;font-size:11px;font-weight:600}
 .badge.recipe{background:#1f3a5a;color:#d9ecff;border-color:#468}
 .badge.notype{background:#6a3a12;color:#ffe9d0;border-color:#c86}
+.badge.overfull{background:#4a3a6a;color:#e6dcff;border-color:#86a}
 .why{color:#c9a;font-size:11px;margin:2px 0}
 figure{margin:0 14px 14px 0;display:inline-block;vertical-align:top;background:#0d0f12;padding:8px;
  border:1px solid #2a2f37}
@@ -217,7 +236,7 @@ for r in rows:
                 r["crop"]["word_runs"], r["crop"]["sha16"]))
     for name, why in bg:
         H.append('<span class="badge%s">%s</span><div class="why">%s</div>'
-                 % ({"RECIPE": " recipe", "NO-TYPE": " notype"}.get(name, ""), name,
+                 % ({"RECIPE": " recipe", "NO-TYPE": " notype", "OVER-FULL": " overfull"}.get(name, ""), name,
                     html.escape(why)))
     H.append("</div><div>")
     pair = ' class="pair"' if any(n == "RECIPE" for n, _ in bg) else ""
@@ -269,6 +288,13 @@ for k in FORBIDDEN_KEYS:
         "a candidate-derived field (%r) is named in the sheet" % k
 assert "A1_notebox" not in doc and "notebox" not in low, "an A1 note-box crop is referenced"
 assert str(HAD.CROPDIR) not in doc, "the sheet points at the 19-span corpus instead of its own crops"
+# A BADGE THAT MISSES FLAGS NOTHING. The OVER-FULL population is the one thing on this sheet that
+# only the signer can act on, and it is derived from the cut rather than listed here, so the
+# rendered count is asserted against the derived one instead of against a number somebody typed.
+assert doc.count(">OVER-FULL<") == len(OVERFULL), \
+    "the sheet renders %d OVER-FULL badges for %d over-full boxes" % (doc.count(">OVER-FULL<"), len(OVERFULL))
+assert nflag == sum(1 for r in rows if badges(r)), \
+    "the flagged count in the header is not the number of rows carrying a badge"
 assert doc.count("<div class=\"row\">") == SET_N, \
     "the sheet renders %d rows, not %d" % (doc.count("<div class=\"row\">"), SET_N)
 
@@ -302,7 +328,8 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "asserted_over_bytes": ["no Hebrew/Greek/presentation forms", "no candidate-derived field "
                                    "names", "no A1 note-box reference", "%d rows" % SET_N],
            "badges": {"NO-TYPE": sorted(NOTYPE), "DUP-BOX": sorted(DUP), "SHORT-BOX": sorted(SHORT),
-                      "RECIPE": [d["span_id"] for d in cut["clip"]["word_runs_differ"]]},
+                      "RECIPE": [d["span_id"] for d in cut["clip"]["word_runs_differ"]],
+                      "OVER-FULL": sorted(OVERFULL)},
            "crop_sha16": shown},
           io.open(str(SIDE), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
