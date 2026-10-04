@@ -1542,8 +1542,41 @@ check("refuses when an in-scope cell has NO read in the base",
 check("refuses a base artifact with NO header at all",
       _gate_refuses("headerless", header={"kind": "not_a_header"}))
 
+# ---- clean_run: the clean-run rule, which decides whether an artifact may be cited -------------------
+# The rule binds both lanes: a run is clean only if git state at START and at END are both clean AND
+# identical. Every check here is on the PROVISIONAL side, because that is the side that protects an ADR --
+# a helper that under-reports cleanliness costs a re-run, one that over-reports launders a dirty run.
+import clean_run as CR                                                     # noqa: E402
+
+_CLEAN = {"git_head": "a" * 40, "git_dirty": {"state": "clean"}, "clean": True}
+_DIRTY = {"git_head": "a" * 40, "git_dirty": {"state": "dirty", "n": 2, "paths": ["x", "y"]},
+          "clean": False}
+_UNK = {"git_head": "unknown", "git_dirty": {"state": "unknown"}, "clean": False}
+_MOVED = dict(_CLEAN, git_head="b" * 40)
+
+check("clean run: both ends clean and identical is NOT provisional",
+      CR.provisional(_CLEAN, _CLEAN) is False)
+check("provisional when the tree was dirty at the START",
+      CR.provisional(_DIRTY, _CLEAN) is True)
+check("provisional when the tree was dirty at the END",
+      CR.provisional(_CLEAN, _DIRTY) is True)
+check("provisional when HEAD MOVED mid-run, though both ends are clean",
+      CR.provisional(_CLEAN, _MOVED) is True,
+      "a commit landing mid-run is the fault a single start-capture cannot see")
+check("`unknown` is NOT clean -- not knowing is not the same as knowing it was clean",
+      CR.provisional(_UNK, _UNK) is True)
+check("git_state() derives `clean` from git's own state word, never a hand-rolled diff",
+      CR.git_state(os.path.dirname(os.path.abspath(__file__)))["git_dirty"]["state"]
+      in ("clean", "dirty", "unknown"))
+check("the banner STATES the verdict rather than leaving it to be inferred",
+      "PROVISIONAL" in CR.banner(_CLEAN, _DIRTY) and "clean run" in CR.banner(_CLEAN, _CLEAN))
+check("importing the helper does not RUN a generator (it is not defined in draw_pool.py)",
+      "def _git(" not in io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              "draw_pool.py"), encoding="utf-8").read(),
+      "`from draw_pool import _git` would execute the whole draw at import time")
+
 # pin it to the exact number, or the suite starts failing on its own growth.
-CHECK_FLOOR = 299
+CHECK_FLOOR = 307
 if len(ran) < CHECK_FLOOR:
     fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
                  f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")
