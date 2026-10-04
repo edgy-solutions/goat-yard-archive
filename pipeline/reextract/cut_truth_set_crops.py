@@ -148,6 +148,23 @@ def clip_rows(im, n_rects):
     "other run" there is the span's own second half and trimming it would delete half the signature."""
     if n_rects > 1:
         return None, "abstain:stacked-crop-%d-rects" % n_rects
+    # THE BOX IS THE ONLY STATEMENT ABOUT WHERE THE SPAN IS. `line_band` picks the inked band nearest
+    # the crop's CENTRE row, on the premise in its docstring that "the box was drawn on that line, so
+    # the centre is on it". That premise holds only for a box tight on one line. Found by eye on
+    # p677:n13, 2026-10-04: its box covers two text lines (39px and 33px), the centre row fell in the
+    # gap between them, and the nearest band won by 4px against 6px -- so the clip kept the roman line
+    # and deleted the one carrying the Hebrew. Nothing downstream could see it: the kept band is a
+    # perfectly good line of type, the trim removes a perfectly good line of type, and the run count
+    # went UP. Measured over all 42 clips: 16 crops hold more than one line of type, and in all 16 the
+    # extra line is inside the BOX, not brought in by the pad -- the case this clip was designed for
+    # (a pad-neighbour) did not occur once. So the clip abstains, and those boxes are a redraw
+    # question. A line counts as inside the box when a full line of type's worth of it is.
+    _y0, _y1 = PAD, im.height - PAD
+    _in = [(a, b) for a, b in G.ink_runs(im)
+           if min(b, _y1 - 1) - max(a, _y0) + 1 >= G.MIN_BAND_PX]
+    if len(_in) > 1:
+        return None, ("abstain:box-covers-%d-lines-of-type:%s:nothing-here-knows-which-holds-the-span"
+                      % (len(_in), [b - a + 1 for a, b in _in]))
     band = G.line_band(im)
     if not band:
         return None, "abstain:no-line-band"
@@ -358,9 +375,10 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "source": "hebrew_aperture_diag._native_crop + crop_fault, as crops() applies them",
                   "clip_rule": "remove only ink runs that do not overlap the span's line band and are "
                                "either >= %d px thick or touch the crop edge" % G.MIN_BAND_PX,
-                  "clip_abstains_when": "the band line_band() returns is itself thinner than a line of "
-                                        "type, or the trim would keep less than one line of type "
-                                        "(found by eye on p558:n3, 2026-10-04)",
+                  "clip_abstains_when": "the BOX covers more than one line of type (p677:n13), the band "
+                                        "line_band() returns is itself thinner than a line of type, or "
+                                        "the trim would keep less than one line of type (p558:n3) -- "
+                                        "all three found by eye on 2026-10-04",
                   "rule_band_precheck": "a crop with no ink run >= %d px is refused and not written "
                                         "(rule_band_fault); crop_has_line() passes on a printed "
                                         "rule and cannot see this" % G.MIN_BAND_PX,
