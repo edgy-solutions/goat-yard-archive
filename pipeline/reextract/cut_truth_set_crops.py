@@ -493,6 +493,49 @@ for b in cut:
         assert nr[0] <= q[0] and nr[1] <= q[1] and nr[2] >= q[2] and nr[3] >= q[3], \
             ("%s: the note-context crop %s does not contain the span rect %s, so the link would "
              "show the signer a DIFFERENT note from the one the box was drawn in" % (b["span_id"], nr, q))
+# AND CONTAINMENT OVER THE PIXELS, because the rectangle arithmetic above was written WRONG the first
+# time and only the pixels said so. A first probe placed the span inside the note crop at (sx-nx,
+# sy-ny) and found 45 of 74 "mismatched"; the crops were right and the probe was wrong -- a note box
+# starts at strip x0=0, so its LEFT pad is clamped at the page edge while the span's pad is not, and
+# 45 of these notes sit against that edge. A rect test cannot see a mapping error of that kind: both
+# crops would still satisfy every inequality. So the span crop is required to appear BYTE-IDENTICAL
+# inside its note crop at the offset the clamped origins imply. That is the actual claim the link
+# makes to the signer -- "the thing you are being asked to read is in here" -- and it is now the
+# thing asserted. A band-stitched note crop (more than one native rect) cannot be addressed by one
+# offset, so it is located by searching for the span instead, and the search is required to find it
+# exactly once.
+def _origin(rc):
+    """Top-left native pixel a crop of rc actually starts at: PAD, clamped at the page edge."""
+    return max(0, rc[0] - PAD), max(0, rc[1] - PAD)
+
+
+pix_contained, pix_searched = 0, []
+for b in cut:
+    nc = b.get("note_context")
+    if not nc:
+        continue
+    N = np.asarray(Image.open(nc["path"]).convert("L"))
+    S = np.asarray(Image.open(b["crop"]["path"]).convert("L"))
+    h, w = S.shape
+    if len(nc["native_rects"]) == 1 and len(b["crop"]["native_rects"]) == 1:
+        (nx, ny) = _origin(nc["native_rects"][0])
+        (sx, sy) = _origin(b["crop"]["native_rects"][0])
+        sub = N[sy - ny:sy - ny + h, sx - nx:sx - nx + w]
+        assert sub.shape == S.shape and np.array_equal(sub, S), \
+            ("%s: the span crop is NOT the pixels at (%d,%d) of its note crop, so the two were cut "
+             "from different places and the link does not show the signer this span"
+             % (b["span_id"], sx - nx, sy - ny))
+    else:
+        hits = [(y, x) for y in range(N.shape[0] - h + 1) for x in range(N.shape[1] - w + 1)
+                if N[y, x] == S[0, 0] and np.array_equal(N[y:y + h, x:x + w], S)]
+        assert len(hits) == 1, \
+            ("%s: the span crop appears %d times in its band-stitched note crop; it must appear "
+             "exactly once or the link is ambiguous" % (b["span_id"], len(hits)))
+        pix_searched.append(b["span_id"])
+    pix_contained += 1
+assert pix_contained == n_note, \
+    "pixel containment was checked on %d of %d note crops" % (pix_contained, n_note)
+
 assert all(os.path.exists(b["note_context"]["path"]) for b in cut if b.get("note_context")), \
     "a note-context crop is recorded and not on disk"
 assert all(os.path.exists(b["page_png"]) for b in cut), "a page PNG path does not exist on disk"
@@ -616,7 +659,11 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         "pad_native_px": PAD,
                         "source": "note_line_region.note_line_regions(strip, notes_on_page, book "
                                   "profile)[note_index-1], the call that placed the box",
-                        "containment_asserted": "the span's native rect lies inside the note's",
+                        "containment_asserted": "the span's native rect lies inside the note's, "
+                                                "AND the span crop is byte-identical to the pixels at "
+                                                "the implied offset of the note crop (searched, and "
+                                                "required unique, for band-stitched note crops)",
+                        "pixel_containment": {"checked": pix_contained, "by_search": pix_searched},
                         "outbound": False,
                         "why_not_an_aperture": "local context for the human signer. Linked by path "
                                                "from the sheet, never embedded in it, and asserted "
@@ -679,6 +726,9 @@ print("NO LINE OF TYPE (box on a rule): %d  %s"
       % (len(rule_only), [x["span_id"] for x in rule_only]))
 print("note context: %d of %d spans linked to the note the box was drawn in (PAD=%d, containment asserted)%s"
       % (n_note, len(cut), PAD, "" if not note_faults else "   NOT DERIVED: %s" % note_faults))
+print("  span crop byte-identical inside its note crop: %d of %d  (%d located by search: %s)"
+      % (pix_contained, n_note, len(pix_searched),
+         ", ".join(pix_searched) or "none"))
 print("edge-sliced neighbours: %d crop(s) carrying %d sliced edge(s); span truncations %d"
       % (len(edge_sliced), sum(x["n_edges"] for x in edge_sliced), len(edge_truncated)))
 print("geometry flags: duplicate-box groups %d %s   box shorter than a line %s"
