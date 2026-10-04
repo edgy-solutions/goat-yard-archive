@@ -605,11 +605,109 @@ def sheet_gate(cs, sheet=SHEET):
     return rec
 
 
-# A dead cell is an item error; a STREAK of them is a fault in the run. 57 of the 11:00 send's cells
-# were `getaddrinfo failed` -- three whole arms scored as if the models had failed, when what failed was
-# DNS on this machine. The rule (Chris, run-level fault vs item error): N consecutive dead items
-# invalidates the run, it aborts, and it is rerun from the top -- never spliced.
-DEAD_RUN_AT = 8
+# A dead cell is an item error; a streak of them is a fault -- but a fault in WHAT. 57 of the 11:00 send's
+# cells were `getaddrinfo failed`, three whole arms scored as if the models had failed when what failed was
+# DNS on this machine. The rule (Chris, run-level fault vs item error): N consecutive dead items invalidates
+# the run, it aborts, and it is rerun from the top -- never spliced.
+#
+# MEASURED 2026-10-04, AND IT FALSIFIED THE FIRST VERSION OF THIS GUARD. A single counter over all cells
+# cannot tell a dead arm from a dead run. `inclusionai/ling-3.0-flash-vl` returned 14 provider errors
+# against 5 reads in the 475-cell text-off run; the guard stayed quiet only because those errors INTERLEAVED
+# with successes and kept resetting the streak. Had they landed consecutively it would have declared the run
+# faulted and discarded 456 good reads -- a false run-level fault over one permanently dead arm.
+#
+# The discriminating signal was in the 11:00 artifact the whole time: its dead cells spanned three whole
+# ARMS. A dead arm fails inside one arm; a dead run fails across arms. So:
+#   DEAD_ARM_AT    consecutive dead cells WITHIN one arm -> that arm is abandoned, named, and moved past.
+#                  The streak resets at every arm header, so one dead arm cannot condemn the run.
+#   DEAD_ARMS_AT   consecutive ABANDONED arms -> the run is faulted. At 11:00 this would have fired after
+#                  two arms and 16 wasted cells instead of 57.
+# Neither threshold is derived from a measured band; both are calibrated from two faults, and that is all
+# the authority they have.
+#
+# A `crop_refused` row is a THIRD thing and must not be counted as either. It never reached the wire: the
+# input guard refused the pixels, which is the guard working. A streak of them says the CROPS are wrong, and
+# calling that a dead arm would print a fault message whose stated cause is false -- the exact error class
+# this split exists to stop. So it gets its own streak and its own reason, and it faults the RUN directly,
+# because crops that fail the guard will fail it for every arm and nothing is learned by walking all 25.
+DEAD_ARM_AT = 8
+DEAD_ARMS_AT = 2
+REFUSED_RUN_AT = 8
+
+
+class RunFault(object):
+    """The dead-cell bookkeeping, lifted out of `run()` so a TEST can drive it and not only a send.
+
+    The first version of this guard was a single counter inline in `run()`'s loop. That is why it shipped
+    wrong: the only way to learn what it did on a real failure pattern was to spend 475 calls and read the
+    artifact afterwards, and when it was wrong the RUN found out, not a test. Every branch below is reachable
+    from a list of row dicts, so the 11:00 pattern (three whole arms of `getaddrinfo failed`) and the
+    2026-10-04 pattern (one arm's provider errors interleaved with its own reads) are both replayable
+    offline, for nothing.
+
+    Three outcomes, because there are three distinct causes, and a fault message naming the wrong one is a
+    false claim about why the run stopped:
+      ""        carry on.
+      "abandon" this ARM is dead -- consecutive dead cells inside it. Write it down and move to the next.
+      "fault"   the RUN is dead -- consecutive arms abandoned, or consecutive crops refused before the wire.
+    """
+
+    def __init__(self, dead_arm_at=None, dead_arms_at=None, refused_run_at=None):
+        self.dead_arm_at = DEAD_ARM_AT if dead_arm_at is None else dead_arm_at
+        self.dead_arms_at = DEAD_ARMS_AT if dead_arms_at is None else dead_arms_at
+        self.refused_run_at = REFUSED_RUN_AT if refused_run_at is None else refused_run_at
+        self.faulted = None            # the run-level reason, or None
+        self.abandoned = []            # every arm abandoned, in order
+        self.why = None                # the reason for the most recent abandonment
+        self.dead_arms = 0             # CONSECUTIVE abandoned arms
+        self.refused = 0               # consecutive pre-send refusals; spans arms, because crops do
+        self.dead = 0                  # consecutive dead cells within the current arm
+        self.live = 0                  # reads written by the current arm
+
+    def arm_start(self):
+        """The dead-cell streak is PER ARM. A dead arm must not condemn the arm that follows it."""
+        self.dead = 0
+        self.live = 0
+
+    def cell(self, row):
+        kind = row.get("kind")
+        if kind == "crop_refused":
+            # Neither live nor dead: no request was made, so no endpoint was tested. Counting this as a
+            # dead cell would abandon a healthy arm under a reason that is not the reason.
+            self.refused += 1
+        elif kind == "read":
+            self.dead, self.live, self.refused = 0, self.live + 1, 0
+        else:
+            self.dead, self.refused = self.dead + 1, 0
+        if self.refused >= self.refused_run_at:
+            self.faulted = ("%d consecutive crops refused pre-send (last fault: %s). The crops are wrong, "
+                            "not the arms." % (self.refused, row.get("crop_fault")))
+            return "fault"
+        if self.dead >= self.dead_arm_at:
+            self.why = "%d consecutive dead cells (last: %s)" % (self.dead, str(row.get("error"))[:120])
+            return "abandon"
+        return ""
+
+    def arm_abandoned(self, model):
+        """Record an abandoned arm, and fault the run if whole arms are dying in a row."""
+        self.abandoned.append(model)
+        self.dead_arms += 1
+        if self.dead_arms >= self.dead_arms_at:
+            self.faulted = ("%d consecutive arms abandoned (%s). Whole arms dying in a row is a fault in "
+                            "the RUN, not in the models."
+                            % (self.dead_arms, ", ".join(self.abandoned[-self.dead_arms:])))
+        return self.faulted
+
+    def arm_finished(self):
+        """Only a LIVE arm breaks the cross-arm streak.
+
+        An arm that reached its end having written nothing -- every cell already present on a resume, or an
+        empty cell list -- is not evidence that the run is healthy. Resetting on it would let abandoned arms
+        be separated by silence and never be counted together.
+        """
+        if self.live:
+            self.dead_arms = 0
+DEAD_RUN_AT = DEAD_ARM_AT          # retained: older artifacts record it in their footer
 
 
 class RunLockHeld(RuntimeError):
@@ -635,10 +733,17 @@ def _pid_alive(pid):
 def acquire_run_lock(out, why=""):
     """One writer per artifact, enforced across PROCESSES.
 
-    RunWriter makes the header precede the rows *within* a process. It cannot see a second process:
-    two `hebrew_frontier_or.py run` processes were alive together at 11:00 over one artifact, and
-    nothing in the file could have told me which rows belonged to which. A same-process guard cannot
-    see a per-process defect -- the axis has to be spanned.
+    RunWriter makes the header precede the rows *within* a process. It cannot see a second process, and
+    a same-process guard cannot see a per-process defect -- the axis has to be spanned. This lock is what
+    PROVES single authorship rather than inferring it from the file's shape.
+
+    RETRACTION, 2026-10-04. The commit that added this said two `hebrew_frontier_or.py run` processes were
+    alive together at 11:00 over one artifact. They were not. The two pids were a launcher re-exec --
+    bash -> python -> python, parent to child, one writer -- and the artifact had said so all along: one
+    config_header, 20-row arm blocks, zero duplicate (model, span) cells. The 11:00 fault was the DNS
+    window alone. The guard is kept because single authorship should be proved rather than inferred, but it
+    was NOT born from an observed instance of the failure it names, and a guard with no witnessed failure
+    behind it is exactly the kind whose threshold nobody can defend later.
 
     Stale locks release themselves: if the recorded pid is gone the lock is taken over, because the
     failure mode of a sticky lock is somebody deleting lock files by hand."""
@@ -754,7 +859,8 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
     # run's header and its own identity -- git state, approval, truth digest, crop hashes, clip status
     # -- was never written. The per-read crop_sha16 kept the pixels answerable; nothing kept the RUN
     # answerable. A file holding several runs is a log of runs; each needs its own bracket.
-    dead, faulted, clean = 0, None, True
+    faulted, clean = None, True
+    fault = RunFault()                 # see RunFault: a dead ARM, a dead RUN and refused CROPS are three
     _reads_before = sum(1 for _o in diag._lines(OUT) if _o.get("kind") == "read") if OUT.exists() else 0
     # RunWriter is the guard behind the comment above: it refuses to write a row until a header has
     # been written, so `write_header` cannot be made conditional again by anybody, including me.
@@ -835,6 +941,7 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                                 "pricing": {k: c[k] for k in ("prompt_per_mtok", "completion_per_mtok",
                                                               "image_per_1k")},
                                 "structured": c["structured"]})
+            fault.arm_start()
             for s, cpath, ctx in cs:
                 if (s["span_id"], model) in done:
                     continue
@@ -854,17 +961,27 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                            "kind": "call_error", "error": f"{type(e).__name__}: {e}"[:300],
                            "reached_wire": True}
                 f.row(row)          # RunWriter flushes every row itself
-                # An item error is an item error until it becomes a streak; then it is the RUN that
-                # is wrong, and continuing only buys more cells that cannot be scored.
-                dead = 0 if row.get("kind") == "read" else dead + 1
+                # An item error is an item error until it becomes a streak; a streak inside one arm
+                # means that ARM is dead, and only a streak of dead ARMS means the run is.
+                verdict = fault.cell(row)
                 tag = row.get("kind")
                 print(f"  {s['span_id']:10s} {tag:10s} {str(row.get('gated', row.get('error','')))[:44]!r}"
                       f" {row.get('provider_served') or ''}")
-                if dead >= DEAD_RUN_AT:
-                    faulted = ("%d consecutive dead cells (last: %s). The run is faulted, not the "
-                               "arms." % (dead, str(row.get("error"))[:120]))
+                if verdict == "fault":
                     break
-            if faulted:
+                if verdict == "abandon":
+                    # The abandonment is WRITTEN whether or not the run goes on to fault. An arm that died
+                    # is a hole in the coverage, and a scorer reading the artifact later must be able to SEE
+                    # it rather than infer it from a short denominator.
+                    f.row({"kind": "arm_abandoned", "model": model, "why": fault.why,
+                           "dead_cells": fault.dead})
+                    print("  *** ARM ABANDONED: %s -- %s" % (model, fault.why))
+                    fault.arm_abandoned(model)
+                    break
+            else:
+                fault.arm_finished()
+            if fault.faulted:
+                faulted = fault.faulted
                 break
         g1 = {"git_head": _git_head0(), "git_dirty": _git_dirty0()}
         clean = (g0 == g1 and g0["git_dirty"].get("state") == "clean")
@@ -873,6 +990,10 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                # even state it: a run is clean only if git_state() at start and at end are both clean
                # and identical. Anything else is provisional and cannot be cited.
                "git_at_start": g0, "git_at_end": g1, "clean_run": clean, "run_faulted": faulted,
+               # Abandoned arms are recorded whether or not the run faulted: an arm that died is a hole in
+               # the coverage even when the other 24 are sound, and a scorer must be able to see it.
+               "dead_arm_at": DEAD_ARM_AT, "dead_arms_at": DEAD_ARMS_AT, "refused_run_at": REFUSED_RUN_AT,
+               "arms_abandoned": fault.abandoned,
                "dead_run_at": DEAD_RUN_AT,
                "finished": time.strftime("%Y-%m-%dT%H:%M:%S")})
     release_run_lock(OUT)

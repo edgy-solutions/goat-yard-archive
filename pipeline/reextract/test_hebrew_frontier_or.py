@@ -1186,11 +1186,18 @@ else:
 
 
 # ---------------------------------------------------------------------------------------------------
-# (21) The frontier runner's run-level brackets. All four were missing when the 11:00 send went out:
+# (21) The frontier runner's run-level brackets. Three were missing when the 11:00 send went out:
 # 57 cells across three whole arms came back `getaddrinfo failed` and the run carried on; the footer
-# could not say `clean_run`; a resume would have spliced onto a footerless artifact; and two processes
-# with identical command lines were alive at once over one file. These are the guards, not the fix --
-# the fix is rerunning from the top.
+# could not say `clean_run`; and a resume would have spliced onto a footerless artifact. These are the
+# guards, not the fix -- the fix is rerunning from the top.
+#
+# RETRACTION, 2026-10-04, of the fourth item as it was written here. This comment said two processes with
+# identical command lines were alive at once over one file. They were not. The two pids were a launcher
+# re-exec -- bash -> python -> python, parent to child, ONE writer -- and the artifact had said so all
+# along: one config_header, 20-row arm blocks, zero duplicate (model, span) cells. The 11:00 fault was the
+# DNS window alone. The cross-process lock below is kept, because single authorship should be PROVED rather
+# than inferred from a file's shape, but it was not born from an observed instance of the failure it names
+# and its checks below should be read as design, not as a reproduction.
 check("the frontier runner names a dead-run threshold", getattr(F, "DEAD_RUN_AT", 0) >= 2,
       str(getattr(F, "DEAD_RUN_AT", None)))
 check("its footer can state the clean-run rule",
@@ -1289,10 +1296,160 @@ check("...checked for real: the file survives a release by a non-owner", os.path
 os.unlink(str(_lp2))
 
 
+# ---------------------------------------------------------------------------------------------------
+# (22) Dead ARM vs dead RUN vs refused CROPS. The first version of this guard was one counter over all
+# cells, and the 2026-10-04 text-off run falsified it: `inclusionai/ling-3.0-flash-vl` returned 14 provider
+# errors against 5 reads, and the ONLY reason 456 good reads survived is that its failures interleaved with
+# its successes and kept resetting the streak. Consecutive, a single counter would have declared the run
+# faulted over one permanently dead arm.
+#
+# The signal that discriminates was in the 11:00 artifact the whole time: its dead cells spanned three whole
+# ARMS. So the streak is per arm, an arm that dies is abandoned rather than fatal, and only consecutive dead
+# ARMS fault the run. Everything below replays a real pattern offline, which is the point of lifting the
+# bookkeeping out of run(): the first version could only be exercised by spending $0.56.
+check("the three thresholds are three NAMES, not one reused",
+      F.DEAD_ARM_AT >= 2 and F.DEAD_ARMS_AT >= 2 and F.REFUSED_RUN_AT >= 2,
+      "%s/%s/%s" % (F.DEAD_ARM_AT, F.DEAD_ARMS_AT, F.REFUSED_RUN_AT))
+
+
+def _err(i=0):
+    return {"kind": "call_error", "error": "ConnectionError: getaddrinfo failed #%d" % i}
+
+
+def _read(i=0):
+    return {"kind": "read", "span_id": "p%d:n0" % i, "gated": "x"}
+
+
+def _refused(f="bandclip_fault"):
+    return {"kind": "crop_refused", "crop_fault": f}
+
+
+def _arm(fault, model, rows):
+    """Drive one arm exactly as run()'s loop does, and report what the arm cost and what it decided."""
+    fault.arm_start()
+    spent, out = 0, ""
+    for r in rows:
+        spent += 1
+        v = fault.cell(r)
+        if v == "fault":
+            out = "fault"
+            break
+        if v == "abandon":
+            out = "abandon"
+            fault.arm_abandoned(model)
+            break
+    else:
+        fault.arm_finished()
+    return out, spent
+
+
+# -- today's pattern: one arm whose errors interleave with its reads is NOT a dead arm.
+_f = F.RunFault()
+_ling = []
+for _i in range(5):
+    _ling += [_err(_i), _err(_i), _err(_i), _read(_i)]        # 15 errors, 5 reads, never 8 in a row
+_ling += [_err(99)]
+_v, _spent = _arm(_f, "inclusionai/ling-3.0-flash-vl", _ling)
+check("the 2026-10-04 ling pattern does not abandon the arm", _v == "", "%r" % _v)
+check("...and does not fault the run", _f.faulted is None, str(_f.faulted)[:120])
+check("...having walked every cell", _spent == len(_ling), "%d of %d" % (_spent, len(_ling)))
+
+# -- but the same count of errors arriving CONSECUTIVELY kills that one arm.
+_f = F.RunFault()
+_v, _spent = _arm(_f, "inclusionai/ling-3.0-flash-vl", [_err(i) for i in range(16)])
+check("8 consecutive dead cells abandons the arm", _v == "abandon", "%r" % _v)
+check("...at the threshold, not after the whole arm", _spent == F.DEAD_ARM_AT,
+      "%d cells" % _spent)
+check("...and the reason names the count and the last error",
+      "8 consecutive dead cells" in (_f.why or "") and "getaddrinfo" in (_f.why or ""), str(_f.why)[:140])
+check("...and ONE dead arm does not fault the run", _f.faulted is None, str(_f.faulted)[:120])
+check("...the arm is named in the record", _f.abandoned == ["inclusionai/ling-3.0-flash-vl"],
+      str(_f.abandoned))
+
+# -- the 11:00 pattern: whole arms dying in a row IS a run fault, and it stops before arm three.
+_f = F.RunFault()
+_dead_arm = [_err(i) for i in range(20)]
+_r1, _s1 = _arm(_f, "arm-one", list(_dead_arm))
+_r2, _s2 = _arm(_f, "arm-two", list(_dead_arm))
+check("two consecutive abandoned arms fault the RUN", _f.faulted is not None, str(_f.faulted)[:60])
+check("...and the fault names the arms, not the models' competence",
+      "arm-one" in _f.faulted and "arm-two" in _f.faulted and "in the RUN, not in the models" in _f.faulted,
+      _f.faulted[:160])
+check("...and 11:00 would have cost 16 cells, not 57", _s1 + _s2 == 2 * F.DEAD_ARM_AT,
+      "%d cells" % (_s1 + _s2))
+
+# -- a LIVE arm between two dead ones breaks the cross-arm streak. This is the whole point of the split.
+_f = F.RunFault()
+_arm(_f, "dead-one", list(_dead_arm))
+_arm(_f, "healthy", [_read(i) for i in range(19)])
+_arm(_f, "dead-two", list(_dead_arm))
+check("a healthy arm between two dead ones keeps the run alive", _f.faulted is None, str(_f.faulted)[:120])
+check("...while still recording both dead arms", _f.abandoned == ["dead-one", "dead-two"],
+      str(_f.abandoned))
+
+# -- an arm that wrote NOTHING is not evidence of health, so it must not break the streak.
+_f = F.RunFault()
+_arm(_f, "dead-one", list(_dead_arm))
+_arm(_f, "all-cells-already-done", [])          # a resume where every cell was already present
+_arm(_f, "dead-two", list(_dead_arm))
+check("an arm that wrote nothing does NOT break the dead-arm streak", _f.faulted is not None,
+      str(_f.faulted)[:120])
+check("...and the fault names the two arms that actually died",
+      "dead-one" in (_f.faulted or "") and "dead-two" in (_f.faulted or ""), (_f.faulted or "")[:160])
+
+# -- the dead-cell streak really is per arm: 7 and 7 is not 14.
+_f = F.RunFault()
+_v1, _ = _arm(_f, "a", [_err(i) for i in range(F.DEAD_ARM_AT - 1)])
+_v2, _ = _arm(_f, "b", [_err(i) for i in range(F.DEAD_ARM_AT - 1)])
+check("the dead-cell streak resets at the arm boundary", (_v1, _v2) == ("", ""), "%r %r" % (_v1, _v2))
+check("...and the counter was actually reset, not merely under threshold",
+      _f.dead == F.DEAD_ARM_AT - 1, str(_f.dead))
+
+# -- a crop_refused is a THIRD thing. Counting it as a dead cell would print a false cause.
+_f = F.RunFault()
+_v, _spent = _arm(_f, "any-arm", [_refused() for _ in range(20)])
+check("a streak of pre-send crop refusals faults the RUN, not the arm", _v == "fault", "%r" % _v)
+check("...and the reason blames the crops, not the models",
+      "crops are wrong" in (_f.faulted or "") and "bandclip_fault" in (_f.faulted or ""),
+      (_f.faulted or "")[:160])
+check("...and no arm was abandoned by it", _f.abandoned == [], str(_f.abandoned))
+check("...and it stopped at the threshold", _spent == F.REFUSED_RUN_AT, "%d cells" % _spent)
+
+# A refusal must not count toward arm death either -- 20 refusals and 1 error is not a dead arm.
+_f = F.RunFault(refused_run_at=10 ** 6)
+_v, _ = _arm(_f, "any-arm", [_refused() for _ in range(20)] + [_err(1)])
+check("refusals do not accumulate toward ARM death", _v == "" and _f.dead == 1,
+      "%r dead=%d" % (_v, _f.dead))
+
+# ...and a read breaks a refusal streak, because the crops after it were evidently fine.
+_f = F.RunFault()
+_v, _ = _arm(_f, "any-arm", [_refused(), _refused(), _refused(), _read(0)] * 5)
+check("a read breaks the refusal streak", _v == "" and _f.faulted is None, "%r" % _v)
+
+# -- run() must WRITE the abandonment, not merely count it: a short denominator is not a record.
+_src = open(F.__file__, encoding="utf-8").read()
+check("run() writes an arm_abandoned row", '"kind": "arm_abandoned"' in _src)
+check("...before asking whether the run is faulted",
+      _src.index('"kind": "arm_abandoned"') < _src.index("fault.arm_abandoned(model)"))
+check("the footer carries all three thresholds and the abandoned arms",
+      all(k in _src for k in ('"dead_arm_at"', '"dead_arms_at"', '"refused_run_at"',
+                              '"arms_abandoned": fault.abandoned')))
+check("DEAD_RUN_AT survives as an alias, because older footers record it",
+      F.DEAD_RUN_AT == F.DEAD_ARM_AT, "%s vs %s" % (F.DEAD_RUN_AT, F.DEAD_ARM_AT))
+
+# -- the retraction is in the code, not only in a report.
+check("the two-process claim is retracted in the runner's source",
+      "RETRACTION" in _src and "launcher re-exec" in _src)
+check("...and the retraction is not left contradicting itself",
+      "processes were alive together at 11:00 over one artifact, and" not in _src)
+check("the retraction is in this suite's own comment too",
+      "RETRACTION" in open(__file__, encoding="utf-8").read())
+
+
 print()
 # An abort is not a failure, so the count is the gate. Raise the floor when you add a section; never
 # pin it to the exact number, or the suite starts failing on its own growth.
-CHECK_FLOOR = 248
+CHECK_FLOOR = 276
 if len(ran) < CHECK_FLOOR:
     fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
                  f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")
