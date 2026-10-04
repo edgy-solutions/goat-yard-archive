@@ -88,3 +88,59 @@ question that flips on its own.
 - **Prod behaviour.** Neither arm runs the deployed image; `0.3.1` is still unpushed.
 - **The `baml_punt:<reason>` cause split**, deliberately deferred: `backend/stage_health.py` must
   stay byte-identical across the pair, so the instrument is not changed mid-measurement.
+
+## Addendum — attempt 1 aborted before scoring (13:11:52, 2026-10-04)
+
+Attempt 1 aborted at `run_eval` exit 3, eleven seconds in, with nothing scored and no output
+files written. Three launcher faults, all mine, all in the scratchpad launcher, none in the repo:
+
+1. **`LITELLM_PROXY_URL` pointed at endpoint D's Ollama port** (`192.168.1.169:11435/v1`), which
+   serves no `local-router` alias — that name exists only on the gya-test LiteLLM service. Every
+   query-expansion call returned HTTP 404 and fell back to `dedup_only`.
+2. **The launcher preflight could not see it.** I used `evals/acceptance_stage_health.py`, a
+   release-wiring check whose own docstring states: "It does NOT assert that any stage is
+   healthy." It behaved correctly — printed `expansion {ok: 0, errored: 1, causes:
+   {http_404: 1}}` and a NOTE naming the 404 — and then passed, as designed. The launcher logged
+   only `tail -2 | cut -c1-200`, which captured the trailing PASS and discarded the NOTE. The
+   instrument was honest; the launcher threw away the half of its output that mattered.
+3. **`MINIO_HTTP_ENDPOINT` was unset**, so `bible_api` fell through to the in-cluster host
+   `minio` and the KJV index never loaded. `bot.py` imports that map as `KJV_DATA` and reads it
+   for scripture text on the **answer** path (`bot.py:135`, `bot.py:997`), so both arms would
+   have scored a silently degraded product. **This condition was also present in the voided
+   morning arm**, whose 11/13 was therefore scored with an empty verse index — another reason
+   not to treat that number as a baseline.
+
+### Corrections applied, identically to both arms
+
+- `LITELLM_PROXY_URL=http://localhost:4000/v1` — the gya-test LiteLLM service, reached by the
+  existing `kubectl --context edge -n gya-test port-forward svc/litellm-service 4000:4000`.
+  Verified serving `local-router` with a 200 before relaunch. This is an endpoint **correction,
+  not a relaxation**: that service round-robins to `.179`/`.188`, which `gpu-servers.md` assigns
+  to "goatyardarchive production and goatyardtest" and which serves `gemma4:e4b` *as*
+  `local-router`. The standing ruling refuses a config of mine naming those hosts directly and
+  carves out the existing goatyardtest path; no config of mine names them.
+- `MINIO_HTTP_ENDPOINT=http://test.chart-example.local` — 76,013 verses load.
+- The launcher preflight is now `scratchpad/preflight_arm.py`, which asserts what a scored run
+  depends on: `expansion.ok` increased across a served request, `expansion.errored == 0`
+  (absolute, since the server is fresh per arm), no `fallbacks`, one pid across both reads, and
+  the verse index loaded. Its whole output is written to the stage log. Born-tested against the
+  attempt-1 server still listening on 8000: it refused, exit 1, on all four counts.
+
+### Corrections to this document's own claims
+
+- The **Endpoint note** above is wrong. Expansion does **not** route through endpoint D; it
+  routes through the gya-test LiteLLM service. This pair does not contend with Lane A2 on
+  endpoint D at all, and the "~130 calls across the pair" and the yield-to-A2 clause do not
+  apply. Left standing above rather than edited, because a locked prediction that quietly
+  rewrites itself is not a prediction.
+- **P5 was exercised and passed.** `run_eval`'s own scored-run preflight refused the arm and
+  scored nothing, on the condition it was built to catch. An exit 3 is the gate working.
+
+### What attempt 1 settled, at no cost
+
+The stage snapshot read `answer {ok: 3}` and `verifier {ok: 3}` while expansion was returning 404
+on every call. A stage reporting `ok` is a statement about itself, not about the quality of its
+inputs — the same shape as a liveness flag reading `full`.
+
+All other predictions (P1–P4, P6–P8) stand exactly as written above. Nothing is committed in
+either repo from the moment attempt 2 starts until it finishes or aborts.
