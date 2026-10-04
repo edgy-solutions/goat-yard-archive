@@ -244,14 +244,21 @@ def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[s
     live timestamps proved no write had happened
     (docs/audits/RESULT_off_vs_on_rerun3_laneA_20261004.md).
 
-    Both kinds are NON-CONFIRMING and both keep the arm provisional. Ruling 2 is that a re-read
-    which differs leaves the arm provisional, and a digest-only difference is not a reason to
-    relax that: it means the start sample's own digest for those objects was computed over bytes
-    that could not be reproduced, so "the corpus held still" is a weaker claim either way.
-    Whether that should stay provisional is a decision to be made, not one to be assumed here;
-    what this function owes the record is the right REASON.
+    Both kinds are NON-CONFIRMING on byte-identity, so `confirms` stays False for both: a
+    digest-only difference means the start sample's own digest for those objects was computed over
+    bytes that could not be reproduced, and reporting that as a confirmation would overstate it.
+
+    They differ on the question the GATE asks, which is whether the corpus was WRITTEN during the
+    run, and that is what `excludes_write` carries. Ruling of 2026-10-04, superseding the earlier
+    reading recorded here: a digest-only difference at a static last_update_ms is NOT provisional.
+    Nothing was written, so the arm can be cited; the unreliable read is a recorded fact about
+    named uuids, not a reason to withhold a measurement it did not touch. A difference whose
+    timestamp MOVED still refuses, because that is a write.
+
+    Two fields because there are two questions. Collapsing them would rebuild the original defect
+    pointing the other way -- a verdict that says "confirmed" about bytes it could not reproduce.
     """
-    base = {"confirms": False, "status": None, "checked": list(read_fault_uuids or []),
+    base = {"confirms": False, "excludes_write": False, "status": None, "checked": list(read_fault_uuids or []),
             "matched": [], "differing": [], "differing_write": [], "differing_digest_only": [],
             "missing": [], "detail": None}
     if not base["checked"]:
@@ -309,8 +316,10 @@ def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[s
                           "from the start sample by digest ONLY, at an identical last_update_ms ("
                           + _named(base["differing_digest_only"]) + ") -- so NOTHING was written: "
                           "one of the two reads is bad, and since the re-read is the later one the "
-                          "start sample's digest for those objects is the suspect. Non-confirming "
-                          "either way, so this arm stays provisional")
+                          "start sample's digest for those objects is the suspect. No write "
+                          "occurred, so this does NOT make the arm provisional; the objects that "
+                          "could not be re-read identically are recorded by uuid as a caveat")
+        base["excludes_write"] = True
     elif base["missing"]:
         base["status"] = "missing"
         base["detail"] = (str(len(base["missing"])) + " object(s) could not be re-read ("
@@ -318,6 +327,7 @@ def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[s
     else:
         base["status"] = "confirmed"
         base["confirms"] = True
+        base["excludes_write"] = True
         base["detail"] = ("all " + str(len(base["matched"])) + " read-faulted object(s) were "
                           "re-read after the run and match the start sample on "
                           + "+".join(REREAD_COMPARE_FIELDS))
@@ -355,6 +365,14 @@ def provisional_console_lines(block: Dict[str, Any]) -> List[str]:
     if not unavailable and not reread.get("status"):
         out.append("    The reason is not in the record, which is its own defect: see"
                    " summary.integrity.corpus.")
+    if block.get("caveats") and not block.get("provisional"):
+        # An arm can be NOT provisional and still carry a finding the operator must see, and
+        # "not provisional" must never read as "nothing happened". The caveat TEXT is not
+        # repeated here: run_eval prints every caveat from one loop that covers all branches, so
+        # emitting it again would double every line. This says it is there and how many.
+        out.append("    " + str(len(block["caveats"])) + " CAVEAT(s) below name the affected"
+                   " object(s) by uuid; the arm is citable, the read fault is not thereby "
+                   "retracted.")
     out.append("    It is not a violation: the answers that were scored were really scored.")
     if block.get("provisional"):
         out.append("    It may withdraw an earlier claim but asserts nothing new, and cannot be")
@@ -482,11 +500,21 @@ def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
     # The condition that makes this a narrowing and not a loosening: the named objects must be
     # RE-READ after the run and still match the AT_START sample. That turns "we failed to read two
     # objects" into "we failed once, re-read, and they had not changed", which is verified rather
-    # than hopeful. No re-read, a failed re-read, or a re-read that DIFFERS -> still provisional.
+    # than hopeful. No re-read, a failed re-read, an object that did not come back, or a re-read
+    # whose last_update_ms MOVED (that is a write) -> still provisional.
+    #
+    # What does NOT make it provisional, per the ruling of 2026-10-04: a re-read differing by
+    # DIGEST ALONE at a static last_update_ms. That is a bad read in one of the two reads and no
+    # write at all, so the arm is citable and the misread uuids go on the record as a caveat. The
+    # gate therefore turns on `excludes_write` ("was a write ruled out?") rather than `confirms`
+    # ("were the bytes reproduced?"): different questions, and only the first is what the claim
+    # "the corpus did not change during this run" actually needs.
     rr = reread_verdict(at_start, read_fault_uuids, reread)
     read_fault_only = changed is None and bool(read_fault_uuids)
     reread_confirmed = bool(read_fault_only and rr["confirms"])
-    provisional = bool(skipped or changed is True or (changed is None and not reread_confirmed))
+    reread_excludes_write = bool(read_fault_only and rr["excludes_write"])
+    provisional = bool(skipped or changed is True
+                       or (changed is None and not reread_excludes_write))
     caveats: list = []
     note = ("changed_during_run is three-state: None means at least one sample could not be "
             "read, NOT that the corpus held still. A change is a violation (the measurement is "
@@ -506,6 +534,18 @@ def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
             "while last_update_ms held still. They were re-read after the run and match the "
             "start sample, so nothing was written and this arm is citable. The corpus comparison "
             "for these objects rests on the re-read, not on the end sample.")
+    elif reread_excludes_write:
+        # Citable -- and the reason it is citable is itself a defect that must not go unsaid. The
+        # uuids are named HERE because a flag nobody is shown is not a disclosure: this caveat is
+        # the only place a reader of the summary learns which objects the instrument misread.
+        caveats.append(
+            "READ-FAULT CAVEAT (digest-only): " + str(len(rr["differing_digest_only"])) +
+            " object(s) (" + _named(rr["differing_digest_only"]) + ") were re-read after the run "
+            "and came back with a DIFFERENT digest at an unchanged last_update_ms. No write "
+            "happened, so this arm is citable -- but two reads of the same unchanged object "
+            "disagree, which means the vector read itself is unreliable and the start sample is "
+            "the suspect. Any claim resting on those objects' BYTES is unsupported; the claim "
+            "that the corpus did not change during the run is not.")
     return {
         "at_start": at_start,
         "at_end": at_end,
@@ -517,6 +557,7 @@ def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
         "read_fault_uuids": read_fault_uuids,
         "reread": rr,
         "reread_confirmed": reread_confirmed,
+        "reread_excludes_write": reread_excludes_write,
         "caveats": caveats,
         "note": note,
     }

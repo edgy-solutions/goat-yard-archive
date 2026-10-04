@@ -351,7 +351,13 @@ def test_the_reread_must_match_the_START_sample_not_the_end_sample():
     # supposed to rule out -- and would pass every other test in this section.
     a, b = _fault_pair()
     block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
-    assert block["provisional"] is True, block
+    # This used to be asserted through `provisional`. Since the ruling of 2026-10-04 it cannot
+    # be: a digest-only difference is citable, so the GATE outcome is now identical whichever
+    # sample the re-read was compared against, and asserting on it would prove nothing. The
+    # observation that still discriminates is `confirms` -- an implementation using the END
+    # sample as its baseline would report the suspect value as CONFIRMED and name u1 matched.
+    assert block["reread"]["confirms"] is False, "the end sample was used as the baseline"
+    assert block["reread"]["matched"] == [], block["reread"]
     assert block["reread_confirmed"] is False, block["reread"]
     assert block["reread"]["status"] == "differs-digest-only", block["reread"]
     assert block["reread"]["differing"] == ["u1"], block["reread"]
@@ -384,16 +390,103 @@ def test_a_digest_only_reread_difference_is_NOT_reported_as_a_write():
     assert "NOTHING was written" in rr["detail"], rr["detail"]
 
 
-def test_a_digest_only_reread_difference_STILL_keeps_the_arm_provisional():
-    # Naming the cause correctly is not the same as relaxing the gate. Ruling 2 (2026-10-04) is
-    # that a re-read which differs leaves the arm provisional, and a digest-only difference means
-    # the start sample digest itself could not be reproduced. Changing that is a decision to be
-    # taken, not a side effect of fixing a wrong reason -- so it is pinned here.
+def test_a_digest_only_reread_difference_does_NOT_make_the_arm_provisional():
+    # The ruling of 2026-10-04 (superseding the stricter reading this test used to pin): a
+    # digest-only difference at a static last_update_ms means NOTHING WAS WRITTEN, so the arm is
+    # citable. The three assertions have to be read together -- the gate opened, and it opened
+    # without anyone claiming the bytes were reproduced.
     a, b = _fault_pair()
     block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
-    assert block["provisional"] is True, block
+    assert block["provisional"] is False, block
+    assert block["reread"]["excludes_write"] is True, block["reread"]
+    assert block["reread"]["confirms"] is False, "no write is not the same as identical bytes"
     assert block["reread_confirmed"] is False, block["reread"]
-    assert block["reread"]["confirms"] is False, block["reread"]
+    assert block["reread_excludes_write"] is True, block["reread"]
+
+
+def test_a_citable_digest_only_arm_NAMES_the_misread_uuids_in_a_caveat():
+    # An arm that is citable BECAUSE of a known bad read must say which objects were misread.
+    # Without this the gate change is a silent loosening: the summary would read "not
+    # provisional" and carry no trace of the fault that made the question come up at all.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    assert block["provisional"] is False, block
+    cav = " ".join(block["caveats"])
+    assert "u1" in cav, block["caveats"]
+    assert "digest-only" in cav, block["caveats"]
+    assert block["reread"]["differing_digest_only"] == ["u1"], block["reread"]
+
+
+def test_the_digest_only_detail_no_longer_claims_the_arm_is_provisional():
+    # The detail string is what gets quoted into reports, so a stale sentence in it is a false
+    # claim on the record even when the gate behaves correctly.
+    a = _state(per_object={"u1": dict(_GOOD)}, per_object_complete=True)
+    v = CS.reread_verdict(a, ["u1"], _rr({"u1": dict(_BAD)}))
+    assert v["status"] == "differs-digest-only", v
+    assert "stays provisional" not in v["detail"], v["detail"]
+    assert "NOT make the arm provisional" in v["detail"], v["detail"]
+
+
+def test_excludes_write_is_true_ONLY_for_the_verdicts_that_rule_out_a_write():
+    # The whole table, because a field that was simply always True would satisfy the two tests
+    # above and would make every unreadable or missing re-read citable.
+    a = _state(per_object={"u1": dict(_GOOD)}, per_object_complete=True)
+    write = {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 900}
+    cases = [
+        ("confirmed",          True,  CS.reread_verdict(a, ["u1"], _rr({"u1": dict(_GOOD)}))),
+        ("differs-digest-only", True, CS.reread_verdict(a, ["u1"], _rr({"u1": dict(_BAD)}))),
+        ("differs-write",      False, CS.reread_verdict(a, ["u1"], _rr({"u1": dict(write)}))),
+        ("missing",            False, CS.reread_verdict(a, ["u1"], _rr({}))),
+        ("not-attempted",      False, CS.reread_verdict(a, ["u1"], None)),
+        ("unavailable",        False, CS.reread_verdict(a, ["u1"], _rr({}, available=False,
+                                                                      reason="connect-failed"))),
+        ("no-baseline",        False, CS.reread_verdict(_state(), ["u1"], _rr({"u1": dict(_GOOD)}))),
+        ("not-needed",         False, CS.reread_verdict(a, [], _rr({}))),
+    ]
+    for expect_status, expect_excl, v in cases:
+        assert v["status"] == expect_status, (expect_status, v["status"], v)
+        assert v["excludes_write"] is expect_excl, (expect_status, v["excludes_write"], v)
+
+
+def test_a_MIXED_verdict_stays_provisional_because_the_write_dominates():
+    # One bad read alongside one real write must not buy the arm its citability back.
+    a = _state(per_object={"u1": dict(_GOOD), "u2": dict(_GOOD)}, per_object_complete=True)
+    b = _state(per_object={"u1": dict(_BAD), "u2": dict(_BAD)}, per_object_complete=True)
+    write = {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 900}
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD), "u2": dict(write)}))
+    assert block["reread"]["status"] == "differs-write", block["reread"]
+    assert block["reread"]["excludes_write"] is False, block["reread"]
+    assert block["provisional"] is True, block
+    assert block["caveats"] == [], "a provisional arm must not be handed a citability caveat"
+
+
+def test_the_console_of_a_citable_read_fault_arm_does_not_read_as_nothing_happened():
+    # provisional_console_lines exists because this text used to be unreachable by any test. An
+    # arm made citable BY a known bad read is the one case where a clean-looking console is most
+    # misleading, so three things must be on it: that it is not provisional, the uuid, and a
+    # pointer to the caveat. The caveat text itself is printed by run_eval's single caveat loop,
+    # which is why it is counted here and not repeated.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    lines = CS.provisional_console_lines(block)
+    joined = "\n".join(lines)
+    assert "not provisional" in joined, lines
+    assert "u1" in joined, lines
+    assert "CAVEAT" in joined, lines
+    assert "PROVISIONAL ON THE CORPUS AXIS" not in joined, lines
+
+
+def test_a_provisional_arm_is_not_offered_a_caveat_pointer_it_has_no_caveats_for():
+    # The pointer line is conditional, and a provisional arm carries no caveats. Printing
+    # "0 CAVEAT(s) below" would be the same class of defect as the empty unavailable_reason
+    # strings this function was written to remove.
+    a = _state(per_object={"u1": dict(_GOOD)}, per_object_complete=True)
+    b = _state(per_object={"u1": dict(_BAD)}, per_object_complete=True)
+    moved = {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 900}
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(moved)}))
+    assert block["provisional"] is True and block["caveats"] == [], block
+    joined = "\n".join(CS.provisional_console_lines(block))
+    assert "CAVEAT" not in joined, joined
 
 
 def test_a_reread_difference_WITH_a_moved_timestamp_is_reported_as_a_write():
@@ -433,17 +526,24 @@ def test_every_reread_compare_field_is_either_compared_or_the_discriminator():
 
 
 def test_a_provisional_corpus_names_the_REREAD_as_the_reason_not_the_samples():
-    # LOAD-BEARING. The exact shape both attempt-5 arms produced: both samples read fine, the
-    # post-run re-read did not confirm, and the operator was told "Corpus state was NOT
-    # established at both ends:  / " with two empty reasons. The reason printed has to be the
-    # reason the record holds.
-    a, b = _fault_pair()
-    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    # LOAD-BEARING. The defect: both samples read fine, the post-run re-read did not confirm,
+    # and the operator was told "Corpus state was NOT established at both ends:  / " with two
+    # empty reasons. The reason printed has to be the reason the record holds.
+    #
+    # The attempt-5 arms produced this with a digest-only re-read, which the 2026-10-04 ruling
+    # makes citable -- so that shape no longer reaches the provisional branch and is covered by
+    # `test_the_console_prints_the_caveat_...` instead. A MOVED last_update_ms is a write, which
+    # still refuses, so the provisional branch is exercised here with one of those.
+    a = _state(per_object={"u1": dict(_GOOD)}, per_object_complete=True)
+    b = _state(per_object={"u1": dict(_BAD)}, per_object_complete=True)
+    moved = {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 900}
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(moved)}))
     lines = CS.provisional_console_lines(block)
     text = "\n".join(lines)
+    assert block["provisional"] is True, block
     assert "PROVISIONAL" in lines[0], lines
     assert "NOT established at both ends" not in text, text
-    assert "differs-digest-only" in text, text
+    assert "differs-write" in text, text
     assert "u1" in text, text
 
 
@@ -574,7 +674,7 @@ if __name__ == "__main__":
     # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
     # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
     # failed" and looks healthy. Assert the COUNT so a dropped test is caught.
-    EXPECTED_TESTS = 45
+    EXPECTED_TESTS = 51
     if len(tests) != EXPECTED_TESTS:
         print("FAIL suite: collected " + str(len(tests)) + " tests, expected " +
               str(EXPECTED_TESTS) + " - a test was lost or added without updating EXPECTED_TESTS")
