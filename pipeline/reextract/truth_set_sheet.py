@@ -259,7 +259,7 @@ H.append('<div class="sub">FILE pages throughout; printed = file &minus; %d. Cro
              PRINTED_OFFSET, cut["git_end"]["git_head"]))
 H.append('<div class="note"><b>What is deliberately missing.</b> The extractor&rsquo;s reading, its '
          'word count and its pointing flag are all absent, and that absence is asserted over these '
-         'bytes before the file is written. The previous truth set was 30% wrong in the direction of '
+         'bytes before the file is written. The previous truth set was 30%% wrong in the direction of '
          'the candidate, once affirmed verbatim. Write what the pixels show, or abstain.<br>'
          '<b>What is present and is NOT a hint:</b> resolved column runs, counted from the ink by gaps '
          'rather than by recognising letters.<br>'
