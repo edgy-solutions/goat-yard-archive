@@ -834,6 +834,17 @@ def answer_lm_rows(run_ledger: Dict[str, List[QuestionResult]]) -> tuple:
     return rows, sorted(set(missing))
 
 
+def _served_counts(distinct: List[dict]) -> Dict[Any, int]:
+    """{provider_served: scored runs}, skipping rows that did not report one."""
+    out: Dict[Any, int] = {}
+    for d in distinct:
+        served = d.get("provider_served")
+        if served in (None, ""):
+            continue
+        out[served] = out.get(served, 0) + d["runs"]
+    return out
+
+
 def answer_lm_tally(run_ledger: Dict[str, List[QuestionResult]]) -> dict:
     """Distinct (client, model, temperature, pin, provider served) combinations across the arm.
 
@@ -857,6 +868,14 @@ def answer_lm_tally(run_ledger: Dict[str, List[QuestionResult]]) -> dict:
         # what we have" -- an unpinned call, or a response whose provider could not be read.
         "runs_pin_honored_false": sum(d["runs"] for d in distinct if d.get("pin_honored") is False),
         "runs_pin_unchecked": sum(d["runs"] for d in distinct if d.get("pin_honored") is None),
+        # Served provider, counted independently of the pin. An UNPINNED arm has one pin
+        # value (None) and pin_honored None on every run, so neither pin gate above can
+        # see a two-provider mixture. floor_20260928 was served DeepInfra 61 / StreamLake
+        # 17 in arm A and 39 / 39 in arm B, and reported no violation for it.
+        "runs_by_provider_served": {
+            str(k): v for k, v in sorted(_served_counts(distinct).items())
+        },
+        "distinct_provider_served": sorted(str(k) for k in _served_counts(distinct)),
     }
 
 
@@ -971,6 +990,18 @@ def check_run_integrity(run_ledger: Dict[str, List[QuestionResult]], allow_lm_ca
         violations.append(
             f"{lm['runs_pin_honored_false']} scored run(s) were served by a provider OUTSIDE "
             f"the pin ({', '.join(served)}) - the pin was sent and not honored")
+    # A gate has to be able to see the failure it was built for. The two gates above watch
+    # the PIN; this one watches what actually served the calls, which is the thing that
+    # changes the measurement. Not gated behind the pin being set, because the arms that
+    # motivated it had no pin at all.
+    served = lm["distinct_provider_served"]
+    if len(served) > 1:
+        mix = ", ".join(f"{k}={v}" for k, v in sorted(lm["runs_by_provider_served"].items()))
+        violations.append(
+            f"the arm was served by {len(served)} different providers ({mix}) - "
+            f"temperature 0 is deterministic WITHIN a provider, not across two, so this "
+            f"arm measures a provider mixture as though it were model behaviour. Pin it "
+            f"with OPENROUTER_PROVIDER_ORDER (see backend/degradation.py provider_pin).")
     if lm["questions_missing_a_record"]:
         miss = lm["questions_missing_a_record"]
         violations.append(
@@ -1291,6 +1322,12 @@ def main(argv: Optional[list] = None) -> int:
                                   "answer_chars": len(r.answer or ""),
                                   "temperature_on_the_wire": ((r.answer_lm or {}).get("temperature_on_the_wire")
                                                                 if isinstance(r.answer_lm, dict) else None),
+                                  "provider_served": ((r.answer_lm or {}).get("provider_served")
+                                                       if isinstance(r.answer_lm, dict) else None),
+                                  "provider_pin": ((r.answer_lm or {}).get("provider_pin")
+                                                    if isinstance(r.answer_lm, dict) else None),
+                                  "pin_honored": ((r.answer_lm or {}).get("pin_honored")
+                                                   if isinstance(r.answer_lm, dict) else None),
                                   "expansion_error": r.expansion_error,
                                   "expansion_fallback": r.expansion_fallback,
                                   "entity_lookup_mode": r.entity_lookup_mode,

@@ -1168,6 +1168,93 @@ def test_entity_lookup_counts_tally_distinct_modes_across_runs():
     assert set(h["entity_lookup"]["distinct_mode"]) == {"full", "degraded_no_vector"}, h["entity_lookup"]
 
 
+# --- item 3: an UNPINNED arm served by two providers is a mixture ---------------------
+# Measured, not hypothetical: floor_20260928 armA was served DeepInfra 61 / StreamLake 17 and
+# armB DeepInfra 39 / StreamLake 39, and both arms reported violations: []. An unpinned arm has
+# ONE pin value (None) and pin_honored None on every run, so both pre-existing pin gates are
+# structurally blind to it -- the same defect as a gate that cannot see its own failure.
+
+_UNPINNED_SL = dict(LM_REC, provider_pin=None, provider_served="StreamLake", pin_honored=None)
+_UNPINNED_DI = dict(LM_REC, provider_pin=None, provider_served="DeepInfra", pin_honored=None)
+
+
+def _mixed_violations():
+    return RE.check_run_integrity(
+        {"q1": [_lm_res("q1", dict(_UNPINNED_DI)), _lm_res("q1", dict(_UNPINNED_DI)),
+                _lm_res("q1", dict(_UNPINNED_SL))],
+         "q2": [_lm_res("q2", dict(_UNPINNED_DI))]},
+        allow_lm_cache=False)
+
+
+def test_unpinned_arm_served_by_two_providers_is_a_violation():
+    v = [x for x in _mixed_violations() if "different providers" in x]
+    assert len(v) == 1, _mixed_violations()
+    assert "2 different providers" in v[0], v[0]
+
+
+def test_the_mixture_violation_names_both_providers_and_their_run_counts():
+    v = [x for x in _mixed_violations() if "different providers" in x][0]
+    assert "DeepInfra=3" in v, v
+    assert "StreamLake=1" in v, v
+    # it has to say what to do about it, or it is a label rather than a gate
+    assert "OPENROUTER_PROVIDER_ORDER" in v, v
+
+
+def test_the_mixture_gate_does_not_fire_on_the_pre_existing_pin_gates():
+    # The point of the new gate is that the old ones CANNOT see this arm. If either of them
+    # fires here, the new gate is redundant and this whole addition is unjustified.
+    all_v = _mixed_violations()
+    assert not any("provider pin changed" in x for x in all_v), all_v
+    assert not any("OUTSIDE" in x for x in all_v), all_v
+
+
+def test_one_served_provider_throughout_is_not_a_mixture():
+    v = RE.check_run_integrity(
+        {"q1": [_lm_res("q1", dict(_UNPINNED_SL)), _lm_res("q1", dict(_UNPINNED_SL))]},
+        allow_lm_cache=False)
+    assert not any("different providers" in x for x in v), v
+
+
+def test_no_provider_reported_anywhere_manufactures_no_mixture():
+    # An endpoint that cannot read the serving provider reports None. Counting None as a
+    # provider would turn "unknown" into a second provider and fabricate a violation --
+    # the inverse of folding silence into health.
+    blind = dict(LM_REC, provider_pin=None, provider_served=None,
+                 provider_served_source=None, pin_honored=None)
+    ledger = {"q1": [_lm_res("q1", dict(blind)), _lm_res("q1", dict(blind))]}
+    v = RE.check_run_integrity(ledger, allow_lm_cache=False)
+    assert not any("different providers" in x for x in v), v
+    t = RE.answer_lm_tally(ledger)
+    assert t["runs_by_provider_served"] == {}, t["runs_by_provider_served"]
+    assert t["distinct_provider_served"] == [], t["distinct_provider_served"]
+
+
+def test_answer_lm_tally_counts_scored_runs_per_served_provider():
+    t = RE.answer_lm_tally(
+        {"q1": [_lm_res("q1", dict(_UNPINNED_DI)), _lm_res("q1", dict(_UNPINNED_SL)),
+                _lm_res("q1", dict(_UNPINNED_SL))],
+         "q2": [_lm_res("q2", dict(_UNPINNED_SL), err="boom")]})
+    # the errored run is not a gap in the evidence and is not counted
+    assert t["runs_by_provider_served"] == {"DeepInfra": 1, "StreamLake": 2}, t
+    assert t["distinct_provider_served"] == ["DeepInfra", "StreamLake"], t
+
+
+def test_per_question_runs_entry_carries_the_provider_fields():
+    # Attribution, not just detection: floor_20260928 recorded no per-run provider, so a
+    # blocky pass/fail pattern (armA scapegoat_001 was T,T,T,F,F,F) could not be tested
+    # against which provider served which run. These three fields are what makes it testable.
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001"])
+    rec = json.loads((out / "logos_001.json").read_text(encoding="utf-8"))
+    r0 = rec["runs"][0]
+    assert r0["provider_served"] == "StreamLake", r0
+    assert r0["provider_pin"] == {"order": ["streamlake"], "allow_fallbacks": False}, r0
+    assert r0["pin_honored"] is True, r0
+
+# A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
+# test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
+# failed" and looks healthy. Assert the COUNT so a silently shrinking suite fails loudly.
+EXPECTED_TESTS = 118
+
 if __name__ == "__main__":
     passed = failed = 0
     for name, fn in sorted(globals().items()):
@@ -1182,4 +1269,8 @@ if __name__ == "__main__":
                 failed += 1
                 print("ERROR %s: %s: %s" % (name, type(e).__name__, e))
     print("%d passed, %d failed" % (passed, failed))
+    if passed + failed != EXPECTED_TESTS:
+        print("FAIL suite: collected %d tests, expected %d - a test was lost or added without "
+              "updating EXPECTED_TESTS" % (passed + failed, EXPECTED_TESTS))
+        failed += 1
     sys.exit(1 if failed else 0)
