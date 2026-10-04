@@ -337,9 +337,24 @@ short = [{"span_id": b["span_id"], "box_h_native": b["crop"]["native_rects"][0][
 rule_only = [{"span_id": b["span_id"], "size": b["crop"]["size"],
               "ink_runs_px": [r[1] - r[0] + 1 for r in G.ink_runs(Image.open(b["crop"]["path"]))]}
              for b in cut if b["crop"]["text_bands"] == 0]
-over = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in cut
+# A PROBE THAT MISSES PASSES ON NOTHING. `word_runs` is a COLUMN ink profile, so on a crop holding two
+# stacked lines the columns are inked from both and the whole crop collapses to one wide run: p921:n4
+# holds four lines resolving 6, 5, 5 and 3 runs and the parent reports ONE. Measured over this set, all
+# 18 multi-line crops resolve fewer runs than their own busiest line, and 16 of them then EQUAL the
+# claimed word count -- a pass the check did not earn. So this tally is reported only over crops where
+# it means something, with the blind population named rather than scored as agreement.
+def _lines_of_type(b):
+    im = Image.open((b["clip"] or b["crop"])["path"])
+    return sum(1 for y0, y1 in G.ink_runs(im) if (y1 - y0 + 1) >= G.MIN_BAND_PX)
+
+
+blind = [{"span_id": b["span_id"], "words": b["words"], "lines_of_type": _lines_of_type(b)}
+         for b in cut if _lines_of_type(b) > 1]
+_meas = [b for b in cut if _lines_of_type(b) <= 1]
+assert len(_meas) + len(blind) == len(cut), "every crop is either measurable or named as blind"
+over = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in _meas
         if _bestruns(b) > b["words"]]
-under = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in cut
+under = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in _meas
          if _bestruns(b) < b["words"]]
 GEOM_FLAGS = {
     "duplicate_box": dup,
@@ -360,6 +375,12 @@ GEOM_FLAGS = {
                         "ink run to be a line of type at all -- so the box cannot hold a word of this "
                         "fount whatever the crop looks like",
     "runs_exceed_words": over, "runs_below_words": under,
+    "runs_not_measurable": blind,
+    "runs_not_measurable_note": "the crop shown for these holds more than one line of type, and a "
+                                "COLUMN ink profile cannot be read across stacked lines -- it merges "
+                                "them and under-counts. These are NOT agreements and NOT exceedances; "
+                                "the check does not apply to them. Every one is also a box the clip "
+                                "abstained on, so they are the same redraw question.",
     "runs_note": "resolved column runs against the extractor's word count, best recipe per span. More "
                  "runs than words means the box holds material beyond the signature (a redraw question "
                  "by the box rule); fewer means ink still bridges, or the extraction claims words the "
@@ -420,7 +441,9 @@ print("NO LINE OF TYPE (box on a rule): %d  %s"
       % (len(rule_only), [x["span_id"] for x in rule_only]))
 print("geometry flags: duplicate-box groups %d %s   box shorter than a line %s"
       % (len(dup), list(dup.values()) or "", [x["span_id"] for x in short] or "none"))
-print("resolved runs vs claimed words: more %d   fewer %d   equal %d"
-      % (len(over), len(under), len(cut) - len(over) - len(under)))
+print("resolved runs vs claimed words (single-line crops only, n=%d of %d): more %d  fewer %d  equal %d"
+      % (len(_meas), len(cut), len(over), len(under), len(_meas) - len(over) - len(under)))
+print("   NOT MEASURABLE (crop holds >1 line of type; the column profile merges them): %d  %s"
+      % (len(blind), [x["span_id"] for x in blind]))
 print(banner(GIT_START, GIT_END))
 print("wrote", OUT.name)
