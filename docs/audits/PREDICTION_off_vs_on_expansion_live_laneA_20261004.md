@@ -229,3 +229,62 @@ question-specific; whether `causes: {"other"}` is hiding several distinct faults
 allowlist bucket (it is a single bucket by design, and that may now be too coarse); or whether the
 suppressed manifest changes the answer the user gets. Those are results, and no result has been read
 yet.
+
+---
+
+## Retraction: "P1 FAILED" was wrong. P1 is undetermined, and a rule I wrote does not exist.
+
+The section above declares the pair void because P1 failed. **P1 did not fail. It has not been
+evaluated yet.** The retraction is held to the same bar as the claim, because a retraction is a
+causal claim too.
+
+**What P1 actually measures.** `summary.integrity.stage_health.expansion` is computed at
+`evals/run_eval.py:932` over `scored` runs only — `[r for runs in run_ledger.values() for r in runs
+if not r.error and not r.degraded]`. **The warmup is not in `run_ledger`.** It is returned
+separately as `warmup_info` and never enters the tally. So the punt that I called a P1 failure is
+not in P1's domain at all, and P1's value will not be known until the arm finishes.
+
+The first question's scored runs, already on disk, expanded clean: `scapegoat_001` ×5 with
+`expansion_error: False`, `expansion_fallback: None`, `entity_lookup_mode: full`,
+`provider_served: StreamLake`, `pin_honored: True`. One question is not an arm, and I am not
+reading P1 off it.
+
+**What did fail is a rule I wrote that is enforced nowhere.** This document says "If the warmup
+shows an expansion error, no scored question is sent." The harness does not do that. It has the
+mechanism — `_warmup` returns `(warmup_info, exit_code)` and the docstring says "A nonzero exit_code
+means: do not score anything" — and for a BAML punt it deliberately prints a WARNING and returns
+zero, which is why the arm proceeded. I asserted a preflight behaviour, did not check whether it
+existed, and then read its absence as a measurement failure. **Recording a rule is not enforcing
+it** ([[recording-a-flag-is-not-acting-on-it]]).
+
+**So the void declaration is withdrawn as premature**, and the withdrawal rests on the field
+definition at `run_eval.py:932`, which is objective and checkable — not on the early runs looking
+clean. If P1 fails on the finished tally, the pair is void and the reclassification above applies
+exactly as written. If P1 holds, the arm is a valid OFF measurement whose warmup punted, and the
+punt belongs in the result as a named hazard.
+
+**Still true from that section, and not withdrawn:**
+
+- The warmup punt is real, and `/health/stages` counted it correctly (`errored: 1`, `causes:
+  {"other": 1}`, `fallbacks: {"poisoned_manifest_suppressed": 1}`). The recorder works.
+- `entities_given_none_returned` is a documented stochastic punt, not a stage fault: the ADR-0013
+  Part D comment at `backend/main.py:673` calls it "a gemma coin-flip, not reliable evidence about
+  manifest quality."
+- On the punt path `search_text = req.query`, so a punted run feeds the **raw query** to the
+  second-pass lookup. The punt rate is therefore the fraction of an arm effectively running without
+  expansion, which is why it has to be measured rather than assumed either way.
+- **Arm ON is still not launched.** The reason is now different and weaker: not "the pair is void"
+  but "P1 is unevaluated." Spending the second arm before the first arm's health is known is the
+  same mistake in a smaller size.
+
+**Three defects to fix in the next round, none of them mid-flight:**
+
+1. **Decide whether a warmup expansion punt is a gate, then make the code say so.** Either `_warmup`
+   returns nonzero for it, or this document stops claiming it does. A rule that lives only in prose
+   is decoration.
+2. **Split the `other` cause bucket.** A documented coin-flip punt and an unrecognised real fault
+   both land in `other`, so the counter cannot distinguish them. `baml_punt:<reason>` is the fix.
+   Deferred because `backend/stage_health.py` is byte-identical in `release-0.3.2` and the
+   instrument must not change mid-arm.
+3. **P1 needs to name its population.** "`errored == 0`" without "over scored runs, warmup excluded"
+   is what let me misread my own prediction within an hour of locking it.
