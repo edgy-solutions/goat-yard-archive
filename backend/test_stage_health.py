@@ -20,6 +20,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import traceback
 
@@ -44,7 +45,11 @@ def test_fresh_snapshot_shape_and_zero_counters():
         "answer", "verifier",
     }
     assert set(snap["process"].keys()) == {"pid", "commit_sha", "started_at", "uptime_s"}
-    assert set(snap["expansion"].keys()) == {"ok", "errored", "causes", "fallbacks"}
+    assert set(snap["expansion"].keys()) == {"ok", "errored", "causes", "fallbacks",
+                                             "retries"}
+    assert set(snap["expansion"]["retries"].keys()) == {
+        "total", "calls_with_retries", "max_observed", "bound_exhausted", "unobserved",
+    }
     assert set(snap["entity_lookup"].keys()) == {"modes"}
     assert set(snap["answer"].keys()) == {"ok", "not_run", "unobservable", "degraded"}
     assert set(snap["verifier"].keys()) == {"ok", "not_run", "unobservable", "failures"}
@@ -54,6 +59,10 @@ def test_fresh_snapshot_shape_and_zero_counters():
     assert snap["expansion"]["errored"] == 0
     assert snap["expansion"]["causes"] == {}
     assert snap["expansion"]["fallbacks"] == {}
+    assert snap["expansion"]["retries"] == {
+        "total": 0, "calls_with_retries": 0, "max_observed": 0,
+        "bound_exhausted": 0, "unobserved": 0,
+    }
     assert snap["entity_lookup"]["modes"] == {}
     assert snap["answer"]["ok"] == 0
     assert snap["answer"]["not_run"] == 0
@@ -455,8 +464,146 @@ def test_source_expansion_error_assigned_outside_stages_capture_guard():
     assert assign_indent == guard_indent, (assign_indent, guard_indent)
 
 
+# --------------------------------------------------------------------------
+# 9. Retry accounting for `retry_policy BoundedTransport` (baml_src/main.baml).
+#
+#    Why these exist: one truncated HTTP response body -- a single request in
+#    67 -- voided a 65-run scored arm, because nothing in baml_src retried and
+#    the expansion stage therefore failed hard on a transport hiccup. The
+#    policy that fixes it is bounded at 3 retries, and a bound that nobody
+#    measures is a bound nobody can tell has been hit. These tests are about
+#    whether the bound is OBSERVABLE, not whether retrying works (that is
+#    backend/test_expansion_retry.py, which drives a real truncating socket).
+# --------------------------------------------------------------------------
+
+def test_the_retry_bound_constant_matches_the_policy_declared_in_baml_src():
+    # DERIVED, not restated. stage_health cannot import baml, so it carries its own
+    # MAX_RETRIES_CONFIGURED; if the policy in baml_src is edited and the constant is
+    # not, every bound_exhausted count silently measures against a stale bound. A
+    # failure here means the two have drifted -- fix the constant, not this test.
+    baml = io.open(os.path.join(os.path.dirname(_HERE), "baml_src", "main.baml"),
+                   encoding="utf-8").read()
+    assert "retry_policy BoundedTransport" in baml, "the policy itself is gone from baml_src"
+    m = re.search(r"retry_policy\s+BoundedTransport\s*\{[^}]*?max_retries\s+(\d+)", baml,
+                  re.S)
+    assert m is not None, "could not parse max_retries out of the BoundedTransport policy"
+    assert sh.MAX_RETRIES_CONFIGURED == int(m.group(1)), (
+        sh.MAX_RETRIES_CONFIGURED, int(m.group(1)))
+
+
+def test_the_expansion_client_actually_carries_the_retry_policy():
+    # The policy existing is not the policy being USED. A failure here means the retry was
+    # declared and then not attached to the client the expansion call runs on, which looks
+    # exactly like a fix and behaves exactly like the defect.
+    baml = io.open(os.path.join(os.path.dirname(_HERE), "baml_src", "main.baml"),
+                   encoding="utf-8").read()
+    m = re.search(r"client<llm>\s+LocalRouter\s*\{(.*?)\n\}", baml, re.S)
+    assert m is not None, "LocalRouter client block not found"
+    assert "retry_policy BoundedTransport" in m.group(1), m.group(1)
+
+
+def test_retries_are_summed_and_the_high_water_mark_is_kept():
+    sh._reset_for_tests()
+    for n in (0, 2, 1):
+        sh.record_request(expansion_error=None, expansion_fallback=None,
+                          expansion_retries=n, entity_lookup_mode="full",
+                          answer_degraded=None, verification_failure=None)
+    r = sh.snapshot()["expansion"]["retries"]
+    assert r["total"] == 3, r
+    assert r["calls_with_retries"] == 2, r      # the 0 does not count as a retried call
+    assert r["max_observed"] == 2, r
+    assert r["bound_exhausted"] == 0, r
+    assert r["unobserved"] == 0, r
+
+
+def test_an_unobserved_retry_count_is_not_recorded_as_zero():
+    # The whole point. A request whose collector was missing tells us NOTHING about
+    # retries. Folding that into total=0 would report a healthy transport on no evidence --
+    # the same silence the not_run/unobservable states exist to prevent elsewhere in this
+    # module. A failure here means a blind run can pass the preflight.
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      expansion_retries=None, entity_lookup_mode="full",
+                      answer_degraded=None, verification_failure=None)
+    r = sh.snapshot()["expansion"]["retries"]
+    assert r["unobserved"] == 1, r
+    assert r["total"] == 0 and r["calls_with_retries"] == 0, r
+    assert r["max_observed"] == 0 and r["bound_exhausted"] == 0, r
+
+
+def test_exhausting_the_bound_is_counted_separately_from_merely_retrying():
+    # Reaching the bound means the transport failed every allowed attempt in a row: broken,
+    # not flaky. The scored-run preflight refuses on this count, so it must not be
+    # indistinguishable from an ordinary successful retry.
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      expansion_retries=1, entity_lookup_mode="full",
+                      answer_degraded=None, verification_failure=None)
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      expansion_retries=sh.MAX_RETRIES_CONFIGURED,
+                      entity_lookup_mode="full",
+                      answer_degraded=None, verification_failure=None)
+    r = sh.snapshot()["expansion"]["retries"]
+    assert r["bound_exhausted"] == 1, r
+    assert r["calls_with_retries"] == 2, r
+    assert r["max_observed"] == sh.MAX_RETRIES_CONFIGURED, r
+
+
+def test_a_bool_is_not_a_retry_count():
+    # isinstance(True, int) is True in Python, so a flag passed where a count belongs would
+    # otherwise be recorded as "1 retry". It is an unobserved count, not a retry.
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      expansion_retries=True, entity_lookup_mode="full",
+                      answer_degraded=None, verification_failure=None)
+    r = sh.snapshot()["expansion"]["retries"]
+    assert r["unobserved"] == 1, r
+    assert r["total"] == 0 and r["calls_with_retries"] == 0, r
+
+
+def test_retries_from_baml_log_is_attempts_minus_one_and_ignores_selected():
+    # Measured against baml_py 0.211.1: LLMCall.selected is True on EVERY call, including
+    # the three that failed, so it cannot identify the winning attempt. Counting "calls
+    # where not selected" would report 0 retries on a call that retried three times.
+    class _Call:
+        def __init__(self):
+            self.selected = True
+
+    class _Log:
+        def __init__(self, n):
+            self.calls = [_Call() for _ in range(n)]
+
+    assert sh.retries_from_baml_log(_Log(4)) == 3
+    assert sh.retries_from_baml_log(_Log(1)) == 0
+    assert all(c.selected for c in _Log(4).calls), "the premise of this test"
+
+
+def test_retries_from_baml_log_returns_None_when_it_cannot_observe():
+    # None is a real answer that the caller keeps distinct from 0 (see the unobserved test).
+    class _NoCalls:
+        pass
+
+    class _EmptyCalls:
+        calls: list = []
+
+    assert sh.retries_from_baml_log(None) is None
+    assert sh.retries_from_baml_log(_NoCalls()) is None
+    assert sh.retries_from_baml_log(_EmptyCalls()) is None
+
+
+def test_source_passes_a_per_request_collector_to_the_expansion_call():
+    # A module-level collector would accumulate across requests and make len(calls) a
+    # running total, so every request after the first would look like it retried. Assert
+    # the collector is constructed INSIDE the handler and handed to the expansion call.
+    assert "_expansion_collector = baml_py.Collector(" in _MAIN
+    assert '"collector": _expansion_collector' in _MAIN
+    # and that the count actually reaches the recorder at every exit
+    assert _MAIN.count("expansion_retries=stage_health.retries_from_baml_log(") == \
+        _MAIN.count("expansion_fallback=locals().get(\"fallback_kind\", None),")
+
+
 if __name__ == "__main__":
-    EXPECTED_TEST_COUNT = 22
+    EXPECTED_TEST_COUNT = 31
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print(

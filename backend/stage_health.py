@@ -87,6 +87,37 @@ ANSWER_DEGRADED_REASONS = frozenset({
 # verification_failure local at all -- so there is nothing to read, and
 # reporting "ok" would be a fabricated pass in the one tool built to detect
 # fabricated health. A caller passes this sentinel instead of a reason.
+# The retry bound declared by `retry_policy BoundedTransport` in baml_src/main.baml. It is
+# restated here because this module must not import baml, and
+# test_stage_health.py DERIVES the expected value by parsing baml_src rather than
+# restating it again -- so if the policy changes and this constant does not, the suite fails
+# instead of silently measuring against a stale bound.
+MAX_RETRIES_CONFIGURED = 3
+
+
+def retries_from_baml_log(log) -> Optional[int]:
+    """Attempts-minus-one from a BAML FunctionLog, or None if it cannot be observed.
+
+    Retries are counted as len(log.calls) - 1 and NOT by inspecting LLMCall.selected:
+    measured against baml_py 0.211.1, `selected` is True on EVERY call including the three
+    that failed, so it cannot identify the winning attempt. Duck-typed on purpose -- this
+    module stays importable without baml installed, which is how test_stage_health.py runs
+    without pulling in Weaviate/DSPy.
+
+    None is a real answer and the caller must keep it distinct from 0: a missing collector
+    means retries were not observed, not that there were none.
+    """
+    if log is None:
+        return None
+    calls = getattr(log, "calls", None)
+    if not calls:
+        return None
+    try:
+        return max(0, len(calls) - 1)
+    except TypeError:
+        return None
+
+
 UNOBSERVABLE = "__unobservable__"
 
 # backend/bot.py:1265 -- the only verification_failure= value currently
@@ -150,7 +181,13 @@ _lock = threading.Lock()
 def _fresh_state() -> dict:
     return {
         "requests_recorded": 0,
-        "expansion": {"ok": 0, "errored": 0, "causes": {}, "fallbacks": {}},
+        # `retries.unobserved` is a THIRD state kept out of the counts on purpose, for the
+        # same reason answer/verifier keep "not_run" separate from "ok": a request whose
+        # collector was missing says NOTHING about retries, and folding that into 0 would
+        # report a healthy transport on no evidence.
+        "expansion": {"ok": 0, "errored": 0, "causes": {}, "fallbacks": {},
+                      "retries": {"total": 0, "calls_with_retries": 0, "max_observed": 0,
+                                  "bound_exhausted": 0, "unobserved": 0}},
         "entity_lookup": {"modes": {}},
         # "not_run" is a THIRD state, kept separate from "ok" on purpose. A
         # request that exits before generation (no retrieval results, or no bot
@@ -186,6 +223,7 @@ def record_request(
     *,
     expansion_error: Optional[str],
     expansion_fallback: Optional[str],
+    expansion_retries: Optional[int] = None,
     entity_lookup_mode: Optional[str],
     answer_degraded: Optional[str],
     verification_failure: Optional[str],
@@ -227,6 +265,26 @@ def record_request(
                 msg = expansion_error if isinstance(expansion_error, str) else str(expansion_error)
                 cause = _bucket_expansion_error(msg)
                 _bump(_state["expansion"]["causes"], cause)
+
+            # Retry accounting for `retry_policy BoundedTransport`. A retry that can loop
+            # silently is the same defect under a new name, so the bound is made observable
+            # here rather than merely declared in baml_src: bound_exhausted counts calls that
+            # used every retry the policy allows, which means the transport is broken rather
+            # than flaky, and the scored-run preflight refuses on it.
+            _r = _state["expansion"]["retries"]
+            if isinstance(expansion_retries, bool) or not isinstance(expansion_retries, int):
+                # bool is excluded explicitly because isinstance(True, int) is True in Python
+                # and a flag is not a count.
+                _bump(_r, "unobserved")
+            else:
+                _n = max(0, expansion_retries)
+                _r["total"] += _n
+                if _n > 0:
+                    _bump(_r, "calls_with_retries")
+                if _n > _r["max_observed"]:
+                    _r["max_observed"] = _n
+                if _n >= MAX_RETRIES_CONFIGURED:
+                    _bump(_r, "bound_exhausted")
 
             if expansion_fallback is not None:
                 kind = _allow(expansion_fallback, EXPANSION_FALLBACK_KINDS)
@@ -273,6 +331,7 @@ def snapshot() -> dict:
             "errored": _state["expansion"]["errored"],
             "causes": dict(_state["expansion"]["causes"]),
             "fallbacks": dict(_state["expansion"]["fallbacks"]),
+            "retries": dict(_state["expansion"]["retries"]),
         }
         entity_lookup = {"modes": dict(_state["entity_lookup"]["modes"])}
         answer = {

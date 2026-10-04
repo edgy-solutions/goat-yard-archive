@@ -76,9 +76,35 @@ client<llm> OpenRouterText {
   }
 }
 
+// Bounded retry for TRANSPORT faults, added 2026-10-04 after one scored arm was voided
+// by a single truncated HTTP response body:
+//   reqwest::Error { kind: Request, url: "http://localhost:4000/v1/chat/completions",
+//                    source: hyper::Error(IncompleteMessage) }
+// on real_ishmael_circumcision_001. One request in 67. The expansion stage was healthy and
+// the model was fine; the body did not arrive whole. Before this policy existed there was NO
+// retry anywhere in baml_src, so a truncated body was an unretried hard failure on the
+// expansion path -- in production as well as in evals, where retrieval silently degrades to
+// the raw query and the user is told nothing.
+//
+// BOUNDED on purpose: 3 retries, so at most 4 attempts. A retry that can loop silently is the
+// same defect under a new name. The bound is observable, not just declared -- backend's
+// stage_health counts attempts per call from the BAML collector (len(log.calls) - 1) and the
+// scored-run preflight REFUSES if any call exhausted the bound. Exhausting it means the
+// transport is broken, not flaky, and nothing should be scored over it.
+retry_policy BoundedTransport {
+  max_retries 3
+  strategy {
+    type exponential_backoff
+    delay_ms 200
+    multiplier 2
+    max_delay_ms 2000
+  }
+}
+
 // Define the LiteLLM proxy client (routes to local Ollama/gemma4 via cluster DNS)
 client<llm> LocalRouter {
   provider openai
+  retry_policy BoundedTransport
   options {
     base_url env.LITELLM_PROXY_URL
     api_key "anything"

@@ -28,6 +28,7 @@ from typing import List, Optional, Any
 from .gill_search import GillSearchEngine
 from .query_expansion import expand_query, init_vector_thesaurus
 from .bot import GroundedGillBot
+import baml_py
 from baml_client.async_client import b
 from .database import init_db
 from .webhooks import router as webhook_router
@@ -546,11 +547,20 @@ async def search(request: Request, req: SearchRequest):
         "entity_baml_dropped_count": 0,
         "entity_baml_dropped": [],
     }
+    # One collector per request, attached to the expansion call ONLY, so that `.last` is
+    # unambiguously that call's log for the rest of the request. A module-level collector
+    # would accumulate across requests and make len(calls) a running total.
+    # This exists because a single truncated response body -- one request in 67 -- voided a
+    # 65-run scored arm, and `retry_policy BoundedTransport` now retries it up to 3 times.
+    # The retries have to be COUNTED, not assumed: a bound nobody measures is a bound nobody
+    # can tell has been hit.
+    _expansion_collector = baml_py.Collector(name="expansion")
     try:
         t3 = time.perf_counter()
         optimized_query = await b.OptimizeSearchQuery(
             user_query=req.query,
-            available_entities=available_entity_names
+            available_entities=available_entity_names,
+            baml_options={"collector": _expansion_collector},
         )
         t4 = time.perf_counter()
         print(f"[TIMING] BAML OptimizeSearchQuery: {t4-t3:.3f}s")
@@ -830,6 +840,8 @@ async def search(request: Request, req: SearchRequest):
         stage_health.record_request(
             expansion_error=locals().get("_expansion_error", None),
             expansion_fallback=locals().get("fallback_kind", None),
+            expansion_retries=stage_health.retries_from_baml_log(
+                getattr(locals().get("_expansion_collector", None), "last", None)),
             entity_lookup_mode=locals().get("entity_lookup_mode", None),
             answer_degraded=None,
             verification_failure=None,
@@ -1223,6 +1235,8 @@ async def search(request: Request, req: SearchRequest):
     stage_health.record_request(
         expansion_error=locals().get("_expansion_error", None),
         expansion_fallback=locals().get("fallback_kind", None),
+        expansion_retries=stage_health.retries_from_baml_log(
+            getattr(locals().get("_expansion_collector", None), "last", None)),
         entity_lookup_mode=locals().get("entity_lookup_mode", None),
         answer_degraded=locals().get("degraded_reason", None),
         verification_failure=locals().get("verification_failure", None),
