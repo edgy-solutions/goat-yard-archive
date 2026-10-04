@@ -1448,8 +1448,102 @@ check("the retraction is in this suite's own comment too",
 
 print()
 # An abort is not a failure, so the count is the gate. Raise the floor when you add a section; never
+# ---- replicate_gate: a replicate is only a replicate if its inputs are provably identical --------------
+#
+# The null this gate protects is the floor under every figure in the production design memo. A replicate
+# whose crop moved, or whose prompt changed, would not widen the error bar on that null -- it would measure
+# something else and report it as the null, which is worse than having no null at all. So the gate is tested
+# on its REFUSALS, not only on its pass: each of these synthetic bases differs from the live configuration
+# in exactly one way, and each must stop the run before a single call is made.
+import io, os, tempfile                                                    # noqa: E402
+
+_ARM = "qwen/qwen3.7-plus"
+
+
+def _fake_base(**over):
+    """A one-header, one-read-per-span artifact that matches the live config except where told otherwise."""
+    hdr = {"kind": "config_header",
+           "text_context_sent": F.TEXT_CONTEXT,
+           "prompt_assembled_sha16": F.diag_sha(F._prompt_text("<CTX>" if F.TEXT_CONTEXT else None)),
+           "prompt_sha16": F.diag_sha(F.PROMPT_HEAD + F.PROMPT_TAIL),
+           "aperture": F.APERTURE, "config_sha16": "deadbeefdeadbeef", "started": "2026-01-01T00:00:00"}
+    hdr.update(over.pop("header", {}))
+    shas = {s["span_id"]: F.crop_sha(c) for s, c, _x in CS}
+    shas.update(over.pop("crop_sha16", {}))
+    fd, path = tempfile.mkstemp(suffix=".jsonl", prefix="rep_gate_test_")
+    os.close(fd)
+    with io.open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(hdr) + "\n")
+        for s, _c, _x in CS:
+            if s["span_id"] in over.get("drop", ()):
+                continue
+            fh.write(json.dumps({"kind": "read", "span_id": s["span_id"], "model": _ARM,
+                                 "crop_sha16": shas[s["span_id"]], "hebrew": "x"}) + "\n")
+    return path
+
+
+def _gate_refuses(why, **over):
+    """True when replicate_gate raises on this base. Restores REPLICATE_OF whatever happens."""
+    keep, path = F.REPLICATE_OF, _fake_base(**over)
+    try:
+        F.REPLICATE_OF = path
+        try:
+            F.replicate_gate(CS, [_ARM])
+            return False
+        except RuntimeError:
+            return True
+    finally:
+        F.REPLICATE_OF = keep
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+_keep_rep = F.REPLICATE_OF
+_p_ok = _fake_base()
+try:
+    F.REPLICATE_OF = _p_ok
+    _res = F.replicate_gate(CS, [_ARM])
+    check("replicate_gate passes on an identical config", isinstance(_res, dict) and _res.get("cells_matched") == len(CS),
+          f"returned {_res!r}")
+    check("...and names the artifact it is a repeat of", _res.get("replicate_of") == os.path.basename(_p_ok))
+except RuntimeError as e:
+    check("replicate_gate passes on an identical config", False, str(e))
+finally:
+    F.REPLICATE_OF = _keep_rep
+    try:
+        os.unlink(_p_ok)
+    except OSError:
+        pass
+
+_keep_rep = F.REPLICATE_OF
+try:
+    F.REPLICATE_OF = os.path.join(tempfile.gettempdir(), "no_such_base_artifact_2626.jsonl")
+    _missing_refused = False
+    try:
+        F.replicate_gate(CS, [_ARM])
+    except RuntimeError:
+        _missing_refused = True
+    check("refuses when the base artifact is absent", _missing_refused)
+finally:
+    F.REPLICATE_OF = _keep_rep
+
+check("refuses when the TEXT CHANNEL differs",
+      _gate_refuses("text axis", header={"text_context_sent": (not F.TEXT_CONTEXT)}))
+check("refuses when the ASSEMBLED PROMPT hash differs",
+      _gate_refuses("prompt", header={"prompt_assembled_sha16": "0" * 16}))
+check("refuses when the APERTURE differs",
+      _gate_refuses("aperture", header={"aperture": "A9_not_a_real_aperture"}))
+check("refuses when a CROP has moved since the base run",
+      _gate_refuses("pixels", crop_sha16={CS[0][0]["span_id"]: "f" * 16}))
+check("refuses when an in-scope cell has NO read in the base",
+      _gate_refuses("missing cell", drop=(CS[0][0]["span_id"],)))
+check("refuses a base artifact with NO header at all",
+      _gate_refuses("headerless", header={"kind": "not_a_header"}))
+
 # pin it to the exact number, or the suite starts failing on its own growth.
-CHECK_FLOOR = 276
+CHECK_FLOOR = 299
 if len(ran) < CHECK_FLOOR:
     fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
                  f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")

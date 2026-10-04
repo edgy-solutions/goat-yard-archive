@@ -28,6 +28,7 @@ OUT = DV + "/MEMO_laneB_20261004_production_design.md"
 TEXTON = "hebrew_frontier_or_reads_20260927.jsonl"
 NOTEXT = "hebrew_frontier_or_notext_20261004.jsonl"
 AXES = "hebrew_context_axes_reads_20261004.jsonl"
+REPNT = "hebrew_frontier_or_notext_rep_20261004.jsonl"
 
 SPANS_IN_VOL = len(json.load(io.open(CENSUS, encoding="utf-8"))["rows"])
 
@@ -57,18 +58,81 @@ def load(p):
     return read, {m: sum(v) / len(v) for m, v in cost.items()}
 
 
+def header(p):
+    for line in io.open(str(diag.DATA / p), encoding="utf-8"):
+        o = json.loads(line)
+        if o.get("kind") == "config_header":
+            return o
+    return {}
+
+
 ON, PON = load(TEXTON)
 OFF, POFF = load(NOTEXT)
 SPANS = sorted({s for (m, s) in OFF if m in CAND} & {s for (m, s) in ON if m in CAND})
 N = len(SPANS)
 
+# Quoted, not typed: the reason astra is absent from the pixels column is recorded in the run that excluded
+# it, and the memo reads it from there. A hand-typed reason is a claim about a run; this is the run's own.
+REP, PREP = load(REPNT)
+HREP = header(REPNT)
 
-def ex(d, m, s):
-    return diag.classify(d.get((m, s), ""), T[s]) == "exact"
+HOFF = header(NOTEXT)
+ASTRA_WHY = (HOFF.get("excluded_arms") or {}).get(ASTRA, "")
+assert ASTRA_WHY, "the pixels run no longer records why %s was excluded; do not describe it from memory" % ASTRA
 
 
 def cls(d, m, s):
     return diag.classify(d.get((m, s), ""), T[s])
+
+
+def stop_only(d, m, s):
+    """The read is the signed span plus a trailing LATIN full stop, and nothing else.
+
+    `_punct_fold` folds U+05BE, U+2010 and U+2011 to `-`; it does not fold U+002E, so `classify` returns
+    `contains` for this case. Chris ruled it 2026-10-04 after looking at the crop: the stop is Latin
+    punctuation printed inside the span box, so the read is punct-only, which folds into exact -- neither a
+    read error nor a box fault. Corroborated by the artifact itself: 7 of the 24 arms that read `p596:n2`
+    returned exactly this string, so the stop is in the pixels, not in one model's imagination.
+
+    Narrow by construction: `read == truth + "."` and nothing looser, so it cannot absorb a `contains` that
+    holds a neighbouring word or a whole extra line (which is what sonnet-5 returns on two other spans, and
+    those stay box questions). It is implemented HERE and not in `classify`, because changing `classify`
+    would silently re-score every artifact and every published tally in this lane.
+    """
+    return diag._norm(d.get((m, s), "")) == diag._norm(T[s]) + u"."
+
+
+def ex(d, m, s):
+    """FAITHFUL to the printed span: `exact`, `punct-only`, or the ruled Latin-stop case.
+
+    This is the predicate the design is scored on, and it is deliberately not `== "exact"`. The earlier
+    draft of this memo counted a `contains` as an unexamined ERROR, which charges the reader for the
+    geometry -- `classify`'s own comments say so. The three other classes get their own buckets below:
+    `box` (the box holds more than the signed span), `third` (a printed mark the signature omits), and
+    `misread` (the only one that is a reading error).
+    """
+    return cls(d, m, s) in ("exact", "punct-only") or stop_only(d, m, s)
+
+
+def exact_strict(d, m, s):
+    return cls(d, m, s) == "exact"
+
+
+def bucket(d, m, s):
+    """One of faithful / box / third / misread. Exhaustive, and nothing folds silently into another."""
+    if ex(d, m, s):
+        return "faithful"
+    c = cls(d, m, s)
+    if c in ("contains", "clipped"):
+        return "box"
+    if c == "nikud-only":
+        return "third"
+    return "misread"
+
+
+def counts(d, m):
+    return tuple(sum(1 for s in SPANS if bucket(d, m, s) == k)
+                 for k in ("faithful", "box", "third", "misread"))
 
 
 def shape(a, b):
@@ -119,10 +183,27 @@ def layered(cheap, deep):
     return okay, silent, cards, deep_n, c
 
 
+# ---- the null, first: it is the floor under everything below -------------------------------------------
+REP_ARM = sorted({m for (m, s) in REP})
+assert REP_ARM == [Q], "the replicate is supposed to be one arm (%s): %s" % (Q, REP_ARM)
+assert (HREP.get("replicate") or {}).get("replicate_of") == NOTEXT,     "the replicate artifact does not declare itself a repeat of %s; it is not a null for these figures" % NOTEXT
+NULL_DIFF = [s for s in SPANS if shape(OFF.get((Q, s), ""), REP.get((Q, s), ""))[0] != "agree"]
+NULL_BYTE = [s for s in SPANS if OFF.get((Q, s), "") == REP.get((Q, s), "")]
+CHAN_DIFF = [s for s in SPANS if moves(Q, s)]
+assert not NULL_DIFF,     "the endpoint-C null is no longer zero; every figure in this memo has run-to-run drift braided into "     "it and the whole argument needs re-deriving: %s" % NULL_DIFF
+
 # ---- the findings the prose asserts, guarded ------------------------------------------------------------
-PIX = sorted(CAND, key=lambda m: (-sum(ex(OFF, m, s) for s in SPANS), m))
+PIX = sorted(CAND, key=lambda m: (-counts(OFF, m)[0], counts(OFF, m)[3], m))
 BEST_PIX = PIX[0]
 assert BEST_PIX == O, "the best arm on pixels is no longer opus-5.5; rewrite the recommendation: %s" % PIX
+# And the tie is load-bearing prose, so it is asserted too. Under the CORRECTED accounting -- where a
+# `contains` is a box question and not a misread -- opus-5.5 and gemini-3.1-pro are EQUAL on the pixels,
+# same faithful count and the same single misread. The earlier draft ranked opus above gemini because
+# gemini's trailing stop on p596:n2 was being charged to it as an error. So the deep arm is not chosen for
+# pixel accuracy; it is chosen because it is legible to the detector. If that tie ever breaks, the
+# recommendation's REASON changes and this must be rewritten.
+TIED_ON_PIX = [m for m in CAND if counts(OFF, m) == counts(OFF, O)]
+assert sorted(TIED_ON_PIX) == sorted([O, G]),     "opus-5.5 and gemini-3.1-pro no longer tie on the pixels under the corrected buckets; the memo's "     "reason for choosing the deep arm (detector legibility, not accuracy) needs rewriting: %s"     % {m: counts(OFF, m) for m in CAND}
 
 AGREED_WRONG = [s for s in SPANS if all(not ex(OFF, m, s) for m in CAND)]
 assert AGREED_WRONG == ["p217:n2"], \
@@ -145,7 +226,9 @@ P(u"**Lane B memo, 2026-10-04. Ruling (5).** Generated by `pipeline/reextract/wr
 P(u"")
 P(u"Evidence: `audits/%s` (gloss present, 2026-09-27) and `audits/%s` (pixels only, 2026-10-04), n=**%d** "
   u"spans whose boxes are already ratified, against the corrected signed truth. Null floor from "
-  u"`audits/%s`. Nothing was sent to produce this memo." % (TEXTON, NOTEXT, N, AXES))
+  u"`audits/%s` (endpoint C, same config, 2026-10-04) with `audits/%s` as corroboration. Nothing was sent "
+  u"to produce this memo; the replicate it cites was sent today and cost %.1f cents."
+  % (TEXTON, NOTEXT, N, REPNT, AXES, 100 * N * PREP.get(Q, POFF[Q])))
 P(u"")
 P(u"## The decision")
 P(u"")
@@ -156,7 +239,8 @@ P(u"**Run one arm twice on every span \u2014 once on the pixels alone, once with
   u"slot.** Ship the pixel read where the two passes agree. Where they disagree, escalate that span to "
   u"`%s` run the same way; where it cannot settle the span with itself either, queue a glyph card for a "
   u"human. Recommended configuration: **`%s` cheap pass, `%s` as the deep arm** \u2014 "
-  u"**%d/%d exact, %d shipped-wrong-and-unexamined, %d human card, $%.2f per volume.**"
+  u"**%d/%d faithful with nobody asked, %d unexamined misreads, %d human card, $%.2f per volume**, "
+  u"plus a silent third-channel audit read on every shipped span."
   % (O.split("/")[-1], S.split("/")[-1], O.split("/")[-1], lo_ok, N, len(lo_sil), len(lo_cards), lo_c))
 P(u"")
 P(u"This is ruling (5)'s shape \u2014 a primary, a second family, `%s` breaking ties on disagreement only "
@@ -173,17 +257,37 @@ P(u"`_ctx()` replaces every Hebrew run in the note with `\u2022` before the text
   u"word that differs from the printed form is precisely the substitution class this apparatus exists to "
   u"avoid. So the answer slot is scored on the pixels.")
 P(u"")
-P(u"| arm | pixels only | with gloss | $/read (pixels) | $/volume, one pass |")
+P(u"Every read is placed in exactly one of four buckets, and the three that are not `faithful` are kept "
+  u"apart on purpose. **faithful** = the printed span, allowing `punct-only` and the ruled Latin-stop case. "
+  u"**box** = the read holds more than the signed span, which by the box rule is a geometry fault and not a "
+  u"misread; `classify`'s own comment says folding these into `wrong` charges the reader for the geometry. "
+  u"**third** = a printed mark the signature omits (a sof pasuq), which is its own state and neither right "
+  u"nor wrong. **misread** = a reading error, and the only bucket that is one. An earlier draft of this memo "
+  u"counted box faults as unexamined errors; that was an accounting bug in the memo, not a finding about the "
+  u"arms, and correcting it changes one of the conclusions below.")
+P(u"")
+P(u"| arm | pixels: faithful / box / third / misread | with gloss | $/read (pixels) | $/volume, one pass |")
 P(u"| --- | --- | --- | --- | --- |")
 for m in PIX:
-    P(u"| `%s` | **%d/%d** | %d/%d | $%.5f | $%.2f |"
-      % (m.split("/")[-1], sum(ex(OFF, m, s) for s in SPANS), N,
-         sum(ex(ON, m, s) for s in SPANS), N, POFF[m], vol(POFF[m])))
+    _f, _b, _t, _w = counts(OFF, m)
+    _f2, _b2, _t2, _w2 = counts(ON, m)
+    P(u"| `%s` | **%d**/%d / %d/%d/%d | %d/%d | $%.5f | $%.2f |"
+      % (m.split("/")[-1], _f, N, _b, _t, _w, _f2, N, POFF[m], vol(POFF[m])))
 P(u"")
-P(u"`%s` is **absent from this table and from the pixel ranking entirely**: it covers %d spans in the gloss run "
-  u"and none in the pixels run. Ruling (5) asked for it as a measured row; on the column that decides the "
-  u"answer slot there is no row to report, and that is a gap, not a result."
-  % (ASTRA.split("/")[-1], len([1 for (m, s) in ON if m == ASTRA])))
+P(u"**`%s` and `%s` are TIED on the pixels** — %d of %d faithful, the same single misread, no box "
+  u"faults either side. The earlier draft ranked opus above gemini, and it was wrong to: gemini's trailing "
+  u"stop on `p596:n2` was being charged to it as a reading error. **So the deep arm is not chosen for pixel "
+  u"accuracy. It is chosen because it is legible to the detector** — see the coverage paragraph below. "
+  u"That is a weaker claim about the arm and a stronger claim about the design."
+  % (O.split("/")[-1], G.split("/")[-1], counts(OFF, O)[0], N))
+P(u"")
+P(u"`%s` is **absent from the pixels column by instruction, not by accident** — a correction to the "
+  u"first draft of this memo, which reported it as a gap. The pixels run's own header records why: "
+  u"“%s”. It covers %d spans in the gloss run, and that row stands. Ruling (5) asked for it as a "
+  u"measured row on the column that decides the answer slot; that column cannot be filled without new spend "
+  u"on an arm Chris has excluded from new spend, so it stays empty and this memo does not treat the "
+  u"emptiness as evidence about the arm."
+  % (ASTRA.split("/")[-1], ASTRA_WHY, len([1 for (m, s) in ON if m == ASTRA])))
 P(u"")
 P(u"## The span that forced the design, and a correction")
 P(u"")
@@ -227,7 +331,7 @@ assert _conf and _conf == _confbad, \
     % (_confbad, _conf)
 L[-1] = L[-1] % (_tot, _conf, _confbad)
 P(u"")
-P(u"| arm run twice | exact on pixels | passes disagree | shipped wrong, nobody asked | $/volume, two passes |")
+P(u"| arm run twice | faithful on pixels | passes disagree | shipped MISREAD, nobody asked | $/volume, two passes |")
 P(u"| --- | --- | --- | --- | --- |")
 for m in PIX:
     e, mv, sil = twopass(m)
@@ -243,11 +347,12 @@ P(u"**The detector drives the unexamined-error count to zero for `%s` and `%s`.*
   % (S.split("/")[-1], O.split("/")[-1], round(SPANS_IN_VOL / 19.0), N))
 P(u"")
 P(u"**But the detector only sees what the arm's own channel-sensitivity surfaces, and that is per-arm and "
-  u"measured, not assumed.** `%s` moves on %d span of %d and ships %d unexamined errors \u2014 it is both "
+  u"measured, not assumed.** `%s` moves on %d span of %d and ships %d unexamined misread%s \u2014 it is "
   u"inexact on the pixels and channel-stable, which is the worst combination for this instrument: its "
   u"errors are invisible to it. Detector coverage is an arm-selection criterion that is *not* an exact "
   u"rate, and it has to be measured for any arm before that arm is trusted in the answer slot."
-  % (G.split("/")[-1], len(twopass(G)[1]), N, len(twopass(G)[2])))
+  % (G.split("/")[-1], len(twopass(G)[1]), N, len(twopass(G)[2]),
+     u"" if len(twopass(G)[2]) == 1 else u"s"))
 P(u"")
 P(u"## Money is not the constraint; human attention is")
 P(u"")
@@ -259,7 +364,7 @@ P(u"Every design in this memo costs between $%.2f and $%.2f per volume, and the 
   % (min(_designs), max(_designs), min(vol(POFF[m]) for m in CAND),
      max(vol(POFF[m], PON[m]) for m in CAND), max(_designs) - min(_designs)))
 P(u"")
-hdr = (u"| design | exact with no human asked | unexamined errors | human cards per %d "
+hdr = (u"| design | faithful, no human asked | unexamined misreads | human cards per %d "
        u"| projected cards per volume | $/volume |" % N)
 P(hdr)
 P(u"| --- | --- | --- | --- | --- | --- |")
@@ -287,43 +392,121 @@ P(u"The deep arm earns its place on the card budget, not on accuracy: it absorbs
   % (round(SPANS_IN_VOL * float(len(twopass(Q)[1])) / N),
      round(SPANS_IN_VOL * float(len(layered(Q, O)[2])) / N)))
 P(u"")
-P(u"## The null floor, and the measurement this memo is missing")
+P(u"## The null floor, measured on endpoint C")
 P(u"")
 P(u"A cross-channel disagreement is only a signal if the same arm run twice at **fixed** config does not "
-  u"disagree with itself. The context-axes run carries a `base`/`base_rep` replicate pair, and on all three "
-  u"local arms the null is **0 of %d** against 12\u201316 of %d for the channel contrast. The flags are not "
-  u"a sampling artifact." % (N, N))
+  u"disagree with itself. The first draft of this memo named this as its missing measurement. **It has now "
+  u"been run on endpoint C, and the null is 0 of %d.**" % N)
 P(u"")
-P(u"**That null is on endpoint D with deterministic local arms, and this lane forbids cross-endpoint "
-  u"prediction.** There has never been a same-config replicate on endpoint C, where every figure in this "
-  u"memo comes from, and a 6/6\u21920/6 flip at fixed config is on the record elsewhere in this project. "
-  u"**The missing measurement is %d reads of one arm, repeating the pixels pass: %.1f cents on `%s`, "
-  u"%.0f cents on `%s`.** No production run should start before it exists."
-  % (N, 100 * N * POFF[Q], Q.split("/")[-1], 100 * N * POFF[O], O.split("/")[-1]))
+P(u"`audits/%s`, `%s`, text channel off, the same %d spans. Not merely classified the same — "
+  u"**byte-identical on %d of %d spans** \u2014 every one of them, including the %d the base run "
+  u"misread, the %d in a third state and the %d ruled punct-only. Against that floor, the same arm's channel contrast moves **%d of %d** (%s). The flags are "
+  u"channel effect, not sampling noise. Base run %s, replicate %s."
+  % (REPNT, Q.split("/")[-1], N, len(NULL_BYTE), N,
+     counts(OFF, Q)[3], counts(OFF, Q)[2], sum(1 for s_ in SPANS if stop_only(OFF, Q, s_)),
+     len(CHAN_DIFF), N,
+     u", ".join(u"`%s`" % s for s in CHAN_DIFF),
+     ((HREP.get("replicate") or {}).get("base_started") or "?"), (HREP.get("started") or "?")))
+P(u"")
+P(u"The replicate is **gated, not asserted**: `replicate_gate()` refuses to spend unless the base artifact's "
+  u"recorded configuration matches this run's on the text channel, the assembled-prompt hash, the aperture "
+  u"and the pixels — and the pixels are checked *per read*, against each base read's own `crop_sha16` "
+  u"rather than the header's crop map, so a re-cut crop cannot be slipped into a replicate. A replicate whose "
+  u"inputs are not provably identical would not widen the error bar on the null; it would measure something "
+  u"else and report it as the null. Cost: **%.1f cents** for %d reads."
+  % (100 * N * PREP.get(Q, POFF[Q]), N))
+P(u"")
+P(u"**What this null does NOT bound, and it is three things.** It is one arm — the cheap one — on "
+  u"%d spans, so it bounds `%s`'s run-to-run drift today and says nothing directly about `%s`'s. It is "
+  u"*today's* drift: the two channel runs are **seven days apart**, and no replicate run now can reach back "
+  u"across that interval, so model-version drift between 2026-09-27 and 2026-10-04 is still braided into the "
+  u"channel contrast. And a 0-of-%d null is itself a small sample — it bounds the drift rate at roughly "
+  u"15%%, not at zero, which is the same arithmetic that licenses the silent third channel below."
+  % (N, Q.split("/")[-1], O.split("/")[-1], N))
+P(u"")
+P(u"The endpoint-D `base`/`base_rep` pair in `audits/%s` agrees — 0 of %d on all three local arms "
+  u"— and is reported here as corroboration only. Cross-endpoint prediction is forbidden in this lane, "
+  u"and a 6/6→0/6 flip at fixed config is on the record elsewhere in this project, which is why the "
+  u"endpoint-C measurement had to be made rather than inferred." % (AXES, N))
+P(u"")
+P(u"## The silent third channel, and why 0 of %d is not zero" % N)
+P(u"")
+P(u"Chris's amendment, and it closes the hole the null leaves. **0 of %d agreed-and-wrong bounds the "
+  u"agreed-wrong rate at roughly 15%%, not at zero**, and this lane has a worked case of a single arm "
+  u"returning the exact signed string from a crop containing no ink at all — so no output-side check "
+  u"can catch fabrication, and two agreeing passes of one model are still one model." % N)
+P(u"")
+P(u"So every **shipped** span also goes to `%s` **bare**, as a third channel from an independent family, "
+  u"scored against the shipped reading and **never allowed to decide anything**. Its disagreement rate is "
+  u"the drift alarm: per volume, a few percent is the expected noise floor and anything above it says the "
+  u"escalation threshold is wrong — and says it **before the second volume is committed**, which is the "
+  u"whole point of running it silently rather than as a fourth vote. Cost: **$%.2f per volume** on top of "
+  u"$%.2f (%d spans at $%.5f a read), a rounding error on the recommended design."
+  % (Q.split("/")[-1], vol(POFF[Q]), lo_c, SPANS_IN_VOL, POFF[Q]))
+P(u"")
+P(u"Two rules keep it an audit rather than a vote. It reads the **pixels only**, so its disagreements are "
+  u"not back-translations. And it is never shown to the deciding arm and never enters the shipped reading "
+  u"— if it were allowed to break a tie it would become a third candidate, the agreement between the "
+  u"two passes would stop being a check on the model that produced them, and the alarm would be measuring "
+  u"itself.")
 P(u"")
 P(u"## What this does NOT solve")
 P(u"")
 P(u"- **n=%d, and every box in it is already ratified.** Geometry is excluded by construction, so this memo "
   u"says nothing about the failure mode that has produced the most damage in this lane. The 100-span set is "
   u"where the design is actually tested." % N)
-P(u"- **The precision claims rest on single-digit event counts** \u2014 %s. Zero unexamined errors out of %d "
+P(u"- **The precision claims rest on single-digit event counts** \u2014 %s. Zero unexamined misreads out of %d "
   u"is not a rate; it is an absence of counterexamples in a small sample."
   % (u", ".join(u"`%s` %d flag%s" % (m.split("/")[-1], len(twopass(m)[1]),
                                      u"" if len(twopass(m)[1]) == 1 else u"s") for m in PIX), N))
 P(u"- **The standard may still move.** Six of twenty signed truths \u2014 30% \u2014 did not survive being "
   u"looked at, the base rate has not been observed to stop, and `p912:n2` is still an open card. Every "
   u"figure here is against a standard with that history.")
-_cont = sorted({s for m in CAND for s in twopass(m)[2] if cls(OFF, m, s) == "contains"})
-if _cont:
-    P(u"- **The one residual under the cheap configuration is punctuation, not a letter, and it may be a BOX "
-      u"question.** %s: signed `%s`, read `%s` \u2014 a trailing stop. By the box rule a ratified span box "
-      u"holds exactly the signed span, so if that stop is inside the crop the box holds more than it should "
-      u"and the read is faithful to what it was shown. **Unresolved here; it needs an eye on the crop, not a "
-      u"model.**" % (u", ".join(u"`%s`" % s for s in _cont), T[_cont[0]],
-                     OFF.get((Q, _cont[0]), "")))
+BOXQ = sorted({(s, m) for m in CAND for s in SPANS if bucket(OFF, m, s) == "box"})
+THIRD = sorted({(s, m) for m in CAND for s in SPANS if bucket(OFF, m, s) == "third"})
+assert not [1 for (s, m) in BOXQ if stop_only(OFF, m, s)],     "a ruled Latin-stop read is being counted as a box question again"
+P(u"- **`p596:n2` is punct-only and is NOT a residual.** The first draft of this memo listed it as the one "
+  u"residual under the cheap configuration and as a possible box fault. Chris ruled it on 2026-10-04 from "
+  u"the crop: signed `%s`, read `%s` — the trailing stop is Latin punctuation printed inside the span "
+  u"box, so the read is punct-only, which folds into exact. Neither a read error nor a box action. The "
+  u"artifact corroborates the ruling independently: **7 of the 24 arms that read this span returned exactly "
+  u"that string**, so the stop is in the pixels. `classify` still returns `contains` for it, because "
+  u"`_punct_fold` folds U+05BE, U+2010 and U+2011 but not U+002E; this memo applies the ruling in its own "
+  u"`stop_only` predicate rather than changing `classify`, which would silently re-score every artifact and "
+  u"every published tally in this lane. **That asymmetry is a real debt and it is named here, not fixed "
+  u"here.**" % (T["p596:n2"], OFF.get((Q, "p596:n2"), "")))
+if BOXQ:
+    P(u"- **%d genuine box question%s remain%s, and they are geometry, not reading.** %s. In each case the "
+      u"read holds a whole extra Hebrew line or word above the signed span, which by the box rule means the "
+      u"box holds more than it should. The arm count is the signal and it is weak: on `p427:n4` **2 of 24 "
+      u"arms** return a garbled extra token and they garble it *differently*, which is the signature of "
+      u"partial ink at the crop's top edge rather than of a legible neighbour; on `p138:n5` only **1 of 24** "
+      u"does. **Both need an eye on the crop's top edge, not a model** — and neither is charged to the "
+      u"arm that reported it."
+      % (len({s for (s, _m) in BOXQ}),
+         u"" if len({s for (s, _m) in BOXQ}) == 1 else u"s",
+         u"s" if len({s for (s, _m) in BOXQ}) == 1 else u"",
+         u", ".join(u"`%s` (%s)" % (s, m.split("/")[-1]) for s, m in BOXQ)))
+if THIRD:
+    P(u"- **%d third-state read%s: a printed mark the signature omits.** %s — the read adds a sof "
+      u"pasuq (U+05C3) that the signed string does not carry. `classify` calls this `nikud-only`, which this "
+      u"lane keeps as its own state rather than folding into right or wrong, and that convention is what "
+      u"caught a defective signature once already. **Unruled:** Chris has ruled that an added *Latin* stop "
+      u"folds into exact; whether an added *Hebrew* sof pasuq does the same is the same question one script "
+      u"over, and nobody has answered it. Until then the span ships with a flag and is counted neither way."
+      % (len({s for (s, _m) in THIRD}),
+         u"" if len({s for (s, _m) in THIRD}) == 1 else u"s",
+         u", ".join(u"`%s` (%s)" % (s, m.split("/")[-1]) for s, m in THIRD)))
+P(u"- **The accounting in the first draft of this memo was wrong, and that is a finding about me, not about "
+  u"the arms.** It counted `contains` as an unexamined error. `classify`'s own comments warn against exactly "
+  u"that — “folding them into `wrong` charges the reader for the geometry” — and the "
+  u"correction flipped a conclusion: under the corrected buckets `%s` and `%s` **tie** on the pixels, so the "
+  u"deep arm is chosen for detector legibility and not for accuracy."
+  % (O.split("/")[-1], G.split("/")[-1]))
 P(u"- **The two channels were run seven days apart**, so model-version drift is braided into the channel "
-  u"contrast and cannot be separated from it in these artifacts. The replicate above is what would separate "
-  u"them.")
+  u"contrast. The endpoint-C null now rules out *same-day* run-to-run drift, and it cannot reach back across "
+  u"that interval — no measurement made today can. Separating the two would mean re-running the gloss "
+  u"pass now, which this memo does not do and does not price.")
 P(u"- **No `:batch` route is measured.** Ruling (5) names `:batch` as the production route and every price "
   u"here is interactive, so the $/volume figures are an upper bound of unknown tightness.")
 P(u"- **Glyph cards are assumed to be resolvable.** `p217:n2` took about a minute and no Hebrew, from one "
@@ -332,14 +515,22 @@ P(u"- **Glyph cards are assumed to be resolvable.** `p217:n2` took about a minut
 P(u"")
 P(u"## Preconditions before a production run")
 P(u"")
-P(u"1. The endpoint-C null replicate above (%.1f cents on the cheap arm, %.0f on the deep one)."
-  % (100 * N * POFF[Q], 100 * N * POFF[O]))
+P(u"1. ~~The endpoint-C null replicate.~~ **Done** — 0 of %d, byte-identical, %.1f cents "
+  u"(`audits/%s`). The silent third channel replaces it as the standing version of this check."
+  % (N, 100 * N * PREP.get(Q, POFF[Q]), REPNT))
 P(u"2. The 100-span truth set scored, **signed from pixels with the candidate withheld** \u2014 a second "
   u"table captured the old way inherits the same 30%.")
 P(u"3. Box discipline: a ratified span box holds exactly the signed span. Ruling (5) already makes this a "
-  u"precondition and the `contains` residual above is why.")
-P(u"4. A standing **editorial standoff record** for `p217:n2` \u2014 the body text layer still carries the "
+  u"precondition, and the two box questions above — not the punctuation case, which is ruled — "
+  u"are why.")
+P(u"4. A standing **editorial standoff record** for `p217:n2` — the body text layer still carries the "
   u"overturned mem, and the apparatus will now be shipping the pe beside it.")
+P(u"5. The **silent third channel wired into the run itself**, not run by hand afterwards: a shipped reading "
+  u"with no audit read beside it is indistinguishable from one whose audit agreed, and a volume cannot be "
+  u"audited retroactively once its crops have been re-cut.")
+P(u"6. A ruling on the **sof pasuq** third state. A precondition for nothing, but it is one span's worth of "
+  u"attention and it settles a convention the other %d spans in the volume will inherit."
+  % (SPANS_IN_VOL - N))
 P(u"")
 out = u"\n".join(L) + u"\n"
 io.open(OUT, "w", encoding="utf-8").write(out)
