@@ -35,6 +35,7 @@ from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
 from .answer_lm_record import no_call_record, record_from_dspy_history
+from . import stage_health
 from .degradation import (
     DEGRADED_LLM_TIMEOUT,
     GENERATION_FAILURE_ANSWER,
@@ -532,6 +533,11 @@ async def search(request: Request, req: SearchRequest):
     # dispatch on which sentinel signal fired (ADR-0012 poisoned-manifest
     # suppression vs dedup-only fallback).
     _punt_reasons: list[str] = []
+    # Plain local for stage_health (backend/stage_health.py): the raw BAML
+    # exception text, readable at the end of the request regardless of
+    # req.debug. stages_capture["baml_error"] carries the same text but only
+    # when debug mode is on.
+    _expansion_error: Optional[str] = None
     # Entity-boost telemetry, populated in the BAML-success path. Defaults
     # cover the punt/exception paths where BAML produced no usable pick.
     entity_boost_telemetry: dict = {
@@ -736,6 +742,9 @@ async def search(request: Request, req: SearchRequest):
             stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
             stages_capture["baml_error"] = str(e)
             stages_capture["baml_fallback"] = fallback_kind
+        # Plain-local mirror for stage_health, readable at the end of the
+        # request regardless of req.debug (see initialisation above).
+        _expansion_error = str(e)
 
     # ADR-0014 fail-anchored gate. If the entity lookup degraded (vector
     # tier / litellm enrichment infra down for that call), the manifest —
@@ -756,6 +765,10 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities = []
         if stages_capture is not None:
             stages_capture["baml_fallback"] = "vector_tier_degraded_suppressed"
+        # Plain-local mirror for stage_health -- this gate can fire on the
+        # BAML-success path too (no exception, so fallback_kind would
+        # otherwise be unset), so it is assigned here unconditionally.
+        fallback_kind = "vector_tier_degraded_suppressed"
         print("[ADR-0014] entity lookup degraded -> entity boost suppressed; "
               "retrieval on deterministic floor (raw + expansion, no boost).")
 
@@ -810,6 +823,19 @@ async def search(request: Request, req: SearchRequest):
         stages_capture["retrieval_chunk_ids_ordered"] = [r.get("chunk_id", "") for r in raw_results]
 
     if not raw_results:
+        # This exit still exercised expansion and the entity lookup, so it is
+        # recorded. answer/verifier never ran on this path -- see the not_run
+        # state in backend/stage_health.py; counting them as ok here would be
+        # the fabricated pass this module exists to prevent.
+        stage_health.record_request(
+            expansion_error=locals().get("_expansion_error", None),
+            expansion_fallback=locals().get("fallback_kind", None),
+            entity_lookup_mode=locals().get("entity_lookup_mode", None),
+            answer_degraded=None,
+            verification_failure=None,
+            answer_ran=False,
+            verifier_ran=False,
+        )
         return SearchResponse(
             answer="No relevant commentary found.",
             citations=[],
@@ -1194,6 +1220,16 @@ async def search(request: Request, req: SearchRequest):
     
     final_citations = [ev.citation for ev in evidence_objects]
 
+    stage_health.record_request(
+        expansion_error=locals().get("_expansion_error", None),
+        expansion_fallback=locals().get("fallback_kind", None),
+        entity_lookup_mode=locals().get("entity_lookup_mode", None),
+        answer_degraded=locals().get("degraded_reason", None),
+        verification_failure=locals().get("verification_failure", None),
+        answer_ran=bot is not None,
+        verifier_ran=bot is not None,
+    )
+
     return SearchResponse(
         answer=answer,
         citations=final_citations,
@@ -1248,6 +1284,16 @@ async def feedback(req: FeedbackRequest):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "goat-yard-archive"}
+
+@app.get("/health/stages")
+async def health_stages():
+    """Production-safe, read-only per-stage LM health for THIS process.
+
+    Cumulative counters since process start (see backend/stage_health.py).
+    Never raw text -- see that module's docstring for the safety rules this
+    route depends on.
+    """
+    return stage_health.snapshot()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
