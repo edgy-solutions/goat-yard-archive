@@ -812,6 +812,62 @@ check("support() reports the void reads it dropped rather than absorbing them",
 check("the control is derived from crop_ink_state, and the fault-tag selector is gone",
       "crop_ink_state(" in _sup and 'if unsc and "crop-fault" in unsc:' not in _sup)
 
+print("\n(16) item 6(a): the context-axes harness, before it produces a number")
+import hebrew_context_axes as AX
+from hebrew_recrop import _RECROP_PROMPT as _RP
+
+# The cross-run null is only a null if `base` is the recorded config to the byte.
+check("the base cell's prompt IS the recorded D prompt, byte for byte",
+      AX.prompt_for(True, False, "ignored") == _RP)
+check("base and base_rep are the same configuration (that is what makes one a null)",
+      [c for c in AX.CELLS if c[0] == "base"][0][1:] ==
+      [c for c in AX.CELLS if c[0] == "base_rep"][0][1:])
+check("the four axis combinations are each present exactly once",
+      sorted({(st, tx) for _c, st, tx in AX.CELLS}) ==
+      [(False, False), (False, True), (True, False), (True, True)])
+
+# The text channel is the FRONTIER's channel, or the two halves of item 6 are not comparable.
+_p = AX.prompt_for(False, True, "a \u2022 b")
+check("text ON carries the frontier's bullet wording and the ctx, text OFF carries neither",
+      "each \u2022 marks" in _p and "a \u2022 b" in _p
+      and "each \u2022 marks" not in AX.prompt_for(False, False, "a \u2022 b"))
+check("the strip sentence appears only when a strip image is actually sent",
+      "Image 1" in AX.prompt_for(True, False, "") and "Image 1" not in AX.prompt_for(False, False, ""))
+check("and the bare prompt never refers to a second image",
+      "image 2" not in AX.prompt_for(False, True, "x").lower())
+
+# The send population: 19, not L._built's 20. This is the defect fixed in support(), not repeated here.
+_pop = AX.built()
+_un = {s["span_id"] for s in diag.build_set(include_sealed=True) if s["unscorable"]}
+check("the axes population excludes unscorable spans (L._built returns 20 where score() tallies 19)",
+      _pop and not ({s["span_id"] for s in _pop} & _un),
+      sorted({s["span_id"] for s in _pop} & _un))
+check("and it is exactly the population the frontier sends, so the two halves of item 6 compare",
+      {s["span_id"] for s in _pop} == {s["span_id"] for s, _c, _x in CS},
+      sorted({s["span_id"] for s in _pop} ^ {s["span_id"] for s, _c, _x in CS}))
+check("every span in it has a context strip, or the strip axis would be silently uneven",
+      all(s.get("context_strip") for s in _pop))
+
+# Guards that must fire before the wire, not after it.
+try:
+    AX.run("192.168.1.179:11435", ["x"])
+    _res = "NO RAISE"
+except RuntimeError as e:
+    _res = "RESERVED" if "RESERVED" in str(e) else str(e)[:60]
+except Exception as e:
+    _res = type(e).__name__
+check("a run at the RESERVED production pair raises before any request is built", _res == "RESERVED",
+      _res)
+_axsrc = (HERE / "hebrew_context_axes.py").read_text(encoding="utf-8")
+check("both channels route their base64 through the gated encoder, so neither can skip the input guard",
+      _axsrc.count("L._b64(") == 2 and "base64.b64encode" not in _axsrc)
+check("the ink state of EVERY channel is recorded beside the read, the strip's included",
+      '"strip_ink"' in _axsrc and '"crop_ink"' in _axsrc)
+check("N consecutive dead items faults the RUN, and a faulted artifact refuses to be scored",
+      "dead >= DEAD_RUN_AT" in _axsrc and "cannot be scored" in _axsrc)
+check("the footer records git at start AND end, and whether they matched",
+      '"clean_run": clean' in _axsrc and "g0 == g1" in _axsrc)
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")
