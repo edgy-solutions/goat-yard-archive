@@ -240,7 +240,12 @@ P(u"**Run one arm twice on every span \u2014 once on the pixels alone, once with
   u"`%s` run the same way; where it cannot settle the span with itself either, queue a glyph card for a "
   u"human. Recommended configuration: **`%s` cheap pass, `%s` as the deep arm** \u2014 "
   u"**%d/%d faithful with nobody asked, %d unexamined misreads, %d human card, $%.2f per volume**, "
-  u"plus a silent third-channel audit read on every shipped span."
+  u"plus a silent third-channel audit read on every shipped span. **The crop recipe for production is "
+  u"PAD=12**, the same recipe the 74-span set is signed on and the same the 19 ratified spans were cut "
+  u"at; the band-clip is a per-span tool and not a pipeline step. The one measurement of whether it buys "
+  u"accuracy is a null with churn (+1 exact out of 10 arms that changed tag, the losses on the second "
+  u"family), which is the device-noise floor and not an effect. Nobody re-proposes it without new "
+  u"evidence of that kind."
   % (O.split("/")[-1], S.split("/")[-1], O.split("/")[-1], lo_ok, N, len(lo_sil), len(lo_cards), lo_c))
 P(u"")
 P(u"This is ruling (5)'s shape \u2014 a primary, a second family, `%s` breaking ties on disagreement only "
