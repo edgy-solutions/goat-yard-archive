@@ -146,6 +146,16 @@ assert not flags.get("edge_truncated_span"), \
     "the cut found %d crop(s) where the SPAN itself is cut by the crop edge; the edge-cut instruction " \
     "on this sheet is the wrong instruction for them" % len(flags.get("edge_truncated_span") or [])
 
+# WHAT THE LINK IS. Not "the note": the localizer's REGION, which ends at the next DETECTED note
+# start, so a missed start merges two printed notes into one. All 5 regions of 3+ lines on this set were
+# opened: 3 hold two notes, 2 hold one note plus page furniture. Rows carry the fact; nothing here asks
+# the signer to adjudicate it, because the crop cannot answer it and the pixels are the same pixels
+# whichever note they belong to.
+REGION_WIDE = {x["span_id"]: x["lines"] for x in cut["note_context"].get("region_covers_3plus_lines", [])}
+SHIFT = {x["span_id"]: x for x in cut["note_context"].get("index_shift_screen", [])}
+assert cut["note_context"].get("what_the_links_showed"), \
+    "the cut carries no account of what the note regions cover"
+
 OVERFULL = {x["span_id"]: x for x in flags.get("runs_not_measurable", [])}
 assert all(x["lines_of_type"] > 1 for x in OVERFULL.values()),     "a span is listed as not-measurable without covering more than one line of type"
 
@@ -263,7 +273,7 @@ H.append('<div class="note"><b>What is deliberately missing.</b> The extractor&r
          'the candidate, once affirmed verbatim. Write what the pixels show, or abstain.<br>'
          '<b>What is present and is NOT a hint:</b> resolved column runs, counted from the ink by gaps '
          'rather than by recognising letters.<br>'
-         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it. <b>Do not sign a word that the crop edge cuts.</b> Measured on this set, by the rule the cut records: in <b>%d</b> crops a NEIGHBOURING word on the same line is sliced by a vertical crop edge and sits in the pad &mdash; <b>%d</b> sliced edges in all, since %s is cut on both sides. In <b>%d</b> crops is the span&rsquo;s OWN ink cut: edge ink never runs continuously across the box boundary, which is the measurement that could have shown otherwise. A sliced neighbour is noise, not a span, and a fragment signed as a word is a wrong truth. Every row carries a link to the note the box was drawn inside and to the native page, so a word that merely LOOKS truncated can be checked instead of guessed at.<br>'
+         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it. <b>Do not sign a word that the crop edge cuts.</b> Measured on this set, by the rule the cut records: in <b>%d</b> crops a NEIGHBOURING word on the same line is sliced by a vertical crop edge and sits in the pad &mdash; <b>%d</b> sliced edges in all, since %s is cut on both sides. In <b>%d</b> crops is the span&rsquo;s OWN ink cut: edge ink never runs continuously across the box boundary, which is the measurement that could have shown otherwise. A sliced neighbour is noise, not a span, and a fragment signed as a word is a wrong truth. Every row carries a link to the region the box sits in and to the native page, so a word that merely LOOKS truncated can be checked instead of guessed at. The linked picture is the LOCALIZER&rsquo;s region, not a printed note: it ends where the detector saw the next note start, and of the 5 regions here that run to three or more lines, 3 hold two printed notes. Rows say so where it applies.<br>'
          '<b>If a crop holds no Hebrew at all, or nothing legible, do not sign it &mdash; press its button.</b> That records a fault against the box, which is a different fact from declining to sign, and the faults download as a file beside the signing skeleton. 23 spans have already been dropped from 96 for faults a script could measure; two of those were found by eye, because no script here can ask what SCRIPT the pixels are in.</div>'
          % (len(EDGE), EDGE_N_EDGES,
             " and ".join(sorted(x for x in EDGE if EDGE[x]["n_edges"] == 2)) or "no crop",
@@ -283,8 +293,12 @@ H.append('<table class="sum">'
          '&nbsp;&middot;&nbsp; <b>%d</b> clean</td></tr>'
          '<tr><td>edge slices</td><td><b>%d</b> crop(s), <b>%d</b> sliced edge(s). Span itself cut: '
          '<b>%d</b>.</td></tr>'
-         '<tr><td>note context</td><td><b>%d</b> of %d spans link to the note the box was drawn inside '
-         '(same PAD=%d recipe, containment asserted at cut time) and to the native page PNG. %s</td></tr>'
+         '<tr><td>note context</td><td><b>%d</b> of %d spans link to the region the box sits in '
+         '(same PAD=%d recipe; the span crop is asserted byte-identical inside it) and to the native '
+         'page PNG. %s</td></tr>'
+         '<tr><td>region width</td><td><b>%d</b> region(s) run to 3+ lines (%s); all were opened, 3 hold '
+         'two printed notes. <b>%d</b> span(s) sit behind one and carry a note-NUMBER question: %s. '
+         'Neither changes what you sign.</td></tr>'
          '</table>'
          % (SET_N, len({r["page"] for r in rows}),
             ('applied: see the detail row below' if cut["clip"].get("applied_as_set_recipe") else
@@ -305,7 +319,10 @@ H.append('<table class="sum">'
             cut["note_context"]["written"], SET_N, cut["note_context"]["pad_native_px"],
             ("Every one derived." if not cut["note_context"]["faults"] else
              "NOT derived for: %s &mdash; those rows link to the page only."
-             % html.escape(", ".join(sorted(cut["note_context"]["faults"]))))))
+             % html.escape(", ".join(sorted(cut["note_context"]["faults"])))),
+            len(REGION_WIDE), html.escape(", ".join("%s at %d lines" % (k, v)
+                                                    for k, v in sorted(REGION_WIDE.items()))),
+            len(SHIFT), html.escape(", ".join(sorted(SHIFT))) or "none"))
 
 assert not cut["clip"]["word_runs_regressed"], "a clip resolves fewer runs than its parent"
 assert SET_N == (cut["clip"]["written"] + cut["clip"]["no_trim"] + len(cut["clip"]["abstained_ids"])
@@ -371,13 +388,26 @@ for r in rows:
     nc = r.get("note_context")
     H.append('<div class="links">')
     if nc:
-        H.append('<a href="%s">note it was drawn in &mdash; %d&times;%d, %d line(s)%s</a> &nbsp;&middot;&nbsp; '
+        H.append('<a href="%s">the region this box sits in &mdash; %d&times;%d, %d line(s)%s</a> &nbsp;&middot;&nbsp; '
                  % (_furl(nc["path"]), nc["size"][0], nc["size"][1], nc["lines_in_segment"],
                     "" if nc["segment_held_the_span"] else ", FIRST segment of a stitched note"))
     else:
         H.append('<span class="why">no note crop derived: %s</span> &nbsp;&middot;&nbsp; '
                  % html.escape(r.get("note_fault") or "unrecorded"))
     H.append('<a href="%s">native page PNG, file p%d</a></div>' % (_furl(r["page_png"]), r["page"]))
+    if sid in REGION_WIDE:
+        H.append('<div class="why">This region runs to %d lines. 5 regions on this set do; all 5 were '
+                 'opened and 3 of them hold TWO printed notes, because the detector ends a note at the '
+                 'next note start it SEES. Nothing for you to decide &mdash; sign the Hebrew in the box '
+                 'above. It is on the row because the extra lines in the linked picture may belong to a '
+                 'different note.</div>' % REGION_WIDE[sid])
+    if sid in SHIFT:
+        H.append('<div class="why">A region of %d lines sits earlier on this page (at note %d). If that '
+                 'region covers two printed notes, this span&rsquo;s note NUMBER is one off &mdash; which '
+                 'is a question about scoring, not about these pixels. Checked by hand: %s</div>'
+                 % (SHIFT[sid]["behind_a_region_of"], SHIFT[sid]["at_note_index"],
+                    "this box is in the note printed <b>o</b> while carrying note 2, so its note identity "
+                    "is open." if sid == "p245:n1" else "it checks out."))
     H.append('<button class="fault" data-s="%s" onclick="mark(this)">not Hebrew / blank '
              '&mdash; record a fault</button>' % html.escape(sid))
     H.append("</div><div>")
@@ -588,7 +618,9 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                            "also_over_full": sorted(set(EDGE) & set(OVERFULL)),
                            "span_truncations": len(flags.get("edge_truncated_span") or [])},
            "note_context": {"linked": sum(1 for r in rows if r.get("note_context")),
-                            "embedded": 0, "how": "file:// path, never a payload"},
+                            "embedded": 0, "how": "file:// path, never a payload",
+                            "region_covers_3plus_lines": REGION_WIDE,
+                            "note_number_question": sorted(SHIFT)},
            "badges": {"NO-TYPE": sorted(NOTYPE), "DUP-BOX": sorted(DUP), "SHORT-BOX": sorted(SHORT),
                       "EDGE-CUT": sorted(EDGE),
                       "RECIPE": [d["span_id"] for d in cut["clip"]["word_runs_differ"]],

@@ -540,6 +540,49 @@ assert all(os.path.exists(b["note_context"]["path"]) for b in cut if b.get("note
     "a note-context crop is recorded and not on disk"
 assert all(os.path.exists(b["page_png"]) for b in cut), "a page PNG path does not exist on disk"
 
+# ---- WHAT THE LINKS SHOWED THE FIRST TIME THEY WERE OPENED ----------------------------------------
+# The region a box sits in is the localizer's region, and `note_line_regions` ends a note at the next
+# DETECTED note start. Miss a start and two printed notes become one region. Its own docstring says the
+# count pre-filter cannot catch that -- "one false note-start plus one missed start sums to the right
+# number and passes" -- and these pages pass it.
+#
+# MEASURED, not inferred: 5 of the 74 regions run to 3 or more lines. All 5 were opened. THREE hold two
+# printed notes (p107:n3 covers markers x and y, p245:n0 covers m and n, p444:n0 covers a and b); the
+# other two are one note plus page furniture -- p233:n4 takes in the sheet signature `U`, p526:n0 takes
+# in the printed rule where the band boundary falls inside its lines. 59 regions are a single line and 10
+# are two.
+#
+# The screen is the line count, and it is a SCREEN: it names regions to open, it does not decide. The
+# consequence it points at is an index shift -- if a region on a page covers two notes, every span on
+# that page with a higher note_index may be reading a shifted note. Two spans are on the far side of a
+# 3+line region. One of them, p245:n1, carries the set's note_index 2 and its region is the printed note
+# marked `o`; the other, p444:n2, checks out. So this is one measured note-identity disagreement, found
+# by opening a link, not a rate.
+#
+# WHAT IT DOES AND DOES NOT TOUCH. It does not touch what the signer does: a signature is about the
+# pixels in the span crop, and those are the same pixels whichever note they belong to. It touches
+# SCORING, where a reading is compared against what the extractor claimed for a note index. So it is
+# recorded here, beside the set, rather than put to the signer as a question the crop cannot answer.
+region_wide = [{"span_id": b["span_id"], "lines": b["note_context"]["lines_in_segment"]}
+               for b in cut if b.get("note_context") and b["note_context"]["lines_in_segment"] >= 3]
+_by_page = {}
+for b in cut:
+    if b.get("note_context"):
+        _by_page.setdefault(b["page"], []).append(b)
+index_shift_screen = []
+for _pg, _bs in sorted(_by_page.items()):
+    _merged = [x["note_index"] for x in _bs if x["note_context"]["lines_in_segment"] >= 3]
+    if not _merged:
+        continue
+    _lo = min(_merged)
+    index_shift_screen += [{"span_id": x["span_id"], "note_index": x["note_index"],
+                            "behind_a_region_of": max(y["note_context"]["lines_in_segment"]
+                                                      for y in _bs if y["note_index"] == _lo),
+                            "at_note_index": _lo}
+                           for x in _bs if x["note_index"] > _lo]
+assert all(x["span_id"] in {b["span_id"] for b in cut} for x in index_shift_screen), \
+    "the shift screen names a span that is not in the set"
+
 # ---- EDGE-SLICED NEIGHBOURS, DERIVED. The sheet tells the signer not to sign a word the crop edge
 # cuts, and the population behind that instruction was a figure in a report ("19 sliced neighbours").
 # A section heading quoting a number nobody re-measures is the defect this lane keeps finding, so it
@@ -664,6 +707,19 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                                 "the implied offset of the note crop (searched, and "
                                                 "required unique, for band-stitched note crops)",
                         "pixel_containment": {"checked": pix_contained, "by_search": pix_searched},
+                        "region_covers_3plus_lines": region_wide,
+                        "index_shift_screen": index_shift_screen,
+                        "what_the_links_showed": "a region ends at the next DETECTED note start, so a "
+                                                 "missed start merges two printed notes. All 5 regions "
+                                                 "of 3+ lines were opened: 3 hold two notes (p107:n3 "
+                                                 "x+y, p245:n0 m+n, p444:n0 a+b), 2 are one note plus "
+                                                 "page furniture (p233:n4 a sheet signature, p526:n0 "
+                                                 "the printed rule at a band boundary). The screen "
+                                                 "names spans to check, it does not decide: of the two "
+                                                 "it names, p245:n1 sits in the note printed `o` while "
+                                                 "carrying note_index 2, and p444:n2 checks out. This "
+                                                 "is a SCORING fact, not a signing one -- the pixels "
+                                                 "are the same pixels whichever note they belong to",
                         "outbound": False,
                         "why_not_an_aperture": "local context for the human signer. Linked by path "
                                                "from the sheet, never embedded in it, and asserted "
@@ -726,6 +782,9 @@ print("NO LINE OF TYPE (box on a rule): %d  %s"
       % (len(rule_only), [x["span_id"] for x in rule_only]))
 print("note context: %d of %d spans linked to the note the box was drawn in (PAD=%d, containment asserted)%s"
       % (n_note, len(cut), PAD, "" if not note_faults else "   NOT DERIVED: %s" % note_faults))
+print("  regions of 3+ lines: %d %s   spans behind one (note-identity screen): %s"
+      % (len(region_wide), [x["span_id"] for x in region_wide],
+         [x["span_id"] for x in index_shift_screen] or "none"))
 print("  span crop byte-identical inside its note crop: %d of %d  (%d located by search: %s)"
       % (pix_contained, n_note, len(pix_searched),
          ", ".join(pix_searched) or "none"))
