@@ -130,11 +130,20 @@ def line_opens_note(band, raised_frac=0.25, gap_min=3, marker_max_w=42, min_text
     return bool(col[g:].sum() >= min_text)             # in the full line. (Floating/reaches-baseline was too
                                                        # strict — it rejected low-sitting markers like `c`.)
 
-def text_lines(ink):
+def text_lines(ink, min_sep_frac=None):
     """Text lines with tall (merged multi-line) bands SPLIT at internal ink valleys. _text_lines groups
     rows on a global threshold, so densely-set apparatus lines fuse; a merged band then breaks the per-line
     baseline/x-height geometry the marker test needs. So: take the raw bands, estimate the single-line
-    height from their median, and split any band taller than 1.5x that at its rowink minima."""
+    height from their median, and split any band taller than 1.5x that at its rowink minima.
+
+    min_sep_frac=None (default): EXACTLY today's behaviour, byte-identical -- this function is shared
+    substrate used elsewhere, and its default must not change. The n-1 candidate rows are chosen by
+    GLOBAL depth alone, with no separation constraint, so two minima belonging to the SAME inter-line
+    valley can both be picked, starving a real line-break elsewhere of its cut (measured on p402: a
+    4-line merged band's two deepest minima sat 12 rows apart in one valley, leaving another valley
+    uncut and a 2-line remainder). When min_sep_frac is given, candidates are instead accepted GREEDILY
+    by depth (deepest first), each only if it is >= min_sep_frac * med rows from every already-accepted
+    cut, until n-1 cuts are chosen (or candidates run out)."""
     raw = _text_lines(ink)
     if not raw:
         return raw
@@ -150,7 +159,17 @@ def text_lines(ink):
         lo, hi = int(0.4 * med), h - int(0.4 * med)
         cand = [i for i in range(lo, hi) if prof[i] <= prof[i - 1] and prof[i] < prof[i + 1]]
         cand.sort(key=lambda i: prof[i])
-        cuts = sorted(cand[:n - 1])
+        if min_sep_frac is None:
+            cuts = sorted(cand[:n - 1])
+        else:
+            min_sep = min_sep_frac * med
+            cuts = []
+            for i in cand:
+                if all(abs(i - c) >= min_sep for c in cuts):
+                    cuts.append(i)
+                    if len(cuts) >= n - 1:
+                        break
+            cuts.sort()
         prev = 0
         for c in cuts:
             out.append((y0 + prev, y0 + c)); prev = c

@@ -1,0 +1,567 @@
+"""verse_regions / verse_head_read born-tests: synthetic-ink unit tests, one per rule, each
+designed to FAIL if the rule it tests is removed (see the mutation-check notes in the handoff
+report). Run: python test_verse_regions.py
+
+EXPECTED_TESTS asserts the suite's OWN test count (test_marker_ledger.py's pattern) so a
+silently-dropped test function fails the run instead of just passing with fewer checks.
+"""
+import numpy as np
+
+import verse_regions as VR
+import verse_head_read as VHR
+
+EXPECTED_TESTS = 21
+
+
+# 1. derive_threshold ---------------------------------------------------------------------------
+
+def test_derive_threshold_first_empty_band_above_median_and_raises():
+    # A WIDE gap sits BELOW the median (a different population boundary: e.g. a centred-lines vs
+    # rest split) and must be ignored -- the rule is "first empty gap scanning UP FROM the
+    # median", never "widest gap anywhere" (MEASURE_step2_gutter_inset_20261004.md: the
+    # widest-gap rule wrongly picked that split instead of the real flush-mode edge).
+    vals = [1, 2, 100, 101, 102, 108, 109, 110]
+    r = VR.derive_threshold(vals, min_gap=5)
+    assert r["lo"] == 102 and r["hi"] == 108, f"must find the first gap above the median, got {r}"
+    assert r["value"] == 105.0
+    assert r["gap"] == 6
+    assert r["rule"] == "first_empty_band_above_median"
+    assert r["n_below"] == 5 and r["n_above"] == 3
+    try:
+        VR.derive_threshold([1, 2, 3, 4, 5], min_gap=5)
+        assert False, "expected ThresholdUndetermined"
+    except VR.ThresholdUndetermined:
+        pass
+
+
+# 2. vertical-rule run treated as white vs. real crossing ---------------------------------------
+
+def test_vertical_rule_treated_as_white_vs_text_crossing_gutter():
+    H, W, xdiv = 50, 400, 200
+    ink = np.zeros((H, W), dtype=bool)
+    # Case A: only a 4px vertical rule at xdiv -> treated as white -> wide gap -> NOT full-width.
+    ink[10:20, 198:202] = True
+    gap_px, _ = VR.gutter_gap(ink, xdiv, 10, 20, W=120)
+    # Without the thin-rule-as-white collapse the 4px rule would SPLIT the window into two
+    # ~118px halves (widest run ~118); collapsed, the whole 240px window is one white run.
+    assert gap_px >= 200, f"a thin rule must collapse to white, not split the window, got gap_px={gap_px}"
+
+    # Case B: ink fills the whole probed window -> crosses the gutter -> full-width.
+    ink2 = np.zeros((H, W), dtype=bool)
+    ink2[10:20, 80:320] = True
+    gap_px2, _ = VR.gutter_gap(ink2, xdiv, 10, 20, W=120)
+    assert gap_px2 == 0, f"text spanning the gutter window must leave no white run, got {gap_px2}"
+
+    full_gap_thr = 50
+    assert gap_px >= full_gap_thr      # case A: not full-width
+    assert gap_px2 < full_gap_thr      # case B: full-width
+
+
+# 2b. double-rule gutter collapse (FIX2) ----------------------------------------------------------
+
+def test_double_rule_gutter_collapses_but_fullwidth_text_survives():
+    H, W, xdiv = 60, 400, 200
+    ink = np.zeros((H, W), dtype=bool)
+    # Two ink runs, each 9px wide -- individually TOO WIDE for the thin-run-only cleaning (which
+    # only flips runs <= RULE_RUN_MAX_W=8px) -- separated by a 3px white gap (<=
+    # DOUBLE_RULE_MERGE_PX=5). They must merge into one 21px cluster, flanked by >=15px white on
+    # both sides and centred within 60px of xdiv: the printed double rule (`.26 #8 .5 #8 .21`,
+    # MEASURE_step2_gutter_inset_20261004.md). Without the merge+collapse the window stays split.
+    ink[10:20, 188:197] = True
+    ink[10:20, 200:209] = True
+    gap_px, _ = VR.gutter_gap(ink, xdiv, 10, 20, W=120)
+    assert gap_px >= 200, (
+        f"two double-rule runs (9px each) must merge and collapse to white, not leave the "
+        f"window split, got gap_px={gap_px}")
+
+    # Genuine full-width text crossing the gutter (140px wide -- far past DOUBLE_RULE_MAX_W=24)
+    # must NOT be swallowed by the double-rule collapse.
+    ink2 = np.zeros((H, W), dtype=bool)
+    ink2[30:40, 80:320] = True
+    gap_px2, _ = VR.gutter_gap(ink2, xdiv, 30, 40, W=120)
+    assert gap_px2 == 0, f"text spanning the gutter window must not be collapsed, got {gap_px2}"
+
+
+# 3. running head + head_band_disagrees_3pct -----------------------------------------------------
+
+def test_running_head_detection_and_disagrees_3pct_flag():
+    H, W, xdiv = 2000, 800, 400
+    ink = np.zeros((H, W), dtype=bool)
+    ink[20:150, 160:640] = True          # a full-width band (running head), y1=150
+    ink[300:310, 20:380] = True          # ordinary left-column body line, 10px tall
+    ink[320:330, 20:380] = True
+    geom = {"file_page": 1, "xdiv": xdiv,
+            "body_regions": [{"col": "left", "box": [0, 0, 400, H]},
+                              {"col": "right", "box": [400, 0, 800, H]}]}
+    s1 = VR.analyze_page_s1(ink, geom)
+    assert s1["running_head"] is not None
+    assert s1["running_head"]["y1"] == 150
+    # TITLE_FRAC_FOSSIL * H = 60; |150-60|=90 > median line height (10) -> flag fires
+    assert "head_band_disagrees_3pct" in s1["flags"]
+
+
+# 3b. full-width classification: two measured edges, abstain zone (FIX3) --------------------------
+
+def test_full_width_classification_two_edges_and_ambiguous_zone():
+    H, W, xdiv = 60, 400, 200
+    ink = np.zeros((H, W), dtype=bool)
+    # gutter_gap's probed window is [xdiv-120, xdiv+120) = abs[80, 320), 240px wide.
+    # Band A (y0=0): an 11px white gap (== FULL_GAP_MAX_PX) -> full-width.
+    ink[0:10, 80:195] = True
+    ink[0:10, 206:320] = True            # abs[195,206) stays white: 11px gap
+    # Band B (y0=20): a 30px white gap (inside the 12-54 abstain zone) -> column, flagged ambiguous.
+    ink[20:30, 80:180] = True
+    ink[20:30, 210:320] = True           # abs[180,210): 30px gap
+    # Band C (y0=40): a 60px white gap (>= COL_GAP_MIN_PX) -> ordinary column, not ambiguous.
+    ink[40:50, 80:170] = True
+    ink[40:50, 230:320] = True           # abs[170,230): 60px gap
+
+    left_bands = [
+        _band("left", 0, 10, 0, 200, 20, 180),
+        _band("left", 20, 30, 0, 200, 20, 180),
+        _band("left", 40, 50, 0, 200, 20, 180),
+    ]
+    right_bands = [
+        _band("right", 0, 10, 200, 400, 220, 380),
+        _band("right", 20, 30, 200, 400, 220, 380),
+        _band("right", 40, 50, 200, 400, 220, 380),
+    ]
+    # One side of the gutter alone is not a full-width line: unpaired -> column band, flagged.
+    f0, l0, r0 = VR._merge_full_bands(left_bands[:1], [], ink, xdiv, gutter_window=120)
+    assert f0 == [] and r0 == [] and len(l0) == 1 and l0[0]["full_unpaired"] is True, (f0, l0)
+
+    full_bands, left_rest, right_rest = VR._merge_full_bands(left_bands, right_bands, ink, xdiv, gutter_window=120)
+
+    assert len(right_rest) == 2
+    assert len(full_bands) == 1 and full_bands[0]["y0"] == 0
+    assert full_bands[0]["gap_px"] <= VR.FULL_GAP_MAX_PX
+
+    assert len(left_rest) == 2
+    ambiguous = next(b for b in left_rest if b["y0"] == 20)
+    column = next(b for b in left_rest if b["y0"] == 40)
+    assert ambiguous["gutter_ambiguous"] is True
+    assert VR.FULL_GAP_MAX_PX < ambiguous["gap_px"] < VR.COL_GAP_MIN_PX
+    assert column["gutter_ambiguous"] is False
+    assert column["gap_px"] >= VR.COL_GAP_MIN_PX
+
+
+# 4. inset candidate ------------------------------------------------------------------------------
+
+def _band(col, y0, y1, x0, x1, left_ink_x, right_ink_x, xheight=10, baseline=None, gap_px=999):
+    return {"col": col, "y0": y0, "y1": y1, "x0": x0, "x1": x1,
+            "left_ink_x": left_ink_x, "right_ink_x": right_ink_x,
+            "baseline": baseline if baseline is not None else y1, "xheight": xheight,
+            "gap_px": gap_px}
+
+
+def test_inset_candidate_fires_after_short_line_not_on_flush_continuation():
+    bands = [
+        _band("left", 0, 20, 0, 400, 20, 380),     # a: normal (first -> auto-candidate, ignored)
+        _band("left", 20, 40, 0, 400, 20, 250),    # b: short line (ragged right)
+        _band("left", 40, 60, 0, 400, 70, 380),    # c: indented after short -> CANDIDATE
+        _band("left", 60, 80, 0, 400, 20, 380),    # d: flush continuation -> NOT a candidate
+        _band("left", 80, 100, 0, 400, 70, 380),   # e: indented, prev (d) is full/justified (NOT
+                                                    #    short) -> R5: fires on inset ALONE, flagged
+    ]
+    s1 = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400, "left": bands, "right": [], "full": []}
+    cands = VR.head_candidates(s1, inset_thr=15)
+    fired_y0 = {c["y0"] for c in cands if c["kind"] == "verse"}
+    assert 40 in fired_y0, "indented line after a short (ragged-right) line must fire"
+    assert 60 not in fired_y0, "a flush continuation must not fire (its own inset is below threshold)"
+    assert 80 in fired_y0, (
+        "R5: an indented band fires on inset ALONE, even when the previous line was itself "
+        "full/justified (not short) -- CAUSE B: 17 such bands were wrongly suppressed")
+    by_y0 = {c["y0"]: c for c in cands if c["kind"] == "verse"}
+    assert by_y0[40].get("flags") == [], "prev WAS short -> no prev_line_full flag"
+    assert by_y0[80].get("flags") == ["prev_line_full"], (
+        "prev was full/justified (prev_right_short False) -> carries prev_line_full as evidence, "
+        "informational only (does not gate)")
+
+
+# 4b. cross-column reading order + prev_band reset on a full band (FIX4) --------------------------
+
+def test_head_candidates_cross_column_reading_order_and_prev_none():
+    # NEGATIVE case + full-band reset: prev_band must carry the reading-order's last band across
+    # the LEFT->RIGHT column switch (not reset per column), yet a flush (non-indented) band must
+    # still not fire merely by being first in its column (the removed per-column "is_first ->
+    # always a candidate" rule would have fired here); and prev_band must reset to None when a
+    # FULL band is crossed, so the next band's candidacy depends on its own inset alone.
+    L1 = _band("left", 0, 20, 0, 400, 20, 380)        # normal
+    L2 = _band("left", 20, 40, 0, 400, 20, 250)       # short / ragged-right
+    R1 = _band("right", 10, 30, 400, 800, 420, 780)   # flush, FIRST in right col, right after short L2
+    R2 = _band("right", 30, 50, 400, 800, 420, 780)   # flush (median baseline)
+    R3 = _band("right", 50, 70, 400, 800, 420, 780)   # flush (median baseline)
+    FB = _band("full", 100, 120, 0, 800, 100, 700)
+    L4 = _band("left", 130, 150, 0, 400, 70, 380)     # indented, first band after FB
+
+    s1_neg = {"file_page": 1, "H": 2000, "W": 800, "xdiv": 400,
+              "left": [L1, L2, L4], "right": [R1, R2, R3], "full": [FB]}
+    cands = VR.head_candidates(s1_neg, inset_thr=15)
+    fired = {(c["col"], c["y0"]) for c in cands if c["kind"] == "verse"}
+    assert ("right", 10) not in fired, (
+        "a flush (non-indented) band must not fire merely by being first in its column "
+        "after a column switch")
+    assert ("left", 130) in fired, (
+        "the first band after a FULL band must fire by its own inset alone -- prev_band must "
+        "reset to None on a full band, not carry R3's (flush, non-short) state across it")
+
+    # POSITIVE case: an INDENTED right-column band, first in its column, right after a SHORT
+    # left-column line, must fire -- proving prev_band genuinely carries across the column switch
+    # (not just failing to fire unconditionally).
+    Rp1 = _band("right", 10, 30, 400, 800, 470, 780)  # indented
+    Rp2 = _band("right", 30, 50, 400, 800, 420, 780)
+    Rp3 = _band("right", 50, 70, 400, 800, 420, 780)
+    s1_pos = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400,
+              "left": [L1, L2], "right": [Rp1, Rp2, Rp3], "full": []}
+    cands2 = VR.head_candidates(s1_pos, inset_thr=15)
+    fired2 = {(c["col"], c["y0"]) for c in cands2 if c["kind"] == "verse"}
+    assert ("right", 10) in fired2, (
+        "an indented band immediately after a short LEFT line must fire via cross-column "
+        "prev_band carry, even though it is the first band in its own column")
+
+
+# 4c. gutter-rule exclusion from band ink extent (R1) ----------------------------------------------
+
+def test_make_band_excludes_gutter_rule_from_ink_extent():
+    # strip_vrules's own max_w=6 is narrower than the printed double-rule's 8-10px line width, so
+    # the rule survives strip_vrules (applied once over the whole column) and would otherwise
+    # become a band's leftmost/rightmost ink. _make_band must independently zero the SAME rule
+    # columns gutter_gap already classifies (_gutter_rule_cols) before measuring extent.
+    H, W, xdiv = 2000, 1000, 400
+    ink = np.zeros((H, W), dtype=bool)
+
+    # Scenario A: right-column band, a 9px rule at local x[3:12) plus text starting at local x 45.
+    ink[200:230, 403:412] = True                       # the rule (abs == local + cx0, cx0=400)
+    ink[200:230, 445:500] = True                        # text, local [45:100)
+    right_box = (400, 0, W, H)
+    right_col_ink = np.zeros((H, W - 400), dtype=bool)
+    right_col_ink[200:230, 3:12] = True
+    right_col_ink[200:230, 45:100] = True
+    band_a = VR._make_band("right", right_box, 200, 230, right_col_ink, ink, xdiv)
+    assert band_a["left_ink_x"] == 400 + 45, (
+        f"the rule must be excluded -- without R1 this would be 400+3, got {band_a['left_ink_x']}")
+    assert band_a["right_ink_x"] == 400 + 100
+    assert band_a["rule_cols_removed"] == 9
+
+    # Scenario B: left-column band, text ends 40px before xdiv (abs 300..360), a 9px rule just
+    # before xdiv (abs 389..398).
+    ink[300:330, 300:360] = True                        # text
+    ink[300:330, 389:398] = True                        # the rule
+    left_box = (0, 0, 400, H)
+    left_col_ink = np.zeros((H, 400), dtype=bool)
+    left_col_ink[300:330, 300:360] = True
+    left_col_ink[300:330, 389:398] = True
+    band_b = VR._make_band("left", left_box, 300, 330, left_col_ink, ink, xdiv)
+    assert band_b["right_ink_x"] == 360, (
+        f"the rule must be excluded -- without R1 this would be 398, got {band_b['right_ink_x']}")
+    assert band_b["left_ink_x"] == 300
+    assert band_b["rule_cols_removed"] == 9
+
+
+# 4d. sliver quarantine (R2) -------------------------------------------------------------------------
+
+def test_sliver_bands_excluded_from_candidates_and_prev_band():
+    a = _band("left", 0, 20, 0, 400, 20, 380)           # normal
+    b = _band("left", 20, 40, 0, 400, 20, 250)          # short / ragged-right
+    speck = _band("left", 40, 46, 0, 400, 20, 380)      # 6px sliver, FLUSH (not short)
+    c = _band("left", 46, 66, 0, 400, 70, 380)          # indented after short -> candidate
+    d = _band("left", 66, 86, 0, 400, 20, 380)          # flush continuation
+    e = _band("left", 86, 106, 0, 400, 70, 380)         # indented, prev (d) full/justified ->
+                                                         # R5: fires on inset alone, flagged
+
+    kept, slivers = VR._split_slivers([a, b, speck, c, d, e])
+    assert kept == [a, b, c, d, e]
+    assert slivers == [speck]
+
+    s1 = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400, "left": kept, "right": [], "full": []}
+    cands = VR.head_candidates(s1, inset_thr=15)
+    fired = {c_["y0"] for c_ in cands if c_["kind"] == "verse"}
+    by_y0 = {c_["y0"]: c_ for c_ in cands if c_["kind"] == "verse"}
+    assert 46 in fired, "with the sliver excluded, c's prev_band is b (short) -- c must fire"
+    assert by_y0[46].get("flags") == [], "prev (b) really was short -> no prev_line_full flag"
+    assert 86 in fired, "R5: e fires on inset alone even though prev (d) is full/justified"
+    assert by_y0[86].get("flags") == ["prev_line_full"]
+
+    # Regression guard: an UNFILTERED sliver (left through to head_candidates untouched) becomes
+    # prev_band for c -- being FLUSH (not short) it no longer suppresses c's candidacy under R5
+    # (inset alone decides is_verse), but it DOES corrupt c's prev_line_full evidence: the sliver
+    # masquerades as a full/justified previous line, wrongly flagging prev_line_full when the real
+    # previous line (b) was short. This proves _split_slivers' exclusion is still load-bearing for
+    # signature correctness, not incidental.
+    s1_unfiltered = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400,
+                      "left": [a, b, speck, c, d, e], "right": [], "full": []}
+    cands_unfiltered = VR.head_candidates(s1_unfiltered, inset_thr=15)
+    by_y0_unfiltered = {c_["y0"]: c_ for c_ in cands_unfiltered if c_["kind"] == "verse"}
+    assert by_y0_unfiltered[46].get("flags") == ["prev_line_full"], (
+        "sanity check on the test's own construction: an unexcluded sliver must corrupt "
+        "c's prev_line_full evidence")
+
+
+# 5. head_reads confirmation -----------------------------------------------------------------------
+
+def test_head_reads_ver_false_rejects_none_keeps_unconfirmed():
+    cands = [
+        {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20],
+         "kind": "verse", "signature": {}},
+        {"file_page": 1, "col": "left", "y0": 30, "y1": 40, "box": [0, 30, 100, 40],
+         "kind": "verse", "signature": {}},
+        {"file_page": 1, "col": "left", "y0": 50, "y1": 60, "box": [0, 50, 100, 60],
+         "kind": "verse", "signature": {}},
+        {"file_page": 1, "col": "left", "y0": 70, "y1": 80, "box": [0, 70, 100, 80],
+         "kind": "chapter", "signature": {}},
+    ]
+    head_reads = {
+        (1, "left", 10): {"ver": False, "numbers": None, "status": "ok"},
+        (1, "left", 50): {"ver": None, "numbers": None, "status": "abstain"},
+        # (1, "left", 70) rejected by the read-prompt (it's not a Ver. line) -- must be ignored
+        (1, "left", 70): {"ver": False, "numbers": None, "status": "ok"},
+    }
+    confirmed, rejected = VR.confirm_candidates(cands, head_reads)
+    assert any(r["y0"] == 10 and r["reason"] == "head_reads:ver_false" for r in rejected)
+    y0_to_conf = {c["y0"]: c for c in confirmed}
+    assert 30 in y0_to_conf and "head_unconfirmed" in y0_to_conf[30].get("flags", [])   # missing key
+    assert 50 in y0_to_conf and "head_unconfirmed" in y0_to_conf[50].get("flags", [])   # ver None
+    assert 70 in y0_to_conf, "a chapter candidate must be confirmed by geometry, never by head_reads"
+
+
+# 6. reconcile_numbers ------------------------------------------------------------------------------
+
+def test_reconcile_numbers_cases():
+    r = VR.reconcile_numbers({"count": None, "read": [3], "witness": None})
+    assert r["numbers_link_status"] == "numbers_single_source" and r["verse"] is None
+
+    r = VR.reconcile_numbers({"count": None, "read": [3], "witness": [3]})
+    assert r["numbers_link_status"] == "numbers_agree" and r["verse"] == [3]
+
+    r = VR.reconcile_numbers({"count": None, "read": [3], "witness": [4]})
+    assert r["numbers_link_status"] == "numbers_disagree"
+    assert r["numbers_disagree_pairs"] == ["read|witness"]
+    assert r["verse"] is None
+
+    r = VR.reconcile_numbers({"count": 1, "read": [1, 2], "witness": [1, 2]})
+    assert r["numbers_link_status"] == "numbers_agree" and r["verse"] == [1, 2]
+
+    r = VR.reconcile_numbers({"count": 1, "read": None, "witness": None})
+    assert r["numbers_link_status"] == "numbers_single_source" and r["verse"] is None
+
+    r = VR.reconcile_numbers({"count": None, "read": None, "witness": None})
+    assert r["numbers_link_status"] == "numbers_none" and r["verse"] is None
+
+
+# 7. assert_numbering_invariant ----------------------------------------------------------------------
+
+def test_assert_numbering_invariant_raises_and_passes():
+    bad = {"file_page_first": 99, "verse": [3], "numbers_link_status": "numbers_single_source",
+           "number_sources": {"count": None, "read": [3], "witness": None}}
+    try:
+        VR.assert_numbering_invariant([bad])
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "99" in str(e)
+
+    good = {"file_page_first": 99, "verse": [3], "numbers_link_status": "numbers_agree",
+            "number_sources": {"count": None, "read": [3], "witness": [3]}}
+    VR.assert_numbering_invariant([good])    # must not raise
+
+
+# 8. witness pairing --------------------------------------------------------------------------------
+
+def test_witness_pairing_null_and_head_count_vs_witness():
+    per_head, flag = VR.pair_witness_numbers(3, [[1], [2]])
+    assert per_head == [None, None, None] and flag is True
+
+    per_head, flag = VR.pair_witness_numbers(2, [[1], [2]])
+    assert per_head == [[1], [2]] and flag is False
+
+
+# 9. region_empty / head_only, derived from bands not a counter (FIX5) --------------------------------
+
+def test_head_only_region_has_head_band_counted_and_region_empty_via_helper():
+    head_band = _band("left", 10, 20, 0, 100, 10, 90)
+    s1 = {"file_page": 1, "H": 100, "W": 200, "xdiv": 100, "left": [head_band], "right": [], "full": []}
+    cand = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20],
+            "kind": "verse", "signature": {}, "head_confirm": None, "flags": []}
+    regions, _ = VR.assemble_regions(
+        [{"file_page": 1}], {1: s1}, {1: [cand]}, {1: []}, {1: None}, config={})
+    assert len(regions) == 1
+    # FIX5: the head band belongs to its own region's rect (extended on open) -- a region with
+    # ONLY its head band is not empty (it has one ink band: the head itself), but it IS head_only.
+    assert regions[0]["region_empty"] is False
+    assert regions[0]["head_only"] is True
+    assert "head_only" in regions[0]["flags"]
+    assert "region_empty" not in regions[0]["flags"]
+
+    # The region_empty born-test: assemble_regions can no longer naturally produce an empty region
+    # (FIX5 always extends the opening rect to the head band), so build one by hand and confirm
+    # _count_ink_bands -- the function assemble_regions now derives emptiness from -- returns 0
+    # for a rect whose row range has no S1 band at all.
+    empty_region = {"rects": [{"file_page": 1, "col": "left", "box": [0, 50, 100, 60]}]}
+    n = VR._count_ink_bands(empty_region, {1: s1})
+    assert n == 0, "a rect covering rows with no S1 band must count zero ink bands"
+
+
+# 10. continuation chaining -----------------------------------------------------------------------------
+
+def test_continuation_chains_and_unanchored():
+    head_band = _band("left", 10, 20, 0, 100, 10, 90)
+    s1_p1 = {"file_page": 1, "H": 100, "W": 200, "xdiv": 100, "left": [head_band], "right": [], "full": []}
+    cand = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20],
+            "kind": "verse", "signature": {}, "head_confirm": None, "flags": []}
+
+    body_band = _band("left", 5, 15, 0, 100, 10, 90)
+
+    # A: consecutive page chains -> ONE region, gains a rect from page 2.
+    s1_p2 = {"file_page": 2, "H": 100, "W": 200, "xdiv": 100, "left": [body_band], "right": [], "full": []}
+    regions_a, _ = VR.assemble_regions(
+        [{"file_page": 1}, {"file_page": 2}],
+        {1: s1_p1, 2: s1_p2}, {1: [cand], 2: []}, {1: [], 2: []}, {1: None, 2: None}, config={})
+    assert len(regions_a) == 1
+    assert regions_a[0]["region_empty"] is False
+    assert any(r["file_page"] == 2 for r in regions_a[0]["rects"])
+
+    # B: a non-consecutive page does NOT chain -> a separate continuation_unanchored region.
+    s1_p3 = {"file_page": 3, "H": 100, "W": 200, "xdiv": 100, "left": [body_band], "right": [], "full": []}
+    regions_b, _ = VR.assemble_regions(
+        [{"file_page": 1}, {"file_page": 3}],
+        {1: s1_p1, 3: s1_p3}, {1: [cand], 3: []}, {1: [], 3: []}, {1: None, 3: None}, config={})
+    kinds = sorted(r["kind"] for r in regions_b)
+    assert kinds == ["continuation_unanchored", "verse"]
+    verse_r = next(r for r in regions_b if r["kind"] == "verse")
+    unanchored_r = next(r for r in regions_b if r["kind"] == "continuation_unanchored")
+    # FIX5: verse_r's rect was extended to its own head band on open, so it is NOT empty (one ink
+    # band: the head itself) even though page 3 did not chain to it -- it IS head_only.
+    assert verse_r["region_empty"] is False
+    assert verse_r["head_only"] is True
+    assert unanchored_r["file_page_first"] == 3
+    assert unanchored_r["region_empty"] is False
+
+
+# 11. guard_crop --------------------------------------------------------------------------------------
+
+def test_guard_crop_statuses():
+    page = np.full((100, 100), 255, dtype=np.uint8)
+    assert VHR.guard_crop(page, (-5, 0, 50, 50), (100, 100)) == "clamped"
+    assert VHR.guard_crop(page, (60, 60, 150, 150), (100, 100)) == "clamped"
+
+    blank = np.full((100, 100), 255, dtype=np.uint8)
+    assert VHR.guard_crop(blank, (0, 0, 50, 50), (100, 100)) == "blank"
+
+    uniform = np.full((100, 100), 50, dtype=np.uint8)
+    assert VHR.guard_crop(uniform, (0, 0, 50, 50), (100, 100)) == "uniform"
+
+    ok = np.zeros((100, 100), dtype=np.uint8)
+    ok[::2, :] = 255     # checkerboard-ish rows: plenty of dark + plenty of texture
+    assert VHR.guard_crop(ok, (0, 0, 50, 50), (100, 100)) == "ok"
+
+
+# 12. read_head with a fake client ---------------------------------------------------------------------
+
+def test_read_head_fake_client_parses():
+    r = VHR.read_head(lambda b: '{"ver": true, "numbers": [3, 4]}', b"x")
+    assert r == {"ver": True, "numbers": [3, 4], "status": "ok", "raw": '{"ver": true, "numbers": [3, 4]}'}
+
+    r = VHR.read_head(lambda b: '{"ver": false, "numbers": null}', b"x")
+    assert r["ver"] is False and r["status"] == "ok"
+
+    r = VHR.read_head(lambda b: '{"ver": null, "numbers": null}', b"x")
+    assert r["ver"] is None and r["status"] == "abstain"
+
+    r = VHR.read_head(lambda b: "not json at all", b"x")
+    assert r["status"] == "error:parse"
+
+
+# 13. run-level fault: 3 consecutive read errors abort ----------------------------------------------
+
+def test_run_level_fault_aborts_after_3_consecutive_errors():
+    counter = VHR.ConsecutiveErrorCounter(limit=3)
+
+    class FlakyClient:
+        base_url = "http://example:11435"
+        model = "m"
+
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, *a, **k):
+            self.calls += 1
+            raise TimeoutError("boom")
+
+    client = FlakyClient()
+    aborted = False
+    try:
+        for _ in range(5):
+            try:
+                VHR.read_head(client, b"png")
+                counter.record_success()
+            except Exception:
+                counter.record_error()
+    except VHR.ConsecutiveReadErrorFault:
+        aborted = True
+    assert aborted
+    assert client.calls == 3, f"must abort exactly at the 3rd consecutive error, got {client.calls} calls"
+
+
+def test_centred_chapter_head_measured_against_text_block_not_column_box():
+    # Left column box starts at 0 but its text block starts at 470 (page margin) and ends at 1930.
+    # A CHAP head centred in the TEXT BLOCK: ink 1050..1350 -> insets 580 / 580. Against the box
+    # it would read 1050 / 580 and fail |l - r| <= inset_thr (the measured miss: chapter heads
+    # found on 1 of 5 expected pages).
+    body = [_band("left", 100 + 60 * i, 150 + 60 * i, 0, 1940, 470, 1930, xheight=10) for i in range(5)]
+    chap = _band("left", 400, 460, 0, 1940, 1050, 1350, xheight=13)
+    s1 = {"file_page": 1, "H": 5400, "W": 3584, "xdiv": 1940, "left": body[:5] + [chap],
+          "right": [], "full": [], "col_boxes": {"left": (0, 0, 1940, 5400)}}
+    cands = VR.head_candidates(s1, inset_thr=50)
+    kinds = [(c["kind"], c["y0"]) for c in cands]
+    assert ("chapter", 400) in kinds, kinds
+    # and an ordinary indented verse line is NOT centred
+    assert not any(k == "chapter" and y != 400 for k, y in kinds), kinds
+
+
+def test_letter_spaced_head_across_gutter_is_paired_into_one_full_chapter_band():
+    # Measured on p128: "C H A P. V." centred on xdiv=1970, inter-letter gap 45 px at the gutter,
+    # so S1 files it as left 1718..1957 + right 2005..2197. Left text block 465..1917 (local,
+    # box x0=0), right 1989..3446 (box x0=1970). Pairing must merge it into ONE full band that the
+    # centred test calls a chapter; a deep-inset LEFT line that does NOT reach the gutter and a
+    # short RIGHT line flush at the gutter that has no left partner must stay column bands.
+    L = [_band("left", 700 + 60 * i, 750 + 60 * i, 0, 1970, 465, 1917, xheight=30) for i in range(6)]
+    R = [_band("right", 700 + 60 * i, 750 + 60 * i, 1970, 3584, 1989, 3446, xheight=29) for i in range(6)]
+    chap_l = _band("left", 2911, 2965, 0, 1970, 1718, 1957, xheight=53, gap_px=45)
+    chap_r = _band("right", 2909, 2937, 1970, 3584, 2005, 2197, xheight=25, gap_px=45)
+    lone_l = _band("left", 3100, 3150, 0, 1970, 1000, 1500, xheight=30)   # centred-ish, not at gutter
+    lone_r = _band("right", 3300, 3350, 1970, 3584, 1990, 2400, xheight=29)  # short, no partner
+    s1 = {"file_page": 128, "H": 5400, "W": 3584, "xdiv": 1970, "left": L + [chap_l, lone_l],
+          "right": R + [chap_r, lone_r], "full": [],
+          "col_boxes": {"left": (0, 0, 1970, 5400), "right": (1970, 0, 3584, 5400)}}
+    n = VR.pair_centred_across_gutter(s1, inset_thr=50)
+    assert n == 1 and s1["n_centred_pairs"] == 1, n
+    assert len(s1["full"]) == 1 and s1["full"][0]["full_basis"] == "centred_pair", s1["full"]
+    assert (s1["full"][0]["left_ink_x"], s1["full"][0]["right_ink_x"]) == (1718, 2197)
+    assert lone_l in s1["left"] and lone_r in s1["right"]
+    assert chap_l not in s1["left"] and chap_r not in s1["right"]
+    kinds = [(c["kind"], c["y0"]) for c in VR.head_candidates(s1, inset_thr=50)]
+    assert ("chapter", 2909) in kinds, kinds
+
+
+def test_confirm_candidates_preserves_candidate_flags():
+    c = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20], "kind": "verse",
+         "signature": {}, "flags": ["prev_line_full"]}
+    conf, rej = VR.confirm_candidates([c], head_reads=None)
+    assert conf[0]["flags"] == ["prev_line_full", "head_unconfirmed"], conf[0]["flags"]
+    conf, rej = VR.confirm_candidates([c], head_reads={(1, "left", 10): {"ver": True, "numbers": [3], "status": "ok"}})
+    assert conf[0]["flags"] == ["prev_line_full"], conf[0]["flags"]
+
+
+if __name__ == "__main__":
+    import traceback
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    if len(fns) != EXPECTED_TESTS:
+        print(f"EXPECTED_TESTS mismatch: discovered {len(fns)}, expected {EXPECTED_TESTS}")
+        raise SystemExit(1)
+    p = f = 0
+    for fn in fns:
+        try:
+            fn(); p += 1; print(f"  PASS {fn.__name__}")
+        except Exception:
+            f += 1; print(f"  FAIL {fn.__name__}"); traceback.print_exc()
+    print(f"\n{p} passed, {f} failed")
+    raise SystemExit(1 if f else 0)
