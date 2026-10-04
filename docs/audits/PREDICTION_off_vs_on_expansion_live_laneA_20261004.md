@@ -353,3 +353,49 @@ Defects 2 and 3 remain open and deliberately deferred: the `baml_punt:<reason>` 
 `release-0.3.2` deploying, because `backend/stage_health.py` is byte-identical there and the
 instrument must not change mid-arm; P1 naming its population belongs in the next locked document,
 not in a patch to this one.
+
+---
+
+## Retraction 2: the corpus violation was a FALSE POSITIVE. 2026-10-04, later the same day
+
+The section above says the vector-sha change was "a **re-embedding** of the gya-test corpus" and
+defends that by saying I read the hashing code instead of assuming an instrument artifact. **That
+is retracted.** Nothing wrote to gya-test. Full evidence in
+`docs/audits/READFAULT_corpus_vector_sha_false_positive_20261004.md`; the three findings:
+
+1. Max `_lastUpdateTimeUnix` over both collections is **2026-05-25T01:47:38Z**, 132 days before the
+   run. Zero objects written on 2026-10-04. The cursor scan also returns unique ids equal to the
+   aggregate count, so pagination neither skips nor duplicates; `pq`/`bq`/`sq` are all disabled and
+   `vectorizer: none`, so there is no quantized cache and the server cannot re-embed on read.
+2. Two fresh samples, identical id set and order, **7 of 7294 vector digests differ — with vector
+   lengths of 4094, 4097 and 4099 for a 4096-dim embedding.** Those are malformed arrays, not
+   different embeddings. (Two of the seven had the correct length and wrong contents, so a length
+   check alone would not have caught them.)
+3. A single-object GET is stable 10/10. The 1.1 MB page body returns two distinct raw-body SHAs in
+   10 fetches at identical byte length, one of them failing to parse 207 bytes past 64 KiB, while
+   `curl` returns the same bytes 50/50. A captured mutation is a verbatim copy of the same body
+   from offset 55027 re-emitted at offset 585293, total length preserved.
+
+**What I got wrong, precisely.** I verified that the fold is order-independent and float-tolerant.
+Both are true, and neither is a statement about whether the bytes reaching the fold are the bytes
+the server sent. I checked the arithmetic and never checked the input, then presented "text sha and
+counts identical, 7294/7294 hashed both times" as discriminating evidence when it is equally
+consistent with a handful of corrupted reads. This is the causal-story failure in its usual
+shape — the detector fired correctly and my explanation of why was invented.
+
+Worse: `fingerprint_rest.py`'s 5-attempt retry loop catches the corruption that breaks the JSON and
+silently re-fetches, so only the **undetectable** form of it ever reached the fingerprint. The
+visible half was being suppressed by a retry nobody counted.
+
+**P1 is unaffected.** Expansion was healthy on 65/65 scored runs; that stands.
+
+**The arm's status changes from void-on-two-axes to void-on-one.** The corpus axis is clean. HEAD
+moving mid-run — my four doc commits — is the whole of what voids it. The rerun needs HEAD frozen
+and nothing else; there is no re-embedding to find and no mystery writer.
+
+**Defect 4, now queued and specified:** a fingerprint difference must be attributable to named
+objects, not a fold. `classify_change` sorts a difference into added / removed / rewritten /
+read_fault using the discriminator the database already owns — a stored object cannot change
+without its `last_update_ms` changing. A read fault is provisional and names its uuids; a real
+change stays a violation; an unknowable timestamp counts as a rewrite, because unknowable is not
+benign. Spec in `scratchpad/SPEC_fingerprint_attribution.md`.
