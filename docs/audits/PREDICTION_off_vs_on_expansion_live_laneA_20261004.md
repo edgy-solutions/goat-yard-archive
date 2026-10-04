@@ -170,3 +170,62 @@ this whole void episode earns.
 
 If the configuration at launch differs from the table above in any row, **this document is void and
 a new one is locked.** A prediction edited to match its run is not a prediction.
+
+---
+
+## P1 FAILED on the warmup. This pair is VOID. Written before the arm finished.
+
+Timestamped by its commit, which lands while arm OFF is still running and before a single scored
+result has been read. That ordering is the only thing that makes the rest of this section worth
+anything.
+
+**What happened.** The preflight probe passed clean (`expansion {ok: 1, errored: 0, causes: {}}`).
+The very next request — the arm warmup — errored:
+
+```
+BAML output structurally punted: ['entities_given_none_returned']
+fallback = poisoned_manifest_suppressed
+```
+
+and `/health/stages` counted it correctly: `expansion {ok: 1, errored: 1, causes: {"other": 1},
+fallbacks: {"poisoned_manifest_suppressed": 1}}`.
+
+**P1 as locked says `errored == 0` and `distinct_fallback == ["<none>"]`, and names the consequence:
+the pair is void, not failed.** It is void. I am not going to reread my own rule into something
+looser now that it has cost me something, because a prediction edited to match its run is not a
+prediction, and this document says so three paragraphs above.
+
+**What this failure is NOT.** It is not the fault that voided the fourteen. That was
+`missing_env_var:LITELLM_PROXY_URL` on every request — the stage was dead and nothing noticed. Here
+the stage is **alive**: the proxy answers, one request expanded fine, and the failing one was caught
+by a suppression gate doing exactly its job (`poisoned_manifest_suppressed`) and reported by a
+recorder shipped for this purpose. Dead-stage and bad-output are different faults, and P1 as written
+cannot tell them apart. **That is a defect in P1, not a reason to excuse the result.**
+
+**The honest consequence: P1 is the wrong rule, and I do not yet know the right one.** A
+one-in-N structural punt with a working suppression gate may be normal operation. If it is, then
+`errored == 0` makes an OFF-vs-ON comparison impossible by construction, and I would be refusing to
+measure a system that works. If it is not normal, the rate will say so. Either way the threshold has
+to come from the measured punt rate, by the rule in [[thresholds-from-empty-bands]] — derive it from
+a gap in the data, never from how much I want the run to survive.
+
+**So arm OFF is being allowed to finish, reclassified in advance:**
+
+- **Void for the flag.** P9, P10 and P11 are abandoned for this pair. No pooled number from this arm
+  may be compared with any other arm, cited in an ADR, or used to move the flag.
+- **Kept as the punt-rate diagnostic.** It will report how many of 65 scored runs punt, with which
+  causes and fallbacks, whether the recorder catches every one, and whether the pin held throughout
+  (`pin_honored` already reads True with `served_by=StreamLake`, so P3/P4 are working).
+- **Arm ON is NOT launched.** Spending a second arm's LM budget on a comparison already declared
+  void would be waste. The pair resumes from a new locked document once the punt rate is known.
+
+This is a reclassification of a running arm, and the reason it is not a rescue is that it **gives up
+the comparison**, which is the thing I wanted, and keeps only the diagnostic, which is the thing the
+failure made available. The spend is mine to account for: one arm of LM calls bought a punt rate
+instead of a floor.
+
+**What this does NOT solve.** It does not say whether the punt is frequent, random, or
+question-specific; whether `causes: {"other"}` is hiding several distinct faults behind one
+allowlist bucket (it is a single bucket by design, and that may now be too coarse); or whether the
+suppressed manifest changes the answer the user gets. Those are results, and no result has been read
+yet.
