@@ -22,6 +22,8 @@ import os
 import re
 import sys
 
+from run_dir import question_files
+
 
 def error_class(msg: str) -> str:
     """Bucket a BAML expansion error without echoing its text."""
@@ -42,8 +44,7 @@ def error_class(msg: str) -> str:
 def census(root: str):
     rows = []
     for dirpath, _dirnames, filenames in os.walk(root):
-        qfiles = [f for f in filenames
-                  if f.endswith(".json") and f not in ("summary.json", "PUBLISHED.json")]
+        qfiles = question_files(filenames)
         n_q = run_ok = run_err = run_nofield = 0
         rep_ok = rep_err = rep_nostages = 0
         causes = {}

@@ -40,6 +40,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 from dotenv import load_dotenv
 
+from run_dir import question_files
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -644,7 +646,9 @@ KEEP_ALIVE_PIN_NOTE = (
 def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
               allow_lm_cache: bool, do_warmup: bool,
               require_provider_pin: bool = False,
-              allow_unset_temperature: bool = False) -> tuple:
+              allow_unset_temperature: bool = False,
+              allow_expansion_errors: bool = False,
+              allow_unpinned_provider: bool = False) -> tuple:
     """Warm the path and verify run integrity BEFORE any question is scored.
 
     Returns (warmup_info, exit_code). A nonzero exit_code means: do not score anything.
@@ -655,6 +659,11 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
     info = {"warmup_ran": do_warmup, "keep_alive_pin": KEEP_ALIVE_PIN_NOTE}
     if not do_warmup:
         print("Warmup    : SKIPPED (--no-warmup); first scored latency includes cold start.\n")
+        refusals = scored_run_refusals(info, allow_expansion_errors, allow_unpinned_provider)
+        if refusals:
+            print("")
+            print(("\n\n").join(refusals))
+            return info, 3
         return info, 0
 
     print(f"Warmup    : one unscored request (embedding + generation), wall {timeout:.0f}s ...",
@@ -673,11 +682,19 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
     # this is the cheapest place to catch it, before any question is asked. Loud, not fatal:
     # see check_run_integrity / stage_health_block for why this must never abort.
     warmup_stages = resp.get("stages")
-    if isinstance(warmup_stages, dict) and warmup_stages.get("baml_error"):
-        print(f"WARNING: the warmup response shows a BAML query-expansion error: "
-              f"{warmup_stages.get('baml_error')!r} "
-              f"(fallback={warmup_stages.get('baml_fallback')!r}). Every scored run in this arm "
-              f"may be silently falling back. Check LITELLM_PROXY_URL on the server.")
+    observed = isinstance(warmup_stages, dict)
+    info["warmup_expansion"] = {
+        "observed": observed,
+        "baml_error": warmup_stages.get("baml_error") if observed else None,
+        "baml_fallback": warmup_stages.get("baml_fallback") if observed else None,
+    }
+    if observed and warmup_stages.get("baml_error"):
+        print(f"            Expansion: ERROR {warmup_stages.get('baml_error')!r} "
+              f"(fallback={warmup_stages.get('baml_fallback')!r})")
+    elif observed:
+        print("            Expansion: healthy on the warmup (no BAML error, no fallback).")
+    else:
+        print("            Expansion: UNOBSERVED - the response carried no `stages` block.")
     print(f"            {info['warmup_seconds']}s"
           + (f"  ERROR: {info['warmup_error']}" if info["warmup_error"] else "")
           + (f"  DEGRADED: {info['warmup_degraded']}" if info["warmup_degraded"] else ""))
@@ -771,7 +788,245 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
         print(f"            Provider served: UNREADABLE "
               f"({alm.get('provider_served_source')}). The pin cannot be verified on this arm; "
               f"unchecked is not honored.")
+
+    # Conditions 1 and 2 of the scored-run preflight. Last in preflight so a reader sees every
+    # observed fact above before the verdict, and so the refusal can quote them.
+    refusals = scored_run_refusals(info, allow_expansion_errors, allow_unpinned_provider)
+    if refusals:
+        print("")
+        print(("\n\n").join(refusals))
+        return info, 3
     return info, 0
+
+
+# --- the scored-run preflight: three conditions, one gate ------------------------------------
+#
+# Ruling (2026-10-04, Chris): enforce the scored-run preflight -- expansion healthy, pin
+# honored, header written -- as a LAUNCHER REFUSAL, born-tested, not a prediction-file rule.
+#
+# What made this necessary. A locked prediction document asserted "if the warmup shows an
+# expansion error, no scored question is sent". Nothing enforced it. The warmup of
+# evals/output/off_vs_on_20261004/off printed a BAML expansion punt as a WARNING and the arm
+# scored all 13 questions anyway -- and because stage_health counts SCORED runs only (the
+# warmup is not in run_ledger) the arm's own health block was structurally unable to see the
+# condition. A rule that lives in prose is not a gate. The only rule that holds is one that
+# refuses.
+#
+# The three conditions are ONE gate, split across two call sites only because the corpus
+# fingerprint costs ~80s and must not be spent on a run that is about to be refused:
+#   1. expansion healthy  -- scored_run_refusals(), on the warmup response
+#   2. pin honored        -- scored_run_refusals(), on the warmup response
+#   3. header written     -- write_run_header(), after the fingerprint
+# Both sites return before the first scored question, which is the property that matters.
+#
+# Each condition has ONE named override, and an override in force is written into the header
+# and into summary.integrity.preflight. An escape hatch nobody can see in the artifact is the
+# same hole in a new place, so the hatches are recorded, not merely available.
+
+EXPANSION_OVERRIDE_FLAG = "--allow-expansion-errors"
+PIN_OVERRIDE_FLAG = "--allow-unpinned-provider"
+
+# Named, so a test can assert the COUNT of conditions instead of a snapshot of messages: a
+# condition quietly dropped from this gate is exactly the failure the suite exists to catch.
+SCORED_RUN_CONDITIONS = ("expansion_healthy", "pin_honored", "header_written")
+
+RUN_HEADER_NAME = "run_header.json"
+
+
+def _expansion_remedy(err: str) -> str:
+    """The remedy differs by cause, and naming the wrong one sends the reader to the wrong file.
+
+    A missing LITELLM_PROXY_URL is a launch-environment fault and is deterministic. A structural
+    punt ("entities_given_none_returned") is the gemma coin-flip of ADR-0013 Part D: rerunning
+    may clear it, and if it does not, expansion is not reliably alive on this server. The old
+    warning said "Check LITELLM_PROXY_URL" for both.
+    """
+    low = (err or "").lower()
+    if "litellm_proxy_url" in low or "environment variable" in low:
+        return ("The launch environment is missing the expansion dependency: export "
+                "LITELLM_PROXY_URL on the SERVER process (not on the harness) and restart it. "
+                "This is the fault that voided fourteen arms.")
+    if "punt" in low:
+        return ("This is a structural BAML punt, not a dead dependency -- the expansion model "
+                "returned no usable output for this one request (ADR-0013 Part D). It is "
+                "stochastic: rerun the launcher. If it recurs, expansion is not reliably alive "
+                "on this server and the arm would be measuring the fallback path.")
+    return "Investigate the expansion stage on the server before scoring anything."
+
+
+def scored_run_refusals(warmup_info: Dict[str, Any], allow_expansion_errors: bool = False,
+                        allow_unpinned_provider: bool = False) -> List[str]:
+    """Conditions 1 and 2. Returns refusal strings; an empty list means proceed.
+
+    Pure -- it reads `warmup_info` and nothing else -- so every branch is born-testable with no
+    server, no endpoint and no model.
+
+    On the pin the test is `pin_honored is not True`, never `is False`. False and None are
+    different facts with the same consequence for a comparison: UNCHECKED IS NOT HONORED. The
+    old code printed exactly that sentence about `provider_served is None`, and returned 0.
+    """
+    refusals: List[str] = []
+
+    if not warmup_info.get("warmup_ran"):
+        # No warmup is no observation of either stage. Both conditions refuse, each under its
+        # own override, so --no-warmup now costs the preflight explicitly instead of silently.
+        if not allow_expansion_errors:
+            refusals.append(
+                "REFUSED (expansion_healthy): the warmup was skipped, so the health of the "
+                "query-expansion stage was never observed. A scored arm whose expansion state "
+                "is unknown is void by the same rule that voided fourteen arms. Drop "
+                "--no-warmup, or pass %s to record this arm as expansion-unverified."
+                % EXPANSION_OVERRIDE_FLAG)
+        if not allow_unpinned_provider:
+            refusals.append(
+                "REFUSED (pin_honored): the warmup was skipped, so no answer_lm record was read "
+                "and the provider pin was never verified. Drop --no-warmup, or pass %s."
+                % PIN_OVERRIDE_FLAG)
+        return refusals
+
+    exp = warmup_info.get("warmup_expansion")
+    if not allow_expansion_errors:
+        if not isinstance(exp, dict) or not exp.get("observed"):
+            refusals.append(
+                "REFUSED (expansion_healthy): the warmup response carried no `stages` block, so "
+                "the harness cannot say whether query expansion ran or fell back. Unobservable "
+                "is not healthy. The eval sends debug:true and any current endpoint answers "
+                "with `stages`; a response without one usually means the server is an older "
+                "build than this harness. Pass %s to record this arm as expansion-unverified."
+                % EXPANSION_OVERRIDE_FLAG)
+        elif exp.get("baml_error"):
+            refusals.append(
+                "REFUSED (expansion_healthy): the warmup shows a query-expansion error, %r "
+                "(fallback=%r). On the fallback path the second-pass lookup is fed the RAW "
+                "query, so the arm would measure retrieval WITHOUT expansion -- the condition "
+                "that voided fourteen arms and 266 questions "
+                "(docs/audits/VOID_arms_without_expansion_laneA_20261004.md). %s Pass %s to "
+                "score anyway and record the arm as expansion-unverified."
+                % (exp.get("baml_error"), exp.get("baml_fallback"),
+                   _expansion_remedy(str(exp.get("baml_error"))), EXPANSION_OVERRIDE_FLAG))
+
+    if not allow_unpinned_provider:
+        alm = warmup_info.get("answer_lm")
+        if not isinstance(alm, dict):
+            refusals.append(
+                "REFUSED (pin_honored): the warmup response carried no `answer_lm` record, so "
+                "the provider that served the call cannot be named, let alone checked against a "
+                "pin. Pass %s to score an arm with an unverified provider." % PIN_OVERRIDE_FLAG)
+        else:
+            pin = alm.get("provider_pin") or warmup_info.get("openrouter_provider_pin")
+            honored = alm.get("pin_honored")
+            if not pin:
+                refusals.append(
+                    "REFUSED (pin_honored): no provider pin is set on the server. deepseek-chat "
+                    "is served at different quantizations (DeepInfra fp4, StreamLake unknown); "
+                    "the floor pair was served 61/17 and 39/39 across two providers while "
+                    "reporting violations: [], so any delta from an unpinned arm is "
+                    "unattributable. Set OPENROUTER_PROVIDER_ORDER on the server and restart it, "
+                    "or pass %s." % PIN_OVERRIDE_FLAG)
+            elif honored is not True:
+                refusals.append(
+                    "REFUSED (pin_honored): the pin %r was sent and pin_honored is %r (served="
+                    "%r, source=%r). UNCHECKED IS NOT HONORED -- False means the call was served "
+                    "outside the pin, None means the endpoint could not say which provider "
+                    "served it, and an arm that cannot name its provider cannot claim one. Pass "
+                    "%s to score it as provider-unverified."
+                    % (pin, honored, alm.get("provider_served"),
+                       alm.get("provider_served_source"), PIN_OVERRIDE_FLAG))
+
+    return refusals
+
+
+def config_sha16(header: Dict[str, Any]) -> str:
+    """Stable digest of the config-bearing part of a run header.
+
+    Deliberately excludes wall-clock and timing fields: two launches of the same arm must agree,
+    or the clobber check below would fire on every rerun and teach its reader to ignore it.
+    """
+    cfg = {k: header.get(k) for k in ("endpoint", "question_ids", "n_runs", "timeout",
+                                      "answer_lm", "expansion", "git", "corpus",
+                                      "overrides_in_force")}
+    return hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def build_run_header(endpoint: str, question_ids: List[str], n_runs: int, timeout: float,
+                     warmup_info: Dict[str, Any], git_at_start: Dict[str, Any],
+                     corpus_at_start: Optional[Dict[str, Any]],
+                     overrides_in_force: List[str]) -> Dict[str, Any]:
+    """The provenance record written BEFORE the first scored question.
+
+    summary.json is written at the END. Until it exists, an output directory full of
+    per-question JSON says nothing about what produced it: which endpoint, which commit, which
+    corpus, which provider, which temperature, whether expansion was alive, or which gate
+    overrides were in force. A run that dies or is killed mid-way -- and a directory a reader
+    finds on disk weeks later -- is anonymous. The header makes a PARTIAL arm self-describing,
+    and it is what lets the other two conditions be audited after the fact instead of trusted.
+    """
+    alm = warmup_info.get("answer_lm") if isinstance(warmup_info.get("answer_lm"), dict) else {}
+    header = {
+        "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "endpoint": endpoint,
+        "question_ids": list(question_ids),
+        "n_runs": n_runs,
+        "timeout": timeout,
+        "answer_lm": {k: alm.get(k) for k in ("path", "client", "model_requested",
+                                              "model_returned", "temperature_on_the_wire",
+                                              "provider_pin", "provider_served",
+                                              "provider_served_source", "pin_honored")},
+        "expansion": warmup_info.get("warmup_expansion"),
+        "lm_cache_enabled": warmup_info.get("lm_cache_enabled"),
+        "warmup_ran": warmup_info.get("warmup_ran"),
+        "git": git_at_start,
+        "corpus": corpus_at_start,
+        "overrides_in_force": list(overrides_in_force),
+        "conditions_enforced": list(SCORED_RUN_CONDITIONS),
+        "note": "Written before the first scored question. summary.json is written at the end; "
+                "this file is what a partial or abandoned arm can still be identified by. "
+                "overrides_in_force lists the preflight conditions that were waived.",
+    }
+    header["config_sha16"] = config_sha16(header)
+    return header
+
+
+def write_run_header(out_dir: Path, header: Dict[str, Any]) -> Optional[str]:
+    """Condition 3. Writes the header, reads it back, and returns a refusal or None.
+
+    Read-back, not write-and-hope: provenance that cannot be re-read is not provenance, and a
+    write that silently failed would leave exactly the anonymous directory this exists to
+    prevent.
+
+    It also refuses to score into a directory whose existing header describes a DIFFERENT
+    config. Mixing two configs' per-question files in one output dir is the splice the
+    run-level-fault rule forbids -- rerun from the top, never splice. The remedy is a fresh
+    --output-dir, so there is deliberately no override for this one.
+    """
+    path = Path(out_dir) / RUN_HEADER_NAME
+    if path.exists():
+        try:
+            prior = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            return ("REFUSED (header_written): %s exists but could not be read (%s: %s), so it "
+                    "cannot be compared against this run's config, and overwriting it would "
+                    "destroy the provenance of whatever is already in this directory. Use a "
+                    "fresh --output-dir." % (path, type(e).__name__, e))
+        if prior.get("config_sha16") != header["config_sha16"]:
+            return ("REFUSED (header_written): %s already describes a DIFFERENT config "
+                    "(config_sha16 %r, this run %r). Scoring into it would splice two arms into "
+                    "one directory, where per-question files from two configs are "
+                    "indistinguishable. Use a fresh --output-dir."
+                    % (path, prior.get("config_sha16"), header["config_sha16"]))
+    try:
+        path.write_text(json.dumps(header, indent=2, sort_keys=True, default=str),
+                        encoding="utf-8")
+        back = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return ("REFUSED (header_written): could not write and re-read the run header at %s "
+                "(%s: %s). An arm with no provenance record cannot be cited, so nothing is "
+                "scored." % (path, type(e).__name__, e))
+    if back.get("config_sha16") != header["config_sha16"]:
+        return ("REFUSED (header_written): the run header at %s did not survive a write/read "
+                "round trip (config_sha16 %r on disk, %r in memory)."
+                % (path, back.get("config_sha16"), header["config_sha16"]))
+    return None
 
 
 def run_level_tally(run_ledger: Dict[str, List["QuestionResult"]]) -> dict:
@@ -1169,6 +1424,24 @@ def main(argv: Optional[list] = None) -> int:
                              "effect was large -- 0%% is a valid explicit value and is not the "
                              "same thing as unset. Off by default, and the harness aborts "
                              "instead.")
+    parser.add_argument("--allow-expansion-errors", action="store_true",
+                        help="Waive the expansion_healthy condition of the scored-run "
+                             "preflight. Without this flag the harness REFUSES to score when "
+                             "the warmup shows a BAML query-expansion error, or shows no "
+                             "`stages` block at all: on the fallback path the second-pass "
+                             "lookup is fed the RAW query, so the arm measures retrieval "
+                             "WITHOUT expansion. That is the condition that voided fourteen "
+                             "arms and 266 questions. An arm started with this flag records it "
+                             "in run_header.json and in summary.integrity.preflight.")
+    parser.add_argument("--allow-unpinned-provider", action="store_true",
+                        help="Waive the pin_honored condition of the scored-run preflight. "
+                             "Without this flag the harness REFUSES unless a provider pin is "
+                             "set AND the warmup reports pin_honored true. UNCHECKED IS NOT "
+                             "HONORED: pin_honored None means the endpoint could not say which "
+                             "provider served the call, and deepseek-chat is served at "
+                             "different quantizations, so a delta from an arm that cannot name "
+                             "its provider is unattributable. Recorded in run_header.json and "
+                             "in summary.integrity.preflight.")
     parser.add_argument("--corpus-fingerprint", choices=("vectors", "text", "skip"),
                         default="vectors",
                         help="Fingerprint the Weaviate corpus at run start and end and record it in integrity.corpus (ruling 1). `vectors` hashes text AND embeddings (measured 80s per sample against 7294 chunks) and is the only setting that can see a re-vectorisation; `text` hashes text only (7s) and is blind to one; `skip` records nothing and makes the run PROVISIONAL, like --allow-dirty-tree.")
@@ -1197,7 +1470,9 @@ def main(argv: Optional[list] = None) -> int:
     warmup_info, pre_rc = preflight(args.endpoint, args.auth_token, args.timeout, n_runs,
                                     args.allow_lm_cache, not args.no_warmup,
                                     args.require_provider_pin,
-                                    args.allow_unset_temperature)
+                                    args.allow_unset_temperature,
+                                    args.allow_expansion_errors,
+                                    args.allow_unpinned_provider)
     if pre_rc:
         print("Nothing was scored. Fix the condition above and rerun.")
         return pre_rc
@@ -1224,6 +1499,24 @@ def main(argv: Optional[list] = None) -> int:
             print(f"UNREAD: {corpus_at_start['unavailable_reason']}")
             print("    The run proceeds -- retrieval reaches Weaviate over gRPC and this read "
                   "is REST -- but it is PROVISIONAL: it cannot state which corpus it scored.")
+
+    # Condition 3 of the scored-run preflight. After the fingerprint so the header can name
+    # the corpus, and before the first scored question so a killed or abandoned arm is still
+    # identifiable. A directory of per-question JSON with no header says nothing about what
+    # produced it, and summary.json is not written until the end.
+    overrides_in_force = ([EXPANSION_OVERRIDE_FLAG] if args.allow_expansion_errors else []) +                          ([PIN_OVERRIDE_FLAG] if args.allow_unpinned_provider else [])
+    run_hdr = build_run_header(args.endpoint, [q["id"] for q in questions], n_runs,
+                               args.timeout, warmup_info, git_at_start, corpus_at_start,
+                               overrides_in_force)
+    hdr_refusal = write_run_header(out_dir, run_hdr)
+    if hdr_refusal:
+        print("")
+        print(hdr_refusal)
+        print("Nothing was scored.")
+        return 3
+    print(f"Header    : {RUN_HEADER_NAME} written, config_sha16={run_hdr['config_sha16']}"
+          + (f"  OVERRIDES IN FORCE: {' '.join(overrides_in_force)}" if overrides_in_force
+             else ""))
 
     results: List[QuestionResult] = []
     # Per-question run ledger. Full results, not booleans: a run that errored or degraded is
@@ -1284,8 +1577,8 @@ def main(argv: Optional[list] = None) -> int:
                        "runs_attempted_on_this_question": len(runs), "of_runs": n_runs},
                 "last_run": ({"api_status": last.api_status, "degraded": last.degraded,
                               "error": last.error} if last else None),
-                "question_files_present": sorted(
-                    f.stem for f in out_dir.glob("*.json") if f.name != "ABORTED.json"),
+                "question_files_present": [
+                    Path(f).stem for f in question_files(p.name for p in out_dir.glob("*.json"))],
                 "what_this_directory_is": (
                     "NOT A RUN. There is no summary.json and no report.md, and there never "
                     "will be for this attempt. The per-question files are the questions that "
@@ -1377,6 +1670,14 @@ def main(argv: Optional[list] = None) -> int:
     }
     summary["answer_lm"] = answer_lm_tally(run_ledger)
     summary["integrity"]["git"] = git_run_block(git_at_start, git_state())
+    summary["integrity"]["preflight"] = {
+        "conditions_enforced": list(SCORED_RUN_CONDITIONS),
+        "overrides_in_force": list(overrides_in_force),
+        "run_header": str(out_dir / RUN_HEADER_NAME),
+        "config_sha16": run_hdr["config_sha16"],
+        "note": "conditions_enforced are refused at launch, before any question is scored. A "
+                "flag in overrides_in_force means that condition was WAIVED for this arm.",
+    }
     summary["integrity"]["answer_temperature"] = answer_temperature_block(run_ledger)
     summary["integrity"]["stage_health"] = stage_health_block(run_ledger)
     if corpus_skip:

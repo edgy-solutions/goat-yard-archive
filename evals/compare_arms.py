@@ -30,6 +30,8 @@ import os
 import statistics
 import sys
 
+from run_dir import is_question_file
+
 SP, SF, FLAKY, NO_DATA = "STABLE-PASS", "STABLE-FAIL", "FLAKY", "NO-DATA"
 
 # Questions that are MEASURED but do not decide the gate (ruling 1, 2026-09-27, Chris).
@@ -103,7 +105,7 @@ def load_arm(d: str) -> dict:
         raise SystemExit(f"not a directory: {d}")
     qs = {}
     for name in sorted(os.listdir(d)):
-        if not name.endswith(".json") or name == "summary.json":
+        if not is_question_file(name):
             continue
         rec = json.load(io.open(os.path.join(d, name), encoding="utf-8"))
         score = rec.get("score") or {}

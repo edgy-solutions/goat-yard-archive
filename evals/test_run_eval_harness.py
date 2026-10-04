@@ -47,8 +47,14 @@ LM_REC = {"path": "dspy", "client": "dspy.LM", "model_requested": "openai/deepse
           "provider_served": "StreamLake", "provider_served_source": "dspy_response_attribute",
           "pin_honored": True}
 
+# The `stages` block as a healthy endpoint reports it under debug:true. Present in GOOD
+# because an endpoint that cannot say whether query expansion ran is now a refusal of its own
+# (expansion_healthy), and a fixture without one would make every test using GOOD fail for a
+# reason it is not about.
+STAGES_OK = {"baml_error": None, "baml_fallback": None}
+
 GOOD = {"answer": "Gill holds this [GENESIS_2_8_S01].", "generation_seconds": 12.5,
-        "lm_cache_enabled": False, "answer_lm": dict(LM_REC)}
+        "lm_cache_enabled": False, "answer_lm": dict(LM_REC), "stages": dict(STAGES_OK)}
 
 
 # --- degradation is an ERROR, never a FAIL -----------------------------------------
@@ -251,12 +257,14 @@ class _Stub:
 
 
 def _preflight(resp, n_runs=3, allow_cache=False, warmup=True, require_pin=False,
-                allow_unset_temp=False):
+                allow_unset_temp=False, allow_expansion_errors=False,
+                allow_unpinned_provider=False):
     stub, orig = _Stub(resp), RE.call_endpoint
     RE.call_endpoint = stub
     try:
         info, rc = RE.preflight("http://x/api/search", None, 200.0, n_runs, allow_cache, warmup,
-                                require_pin, allow_unset_temp)
+                                require_pin, allow_unset_temp, allow_expansion_errors,
+                                allow_unpinned_provider)
     finally:
         RE.call_endpoint = orig
     return info, rc, stub
@@ -293,14 +301,19 @@ def test_preflight_aborts_when_the_warmup_pin_was_not_honored():
     assert rc == 3, rc
 
 
-def test_preflight_proceeds_when_the_pin_is_merely_UNCHECKABLE():
-    # None is not False. An unpinned arm, or one whose provider could not be read, is still a
-    # valid measurement of itself -- it just cannot claim a verified provider. Aborting here
-    # would make every unpinned baseline unrunnable.
+def test_preflight_REFUSES_when_the_pin_is_merely_UNCHECKABLE():
+    """Reversed by the 2026-10-04 ruling; the old assertion is kept as the reason.
+
+    This test used to assert rc == 0, on the grounds that an arm whose provider could not be
+    read "is still a valid measurement of itself". That is true of a single arm and false of
+    the comparison every arm in this lane is run for: the floor pair was served 61/17 and 39/39
+    across two providers at different quantizations while reporting violations: []. UNCHECKED
+    IS NOT HONORED. The escape is explicit and recorded, not the default.
+    """
     unk = dict(LM_REC, provider_pin=None, provider_served=None,
                provider_served_source="unavailable:no-provider-on-dspy-response", pin_honored=None)
     _, rc, _ = _preflight(dict(GOOD, answer_lm=unk, openrouter_provider_pin=None), n_runs=1)
-    assert rc == 0, rc
+    assert rc == 3, rc
 
 
 def test_preflight_aborts_when_warmup_itself_degrades():
@@ -320,7 +333,8 @@ def test_single_run_tolerates_unknown_cache_state():
     per-call record is a separate abort (ruling 2) with its own tests. Leaving it out would make
     this test pass or fail for a reason it is not about.
     """
-    _, rc, _ = _preflight({"answer": "ok", "answer_lm": dict(LM_REC)}, n_runs=1)
+    _, rc, _ = _preflight({"answer": "ok", "answer_lm": dict(LM_REC),
+                           "stages": dict(STAGES_OK)}, n_runs=1)
     assert rc == 0, rc
 
 
@@ -329,9 +343,11 @@ def test_allow_lm_cache_does_not_abort():
     assert rc == 0, rc
 
 
-def test_no_warmup_sends_no_request():
+def test_no_warmup_refuses_and_sends_no_request():
+    # --no-warmup observes neither expansion health nor the pin, so the preflight has nothing
+    # to pass on. It still must not spend a request discovering that.
     info, rc, stub = _preflight(GOOD, warmup=False)
-    assert rc == 0 and stub.calls == 0 and info["warmup_ran"] is False
+    assert rc == 3 and stub.calls == 0 and info["warmup_ran"] is False
 
 
 # --- wiring (a constant nothing calls is the defect this work exists to fix) ------
@@ -843,6 +859,8 @@ def _run_main(responses, ids, corpus=None, fingerprint="skip"):
     try:
         rc = RE.main(["--endpoint", "http://x/api/search", "--output-dir", str(out),
                       "--ids"] + ids + ["--runs", "1", "--no-warmup", "--allow-dirty-tree",
+                                        "--allow-expansion-errors",
+                                        "--allow-unpinned-provider",
                                         "--corpus-fingerprint", fingerprint])
     finally:
         RE.call_endpoint = orig
@@ -1250,10 +1268,319 @@ def test_per_question_runs_entry_carries_the_provider_fields():
     assert r0["provider_pin"] == {"order": ["streamlake"], "allow_fallbacks": False}, r0
     assert r0["pin_honored"] is True, r0
 
+
+# --- the scored-run preflight: three conditions, enforced at launch ----------------------
+#
+# Ruling (2026-10-04, Chris): expansion healthy, pin honored, header written, enforced as a
+# LAUNCHER REFUSAL and born-tested -- not a rule in a prediction document.
+#
+# The defect these cover: PREDICTION_off_vs_on_expansion_live_laneA_20261004.md said "if the
+# warmup shows an expansion error, no scored question is sent". Nothing enforced it. The arm's
+# warmup punted, the harness printed a WARNING, and all 13 questions were scored. Every test
+# below fails against the parent commit, except the ones marked as negative controls -- a
+# refusal that always fires certifies nothing.
+
+
+def _refusals(**kw):
+    """scored_run_refusals over a warmup_info built from the GOOD/LM_REC fixtures."""
+    info = {"warmup_ran": True, "answer_lm": dict(LM_REC),
+            "warmup_expansion": dict(STAGES_OK, observed=True)}
+    info.update(kw)
+    return RE.scored_run_refusals(info)
+
+
+def test_scored_run_refusals_is_SILENT_on_a_healthy_warmup():
+    # Negative control. Every refusal below is worthless if this one does not hold.
+    assert _refusals() == [], _refusals()
+
+
+def test_preflight_refuses_a_warmup_expansion_error():
+    exp = {"observed": True, "baml_error": "BAML output structurally punted: ['x']",
+           "baml_fallback": "poisoned_manifest_suppressed"}
+    _, rc, _ = _preflight(dict(GOOD, stages=exp))
+    assert rc == 3, rc
+
+
+def test_preflight_refuses_a_warmup_with_no_stages_block():
+    # Unobservable is not healthy. The same shape as stage_health's `unobservable` state: a
+    # stage whose health cannot be read must never be counted as ok.
+    payload = dict(GOOD)
+    payload.pop("stages")
+    _, rc, _ = _preflight(payload)
+    assert rc == 3, rc
+
+
+def test_expansion_override_scores_anyway_and_names_itself():
+    exp = {"observed": True, "baml_error": "missing env var", "baml_fallback": "dedup_only"}
+    _, rc, _ = _preflight(dict(GOOD, stages=exp), allow_expansion_errors=True)
+    assert rc == 0, rc
+
+
+def test_expansion_refusal_quotes_the_error_and_the_fallback():
+    # A refusal that does not say WHAT it saw sends the reader back to the log.
+    r = _refusals(warmup_expansion={"observed": True, "baml_error": "punted: ['x']",
+                                    "baml_fallback": "poisoned_manifest_suppressed"})
+    assert len(r) == 1, r
+    assert "punted" in r[0] and "poisoned_manifest_suppressed" in r[0], r[0]
+
+
+def test_expansion_remedy_separates_the_env_fault_from_the_punt():
+    # The old warning said "Check LITELLM_PROXY_URL" for both causes. One is a dead dependency
+    # and deterministic; the other is a stochastic BAML punt whose remedy is to rerun.
+    env = RE._expansion_remedy("LLM client 'LocalRouter' requires environment variable "
+                               "'LITELLM_PROXY_URL' to be set but it is not")
+    punt = RE._expansion_remedy("BAML output structurally punted: "
+                                "['entities_given_none_returned']")
+    assert "LITELLM_PROXY_URL" in env and "rerun" not in env.lower(), env
+    assert "rerun" in punt.lower() and "LITELLM_PROXY_URL" not in punt, punt
+
+
+def test_preflight_refuses_when_no_provider_pin_is_set():
+    unpinned = dict(LM_REC, provider_pin=None, pin_honored=None)
+    _, rc, _ = _preflight(dict(GOOD, answer_lm=unpinned, openrouter_provider_pin=None))
+    assert rc == 3, rc
+
+
+def test_pin_override_permits_an_unpinned_arm():
+    unpinned = dict(LM_REC, provider_pin=None, pin_honored=None)
+    _, rc, _ = _preflight(dict(GOOD, answer_lm=unpinned, openrouter_provider_pin=None),
+                          allow_unpinned_provider=True)
+    assert rc == 0, rc
+
+
+def test_pin_refusal_fires_on_None_as_well_as_False():
+    # The closed hole: the old code PRINTED "unchecked is not honored" about
+    # provider_served=None and then returned 0. False and None are different facts with the
+    # same consequence for a comparison.
+    for honored in (False, None):
+        alm = dict(LM_REC, pin_honored=honored, provider_served=None)
+        r = _refusals(answer_lm=alm)
+        assert len(r) == 1 and "pin_honored" in r[0], (honored, r)
+
+
+def test_pin_refusal_does_not_fire_when_the_pin_came_from_the_server_block():
+    # Negative control on the pin's SOURCE: a per-call record with no provider_pin but a
+    # server-reported pin, honored, is a pinned arm and must not refuse.
+    alm = dict(LM_REC, provider_pin=None)
+    r = _refusals(answer_lm=alm,
+                  openrouter_provider_pin={"order": ["streamlake"], "allow_fallbacks": False})
+    assert r == [], r
+
+
+def test_no_warmup_refuses_BOTH_health_conditions():
+    r = RE.scored_run_refusals({"warmup_ran": False})
+    assert len(r) == 2, r
+    assert any("expansion_healthy" in x for x in r) and any("pin_honored" in x for x in r), r
+
+
+def test_no_warmup_proceeds_only_with_both_overrides():
+    assert RE.scored_run_refusals({"warmup_ran": False}, True, True) == []
+    assert len(RE.scored_run_refusals({"warmup_ran": False}, True, False)) == 1
+    assert len(RE.scored_run_refusals({"warmup_ran": False}, False, True)) == 1
+
+
+def test_every_named_condition_can_actually_refuse():
+    """Assert the COUNT and that each named condition has a reachable refusal.
+
+    Derived, not pinned: the gate's conditions are read from SCORED_RUN_CONDITIONS and each one
+    must be produced by some input. A condition listed in the header but enforced nowhere is
+    the exact defect this work exists to fix, and a snapshot of three message strings would not
+    notice it.
+    """
+    fired = set()
+    for x in RE.scored_run_refusals({"warmup_ran": False}):
+        for c in RE.SCORED_RUN_CONDITIONS:
+            if c in x:
+                fired.add(c)
+    bad = RE.write_run_header(Path(tempfile.mkdtemp()) / "nope" / "deeper",
+                              RE.build_run_header("http://x", [], 1, 1.0, {}, {}, None, []))
+    for c in RE.SCORED_RUN_CONDITIONS:
+        if bad and c in bad:
+            fired.add(c)
+    assert len(RE.SCORED_RUN_CONDITIONS) == 3, RE.SCORED_RUN_CONDITIONS
+    assert fired == set(RE.SCORED_RUN_CONDITIONS), (fired, RE.SCORED_RUN_CONDITIONS)
+
+
+# --- condition 3: the header -------------------------------------------------------------
+
+def _hdr(**kw):
+    info = {"warmup_ran": True, "answer_lm": dict(LM_REC), "lm_cache_enabled": False,
+            "warmup_expansion": dict(STAGES_OK, observed=True)}
+    args = {"endpoint": "http://x/api/search", "question_ids": ["a", "b"], "n_runs": 5,
+            "timeout": 200.0, "warmup_info": info, "git_at_start": {"head": "abc", "dirty": False},
+            "corpus_at_start": _corpus(), "overrides_in_force": []}
+    args.update(kw)
+    return RE.build_run_header(**args)
+
+
+def test_run_header_round_trips_and_names_the_arm():
+    out = Path(tempfile.mkdtemp())
+    h = _hdr()
+    assert RE.write_run_header(out, h) is None
+    back = json.loads((out / RE.RUN_HEADER_NAME).read_text(encoding="utf-8"))
+    assert back["config_sha16"] == h["config_sha16"], back
+    # The facts a reader of an abandoned directory needs: which endpoint, which commit, which
+    # corpus, which provider, which temperature, whether expansion was alive.
+    assert back["endpoint"] == "http://x/api/search"
+    assert back["git"]["head"] == "abc"
+    assert back["corpus"]["content_sha256"] == h["corpus"]["content_sha256"]
+    assert back["answer_lm"]["provider_served"] == "StreamLake"
+    assert back["answer_lm"]["temperature_on_the_wire"] == 0.0
+    assert back["answer_lm"]["pin_honored"] is True
+    assert back["expansion"]["observed"] is True
+    assert back["question_ids"] == ["a", "b"] and back["n_runs"] == 5
+
+
+def test_run_header_refuses_an_unwritable_destination():
+    # A write that silently failed would leave the anonymous directory the header exists to
+    # prevent, so the refusal is on write-and-read-back, not on write alone.
+    missing = Path(tempfile.mkdtemp()) / "no-such-dir" / "deeper"
+    msg = RE.write_run_header(missing, _hdr())
+    assert msg and "header_written" in msg, msg
+
+
+def test_run_header_refuses_a_DIFFERENT_config_in_the_same_directory():
+    out = Path(tempfile.mkdtemp())
+    assert RE.write_run_header(out, _hdr()) is None
+    msg = RE.write_run_header(out, _hdr(n_runs=3))
+    assert msg and "DIFFERENT config" in msg, msg
+    # and it did not clobber the first header
+    back = json.loads((out / RE.RUN_HEADER_NAME).read_text(encoding="utf-8"))
+    assert back["n_runs"] == 5, back
+
+
+def test_run_header_accepts_a_rerun_of_the_SAME_config():
+    # Negative control: a refusal that fires on every rerun teaches its reader to ignore it.
+    out = Path(tempfile.mkdtemp())
+    assert RE.write_run_header(out, _hdr()) is None
+    assert RE.write_run_header(out, _hdr()) is None
+
+
+def test_config_sha16_ignores_wall_clock():
+    a, b = _hdr(), _hdr()
+    b["written_at"] = "1999-01-01T00:00:00Z"
+    assert RE.config_sha16(a) == RE.config_sha16(b)
+
+
+def test_run_header_records_the_overrides_in_force():
+    h = _hdr(overrides_in_force=[RE.EXPANSION_OVERRIDE_FLAG])
+    assert h["overrides_in_force"] == [RE.EXPANSION_OVERRIDE_FLAG], h
+    # and a waived condition changes the config identity, so two arms that differ only in which
+    # gate was waived are not the same config
+    assert RE.config_sha16(h) != RE.config_sha16(_hdr())
+
+
+def test_a_run_header_is_not_a_question_file():
+    # The header lands in the same directory as the per-question results. compare_arms and the
+    # expansion census both glob *.json there; without this it becomes a phantom question.
+    import run_dir
+    assert run_dir.is_question_file("scapegoat_001.json")
+    for name in ("run_header.json", "summary.json", "ABORTED.json", "PUBLISHED.json",
+                 "report.md"):
+        assert not run_dir.is_question_file(name), name
+
+
+def test_the_run_dir_consumers_do_not_restate_the_exclusion_list():
+    # Four copies of this knowledge existed and no two agreed. A new sidecar must be added in
+    # one place, so assert the consumers resolve it through run_dir rather than by name.
+    for mod in ("run_eval.py", "compare_arms.py", "expansion_census.py"):
+        src = (Path(__file__).resolve().parent / mod).read_text(encoding="utf-8")
+        assert "from run_dir import" in src, mod
+        body = src.split("from run_dir import", 1)[1]
+        assert 'name == "summary.json"' not in body, mod
+        assert '!= "ABORTED.json"' not in body, mod
+
+
+# --- the whole launcher, end to end -----------------------------------------------------
+
+def _run_main_with_warmup(responses, ids, extra_argv=()):
+    """Drive RE.main WITH a warmup, so the preflight gate is on the path.
+
+    _run_main passes --no-warmup and therefore waives both health conditions; these tests are
+    about the gate itself, so they must not.
+    """
+    out = Path(tempfile.mkdtemp()) / "run"
+    stub, orig = _SeqStub(responses), RE.call_endpoint
+    orig_cs = RE.corpus_state
+    RE.call_endpoint = stub
+
+    def _refuse(*a, **kw):
+        raise AssertionError("the offline suite must not read the live corpus")
+
+    RE.corpus_state = _refuse
+    try:
+        rc = RE.main(["--endpoint", "http://x/api/search", "--output-dir", str(out),
+                      "--ids"] + list(ids) + ["--runs", "1", "--allow-dirty-tree",
+                                              "--corpus-fingerprint", "skip"] + list(extra_argv))
+    finally:
+        RE.call_endpoint = orig
+        RE.corpus_state = orig_cs
+    return rc, out, stub
+
+
+def test_main_scores_NOTHING_when_the_warmup_expansion_is_broken():
+    """The whole point. The arm this gate came from scored 65 runs after this exact warning."""
+    broken = dict(GOOD, stages={"baml_error": "BAML output structurally punted: "
+                                              "['entities_given_none_returned']",
+                                "baml_fallback": "poisoned_manifest_suppressed"})
+    rc, out, stub = _run_main_with_warmup([broken], ["logos_001"])
+    assert rc == 3, rc
+    assert stub.calls == 1, ("a scored question was sent after the refusal", stub.calls)
+    assert not (out / "summary.json").exists(), sorted(p.name for p in out.iterdir())
+    assert RE.question_files(p.name for p in out.iterdir()) == [], sorted(
+        p.name for p in out.iterdir())
+
+
+def test_main_writes_the_header_BEFORE_the_first_question_file():
+    rc, out, stub = _run_main_with_warmup([GOOD], ["logos_001"])
+    assert rc == 0, rc
+    hdr_path = out / RE.RUN_HEADER_NAME
+    assert hdr_path.is_file(), sorted(p.name for p in out.iterdir())
+    q = out / "logos_001.json"
+    assert q.is_file(), sorted(p.name for p in out.iterdir())
+    assert hdr_path.stat().st_mtime <= q.stat().st_mtime, "header written after the question"
+    hdr = json.loads(hdr_path.read_text(encoding="utf-8"))
+    assert hdr["question_ids"] == ["logos_001"], hdr
+    assert hdr["overrides_in_force"] == [], hdr
+
+
+def test_main_records_the_gate_state_in_the_summary():
+    rc, out, _ = _run_main_with_warmup([GOOD], ["logos_001"])
+    assert rc == 0, rc
+    pre = _summary(out)["integrity"]["preflight"]
+    assert pre["conditions_enforced"] == list(RE.SCORED_RUN_CONDITIONS), pre
+    assert pre["overrides_in_force"] == [], pre
+    assert pre["config_sha16"], pre
+
+
+def test_main_records_a_WAIVED_condition_in_the_summary():
+    # An escape hatch nobody can see in the artifact is the same hole in a new place.
+    broken = dict(GOOD, stages={"baml_error": "missing env var", "baml_fallback": "dedup_only"})
+    rc, out, _ = _run_main_with_warmup([broken], ["logos_001"],
+                                       ["--allow-expansion-errors"])
+    # The override waives the LAUNCH refusal, not the post-run violation: the arm runs, and
+    # still exits 4 because its scored runs had an expansion error. Waiving a gate must not
+    # also silence the check downstream of it.
+    assert rc == 4, rc
+    viols = _summary(out)["integrity"]["violations"]
+    assert any("expansion" in v for v in viols), viols
+    pre = _summary(out)["integrity"]["preflight"]
+    assert pre["overrides_in_force"] == [RE.EXPANSION_OVERRIDE_FLAG], pre
+    hdr = json.loads((out / RE.RUN_HEADER_NAME).read_text(encoding="utf-8"))
+    assert hdr["overrides_in_force"] == [RE.EXPANSION_OVERRIDE_FLAG], hdr
+
+
+def test_the_header_write_precedes_the_scoring_loop_in_SOURCE():
+    # Ordering is the property, and a passing end-to-end test on one input does not pin it.
+    assert SRC.index("write_run_header(out_dir") < SRC.index(
+        "results: List[QuestionResult] = []"), "the header must be written before scoring"
+    assert SRC.index("scored_run_refusals(info") < SRC.index("return info, 0"), \
+        "the health gate must run before preflight returns success"
+
 # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
 # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
 # failed" and looks healthy. Assert the COUNT so a silently shrinking suite fails loudly.
-EXPECTED_TESTS = 118
+EXPECTED_TESTS = 144
 
 if __name__ == "__main__":
     passed = failed = 0
