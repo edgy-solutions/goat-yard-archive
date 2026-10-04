@@ -151,6 +151,16 @@ def clip_rows(im, n_rects):
     band = G.line_band(im)
     if not band:
         return None, "abstain:no-line-band"
+    # THE BAND IS A CLAIM TOO. Found by eye on p558:n3, 2026-10-04: its crop holds two text lines
+    # (37px and 39px) with a 6px run of descenders and stops between them, and `line_band` returned
+    # the 6px run. The clip rule then did exactly what it promised -- it never removes the span's own
+    # band -- and deleted both real lines, keeping a 14px sliver that resolved "6 words". The guard
+    # was sound; its INPUT was wrong, which is the lane's own law that a gate's inputs must not
+    # depend on what the gate checks. So the same derived constant is asked about the band itself: a
+    # band thinner than a line of type is not the span's line, and nothing may be trimmed against it.
+    if (band[1] - band[0]) < G.MIN_BAND_PX:
+        return None, ("abstain:line-band-is-not-a-line-of-type:%dpx:floor-%d"
+                      % (band[1] - band[0], G.MIN_BAND_PX))
     b0, b1 = band[0], band[1] - 1                      # line_band returns y1 EXCLUSIVE
     h = im.height
     runs = G.ink_runs(im)
@@ -166,6 +176,12 @@ def clip_rows(im, n_rects):
             top = max(top, y1 + 1)
         else:
             bot = min(bot, y0 - 1)
+    if (bot - top + 1) < G.MIN_BAND_PX:
+        # Post-condition, independent of how the trim was reached: whatever survives must still be
+        # thick enough to BE a line of type. p381:n1 kept 17px of a crop whose thickest ink run was
+        # 30px and nobody would have looked at it, because its run count did not change.
+        return None, ("abstain:clip-would-keep-%dpx-under-the-%dpx-line-floor"
+                      % (bot - top + 1, G.MIN_BAND_PX))
     if not (top <= b0 and bot >= b1 and top < bot):
         return None, "abstain:trim-would-enter-the-span-band:%d-%d-vs-band-%d-%d" % (top, bot, b0, b1)
     return {"rows": [top, bot], "kept": bot - top + 1, "of": h, "line_band": [b0, b1],
@@ -265,6 +281,22 @@ for b in clipped:
     assert HAD.bandclip_fault(b["clip"]["path"]) is None, "a clip on disk does not prove as a slice"
 assert not clip_faults or all(not os.path.exists(OUTDIR / ("%s_A2_bandclip.png" % s.replace(":", "_")))
                               for s in clip_faults), "a refused clip is still on disk"
+# THE DIRECTORY MUST BE WHAT THE ARTIFACT SAYS IT IS. A clip that this run abstained from but an
+# EARLIER run wrote is still on disk, and a glob is all it takes to put it in front of somebody --
+# which is how a clip trimmed against a 6px band would have survived the rule that now refuses it.
+# Only band-clips and their sidecars are swept; a parent crop is never touched by this.
+_want = {b["clip"]["path"].replace("\\", "/") for b in clipped}
+_stale = []
+for _p in sorted(OUTDIR.glob("*_A2_bandclip.png")):
+    if str(_p).replace("\\", "/") not in _want:
+        _sid = _p.name[:-len("_A2_bandclip.png")].replace("_", ":")
+        assert _sid.split(":")[0].startswith("p"), "refusing to sweep an unrecognised file: %s" % _p.name
+        _stale.append(_p.name)
+        _p.unlink()
+        if _p.with_suffix(".parent.json").exists():
+            _p.with_suffix(".parent.json").unlink()
+assert len(list(OUTDIR.glob("*_A2_bandclip.png"))) == len(clipped), \
+    "the crop directory holds a different number of clips than the artifact describes"
 # The clip must never resolve FEWER words than its parent: that is the amputation `line_band` caused.
 regressed = [b["span_id"] for b in clipped if len(b["clip"]["word_runs"]) < len(b["crop"]["word_runs"])]
 
@@ -326,6 +358,9 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "source": "hebrew_aperture_diag._native_crop + crop_fault, as crops() applies them",
                   "clip_rule": "remove only ink runs that do not overlap the span's line band and are "
                                "either >= %d px thick or touch the crop edge" % G.MIN_BAND_PX,
+                  "clip_abstains_when": "the band line_band() returns is itself thinner than a line of "
+                                        "type, or the trim would keep less than one line of type "
+                                        "(found by eye on p558:n3, 2026-10-04)",
                   "rule_band_precheck": "a crop with no ink run >= %d px is refused and not written "
                                         "(rule_band_fault); crop_has_line() passes on a printed "
                                         "rule and cannot see this" % G.MIN_BAND_PX,
@@ -333,6 +368,7 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                             "rule keeps 14-78 and resolves the same 2 runs",
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},
        "crop_dir": str(OUTDIR), "faults": faults, "clip_faults": clip_faults,
+       "stale_clips_swept": _stale,
        "clip": {"written": len(clipped), "no_trim": sum(1 for b in cut if b["clip_abstain"].startswith("no-trim")),
                 "abstained": sorted({b["clip_abstain"] for b in cut if b["clip_abstain"]
                                      and not b["clip_abstain"].startswith("no-trim")}),
