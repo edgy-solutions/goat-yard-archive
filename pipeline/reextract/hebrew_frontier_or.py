@@ -78,6 +78,8 @@ from PIL import Image
 import hebrew_aperture_diag as diag
 import hebrew_local_arms as L
 from run_header import build_header, require_endpoint, RunWriter
+from run_header import _git_head as _git_head0, _git_dirty as _git_dirty0
+from run_header import _git_head as _git_head0, _git_dirty as _git_dirty0
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -603,6 +605,91 @@ def sheet_gate(cs, sheet=SHEET):
     return rec
 
 
+# A dead cell is an item error; a STREAK of them is a fault in the run. 57 of the 11:00 send's cells
+# were `getaddrinfo failed` -- three whole arms scored as if the models had failed, when what failed was
+# DNS on this machine. The rule (Chris, run-level fault vs item error): N consecutive dead items
+# invalidates the run, it aborts, and it is rerun from the top -- never spliced.
+DEAD_RUN_AT = 8
+
+
+class RunLockHeld(RuntimeError):
+    pass
+
+
+def _lock_path(out):
+    return Path(str(out) + ".lock")
+
+
+def _pid_alive(pid):
+    """True if that pid is running. Windows: tasklist, because os.kill(pid, 0) lies here."""
+    import subprocess
+    try:
+        o = subprocess.run(["tasklist", "/FI", "PID eq %d" % int(pid)], capture_output=True, text=True,
+                           timeout=20).stdout
+        return str(int(pid)) in o
+    except Exception:
+        return True          # cannot tell -> assume held. A false refusal costs a minute; a false
+        #                      release costs an artifact whose rows have no single author.
+
+
+def acquire_run_lock(out, why=""):
+    """One writer per artifact, enforced across PROCESSES.
+
+    RunWriter makes the header precede the rows *within* a process. It cannot see a second process:
+    two `hebrew_frontier_or.py run` processes were alive together at 11:00 over one artifact, and
+    nothing in the file could have told me which rows belonged to which. A same-process guard cannot
+    see a per-process defect -- the axis has to be spanned.
+
+    Stale locks release themselves: if the recorded pid is gone the lock is taken over, because the
+    failure mode of a sticky lock is somebody deleting lock files by hand."""
+    import os
+    lp = _lock_path(out)
+    if lp.exists():
+        try:
+            rec = json.loads(lp.read_text(encoding="utf-8"))
+        except Exception:
+            rec = {}
+        pid = rec.get("pid")
+        if pid and pid != os.getpid() and _pid_alive(pid):
+            raise RunLockHeld(
+                "%s is already being written by pid %s (started %s, %s).\n  Two runs over one artifact"
+                " leave rows with no single author. Wait for it, or kill it and rerun from the top."
+                % (lp.name, pid, rec.get("started"), rec.get("why") or "no reason recorded"))
+        print("  taking over a stale lock from pid %s (not running)" % pid)
+    lp.write_text(json.dumps({"pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                              "why": why, "argv": sys.argv[1:]}, ensure_ascii=False), encoding="utf-8")
+    # The explicit release at the end of run() is skipped by an exception, and a lock that outlives its
+    # run is a lock somebody deletes by hand. A hard kill still leaves it, which is what the stale-pid
+    # takeover above is for.
+    import atexit
+    atexit.register(release_run_lock, out)
+    return lp
+
+
+def release_run_lock(out):
+    import os
+    lp = _lock_path(out)
+    try:
+        if lp.exists() and json.loads(lp.read_text(encoding="utf-8")).get("pid") == os.getpid():
+            lp.unlink()
+    except Exception:
+        pass
+
+
+def refuse_footerless(out):
+    """A run that wrote rows and no footer never closed. Resuming onto it is the forbidden splice."""
+    if not Path(out).exists():
+        return
+    L = list(diag._lines(out))
+    rows_ = [o for o in L if o.get("kind") in ("read", "call_error", "crop_refused")]
+    if rows_ and not any(o.get("kind") == "run_footer" for o in L):
+        raise RuntimeError(
+            "%s holds %d row(s) and NO footer -- its run never closed, so its rows cannot be"
+            " attributed to a finished run.\n  Rerun from the top: move it aside (keep it, it is"
+            " evidence) and let this run write a fresh artifact. Never splice."
+            % (Path(out).name, len(rows_)))
+
+
 def run(only=None, spans=None, approved=False, sheet_path=None):
     cs = cells(spans)
     # Gate BEFORE the catalog pull, so a refusal costs nothing and cannot be mistaken for a run that
@@ -641,6 +728,10 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
              for s_, c_, _x in cs}
     print(f"  archived {len(_arch)} pixel state(s) under their hashes -> {diag.SENT_SHA.name}")
 
+    # Before the catalog pull, with the other gates: a refusal here costs nothing.
+    refuse_footerless(OUT)
+    _lock = acquire_run_lock(OUT, why="frontier run%s" % ("" if TEXT_CONTEXT else " --no-text"))
+    g0 = {"git_head": _git_head0(), "git_dirty": _git_dirty0()}
     cat = catalog(refresh=True)
     done = set()
     if OUT.exists():
@@ -663,6 +754,7 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
     # run's header and its own identity -- git state, approval, truth digest, crop hashes, clip status
     # -- was never written. The per-read crop_sha16 kept the pixels answerable; nothing kept the RUN
     # answerable. A file holding several runs is a log of runs; each needs its own bracket.
+    dead, faulted, clean = 0, None, True
     _reads_before = sum(1 for _o in diag._lines(OUT) if _o.get("kind") == "read") if OUT.exists() else 0
     # RunWriter is the guard behind the comment above: it refuses to write a row until a header has
     # been written, so `write_header` cannot be made conditional again by anybody, including me.
@@ -762,11 +854,34 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                            "kind": "call_error", "error": f"{type(e).__name__}: {e}"[:300],
                            "reached_wire": True}
                 f.row(row)          # RunWriter flushes every row itself
+                # An item error is an item error until it becomes a streak; then it is the RUN that
+                # is wrong, and continuing only buys more cells that cannot be scored.
+                dead = 0 if row.get("kind") == "read" else dead + 1
                 tag = row.get("kind")
                 print(f"  {s['span_id']:10s} {tag:10s} {str(row.get('gated', row.get('error','')))[:44]!r}"
                       f" {row.get('provider_served') or ''}")
+                if dead >= DEAD_RUN_AT:
+                    faulted = ("%d consecutive dead cells (last: %s). The run is faulted, not the "
+                               "arms." % (dead, str(row.get("error"))[:120]))
+                    break
+            if faulted:
+                break
+        g1 = {"git_head": _git_head0(), "git_dirty": _git_dirty0()}
+        clean = (g0 == g1 and g0["git_dirty"].get("state") == "clean")
         f.row({"kind": "run_footer", "budget_after": _budget(),
-                            "finished": time.strftime("%Y-%m-%dT%H:%M:%S")})
+               # The clean-run rule binds both lanes, and until now this runner's footer could not
+               # even state it: a run is clean only if git_state() at start and at end are both clean
+               # and identical. Anything else is provisional and cannot be cited.
+               "git_at_start": g0, "git_at_end": g1, "clean_run": clean, "run_faulted": faulted,
+               "dead_run_at": DEAD_RUN_AT,
+               "finished": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    release_run_lock(OUT)
+    if faulted:
+        print("\n*** RUN FAULTED: %s\n    This artifact cannot be scored or cited. Fix the cause, move"
+              " it aside, rerun from the top. ***" % faulted)
+    if not clean:
+        print("\n*** PROVISIONAL: git moved or the tree was dirty.\n    start=%s\n    end=%s ***"
+              % (g0, g1))
     print("\nwrote", OUT)
 
 

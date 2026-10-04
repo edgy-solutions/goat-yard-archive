@@ -1185,10 +1185,114 @@ else:
           "no approved pad-probe sheet -- section (20)'s gate checks prove nothing")
 
 
+# ---------------------------------------------------------------------------------------------------
+# (21) The frontier runner's run-level brackets. All four were missing when the 11:00 send went out:
+# 57 cells across three whole arms came back `getaddrinfo failed` and the run carried on; the footer
+# could not say `clean_run`; a resume would have spliced onto a footerless artifact; and two processes
+# with identical command lines were alive at once over one file. These are the guards, not the fix --
+# the fix is rerunning from the top.
+check("the frontier runner names a dead-run threshold", getattr(F, "DEAD_RUN_AT", 0) >= 2,
+      str(getattr(F, "DEAD_RUN_AT", None)))
+check("its footer can state the clean-run rule",
+      all(k in open(F.__file__, encoding="utf-8").read()
+          for k in ('"git_at_start": g0', '"clean_run": clean', '"run_faulted": faulted')))
+
+_rd = _tf.mkdtemp()
+_a1 = os.path.join(_rd, "no_such.jsonl")
+_ok = True
+try:
+    F.refuse_footerless(_a1)
+except Exception as e:
+    _ok = False
+check("a missing artifact is not a footerless one", _ok)
+
+_a2 = os.path.join(_rd, "rows_no_footer.jsonl")
+open(_a2, "w", encoding="utf-8").write(
+    json.dumps({"kind": "config_header"}) + "\n" +
+    json.dumps({"kind": "read", "span_id": "p1:n1", "model": "m"}) + "\n")
+try:
+    F.refuse_footerless(_a2)
+    _r = "NO RAISE"
+except RuntimeError as e:
+    _r = str(e)
+check("rows and no footer refuses a resume", "ever splice" in _r, _r[:120])
+check("and it says the rows are evidence, not garbage", "evidence" in _r, _r[:160])
+
+_a3 = os.path.join(_rd, "rows_and_footer.jsonl")
+open(_a3, "w", encoding="utf-8").write(
+    json.dumps({"kind": "config_header"}) + "\n" +
+    json.dumps({"kind": "read", "span_id": "p1:n1", "model": "m"}) + "\n" +
+    json.dumps({"kind": "run_footer", "clean_run": True}) + "\n")
+_ok = True
+try:
+    F.refuse_footerless(_a3)
+except Exception:
+    _ok = False
+check("a closed run may be resumed", _ok)
+
+# A call_error row counts: the 11:00 artifact held 69 of them and no footer.
+_a4 = os.path.join(_rd, "errors_no_footer.jsonl")
+open(_a4, "w", encoding="utf-8").write(
+    json.dumps({"kind": "config_header"}) + "\n" +
+    json.dumps({"kind": "call_error", "span_id": "p1:n1", "model": "m"}) + "\n")
+try:
+    F.refuse_footerless(_a4)
+    _r = "NO RAISE"
+except RuntimeError as e:
+    _r = str(e)
+check("an artifact of nothing but dead cells is footerless too", "ever splice" in _r, _r[:100])
+
+# The cross-process lock. RunWriter orders rows within one process and cannot see a second.
+_a5 = os.path.join(_rd, "locked.jsonl")
+_lp = F.acquire_run_lock(_a5, why="born test")
+check("acquiring writes a lock naming this pid",
+      json.loads(open(str(_lp), encoding="utf-8").read())["pid"] == os.getpid())
+check("re-acquiring in the SAME process is allowed (it is the same writer)",
+      bool(F.acquire_run_lock(_a5, why="born test again")))
+
+_rec = json.loads(open(str(_lp), encoding="utf-8").read())
+_rec["pid"] = 1  # pid 1 does not exist on Windows; stand in for a live foreign writer
+open(str(_lp), "w", encoding="utf-8").write(json.dumps(_rec))
+_alive0 = F._pid_alive
+F._pid_alive = lambda pid: True
+try:
+    F.acquire_run_lock(_a5, why="second writer")
+    _r = "NO RAISE"
+except F.RunLockHeld as e:
+    _r = str(e)
+finally:
+    F._pid_alive = _alive0
+check("a lock held by a LIVE foreign pid refuses the second writer", "already being written" in _r,
+      _r[:120])
+check("and it says what to do about it", "rerun from the top" in _r, _r[:200])
+
+F._pid_alive = lambda pid: False
+try:
+    F.acquire_run_lock(_a5, why="after the holder died")
+    _r2 = "took over"
+except F.RunLockHeld as e:
+    _r2 = str(e)
+finally:
+    F._pid_alive = _alive0
+check("a lock whose holder is gone is taken over, not honoured forever", _r2 == "took over", _r2[:120])
+
+F.release_run_lock(_a5)
+check("releasing removes the lock", not os.path.exists(str(_lp)))
+
+check("a foreign pid's lock is NOT released by us", True)   # by construction: release checks the pid
+_lp2 = F.acquire_run_lock(_a5, why="ownership")
+_rec = json.loads(open(str(_lp2), encoding="utf-8").read())
+_rec["pid"] = 999999
+open(str(_lp2), "w", encoding="utf-8").write(json.dumps(_rec))
+F.release_run_lock(_a5)
+check("...checked for real: the file survives a release by a non-owner", os.path.exists(str(_lp2)))
+os.unlink(str(_lp2))
+
+
 print()
 # An abort is not a failure, so the count is the gate. Raise the floor when you add a section; never
 # pin it to the exact number, or the suite starts failing on its own growth.
-CHECK_FLOOR = 235
+CHECK_FLOOR = 248
 if len(ran) < CHECK_FLOOR:
     fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
                  f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")
