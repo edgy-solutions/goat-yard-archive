@@ -637,6 +637,48 @@ class CropRefused(Exception):
 # construction; `offnet=True` makes it unreachable by refusal as well.
 OFFNET_SUFFIX = "_A2_spanbox.png"
 
+# Item 6(b) sends a crop that is NOT the A2 span box: the same crop with the rows carrying a
+# neighbouring line removed. A filename rule cannot tell that apart from any other PNG, and renaming
+# the clip to look like a span box would make the gate assert something false. So the clip gets its
+# own suffix and its own proof obligation: it is sendable only if it is LITERALLY a full-width row
+# range of a crop that is itself sendable. That is checked against the pixels, not against the
+# sidecar that names the parent -- a sidecar pointing anywhere else fails the byte comparison.
+OFFNET_BANDCLIP_SUFFIX = "_A2_bandclip.png"
+
+
+def bandclip_fault(pth):
+    """None if this band-clip is provably a row-range of an A2 span-box crop; else a fault string.
+
+    The clip may only REMOVE whole rows from the top and bottom. Equal width is required and the
+    bytes must match exactly, so no clip can introduce a pixel the parent did not already have, and
+    nothing outside the ratified span box can enter the wire through this route."""
+    pth = Path(pth)
+    side = pth.with_suffix(".parent.json")
+    if not side.exists():
+        return "offnet:bandclip-has-no-parent-record:%s" % pth.name
+    try:
+        rec = json.loads(side.read_text(encoding="utf-8"))
+        parent = Path(rec["parent"])
+        y0, y1 = int(rec["rows"][0]), int(rec["rows"][1])
+    except Exception as e:
+        return "offnet:bandclip-parent-record-unreadable:%s:%s" % (pth.name, type(e).__name__)
+    if not str(parent).endswith(OFFNET_SUFFIX):
+        return "offnet:bandclip-parent-is-not-an-A2-span-box-crop:%s" % parent.name
+    if not parent.exists() or not pth.exists():
+        return "offnet:bandclip-parent-missing:%s" % parent.name
+    try:
+        a = Image.open(parent).convert("L")
+        b = Image.open(pth).convert("L")
+    except Exception as e:
+        return "offnet:bandclip-unreadable:%s" % type(e).__name__
+    if not (0 <= y0 <= y1 < a.height):
+        return "offnet:bandclip-rows-outside-parent:%d-%d-of-%d" % (y0, y1, a.height)
+    if b.size != (a.width, y1 - y0 + 1):
+        return "offnet:bandclip-size-does-not-match-its-rows:%dx%d" % b.size
+    if a.crop((0, y0, a.width, y1 + 1)).tobytes() != b.tobytes():
+        return "offnet:bandclip-is-not-a-slice-of-its-parent:%s" % pth.name
+    return None
+
 
 def b64_gated(src, what="", offnet=False, **geo):
     """base64 of an image that PASSED the gate, or CropRefused. The ONLY sanctioned encoder.
@@ -662,7 +704,11 @@ def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None
         # memory on the path to the wire.
         if hasattr(src, "convert"):
             return None, "offnet:in-memory-image-has-no-aperture"
-        if not str(src).endswith(OFFNET_SUFFIX):
+        if str(src).endswith(OFFNET_BANDCLIP_SUFFIX):
+            f = bandclip_fault(src)
+            if f:
+                return None, f
+        elif not str(src).endswith(OFFNET_SUFFIX):
             return None, "offnet:not-an-A2-span-box-crop:%s" % Path(src).name
     if hasattr(src, "convert"):
         im = src

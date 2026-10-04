@@ -978,9 +978,100 @@ check("excluded arms are out of the approved arm count (astra is the priciest ar
       "m not in getattr(F, \"EXCLUDED_ARMS\", {})" in _cssrc)
 
 print()
+print("(19) the band-clip route out of the network -- item 6(b)")
+print("-" * 92)
+
+# Item 6(b) sends a crop that is not the A2 span box. A filename rule cannot tell a band-clip from
+# any other PNG, so the clip carries a proof obligation instead: it must BE a full-width row range of
+# a sendable A2 crop, checked against the pixels. These checks are the adversary -- each one builds a
+# clip that lies in a different way and asserts the gate refuses it.
+import tempfile                                                             # noqa: E402
+from PIL import Image as _Im                                                # noqa: E402
+
+_src = None
+for _s, _c, _x in F.cells():
+    if _s["span_id"] == "p912:n2":
+        _src = _c
+        break
+check("the band-clip parent crop is present to test against", bool(_src), str(_src))
+
+_td = tempfile.mkdtemp(prefix="bandclip_")
+
+
+def _mk(name, img, parent=None, rows=None):
+    p = os.path.join(_td, name)
+    img.save(p)
+    if parent is not None:
+        rec = {"parent": str(parent), "rows": list(rows or [0, img.height - 1])}
+        open(os.path.splitext(p)[0] + ".parent.json", "w", encoding="utf-8").write(json.dumps(rec))
+    return p
+
+
+if _src:
+    _par = _Im.open(_src)
+    _rows = (14, 72)
+    _good = _par.crop((0, _rows[0], _par.width, _rows[1] + 1))
+
+    _p = _mk("ok_A2_bandclip.png", _good, _src, _rows)
+    check("a clip that IS a row range of its A2 parent passes the gate",
+          diag.gate_outbound(_p, offnet=True)[1] is None, str(diag.gate_outbound(_p, offnet=True)[1]))
+
+    _p = _mk("nosidecar_A2_bandclip.png", _good)
+    check("a clip with no parent record is refused",
+          "bandclip-has-no-parent-record" in (diag.gate_outbound(_p, offnet=True)[1] or ""))
+
+    _bad = _good.copy()
+    _px = _bad.load()
+    _px[0, 0] = (0, 0, 0) if _bad.mode == "RGB" else 0
+    _p = _mk("onepixel_A2_bandclip.png", _bad, _src, _rows)
+    check("a clip altered by ONE pixel is refused -- the check is the bytes, not the sidecar",
+          "not-a-slice-of-its-parent" in (diag.gate_outbound(_p, offnet=True)[1] or ""),
+          str(diag.gate_outbound(_p, offnet=True)[1]))
+
+    _p = _mk("wrongrows_A2_bandclip.png", _good, _src, (10, 68))
+    check("a clip whose recorded rows do not produce it is refused",
+          (diag.gate_outbound(_p, offnet=True)[1] or "").startswith("offnet:bandclip-"),
+          str(diag.gate_outbound(_p, offnet=True)[1]))
+
+    _p = _mk("notebox_A2_bandclip.png", _good, str(_src).replace("_A2_spanbox.png", "_A1_notebox.png"),
+             _rows)
+    check("a clip claiming a NOTE-BOX parent is refused -- the one aperture that may never leave",
+          "parent-is-not-an-A2-span-box-crop" in (diag.gate_outbound(_p, offnet=True)[1] or ""))
+
+    _p = _mk("missing_A2_bandclip.png", _good, os.path.join(_td, "gone_A2_spanbox.png"), _rows)
+    check("a clip whose parent does not exist is refused",
+          "bandclip-parent-missing" in (diag.gate_outbound(_p, offnet=True)[1] or ""))
+
+    _wide = _Im.new(_good.mode, (_good.width + 4, _good.height), 255)
+    _wide.paste(_good, (0, 0))
+    _p = _mk("widened_A2_bandclip.png", _wide, _src, _rows)
+    check("a clip that is WIDER than its parent slice is refused (rows may be dropped, pixels may not "
+          "be added)", (diag.gate_outbound(_p, offnet=True)[1] or "").startswith("offnet:bandclip-"),
+          str(diag.gate_outbound(_p, offnet=True)[1]))
+
+    _p = _mk("chained_A2_bandclip.png", _good.crop((0, 2, _good.width, 20)),
+             os.path.join(_td, "ok_A2_bandclip.png"), (2, 19))
+    check("a clip OF a clip is refused -- the parent must be the ratified span box itself",
+          "parent-is-not-an-A2-span-box-crop" in (diag.gate_outbound(_p, offnet=True)[1] or ""))
+
+# The live item 6(b) pixel, as it sits on disk: it is the thing the contact sheet shows.
+_LIVE = ("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits/hebrew_pad_probe_20261004/"
+         "p912_n2_A2_bandclip.png")
+if os.path.exists(_LIVE):
+    check("the item 6(b) clip on disk passes the gate",
+          diag.gate_outbound(_LIVE, offnet=True)[1] is None, str(diag.gate_outbound(_LIVE, offnet=True)[1]))
+    check("and it is 385x59, the full width of its parent",
+          _Im.open(_LIVE).size == (385, 59), str(_Im.open(_LIVE).size))
+
+# The suffix rule itself: the old refusal still stands for everything that is neither.
+check("a PNG that is neither an A2 span box nor a band-clip is still refused",
+      "not-an-A2-span-box-crop" in (diag.gate_outbound(os.path.join(_td, "x_A1_notebox.png"),
+                                                    offnet=True)[1] or ""))
+
+print()
 # An abort is not a failure, so the count is the gate. Raise the floor when you add a section; never
 # pin it to the exact number, or the suite starts failing on its own growth.
-CHECK_FLOOR = 205
+CHECK_FLOOR = 216
 if len(ran) < CHECK_FLOOR:
     fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
                  f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")
