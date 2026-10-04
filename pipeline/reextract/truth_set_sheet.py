@@ -255,7 +255,11 @@ assert doc.count("<div class=\"row\">") == SET_N, \
     "the sheet renders %d rows, not %d" % (doc.count("<div class=\"row\">"), SET_N)
 
 # ---- content-addressed name + the clobber guard ----------------------------------------------------
-sig = ";".join("%s:%s" % (s, shown[s]["A2_spanbox"]) for s in sorted(shown))
+# The name must address EVERY pixel the sheet shows. It addressed only the parent crops, so when
+# the clip rule was corrected on 2026-10-04 the sheet kept its old name and the clobber guard had
+# to refuse it -- the guard caught what the name should have expressed.
+sig = ";".join("%s:%s:%s" % (s, shown[s]["A2_spanbox"], shown[s].get("A2_bandclip") or "-")
+               for s in sorted(shown))
 DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
 OUT = HAD.DATA / ("truthset_sheet_%s_%dspan_%s.html" % (SET, len(shown), DIG))
 SIDE = OUT.with_suffix(".json")
