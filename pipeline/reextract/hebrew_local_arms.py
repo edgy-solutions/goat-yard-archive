@@ -28,6 +28,16 @@ lane keeps finding. So each arm loads its model with the real options, then read
 `size_vram/size` is below VRAM_MIN the arm is ABORTED before a single span is read, and the abort is
 recorded. One model at a time; the previous model is unloaded (`keep_alive: 0`) before the next loads.
 
+THE CANARY, AND WHY IT ABORTS THE RUN. A2, 2026-10-04: endpoint D answered text prompts with `////`
+after roughly 60 JSON-format image reads in one run and recovered only on a model RELOAD; a later run of
+87 reads with canaries in it stayed healthy (`gpu-servers.md`). So every arm here calls a text canary
+before its first read, every `CANARY_EVERY` reads, and once more before the model is unloaded. A failure
+is RUN-level: endpoint degeneracy is server state, so every read since the last PASSING canary is suspect
+as a group and the run stops rather than skipping an item. The suspect keys go into the artifact and a
+resume SUBTRACTS them from its `done` set -- without that, the rerun would splice back exactly the reads
+the canary was there to distrust and the file would look complete. A passing canary is not evidence that
+the reads around it are good; only a failing one is evidence, and that asymmetry is the whole value.
+
 SCOPE -- what this cannot tell you. It measures READS against signed verdicts on 19 spans. Cross-endpoint
 and cross-read-path comparison is NOT scoring: the C arms and the D arms differ in device AND API route, and
 Chris's device-noise rule (handoff section 11c) puts differences of ~3 spans or fewer inside the noise floor.
@@ -49,6 +59,7 @@ import hebrew_aperture_diag as D
 import nikud_gate
 import script_gate
 from endpoint_guard import resolve_host, EndpointMissing, EndpointRefused
+from endpoint_canary import Canary, CanaryFailed, suspect_from_log
 from run_header import build_header, endpoint_id, model_digest, normalize_hostport
 from hebrew_recrop import _RECROP_PROMPT
 
@@ -58,6 +69,10 @@ PRERUN = DATA / "hebrew_local_arms_prerun_20260920.md"
 ARMS = [m for m in ["qwen3.5:122b", "glm-ocr:bf16", "nemotron3:33b", "qwen3.8:latest"]
         if m not in D.DROPPED_ARMS]        # glm-ocr dropped 2026-09-27, see D.DROPPED_ARMS
 APERTURES = ("A1_notebox", "A2_spanbox")
+# A2, 2026-10-04: D answered text prompts with `////` after ~60 JSON-format image reads in one run
+# and recovered only on a model reload; 87 reads with canaries stayed healthy. Chris: canary every
+# batch on D, abort on failure. 20 is under A2's observed onset with room for it to arrive earlier.
+CANARY_EVERY = 20
 NUM_CTX = D.NUM_CTX
 VRAM_MIN = 0.98        # size_vram/size. Below this the model spilled to CPU and the arm is aborted.
 KEEP_ALIVE = "30m"
@@ -141,9 +156,20 @@ def vram_check(hostport, model):
 
 def run(hostport, models, out=OUT, include_sealed=True):
     built = _built(include_sealed)
-    done = set()
+    done, suspect = set(), set()
     if out.exists():
-        done = {(o["span_id"], o["aperture"], o["model"]) for o in D._lines(out) if "span_id" in o}
+        lines = D._lines(out)
+        done = {(o["span_id"], o["aperture"], o["model"]) for o in lines if "span_id" in o}
+        # A read taken inside a failed canary's window may NOT be inherited. Without this the resume
+        # would splice back exactly the reads the canary existed to distrust, and the artifact would
+        # look complete. The suspect keys are (span_id, aperture) under the model named in the record.
+        suspect = {(k[0], k[1], o["model"]) for o in lines
+                   if o.get("kind") == "canary" and not o.get("ok")
+                   for k in (o.get("suspect") or [])}
+        if suspect:
+            print("  %d read(s) are inside a failed canary's window and will be RE-READ: %s"
+                  % (len(suspect), sorted(suspect)[:6]), flush=True)
+            done -= suspect
     aborted = []
     with io.open(out, "a", encoding="utf-8") as f:
         for model in models:
@@ -174,6 +200,19 @@ def run(hostport, models, out=OUT, include_sealed=True):
                 unload(hostport, model)
                 continue
             n = 0
+            can = Canary(hostport, model, every=CANARY_EVERY, opts=_opts())
+            try:
+                f.write(json.dumps(can.check("arm-start"), ensure_ascii=False) + "\n")
+                f.flush()
+            except CanaryFailed as e:
+                # A model that cannot answer a text prompt before the first image read is not an arm.
+                f.write(json.dumps(e.record, ensure_ascii=False) + "\n")
+                f.flush()
+                print("  ABORTED: canary failed before the first read -- %s" % e.record["why"],
+                      flush=True)
+                aborted.append((model, {"canary": e.record["why"]}))
+                unload(hostport, model)
+                continue
             for s in built:
                 for ap in APERTURES:
                     if not s.get(ap) or (s["span_id"], ap, model) in done:
@@ -207,7 +246,35 @@ def run(hostport, models, out=OUT, include_sealed=True):
                     f.flush()
                     n += 1
                     print(f"  {s['span_id']:10s} {ap:11s} {secs:7.1f}s  {gated[:44]!r}", flush=True)
-            print(f"  arm done: {n} reads", flush=True)
+                    try:
+                        rec = can.tick((s["span_id"], ap))
+                    except CanaryFailed as e:
+                        # RUN-level fault, not an item error: the endpoint is degenerate, the reads
+                        # since the last passing canary are suspect as a group, and splicing a rerun
+                        # onto them is the thing this must not allow. Write the record, stop.
+                        f.write(json.dumps(e.record, ensure_ascii=False) + "\n")
+                        f.flush()
+                        print("\n*** CANARY FAILED after %d reads: %s" % (n, e.record["why"]))
+                        print("    %d read(s) in this arm are SUSPECT and will be re-read on resume."
+                              % len(e.suspect))
+                        print("    A2 saw this recover only on a model RELOAD. Reload, then rerun.")
+                        unload(hostport, model)
+                        raise
+                    if rec:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                        f.flush()
+                        print("  canary ok after %d reads (%.1fs)" % (n, rec["secs"]), flush=True)
+            try:
+                f.write(json.dumps(can.check("arm-end"), ensure_ascii=False) + "\n")
+                f.flush()
+            except CanaryFailed as e:
+                f.write(json.dumps(e.record, ensure_ascii=False) + "\n")
+                f.flush()
+                print("\n*** CANARY FAILED at arm end: %s" % e.record["why"])
+                print("    %d read(s) since the last passing canary are SUSPECT." % len(e.suspect))
+                unload(hostport, model)
+                raise
+            print(f"  arm done: {n} reads, {can.n_checks} canaries", flush=True)
             unload(hostport, model)
     if aborted:
         print("\nABORTED ARMS (spilled to CPU / failed to load):")
