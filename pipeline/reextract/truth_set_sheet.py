@@ -61,7 +61,7 @@ from clean_run import git_state, provisional, banner                      # noqa
 
 # The re-frozen set (2026-10-04): the 96 minus 20 spans at measured box faults. The 96 sheet keeps
 # its own name and sidecar -- an approval record is named by the pixels it describes.
-SET, SET_N = "13e053b86b75a195", 76
+SET, SET_N = "0401b636ffa7bf1a", 74
 CUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
 PRINTED_OFFSET = 88
 SKEL_NAME = "truthset_signing_%s.jsonl" % SET
@@ -168,7 +168,8 @@ H.append('<div class="note"><b>What is deliberately missing.</b> The extractor&r
          '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it. <b>Do not sign a word that the crop edge cuts.</b> Measured on this set: the span&rsquo;s own ink never reaches a vertical edge, but in 19 crops a NEIGHBOURING word on the same line is sliced by the edge and sits in the pad. It is noise, not a span, and a fragment signed as a word is a wrong truth.</div>')
 H.append('<table class="sum">'
          '<tr><td>spans</td><td><b>%d</b> on %d pages, 0 refused by the crop gate &mdash; the 96 set minus 20 spans at measured box faults (14 on the printed rule, 6 at the three duplicate boxes)</td></tr>'
-         '<tr><td>band-clips</td><td><b>%d</b> written, %d needed no trim (no foreign line in the pad), '
+         '<tr><td>band-clips</td><td>%s</td></tr>'
+         '<tr><td>(clip detail)</td><td><b>%d</b> written, %d needed no trim (no foreign line in the pad), '
          '<b>%d abstained</b>, %d resolved FEWER runs than its parent</td></tr>'
          '<tr><td>recipe differs</td><td><b>%d</b> span(s)</td></tr>'
          '<tr><td>DUP-BOX</td><td><b>%d</b> pair(s): %s</td></tr>'
@@ -176,7 +177,13 @@ H.append('<table class="sum">'
          'the printed rule: %s</td></tr>'
          '<tr><td>SHORT-BOX</td><td><b>%d</b>: %s</td></tr>'
          '</table>'
-         % (SET_N, len({r["page"] for r in rows}), cut["clip"]["written"], cut["clip"]["no_trim"],
+         % (SET_N, len({r["page"] for r in rows}),
+            ('applied: see the detail row below' if cut["clip"].get("applied_as_set_recipe") else
+             '<b>WITHDRAWN as a set recipe</b> &mdash; every crop here is PAD=12 only, the same recipe '
+             'as the 19 spans already signed, so the two sets are comparable. The clip survives as a '
+             'per-span tool. Its one accuracy measurement (p912:n2, 24 paired arms) moved 10 arms for a '
+             'net of +1 exact, losing claude-sonnet-5 and gemini-3.8-flash to <i>wrong</i>.'),
+            cut["clip"]["written"], cut["clip"]["no_trim"],
             SET_N - cut["clip"]["written"] - cut["clip"]["no_trim"],
             len(cut["clip"]["word_runs_regressed"]),
             len(cut["clip"]["word_runs_differ"]), len(flags["duplicate_box"]),
@@ -185,7 +192,13 @@ H.append('<table class="sum">'
             len(SHORT), html.escape(", ".join(sorted(SHORT)))))
 
 assert not cut["clip"]["word_runs_regressed"], "a clip resolves fewer runs than its parent"
-assert SET_N == cut["clip"]["written"] + cut["clip"]["no_trim"] + len(cut["clip"]["abstained_ids"]),     "written + no-trim + abstained does not account for every span in the set"
+assert SET_N == (cut["clip"]["written"] + cut["clip"]["no_trim"] + len(cut["clip"]["abstained_ids"])
+                 + cut["clip"].get("not_attempted", 0)), \
+    "written + no-trim + abstained + not-attempted does not account for every span in the set"
+assert cut["clip"].get("applied_as_set_recipe") or cut["clip"]["written"] == 0, \
+    "the cut says the clip is withdrawn as a set recipe and then reports clips written"
+assert (cut["clip"]["written"] > 0) == any(r.get("clip") for r in rows), \
+    "the clip count and the rows the sheet would render a clip for disagree"
 
 shown, nflag = {}, 0
 for r in rows:

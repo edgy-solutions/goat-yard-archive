@@ -47,7 +47,7 @@ import hebrew_glyph_card as G                                              # noq
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 from clean_run import git_state, provisional, banner                      # noqa: E402
 
-SET, SET_N = "13e053b86b75a195", 76
+SET, SET_N = "0401b636ffa7bf1a", 74
 CUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
 PRINTED_OFFSET = 88
 N_WORST, N_MILD = 4, 1
@@ -55,6 +55,20 @@ N_WORST, N_MILD = 4, 1
 READABLE = re.compile(u"[֐-׿יִ-ﭏͰ-Ͽἀ-῿]")
 _PROBE = u"אב"
 FORBIDDEN_KEYS = ("hebrew", "words", "nikud", "letters", "chars", "truth", "signature")
+
+# THE BAND-CLIP IS NO LONGER A SET RECIPE, so there is no set-wide pair population to rank and this
+# sheet has nothing to offer an eye. Chris, 2026-10-04: "The band-clip stays as a per-span tool, not a
+# pipeline step, used only when you ask for a cleaner card on a specific span. The five post-fix pairs
+# are moot; don't judge them." Refuse loudly rather than render a five-row sheet off whatever clips
+# happen to be on disk: a sheet named for a decision that has been taken is how a withdrawn recipe gets
+# approved a second time. Point SET at a cut taken with CLIP_AS_SET_RECIPE on to use this again.
+_cut_peek = json.load(io.open(str(CUT), encoding="utf-8")) if CUT.exists() else {"clip": {}}
+if not _cut_peek.get("clip", {}).get("applied_as_set_recipe", True):
+    print("REFUSED: cut %s was taken with the band-clip WITHDRAWN as a set recipe (0 clips written)."
+          % CUT.name)
+    print("         The five recipe pairs are moot by Chris's ruling of 2026-10-04 and this sheet is "
+          "not regenerated.")
+    sys.exit(0)
 
 GIT_START = git_state(_HERE)
 

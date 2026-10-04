@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Cut the 96 truth-set crops: A2 span box at PAD=12, and the band-clip, guarded and hashed.
+"""Cut the truth-set crops: A2 span box at PAD=12. One recipe for the whole set.
+
+WITHDRAWN 2026-10-04, AND THE REASON IS WORTH KEEPING. Everything below about the band-clip stands as
+written and the code still runs when `CLIP_AS_SET_RECIPE` is turned on for a single span. It is not the
+set recipe. Chris: "Sixteen of the multi-line crops have the extra line INSIDE the box, so the clip's
+intended case didn't occur once, and where it did fire it had to choose a line by a centre-row
+heuristic." The 74 are cut at PAD=12 exactly like the 19 already signed, which also keeps the two sets
+comparable. The one measurement of whether the clip buys accuracy is the p912 pad probe: 24 paired arms,
+14 exact at PAD=12 against 15 with the clip -- a net of +1 across 10 arms that changed tag, with
+claude-sonnet-5 and gemini-3.8-flash both going exact -> wrong. That is a null, not a case.
 
 Chris, 2026-10-04: "cutting is use, not a substrate change" -- so Lane B cuts these itself rather than
 asking A2. The 96 are A2 SPAN boxes, not note boxes: `note_crop.py`'s `page_note_crops()` cuts note
@@ -72,7 +81,17 @@ from clean_run import git_state, provisional, banner                      # noqa
 
 # The re-frozen set (2026-10-04). The 96 set keeps its own name, files and crop directory: a set is
 # dropped FROM, never edited, and its cut artifact is the record of the faults that caused the drop.
-SET, SET_N = "13e053b86b75a195", 76
+SET, SET_N = "0401b636ffa7bf1a", 74
+
+# BAND-CLIP WITHDRAWN AS A SET RECIPE. Chris, 2026-10-04: "A recipe that abstains on 18 of 42 and chose
+# wrong on one is not a set-wide cut. The 76 get the same crop recipe as the 19 you've already signed,
+# which also keeps the two sets comparable." The clip machinery below is KEPT and still guarded, as a
+# per-span tool for when a cleaner card is wanted on one span -- it is not a pipeline step, and with
+# this flag off it is not attempted. A row's `clip_abstain` then reads `withdrawn:` rather than
+# `abstain:`, because "not attempted" and "attempted and refused" are different facts and a tally that
+# merges them would report 74 abstains as if the rule had looked at something.
+CLIP_AS_SET_RECIPE = False
+NOT_ATTEMPTED = "withdrawn:band-clip-is-not-a-set-recipe"
 TRUTH = HAD.DATA / ("truth_set%d_%s.json" % (SET_N, SET))
 OUTDIR = HAD.DATA / ("truthset%d_crops_%s" % (SET_N, SET))
 OUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
@@ -255,7 +274,7 @@ for r in rows:
                    "ink_px": int(sum(prof)), "ink_rows": int(sum(1 for v in prof if v)),
                    "word_runs": word_runs(im)}
 
-    cand, why = clip_rows(im, len(rects))
+    cand, why = clip_rows(im, len(rects)) if CLIP_AS_SET_RECIPE else (None, NOT_ATTEMPTED)
     rec["clip_abstain"] = why
     rec["clip"] = None
     if cand and (cand["trim_top"] or cand["trim_bot"]):
@@ -408,14 +427,18 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},
        "crop_dir": str(OUTDIR), "faults": faults, "clip_faults": clip_faults,
        "stale_clips_swept": _stale,
-       "clip": {"written": len(clipped), "no_trim": sum(1 for b in cut if b["clip_abstain"].startswith("no-trim")),
+       "clip": {"applied_as_set_recipe": CLIP_AS_SET_RECIPE,
+                "written": len(clipped), "no_trim": sum(1 for b in cut if b["clip_abstain"].startswith("no-trim")),
+                "not_attempted": sum(1 for b in cut if b["clip_abstain"] == NOT_ATTEMPTED),
                 # `abstained` is a SET of reason strings and two spans can share one, so it under-
                 # counts: 18 abstains collapsed to 16 strings and written + no_trim + abstained did not
                 # add up to the set. The ids are the count; the strings are the vocabulary.
                 "abstained_ids": {b["span_id"]: b["clip_abstain"] for b in cut if b["clip_abstain"]
-                                  and not b["clip_abstain"].startswith("no-trim")},
+                                  and not b["clip_abstain"].startswith("no-trim")
+                                  and b["clip_abstain"] != NOT_ATTEMPTED},
                 "abstained": sorted({b["clip_abstain"] for b in cut if b["clip_abstain"]
-                                     and not b["clip_abstain"].startswith("no-trim")}),
+                                     and not b["clip_abstain"].startswith("no-trim")
+                                     and b["clip_abstain"] != NOT_ATTEMPTED}),
                 "word_runs_differ": [{"span_id": b["span_id"], "base": b["crop"]["word_runs"],
                                       "clip": b["clip"]["word_runs"]} for b in differ],
                 "word_runs_regressed": regressed,
@@ -437,10 +460,17 @@ print("ink: min %d px on %d rows   sizes %dx%d..%dx%d"
       % (min(b["crop"]["ink_px"] for b in cut), min(b["crop"]["ink_rows"] for b in cut),
          min(b["crop"]["size"][0] for b in cut), min(b["crop"]["size"][1] for b in cut),
          max(b["crop"]["size"][0] for b in cut), max(b["crop"]["size"][1] for b in cut)))
-assert (len(clipped) + art["clip"]["no_trim"] + len(art["clip"]["abstained_ids"])) == len(cut),     "written + no-trim + abstained does not account for every crop that was cut"
-print("clips written %d   no trim needed %d   abstains %d (%d distinct reasons)"
+assert (len(clipped) + art["clip"]["no_trim"] + len(art["clip"]["abstained_ids"])
+        + art["clip"]["not_attempted"]) == len(cut), \
+    "written + no-trim + abstained + not-attempted does not account for every crop that was cut"
+assert CLIP_AS_SET_RECIPE or (not clipped and not list(OUTDIR.glob("*_A2_bandclip.png"))), \
+    "the clip is withdrawn as a set recipe but a clip was written or is on disk"
+print("clips written %d   no trim needed %d   abstains %d (%d distinct reasons)   not attempted %d"
       % (len(clipped), art["clip"]["no_trim"], len(art["clip"]["abstained_ids"]),
-         len(art["clip"]["abstained"])))
+         len(art["clip"]["abstained"]), art["clip"]["not_attempted"]))
+if not CLIP_AS_SET_RECIPE:
+    print("BAND-CLIP WITHDRAWN AS A SET RECIPE: all %d crops are PAD=%d only, the same recipe as the 19 "
+          "already signed." % (len(cut), PAD))
 for _s, _r in sorted(art["clip"]["abstained_ids"].items()):
     print("   ABSTAIN %-10s %s" % (_s, _r))
 print("word runs DIFFER on %d span(s): %s"
