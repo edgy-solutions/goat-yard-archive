@@ -1068,10 +1068,127 @@ check("a PNG that is neither an A2 span box nor a band-clip is still refused",
       "not-an-A2-span-box-crop" in (diag.gate_outbound(os.path.join(_td, "x_A1_notebox.png"),
                                                     offnet=True)[1] or ""))
 
+# ---------------------------------------------------------------------------------------------------
+# (20) The pad probe's runner. A paired two-condition run spends real money on the same arms, so the
+# refusals are tested first and the whole bracket -- gates, archive, header, footer -- is exercised with
+# the catalog stubbed to ZERO arms. That dry run proves the order (header before any row) without a
+# wire, which is exactly the property the 2026-09-27 splice violated.
+import hebrew_pad_probe as PP                                                # noqa: E402
+
+check("the probe names a run-level fault threshold", getattr(PP, "DEAD_RUN_AT", 0) >= 2,
+      str(getattr(PP, "DEAD_RUN_AT", None)))
+
+_SJ = PP.SHEET_JSON
+if _SJ.exists() and PP.CLIP.exists():
+    _rec = json.loads(_SJ.read_text(encoding="utf-8"))
+
+    def _sidecar(mut, name):
+        r = json.loads(json.dumps(_rec))
+        mut(r)
+        p = os.path.join(_td, name)
+        open(p, "w", encoding="utf-8").write(json.dumps(r, ensure_ascii=False))
+        return p
+
+    def _refuses(path, needle):
+        try:
+            PP._gates(path)
+            return False, "no refusal"
+        except RuntimeError as e:
+            return (needle in str(e)), str(e)[:120]
+
+    check("the live approved sheet passes the probe's gates",
+          PP._gates(_SJ)[3].get("approved") is True)
+
+    _ok, _d = _refuses(_sidecar(lambda r: r.pop("approved", None), "unapproved.json"), "no approval")
+    check("an unapproved sidecar is refused", _ok, _d)
+    _ok, _d = _refuses(_sidecar(lambda r: r.update(approved=False), "no.json"), "no approval")
+    check("approved=false is refused too", _ok, _d)
+    _ok, _d = _refuses(_sidecar(lambda r: r["crop_sha16"].update(clip="0" * 16), "moved.json"),
+                       "changed since the sheet")
+    check("a crop that moved since the sheet is refused", _ok, _d)
+    _ok, _d = _refuses(_sidecar(lambda r: r["crop_sha16"].pop("clip"), "scope.json"),
+                       "not on the approved sheet")
+    check("a condition absent from the sheet's scope table is refused", _ok, _d)
+
+    # Both conditions must be hash-identical to what was shown, not just present.
+    _sp, _ctx, _cr, _ = PP._gates(_SJ)
+    check("the gate returns both conditions", sorted(_cr) == ["base", "clip"], str(sorted(_cr)))
+    check("and both hashes equal the approved sheet's",
+          all(_rec["crop_sha16"][k] == F.crop_sha(v) for k, v in _cr.items()))
+    check("the context it would send is the processed ctx, not the raw paragraph",
+          _ctx == F.cells([PP.SPAN])[0][2])
+
+    # The splice guard: rows and no footer means the run never closed.
+    _ff = os.path.join(_td, "footerless.jsonl")
+    open(_ff, "w", encoding="utf-8").write(
+        json.dumps({"kind": "config_header", "run": "padprobe", "span_id": PP.SPAN}) + "\n" +
+        json.dumps({"kind": "read", "span_id": PP.SPAN, "model": "m", "condition": "base"}) + "\n")
+    try:
+        PP.run(_SJ, _ff)
+        _ok, _d = False, "no refusal"
+    except RuntimeError as e:
+        _ok, _d = ("ever splice" in str(e)), str(e)[:120]
+    check("a footerless artifact refuses a resume instead of splicing onto it", _ok, _d)
+
+    # The full bracket, no wire: zero callable arms, archive stubbed.
+    _cat0, _put0, _bud0 = PP.F.catalog, PP.diag.sent_archive_put, PP.F._budget
+    _arch = []
+    PP.F.catalog = lambda refresh=True: {"models": {}, "pulled": "stub"}
+    # _budget() hits the network and _key() sys.exit()s on a missing env var -- in a test file that is
+    # an ABORT, not a failure, and it would take the remaining checks with it.
+    PP.F._budget = lambda: {"stub": True}
+    PP.diag.sent_archive_put = lambda src, sid, ap="A2_spanbox", why="": _arch.append((str(src), ap)) or "stub"
+    _dry = os.path.join(_td, "dry.jsonl")
+    try:
+        PP.run(_SJ, _dry)
+        _lines = [json.loads(x) for x in open(_dry, encoding="utf-8") if x.strip()]
+    finally:
+        PP.F.catalog, PP.diag.sent_archive_put, PP.F._budget = _cat0, _put0, _bud0
+    _h = _lines[0] if _lines else {}
+    check("the dry run writes its header FIRST, and it is a checkable config_header",
+          _h.get("kind") == "config_header" and _h.get("run") == "padprobe",
+          "%s / %s" % (_h.get("kind"), _h.get("run")))
+    check("the header names the machine, so require_endpoint can check it",
+          bool(_h.get("endpoint_id")) and _h.get("endpoint_host") == "openrouter.ai:443",
+          str(_h.get("endpoint_host")))
+    check("the header records both crops' hashes",
+          _h.get("crop_sha16") == {k: F.crop_sha(v) for k, v in _cr.items()}, str(_h.get("crop_sha16")))
+    check("the header names the sheet it was approved on",
+          _h.get("contact_sheet") == _SJ.name, str(_h.get("contact_sheet")))
+    check("the header records the band-clip's kept rows",
+          _h.get("bandclip_rows_kept") == _rec.get("rows_kept"), str(_h.get("bandclip_rows_kept")))
+    check("both crops were archived before any spend, the clip under its OWN aperture",
+          sorted(a for _p, a in _arch) == ["A2_bandclip", "A2_spanbox"], str(_arch))
+    _f = [o for o in _lines if o.get("kind") == "padprobe_run_footer"]
+    check("the dry run closes with a footer", len(_f) == 1, str([o.get("kind") for o in _lines]))
+    check("the footer brackets git at start and end", bool(_f and "git_at_start" in _f[0]
+                                                           and "git_at_end" in _f[0]))
+    check("zero callable arms means zero reads", not [o for o in _lines if o.get("kind") == "read"])
+
+    # score() on a synthetic artifact: the paired question, and only it.
+    _sc = os.path.join(_td, "scored.jsonl")
+    _t = SETS[PP.SPAN]["truth"]
+    with open(_sc, "w", encoding="utf-8") as _w:
+        for _m, _b, _c in (("armA", _t, _t), ("armB", "", _t), ("armC", _t, _t.split()[0])):
+            for _cond, _r in (("base", _b), ("clip", _c)):
+                _w.write(json.dumps({"kind": "read", "span_id": PP.SPAN, "model": _m,
+                                     "condition": _cond, "gated": _r}, ensure_ascii=False) + "\n")
+    _by, _tal, _moved = PP.score(_sc)
+    check("score counts each condition over the same arms",
+          _tal["base"].get("exact") == 2 and _tal["clip"].get("exact") == 2, str(_tal))
+    check("score names the arms whose class MOVED between conditions",
+          sorted(m for m, _a, _b2 in _moved) == ["armB", "armC"], str(_moved))
+    check("an empty read is not scored as a match",
+          _by[("base", "armB")] not in ("exact", "clipped"), str(_by[("base", "armB")]))
+else:
+    check("pad-probe sheet and clip are on disk", False,
+          "no approved pad-probe sheet -- section (20)'s gate checks prove nothing")
+
+
 print()
 # An abort is not a failure, so the count is the gate. Raise the floor when you add a section; never
 # pin it to the exact number, or the suite starts failing on its own growth.
-CHECK_FLOOR = 216
+CHECK_FLOOR = 235
 if len(ran) < CHECK_FLOOR:
     fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
                  f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")

@@ -208,9 +208,190 @@ def build(out=None):
     return out
 
 
+OUT = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits/"
+           "hebrew_pad_probe_reads_20261004.jsonl")
+SHEET_JSON = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits/"
+                  "contact_sheet_20261004_padprobe_a51226c7.json")
+DEAD_RUN_AT = 6          # consecutive dead cells that invalidate the run rather than one item
+
+
+def _gates(sheet_json):
+    """Everything that must hold before a single call. Returns (span, ctx, {condition: path}, sheet rec).
+
+    Order matters: every refusal here costs nothing and cannot be mistaken for a run that started."""
+    rec = json.loads(Path(sheet_json).read_text(encoding="utf-8"))
+    if not rec.get("approved"):
+        raise RuntimeError("%s records no approval. Chris approves the sheet, then we spend; there is "
+                           "no path around it." % Path(sheet_json).name)
+    base, span, ctx = None, None, None
+    for s, c, x in F.cells([SPAN]):
+        span, base, ctx = s, Path(c), x
+    crops = {"base": base, "clip": CLIP}
+    shown = rec.get("crop_sha16") or {}
+    bad = {}
+    for k, p in crops.items():
+        if k not in shown:
+            bad[k] = "not on the approved sheet"
+        elif shown[k] != F.crop_sha(p):
+            bad[k] = "crop changed since the sheet: shown %s, now %s" % (shown[k], F.crop_sha(p))
+        else:
+            fault = diag.gate_outbound(p, offnet=True)[1]
+            if fault:
+                bad[k] = "the outbound gate refuses it: %s" % fault
+    if bad:
+        raise RuntimeError("contact-sheet gate REFUSED: %s" % json.dumps(bad, ensure_ascii=False))
+    return span, ctx, crops, rec
+
+
+def run(sheet_json=SHEET_JSON, out=OUT):
+    from run_header import build_header, RunWriter, _git_head, _git_dirty
+    span, ctx, crops, rec = _gates(sheet_json)
+
+    # A killed or faulted run leaves rows and no footer. Resuming onto it is the splice the run-level
+    # fault rule forbids, so it is refused here rather than remembered.
+    if Path(out).exists():
+        rows_ = [o for o in diag._lines(out)
+                 if o.get("kind") in ("read", "call_error", "crop_refused")]
+        if rows_ and not any(o.get("kind") == "padprobe_run_footer" for o in diag._lines(out)):
+            raise RuntimeError("%s holds %d read(s) and NO footer -- its run never closed. Rerun from "
+                               "the top: delete it, or pass a new --out. Never splice."
+                               % (Path(out).name, len(rows_)))
+
+    g0 = {"git_head": _git_head(), "git_dirty": _git_dirty()}
+    cat = F.catalog(refresh=True)
+    arms = [m for m in F.ARMS if m not in getattr(F, "EXCLUDED_ARMS", {})
+            and (cat["models"].get(m) or {}).get("status") == "ok"]
+    # Archive the pixels BEFORE spending on them. A run is answerable for its pixels only while the
+    # pixels exist, and the clip is archived under its own aperture so it can never be mistaken for
+    # the span box it was cut from.
+    arch = {"base": diag.sent_archive_put(crops["base"], SPAN, "A2_spanbox", why="pad probe 6(b)"),
+            "clip": diag.sent_archive_put(crops["clip"], SPAN, "A2_bandclip", why="pad probe 6(b)")}
+    print("archived %s -> %s" % (arch, diag.SENT_SHA.name))
+
+    done = set()
+    if Path(out).exists():
+        done = {(o.get("condition"), o["model"]) for o in diag._lines(out)
+                if o.get("kind") == "read" and (o.get("hebrew") or "").strip()}
+    faulted, dead = None, 0
+
+    with RunWriter(out) as f:
+        f.header(build_header(
+            host=F.HOST, port=F.PORT, model="multi:%d-openrouter-arms" % len(arms),
+            digest_fn=lambda hp, mo, t=None: "n/a:hosted-api",
+            identity_extra={
+                # kind stays `config_header`: require_endpoint accepts that and only that, and a run
+                # whose header cannot be checked for its machine is the gap the rule exists to close.
+                "run": "padprobe", "item": "6(b) pad probe", "span": SPAN, "arms": arms,
+                "aperture": "A2_spanbox + A2_bandclip (paired, same run)",
+                "conditions": {k: str(v) for k, v in crops.items()},
+                "crop_sha16": {k: F.crop_sha(v) for k, v in crops.items()},
+                "crops_archived": arch, "crops_archive": diag.SENT_SHA.name,
+                "bandclip_rows_kept": rec.get("rows_kept"), "bandclip_parent_rows": rec.get("parent_rows"),
+                "prompt_sha16": F.diag_sha(F.PROMPT_HEAD + F.PROMPT_TAIL),
+                "text_context_sent": True,
+                "truth_digest": F.truth_digest(), "truth_digest_at_sheet": rec.get("truth_digest"),
+                "excluded_arms": getattr(F, "EXCLUDED_ARMS", {}),
+                "contact_sheet": Path(sheet_json).name,
+                "contact_sheet_approved_at": rec.get("approved_at"),
+                "approval": "recorded claim from the sheet sidecar; human approval is NOT "
+                            "machine-verifiable"},
+            extra={"privacy": {"request_filter": "provider.data_collection=deny"},
+                   "catalog_pulled": cat["pulled"], "budget_before": F._budget(),
+                   "note_box_crops_sent": 0, "git_at_start": g0, "dead_run_at": DEAD_RUN_AT,
+                   "pages": "FILE pages (printed = file - 88)",
+                   "design": "both conditions in ONE run: the recorded baseline is two weeks old and "
+                             "comparing across runs would carry a confound the pairing removes"}),
+            "pad probe")
+        for model in arms:
+            c = cat["models"][model]
+            print("\n== %s" % model, flush=True)
+            f.row({"kind": "arm_header", "model": model, "started": time.strftime("%H:%M:%S"),
+                   "git_head": _git_head(), "git_dirty": _git_dirty(),
+                   "structured": c["structured"]})
+            for cond, cpath in crops.items():
+                if (cond, model) in done:
+                    continue
+                try:
+                    row = F.call(model, span, cpath, ctx, c["structured"])
+                except diag.CropRefused as e:
+                    row = {"span_id": SPAN, "model": model, "kind": "crop_refused",
+                           "unscorable": "crop-fault:%s" % e.fault, "crop_fault": e.fault,
+                           "cost_usd": 0.0, "reached_wire": False}
+                except Exception as e:
+                    row = {"span_id": SPAN, "model": model, "kind": "call_error",
+                           "error": ("%s: %s" % (type(e).__name__, e))[:300], "reached_wire": True}
+                row["condition"] = cond
+                row["aperture"] = "A2_bandclip" if cond == "clip" else "A2_spanbox"
+                f.row(row)
+                dead = 0 if row.get("kind") == "read" else dead + 1
+                print("  %-5s %-10s %r" % (cond, row.get("kind"),
+                                           str(row.get("gated", row.get("error", "")))[:44]),
+                      flush=True)
+                if dead >= DEAD_RUN_AT:
+                    faulted = "%d consecutive dead cells" % dead
+                    break
+            if faulted:
+                break
+        g1 = {"git_head": _git_head(), "git_dirty": _git_dirty()}
+        clean = (g0 == g1 and g0["git_dirty"].get("state") == "clean")
+        f.row({"kind": "padprobe_run_footer", "git_at_start": g0, "git_at_end": g1,
+               "clean_run": clean, "run_faulted": faulted, "budget_after": F._budget(),
+               "finished": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    if faulted:
+        print("\n*** RUN FAULTED: %s -- this artifact cannot be scored or cited. Rerun from the top; "
+              "never splice. ***" % faulted)
+    if not clean:
+        print("\n*** PROVISIONAL: git moved or the tree was dirty. start=%s end=%s ***" % (g0, g1))
+    print("\nwrote %s" % out)
+
+
+def score(out=OUT):
+    """The paired question and nothing else: exact on the clip vs exact on the pad, same arms."""
+    lines = list(diag._lines(out))
+    foot = [o for o in lines if o.get("kind") == "padprobe_run_footer"]
+    span = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}[SPAN]
+    truth = span["truth"]
+    by = {}
+    for o in lines:
+        if o.get("kind") == "read":
+            by[(o["condition"], o["model"])] = diag.classify(o.get("gated") or "", truth)
+    arms = sorted({m for _c, m in by})
+    tal = {}
+    for cond in ("base", "clip"):
+        c = {}
+        for m in arms:
+            k = by.get((cond, m))
+            if k:
+                c[k] = c.get(k, 0) + 1
+        tal[cond] = c
+    print("span %s  truth %r  n_arms=%d" % (SPAN, truth, len(arms)))
+    for cond in ("base", "clip"):
+        c = tal[cond]
+        print("  %-5s exact=%-3d clipped=%-3d contains=%-3d wrong=%-3d abstain=%-3d other=%s"
+              % (cond, c.get("exact", 0), c.get("clipped", 0), c.get("contains", 0),
+                 c.get("wrong", 0), c.get("abstain", 0),
+                 {k: v for k, v in c.items() if k not in
+                  ("exact", "clipped", "contains", "wrong", "abstain")}))
+    moved = [(m, by.get(("base", m)), by.get(("clip", m))) for m in arms
+             if by.get(("base", m)) != by.get(("clip", m))]
+    print("  arms whose class MOVED: %d of %d" % (len(moved), len(arms)))
+    for m, a, b in moved:
+        print("    %-34s %-9s -> %-9s" % (m, a, b))
+    if foot:
+        print("  clean_run=%s  faulted=%s" % (foot[-1].get("clean_run"), foot[-1].get("run_faulted")))
+    return by, tal, moved
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] != "sheet":
+    cmd = a[0] if a else ""
+    if cmd == "sheet":
+        build(a[a.index("--out") + 1] if "--out" in a else None)
+    elif cmd == "run":
+        run(Path(a[a.index("--sheet") + 1]) if "--sheet" in a else SHEET_JSON,
+            Path(a[a.index("--out") + 1]) if "--out" in a else OUT)
+    elif cmd == "score":
+        score(Path(a[a.index("--out") + 1]) if "--out" in a else OUT)
+    else:
         print(__doc__)
         sys.exit(2)
-    build(a[a.index("--out") + 1] if "--out" in a else None)
