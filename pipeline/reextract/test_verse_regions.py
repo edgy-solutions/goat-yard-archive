@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 31
+EXPECTED_TESTS = 41
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -423,7 +423,8 @@ def test_assert_numbering_invariant_raises_and_passes():
 
 def test_parse_ver_head_cases():
     ok = VR.parse_ver_head("Ver. 21. And his")
-    assert ok == {"ver": True, "numbers": [21], "raw_head": "Ver. 21", "status": "ok"}, ok
+    assert ok == {"ver": True, "numbers": [21], "raw_head": "Ver. 21", "status": "ok",
+                  "ver_case": "upper"}, ok
 
     for dash in ("-", "–", "—"):                # hyphen, en dash, em dash
         r = VR.parse_ver_head(f"Ver. 12{dash}14 some text")
@@ -436,7 +437,8 @@ def test_parse_ver_head_cases():
     assert r["status"] == "ok" and r["numbers"] == [4], r
 
     r = VR.parse_ver_head("Ver. 5-3")                       # M not > N
-    assert r == {"ver": True, "numbers": None, "raw_head": "Ver. 5-3", "status": "range_implausible"}, r
+    assert r == {"ver": True, "numbers": None, "raw_head": "Ver. 5-3",
+                 "status": "range_implausible", "ver_case": "upper"}, r
 
     r = VR.parse_ver_head("Ver. 5-30")                      # span 25 > RANGE_SPAN_MAX (20)
     assert r["status"] == "range_implausible" and r["numbers"] is None, r
@@ -445,14 +447,25 @@ def test_parse_ver_head_cases():
     assert r["status"] == "range_implausible" and r["numbers"] is None, r
 
     r = VR.parse_ver_head("Ver.")                           # "Ver" with no number spec
-    assert r == {"ver": True, "numbers": None, "raw_head": "Ver.", "status": "unparsed"}, r
+    assert r == {"ver": True, "numbers": None, "raw_head": "Ver.", "status": "unparsed",
+                 "ver_case": "upper"}, r
 
     r = VR.parse_ver_head("   ")                            # empty/whitespace-only
-    assert r == {"ver": None, "numbers": None, "raw_head": None, "status": "empty"}, r
+    assert r == {"ver": None, "numbers": None, "raw_head": None, "status": "empty",
+                 "ver_case": None}, r
     assert VR.parse_ver_head("") == r
 
-    r = VR.parse_ver_head("ver. 5")                         # lowercase "ver." is NOT a head
-    assert r == {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver"}, r
+    r = VR.parse_ver_head("ver. 5")                         # lowercase "ver." WITH a number -> a head
+    assert r == {"ver": True, "numbers": [5], "raw_head": "ver. 5", "status": "ok",
+                 "ver_case": "lower"}, r
+
+    r = VR.parse_ver_head("ver. And")                       # lowercase "ver." with NO number -> prose
+    assert r == {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver",
+                 "ver_case": None}, r
+
+    for bad in ("very good", "verse 3", "ver 3"):            # no required lowercase punctuation / not "ver"
+        r = VR.parse_ver_head(bad)
+        assert r["status"] == "no_ver" and r["ver"] is False and r["ver_case"] is None, (bad, r)
 
     r = VR.parse_ver_head(' "Ver. 7 is the just')           # <=3 leading non-alnum chars tolerated
     assert r["status"] == "ok" and r["numbers"] == [7], r
@@ -475,14 +488,128 @@ def test_parse_witness_multiline_ranges_and_chapters():
     assert w["verse_heads"] == [[1], [2, 3, 4], [5]], w
 
 
-# 8. witness pairing --------------------------------------------------------------------------------
+# 8. witness pairing by text-similarity sequence alignment (replaces positional pairing) ----------
 
-def test_witness_pairing_null_and_head_count_vs_witness():
-    per_head, flag = VR.pair_witness_numbers(3, [[1], [2]])
-    assert per_head == [None, None, None] and flag is True
+_WIT_TEXTS = [
+    "in the beginning god created the heaven and the earth",
+    "and the earth was without form and void and darkness",
+    "and god said let there be light and there was light",
+    "and god saw the light that it was good and divided",
+]
 
-    per_head, flag = VR.pair_witness_numbers(2, [[1], [2]])
-    assert per_head == [[1], [2]] and flag is False
+
+def _rk(t):
+    return VR.align_key(t, VR.ALIGN_KEY_CHARS)
+
+
+def test_align_witness_equal_counts_same_order_positional():
+    read_keys = [_rk(t) for t in _WIT_TEXTS[:3]]
+    assert VR.align_witness(read_keys, _WIT_TEXTS[:3]) == [("paired", 0), ("paired", 1), ("paired", 2)]
+
+
+def test_align_witness_extra_witness_head_is_skipped():
+    read_keys = [_rk(t) for t in _WIT_TEXTS[:3]]
+    extra = "zzz qqq xyz nonsense filler phrase totally unlike"
+    witness_lines = [_WIT_TEXTS[0], extra, _WIT_TEXTS[1], _WIT_TEXTS[2]]
+    assert VR.align_witness(read_keys, witness_lines) == [("paired", 0), ("paired", 2), ("paired", 3)]
+
+
+def test_align_witness_identical_competing_lines_are_ambiguous():
+    read_keys = [_rk(_WIT_TEXTS[0])]
+    witness_lines = [_WIT_TEXTS[0], _WIT_TEXTS[0]]        # two lines, same key -> neither essential
+    assert VR.align_witness(read_keys, witness_lines) == [("ambiguous", None)]
+
+
+def test_align_witness_empty_read_key_is_unpaired():
+    assert VR.align_witness([""], [_WIT_TEXTS[0]]) == [("unpaired", None)]
+
+
+def test_assemble_regions_witness_pairs_by_text_not_by_numbers():
+    # Read and witness DISAGREE on the verse numbers for every head (20/21/32/23 vs 99/98/97/96),
+    # but the witness lines are IDENTICAL text to the read heads' trailing text, in the same order.
+    # align_witness must still pair every head (by text alone) and the region's witness number
+    # must come from the witness's OWN number (never the read's), proving numbers are not an input
+    # to the alignment itself.
+    read_nums = [20, 21, 32, 23]
+    wit_nums = [[99], [98], [97], [96]]
+    bands, cands = [], []
+    for y0, n, t in zip((10, 30, 50, 70), read_nums, _WIT_TEXTS):
+        y1 = y0 + 10
+        bands.append(_band("left", y0, y1, 0, 400, 20, 380))
+        hc = {"text": f"Ver. {n}. {t}", "ver": True, "numbers": [n], "raw_head": f"Ver. {n}",
+              "status": "ok", "raw": f"Ver. {n}. {t}", "ver_case": "upper"}
+        cands.append({"file_page": 1, "col": "left", "y0": y0, "y1": y1, "box": [0, y0, 400, y1],
+                      "kind": "verse", "signature": {}, "head_confirm": hc, "flags": []})
+    s1 = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400, "left": bands, "right": [], "full": []}
+    witness = {"verse_heads": wit_nums, "verse_lines": _WIT_TEXTS, "chapter_count": 0}
+    regions, summaries = VR.assemble_regions(
+        [{"file_page": 1}], {1: s1}, {1: cands}, {1: []}, {1: witness}, config={})
+    assert [r["witness_pairing"] for r in regions] == ["paired"] * 4
+    assert [r["number_sources"]["witness"] for r in regions] == wit_nums
+    assert [r["number_sources"]["read"] for r in regions] == [[n] for n in read_nums]
+    assert summaries[1]["n_witness_paired"] == 4
+    assert summaries[1]["n_witness_ambiguous"] == 0
+    assert summaries[1]["n_witness_unpaired"] == 0
+
+
+# 8b. ascending invariant per source (disputed/chains) -- replaces verse_not_ascending -------------
+
+def test_disputed_cases():
+    # NOTE: the spec's worked example states [[20],[21],[32],[23]] -> {2}, but the cited reference
+    # (C:\tmp\a2\fix_abc\ascdiag.py's disputed(), reproduced here byte-for-byte) actually returns
+    # {2, 3} for this input when run directly: 20,21,32 and 20,21,23 are two equally-long (length
+    # 3) ascending chains, so BOTH 32 and 23 are tied at the same f-layer and neither is uniquely
+    # kept -- this is the algorithm's own tie rule, not a transcription error (verified by running
+    # the reference script's code against this exact input). Held to the verified reference
+    # behaviour, not the spec's prose, per the "reproduce their behaviour exactly" instruction;
+    # flagged in the report.
+    assert VR.disputed([[20], [21], [32], [23]]) == {2, 3}
+    assert VR.disputed([[22], [23], [21]]) == {2}
+    assert VR.disputed([[1], [35], [3], [4]]) == {1}
+    assert VR.disputed([[1], [2], [3], [4]]) == set()
+    assert VR.disputed([[2], [1]]) == {0, 1}
+    assert VR.disputed([[12, 13, 14], [15]]) == set()
+
+
+def test_chains_splits_at_chapter_intro_and_page_gap():
+    regs = [
+        {"kind": "verse", "file_page_first": 1, "tag": "a"},
+        {"kind": "verse", "file_page_first": 1, "tag": "b"},
+        {"kind": "chapter_intro", "file_page_first": 2, "tag": "ci"},   # resets the chain
+        {"kind": "verse", "file_page_first": 2, "tag": "c"},
+        {"kind": "verse", "file_page_first": 5, "tag": "d"},            # page gap (2 -> 5) resets
+        {"kind": "continuation_unanchored", "file_page_first": 5, "tag": "cu"},  # doesn't enter/reset
+        {"kind": "verse", "file_page_first": 6, "tag": "e"},
+        {"kind": "unknown_kind", "file_page_first": 6, "tag": "u"},     # invisible to the walk
+        {"kind": "verse", "file_page_first": 7, "tag": "f"},
+    ]
+    chains = VR._chains(regs)
+    assert [[r["tag"] for r in c] for c in chains] == [["a", "b"], ["c"], ["d", "e", "f"]]
+
+
+def test_ascending_invariant_wired_into_assemble_regions():
+    # read == witness == [20, 21, 32, 23] for 4 consecutive verse heads on one page: the ascending
+    # check runs independently per source but both sources carry the SAME sequence here, so both
+    # flag the same disputed indices (2 and 3, see test_disputed_cases) while 0 and 1 stay
+    # undisputed on both sources even though read == witness everywhere.
+    nums = [20, 21, 32, 23]
+    bands, cands = [], []
+    for y0, n, t in zip((10, 30, 50, 70), nums, _WIT_TEXTS):
+        y1 = y0 + 10
+        bands.append(_band("left", y0, y1, 0, 400, 20, 380))
+        hc = {"text": f"Ver. {n}. {t}", "ver": True, "numbers": [n], "raw_head": f"Ver. {n}",
+              "status": "ok", "raw": f"Ver. {n}. {t}", "ver_case": "upper"}
+        cands.append({"file_page": 1, "col": "left", "y0": y0, "y1": y1, "box": [0, y0, 400, y1],
+                      "kind": "verse", "signature": {}, "head_confirm": hc, "flags": []})
+    s1 = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400, "left": bands, "right": [], "full": []}
+    witness = {"verse_heads": [[n] for n in nums], "verse_lines": _WIT_TEXTS, "chapter_count": 0}
+    regions, _ = VR.assemble_regions(
+        [{"file_page": 1}], {1: s1}, {1: cands}, {1: []}, {1: witness}, config={})
+    assert [r["disputed"] for r in regions] == [False, False, True, True]
+    assert [r["disputed_by"] for r in regions] == [[], [], ["read", "witness"], ["read", "witness"]]
+    assert "verse_order_disputed:read" in regions[2]["flags"]
+    assert "verse_order_disputed:witness" in regions[2]["flags"]
+    assert "verse_order_disputed:read" not in regions[0]["flags"]
 
 
 # 9. region_empty / head_only, derived from bands not a counter (FIX5) --------------------------------
@@ -565,12 +692,41 @@ def test_guard_crop_statuses():
     assert VHR.guard_crop(ok, (0, 0, 50, 50), (100, 100)) == "ok"
 
 
+def test_guard_crop_straddle_and_blank_band():
+    # crop = gray[0:40, 0:50]; pad=CROP_PAD_Y=12 -> band = crop rows [12, 28).
+    W = 50
+    box = (0, 0, W, 40)
+
+    def _page(dark_rows):
+        page = np.full((100, W), 255, dtype=np.uint8)
+        for y in dark_rows:
+            page[y, :] = 0
+        return page
+
+    # whole line fully inside the band, clear of both pad margins -> ok
+    whole = _page(range(18, 22))
+    assert VHR.guard_crop(whole, box, (100, W)) == "ok"
+
+    # band starts mid-line: core ink runs right up to the band's own first row -> straddle
+    top = _page(range(8, 17))
+    assert VHR.guard_crop(top, box, (100, W)) == "straddle"
+
+    # band ends mid-line: core ink runs right up to the band's own last row -> straddle
+    bottom = _page(range(24, 32))
+    assert VHR.guard_crop(bottom, box, (100, W)) == "straddle"
+
+    # ink only in the pad margins, none inside the band at all -> blank_band
+    pad_only = _page(list(range(2, 7)) + list(range(33, 38)))
+    assert VHR.guard_crop(pad_only, box, (100, W)) == "blank_band"
+
+
 # 12. read_head with a fake client -- head read = transcription, code parses ----------------------
 
 def test_read_head_fake_client_parses():
     r = VHR.read_head(lambda b: "Ver. 3, 4. In the beginning", b"x")
     assert r == {"text": "Ver. 3, 4. In the beginning", "ver": True, "numbers": [3, 4],
-                 "raw_head": "Ver. 3, 4", "status": "ok", "raw": "Ver. 3, 4. In the beginning"}
+                 "raw_head": "Ver. 3, 4", "status": "ok", "raw": "Ver. 3, 4. In the beginning",
+                 "ver_case": "upper"}
 
     r = VHR.read_head(lambda b: "And God said, Let there be light", b"x")
     assert r["ver"] is False and r["status"] == "no_ver"
@@ -822,6 +978,24 @@ def test_confirm_candidates_preserves_candidate_flags():
     assert conf[0]["flags"] == ["prev_line_full", "head_unconfirmed"], conf[0]["flags"]
     conf, rej = VR.confirm_candidates([c], head_reads={(1, "left", 10): {"ver": True, "numbers": [3], "status": "ok"}})
     assert conf[0]["flags"] == ["prev_line_full"], conf[0]["flags"]
+
+
+def test_confirm_candidates_straddle_refused_is_rejected():
+    c = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20], "kind": "verse",
+         "signature": {}, "flags": []}
+    hr = {"ver": None, "numbers": None, "status": "guard_refused:straddle", "ver_case": None}
+    conf, rej = VR.confirm_candidates([c], head_reads={(1, "left", 10): hr})
+    assert conf == []
+    assert len(rej) == 1 and rej[0]["reason"] == "guard_refused:straddle" and rej[0]["head_confirm"] == hr
+
+
+def test_confirm_candidates_lowercase_ver_case_flags_confirmed_head():
+    c = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20], "kind": "verse",
+         "signature": {}, "flags": []}
+    hr = {"ver": True, "numbers": [5], "status": "ok", "ver_case": "lower"}
+    conf, rej = VR.confirm_candidates([c], head_reads={(1, "left", 10): hr})
+    assert rej == []
+    assert conf[0]["flags"] == ["head_ver_lowercase"], conf[0]["flags"]
 
 
 if __name__ == "__main__":

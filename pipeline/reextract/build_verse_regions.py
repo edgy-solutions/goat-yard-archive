@@ -42,6 +42,7 @@ import os
 import subprocess
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -98,6 +99,11 @@ def validate_out_path(out_arg):
 # Config block + hash
 # ---------------------------------------------------------------------------
 
+def now_utc_iso():
+    """ISO-8601 UTC, 'Z' suffix (never '+00:00') -- used for both run_header timestamps."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def config_hash(base_config):
     canonical = json.dumps(base_config, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
@@ -114,6 +120,11 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "endpoint_id": args.endpoint_id,
         "full_gap_max_px": VR.FULL_GAP_MAX_PX,
         "col_gap_min_px": VR.COL_GAP_MIN_PX,
+        "text_line_snap": VR.TEXT_LINE_SNAP,
+        "straddle_core_frac": VHR.STRADDLE_CORE_FRAC,
+        "straddle_core_min_rows": VHR.STRADDLE_CORE_MIN_ROWS,
+        "align_sim_mid": VR.ALIGN_SIM_MID,
+        "align_key_chars": VR.ALIGN_KEY_CHARS,
         "module_sha256": module_sha256,
         "git_head": git_head,
         "git_dirty": git_dirty,
@@ -328,11 +339,12 @@ def main(argv=None):
     usable_pages = sorted(geom_by_page.keys())
 
     records = [{"kind": "run_header", "config": config, "pages_requested": pages_requested,
-                "pages_usable": usable_pages}]
+                "pages_usable": usable_pages, "started_utc": now_utc_iso()}]
     records.extend(invalid_records)
 
     if not usable_pages:
         records.append({"kind": "run_aborted", "reason": "no_usable_pages"})
+        records[0]["finished_utc"] = now_utc_iso()
         _write(out_path, records)
         print("ERROR: zero usable pages (all requested pages missing geometry or image)",
               file=sys.stderr)
@@ -351,6 +363,7 @@ def main(argv=None):
     except VR.ThresholdUndetermined as e:
         records.append({"kind": "run_aborted", "reason": "inset_thr_undetermined",
                          "detail": str(e)})
+        records[0]["finished_utc"] = now_utc_iso()
         _write(out_path, records)
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
@@ -383,6 +396,7 @@ def main(argv=None):
         except Exception as e:
             records.append({"kind": "run_aborted", "reason": "endpoint_resolution_failed",
                              "detail": str(e)})
+            records[0]["finished_utc"] = now_utc_iso()
             _write(out_path, records)
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
@@ -409,6 +423,7 @@ def main(argv=None):
             records[0]["status"] = "aborted"
             records[0]["abort_reason"] = f"canary_failed batch {next_batch[0]}"
             records[0]["canary"] = canary_log
+            records[0]["finished_utc"] = now_utc_iso()
             _write(out_path, records[:1])  # header ONLY -- no retry, no partial page/region data
             print(f"ERROR: canary failed: {e}", file=sys.stderr)
 
@@ -429,6 +444,7 @@ def main(argv=None):
             records[0]["status"] = "aborted"
             records[0]["abort_reason"] = f"consecutive_read_errors: {e}"
             records[0]["canary"] = canary_log
+            records[0]["finished_utc"] = now_utc_iso()
             _write(out_path, records[:1])  # header ONLY, same as a canary abort
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
@@ -470,6 +486,7 @@ def main(argv=None):
         records.append({"kind": "region", **{k: v for k, v in region.items()}})
 
     records[0]["status"] = "complete"
+    records[0]["finished_utc"] = now_utc_iso()
     _write(out_path, records)
 
     print("\n=== run_summary ===")

@@ -10,6 +10,7 @@ baseline, (b) small: height under the x-height, (c) isolated: a whitespace gap a
 Run PER COLUMN (detect the gutter, split, detect each column, left then right = reading order). The count is
 the GATE, never loosened: detected starts must equal the extractor's note count, else abstain the page.
 Marker letter-reading is a CONFIRMATION check elsewhere, never a source of a start here."""
+import math
 import numpy as np
 from hanging_indent import _text_lines
 
@@ -130,7 +131,7 @@ def line_opens_note(band, raised_frac=0.25, gap_min=3, marker_max_w=42, min_text
     return bool(col[g:].sum() >= min_text)             # in the full line. (Floating/reaches-baseline was too
                                                        # strict — it rejected low-sitting markers like `c`.)
 
-def text_lines(ink, min_sep_frac=None, line_h=None):
+def text_lines(ink, min_sep_frac=None, line_h=None, snap=None):
     """Text lines with tall (merged multi-line) bands SPLIT at internal ink valleys. _text_lines groups
     rows on a global threshold, so densely-set apparatus lines fuse; a merged band then breaks the per-line
     baseline/x-height geometry the marker test needs. So: take the raw bands, estimate the single-line
@@ -150,7 +151,21 @@ def text_lines(ink, min_sep_frac=None, line_h=None):
     `med` everywhere med drove the split (n, the 1.5x merged-band test, lo/hi, min_sep) -- for a column
     whose own raw bands are themselves multi-line (so its own median is not a usable single-line
     estimate; see verse_regions.choose_line_h / LINE_H_EMPTY_BAND_MULT), the caller passes a line height
-    measured elsewhere (the page-pooled median)."""
+    measured elsewhere (the page-pooled median).
+
+    snap=None (default): the min_sep_frac/global-depth cut selection above, unchanged. snap="pitch" picks
+    cuts a different way: the deepest-valley rule (with or without min_sep_frac) ranks candidate rows by
+    GLOBAL depth alone, so a near-white row under a baseline INSIDE a line (a line with few descenders)
+    can be deeper than a true inter-line gap and steal a cut from it (measured on 20 vol.1 pages against
+    Tesseract line boxes: 20 of 358 cuts mid-line on columns using their own line height, 41 of 273 on
+    columns using the page-pooled line height; "pitch" brought both to 2). "pitch" instead PARTITIONS the band into n
+    evenly spaced windows (one per expected cut, each centred on k * h/n, half a pitch wide either side)
+    and picks the shallowest row WITHIN each window -- a false-deep row far from where a cut is expected
+    can no longer outrank the true (if shallower, within-window) gap near it. min_sep_frac is ignored
+    under snap="pitch" (windows already enforce separation by construction). Any other snap value is a
+    programming error -> ValueError."""
+    if snap not in (None, "pitch"):
+        raise ValueError(f"text_lines: unknown snap {snap!r} (expected None or 'pitch')")
     raw = _text_lines(ink)
     if not raw:
         return raw
@@ -164,20 +179,33 @@ def text_lines(ink, min_sep_frac=None, line_h=None):
         if n <= 1 or h < 1.5 * use_h:
             out.append((y0, y1)); continue
         prof = ink[y0:y1].sum(axis=1).astype(float)    # split at the n-1 deepest interior valleys
-        lo, hi = int(0.4 * use_h), h - int(0.4 * use_h)
-        cand = [i for i in range(lo, hi) if prof[i] <= prof[i - 1] and prof[i] < prof[i + 1]]
-        cand.sort(key=lambda i: prof[i])
-        if min_sep_frac is None:
-            cuts = sorted(cand[:n - 1])
-        else:
-            min_sep = min_sep_frac * use_h
+        if snap == "pitch":
+            pitch = h / n
             cuts = []
-            for i in cand:
-                if all(abs(i - c) >= min_sep for c in cuts):
-                    cuts.append(i)
-                    if len(cuts) >= n - 1:
-                        break
-            cuts.sort()
+            for k in range(1, n):
+                e = k * pitch
+                lo_w = max(1, math.ceil(e - pitch / 2))
+                hi_w = min(h - 1, math.ceil(e + pitch / 2))
+                seg = prof[lo_w:hi_w]
+                m = seg.min()
+                idx = [lo_w + i for i, v in enumerate(seg) if v == m]
+                cuts.append(min(idx, key=lambda i: abs(i - e)))
+            cuts = sorted(set(cuts))
+        else:
+            lo, hi = int(0.4 * use_h), h - int(0.4 * use_h)
+            cand = [i for i in range(lo, hi) if prof[i] <= prof[i - 1] and prof[i] < prof[i + 1]]
+            cand.sort(key=lambda i: prof[i])
+            if min_sep_frac is None:
+                cuts = sorted(cand[:n - 1])
+            else:
+                min_sep = min_sep_frac * use_h
+                cuts = []
+                for i in cand:
+                    if all(abs(i - c) >= min_sep for c in cuts):
+                        cuts.append(i)
+                        if len(cuts) >= n - 1:
+                            break
+                cuts.sort()
         prev = 0
         for c in cuts:
             out.append((y0 + prev, y0 + c)); prev = c

@@ -21,8 +21,9 @@ Stage map (S1-S5), each deterministic, each emits flags, none gates:
 """
 from __future__ import annotations
 
+import difflib
 import re
-from collections import namedtuple
+from collections import namedtuple, Counter
 
 import numpy as np
 
@@ -82,6 +83,15 @@ SLIVER_MAX_H_PX = 20
 # ~63px, median single line ~60px). Requiring cuts to be this fraction of the median line height
 # apart from each other rejects the second, spurious minimum and lets the real valley win instead.
 TEXT_LINE_MIN_SEP_FRAC = 0.5
+
+# text_lines' deepest-valley rule (with or without min_sep_frac) ranks candidate rows by GLOBAL
+# depth, so a near-white row under a baseline INSIDE a line can outrank a true inter-line gap that
+# happens to be shallower (measured, 20 vol.1 pages: 20/358 cuts mid-line on own-line-height columns,
+# 41/273 on page-line-height columns; pitch: 2 and 2).
+# snap="pitch" partitions each band into n evenly spaced windows instead, one per expected cut, so a
+# false-deep row elsewhere in the band can no longer steal a cut from the true (if shallower,
+# within-window) gap near it.
+TEXT_LINE_SNAP = "pitch"
 
 # Defect: note_start_detect.text_lines estimates a column's single-line height as the median of
 # that column's OWN raw (pre-split) band heights. On an intact column most raw bands already are
@@ -440,7 +450,8 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
         if basis == "page":
             flags.append(f"line_h_from_page:{col}")
         raw_bands = [_make_band(col, box, y0 + ly0, y0 + ly1, cleaned, ink, xdiv, gutter_window)
-                     for (ly0, ly1) in text_lines(cleaned, min_sep_frac=TEXT_LINE_MIN_SEP_FRAC, line_h=col_line_h)]
+                     for (ly0, ly1) in text_lines(cleaned, min_sep_frac=TEXT_LINE_MIN_SEP_FRAC,
+                                                   line_h=col_line_h, snap=TEXT_LINE_SNAP)]
         kept, col_slivers = _split_slivers(raw_bands)
         bands[col] = kept
         slivers.extend(col_slivers)
@@ -687,13 +698,24 @@ def confirm_candidates(candidates, head_reads=None):
             continue
         ver = hr.get("ver")
         status = hr.get("status")
+        if status == "guard_refused:straddle":
+            # A crop whose y-bounds cut through the middle of a line (guard_crop's straddle check)
+            # cannot be trusted to carry the line's real start -- unlike other guard refusals
+            # (clamped/blank/uniform/blank_band/too_short), which merely mean "nothing readable was
+            # attempted" and leave the geometric candidate standing unconfirmed, a straddling crop
+            # is evidence the candidate's own band boundary is WRONG, so it is rejected outright.
+            rejected.append(dict(c, head_confirm=hr, reason="guard_refused:straddle"))
+            continue
         if ver is False:
             rejected.append(dict(c, head_confirm=hr, reason="head_reads:no_ver"))
             continue
         if ver is None or status != "ok":
             confirmed.append(dict(c, head_confirm=hr, flags=list(c.get("flags") or []) + ["head_unconfirmed"]))
             continue
-        confirmed.append(dict(c, head_confirm=hr, flags=list(c.get("flags") or [])))
+        flags = list(c.get("flags") or [])
+        if hr.get("ver_case") == "lower":
+            flags.append("head_ver_lowercase")
+        confirmed.append(dict(c, head_confirm=hr, flags=flags))
     return confirmed, rejected
 
 
@@ -767,6 +789,10 @@ _CHAP_RE = re.compile(r'(?m)^\s*#\s*Chapter\b.*$')
 # parse_witness (the old vol.1 .md). The old _VER_RE (`([0-9][0-9, ]*)`) stopped at a dash, so
 # witness "Ver. 12--14" parsed as [12] and "Ver. 28-34" as [28] -- this replaced it.
 _VER_HEAD_RE = re.compile(r'Ver[.,]?')
+# Lowercase "ver" is only treated as a head with REQUIRED punctuation (unlike the capital form,
+# where the '.'/',' is optional) -- "ver 3" reads as prose ("ver" is a common word fragment/OCR
+# noise), "ver. 3"/"ver, 3" reads as a head. See parse_ver_head.
+_VER_HEAD_LOWER_RE = re.compile(r'ver[.,]')
 _DASHES = "-–—"  # hyphen, en dash, em dash
 _NUM_ITEM_RE = re.compile(r'\s*([0-9]+)(?:\s*[' + _DASHES + r']\s*([0-9]+))?')
 RANGE_SPAN_MAX = 20  # a "Ver. N-M" range wider than this is implausible, never silently trusted
@@ -824,60 +850,205 @@ def parse_ver_head(text):
     the model's job is to TRANSCRIBE the line exactly, never to classify it -- this function alone
     decides ver/numbers/status from the transcription, so there is one parser, not one per caller.
 
-    Returns dict(ver, numbers, raw_head, status):
-      status "empty"            -- text is empty/whitespace-only; ver=None, numbers=None.
+    Returns dict(ver, numbers, raw_head, status, ver_case):
+      status "empty"            -- text is empty/whitespace-only; ver=None, numbers=None,
+                                    ver_case=None.
       status "no_ver"           -- does not start (after up to 3 leading non-alnum chars) with
-                                    capital "Ver" + optional '.'/','  (lowercase "ver." is NOT a
-                                    head); ver=False, numbers=None.
-      status "unparsed"         -- "Ver" present but no number spec follows; ver=True, numbers=None.
+                                    capital "Ver" + optional '.'/',' , NOR with lowercase "ver" +
+                                    REQUIRED '.'/','; ver=False, numbers=None, ver_case=None.
+      status "unparsed"         -- "Ver" present but no number spec follows; ver=True, numbers=None
+                                    (capital only -- see below); ver_case="upper".
       status "range_implausible"-- a number spec parsed but failed plausibility (see
-                                    _expand_number_items); ver=True, numbers=None.
-      status "ok"               -- ver=True, numbers = the expanded, strictly-ascending list.
-    raw_head is the matched "Ver..." prefix string (through the parsed number spec, when any)."""
+                                    _expand_number_items); ver=True, numbers=None (capital only --
+                                    see below); ver_case="upper".
+      status "ok"               -- ver=True, numbers = the expanded, strictly-ascending list;
+                                    ver_case="upper" or "lower".
+    raw_head is the matched "Ver..."/"ver..." prefix string (through the parsed number spec, when
+    any).
+
+    Lowercase "ver" (punctuation REQUIRED: "ver." / "ver,", never bare "ver") is tried only when the
+    capital form does not match at the same position. A lowercase match without a plausible number
+    spec is "no_ver", never "unparsed"/"range_implausible": the lowercase form is accepted only when
+    the whole head (punctuation + number) is present (one measured instance, 745L "ver. 1.")."""
     s = (text or "").strip()
     if not s:
-        return {"ver": None, "numbers": None, "raw_head": None, "status": "empty"}
+        return {"ver": None, "numbers": None, "raw_head": None, "status": "empty", "ver_case": None}
     i = 0
     while i < min(3, len(s)) and not s[i].isalnum():
         i += 1
     rest = s[i:]
     m = _VER_HEAD_RE.match(rest)
-    if not m:
-        return {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver"}
-    after = rest[m.end():]
-    items, consumed = _parse_number_items(after)
-    if not items:
-        return {"ver": True, "numbers": None, "raw_head": rest[:m.end()], "status": "unparsed"}
-    expanded, implausible = _expand_number_items(items)
-    raw_head = rest[:m.end() + consumed]
-    if implausible:
-        return {"ver": True, "numbers": None, "raw_head": raw_head, "status": "range_implausible"}
-    return {"ver": True, "numbers": expanded, "raw_head": raw_head, "status": "ok"}
+    if m:
+        after = rest[m.end():]
+        items, consumed = _parse_number_items(after)
+        if not items:
+            return {"ver": True, "numbers": None, "raw_head": rest[:m.end()], "status": "unparsed",
+                    "ver_case": "upper"}
+        expanded, implausible = _expand_number_items(items)
+        raw_head = rest[:m.end() + consumed]
+        if implausible:
+            return {"ver": True, "numbers": None, "raw_head": raw_head,
+                    "status": "range_implausible", "ver_case": "upper"}
+        return {"ver": True, "numbers": expanded, "raw_head": raw_head, "status": "ok",
+                "ver_case": "upper"}
+
+    lm = _VER_HEAD_LOWER_RE.match(rest)
+    if lm:
+        after = rest[lm.end():]
+        items, consumed = _parse_number_items(after)
+        if items:
+            expanded, implausible = _expand_number_items(items)
+            if not implausible:
+                raw_head = rest[:lm.end() + consumed]
+                return {"ver": True, "numbers": expanded, "raw_head": raw_head, "status": "ok",
+                        "ver_case": "lower"}
+        return {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver",
+                "ver_case": None}
+
+    return {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver", "ver_case": None}
 
 
 def parse_witness(md_text):
-    """Pure string parse of the witness .md: verse-head numbers and chapter-head count, in
-    reading order top to bottom. Counts and numbers ONLY -- never geometry. Witness lines are
-    matched as today (line start, optional leading '*'s, literal "Ver."); the number spec after it
-    uses the SAME shared parser as parse_ver_head, so e.g. "Ver. 12--14" -> [12,13,14], not [12]."""
+    """Pure string parse of the witness .md: verse-head numbers, verse-head trailing text, and
+    chapter-head count, in reading order top to bottom. Counts and numbers ONLY from the numbers --
+    never geometry. Witness lines are matched as today (line start, optional leading '*'s, literal
+    "Ver."); the number spec after it uses the SAME shared parser as parse_ver_head, so e.g.
+    "Ver. 12--14" -> [12,13,14], not [12].
+
+    "verse_lines": for each verse head, the running text AFTER the number spec, to the end of that
+    line (exactly simdiag2.py's wit_heads: text[m.end()+consumed:].split('\\n',1)[0]) -- the key
+    material for align_witness, which pairs heads by this TEXT, never by the numbers themselves."""
     verse_heads = []
+    verse_lines = []
     text = md_text or ""
     for m in _VER_LINE_RE.finditer(text):
-        items, _ = _parse_number_items(text[m.end():])
+        items, consumed = _parse_number_items(text[m.end():])
         nums, _implausible = _expand_number_items(items) if items else ([], False)
         verse_heads.append(nums)
+        verse_lines.append(text[m.end() + consumed:].split('\n', 1)[0])
     chapter_count = len(_CHAP_RE.findall(text))
-    return {"verse_heads": verse_heads, "chapter_count": chapter_count}
+    return {"verse_heads": verse_heads, "verse_lines": verse_lines, "chapter_count": chapter_count}
 
 
-def pair_witness_numbers(layout_verse_count, witness_verse_numbers):
-    """Positional pairing, ONLY when the page's layout verse-head count equals the witness
-    verse-head count for that page -- otherwise witness=None for every head on the page plus
-    head_count_vs_witness. Never aligned using the read (that would make agreement tautological).
-    Returns (witness_per_head: [list[int]|None, ...], head_count_vs_witness: bool)."""
-    if layout_verse_count != len(witness_verse_numbers):
-        return [None] * layout_verse_count, True
-    return list(witness_verse_numbers), False
+# ------------------------------------------------------------------------------------------------
+# Witness pairing by TEXT-SIMILARITY SEQUENCE ALIGNMENT (replaces positional pairing).
+#
+# pair_witness_numbers (deleted) only paired when the page's read head-count equaled the witness
+# head-count, and then paired strictly by POSITION -- a single missed/extra head anywhere on the
+# page nulled out EVERY witness number on that page (30 of 69 heads in rerun 1). Aligning by the
+# TEXT after each head (never by the verse numbers, which would make any agreement check
+# tautological) survives a missing/extra head: only the heads actually out of step are affected.
+# ------------------------------------------------------------------------------------------------
+
+ALIGN_SIM_MID = 0.5     # a read/witness line-key pair below this difflib ratio is not even a
+                         # CANDIDATE pair (the alignment weight w = sim - mid must be > 0 to be
+                         # usable at all) -- the midpoint of the ratio scale, separating "these are
+                         # probably the same line" from "probably not", used as a pair FLOOR, not a
+                         # decision threshold (the DP below decides the actual pairing).
+ALIGN_KEY_CHARS = 24     # read-head key length: the value the offline measurement used (half-width
+                         # crops give read keys of 3-24 chars); not tuned.
+
+_ALIGN_KEY_CLEAN_RE = re.compile(r'[^a-z ]+')
+
+
+def align_key(s, n=None):
+    """Lowercase; any run of non-[a-z ] characters -> a single space; collapse whitespace; strip;
+    truncate to n characters if given. The shared text-similarity key for both a read head's
+    trailing text and a witness line (simdiag2.py's key())."""
+    s = _ALIGN_KEY_CLEAN_RE.sub(' ', (s or '').lower())
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s[:n] if n is not None else s
+
+
+def _read_key_text(head_confirm):
+    """The text after a read head's raw_head (aligndiag.py's read_key()): the words that follow
+    'Ver. N' on the SAME transcribed line -- the alignment key is always this trailing text, never
+    the verse numbers. '' when there is no head_confirm text at all (such a head can never pair)."""
+    hc = head_confirm or {}
+    txt = (hc.get("text") or "").strip()
+    if not txt:
+        return ""
+    rh = hc.get("raw_head") or ""
+    i = txt.find(rh) if rh else -1
+    return txt[i + len(rh):] if i >= 0 else txt
+
+
+def _align_sim(rk, wline):
+    """difflib ratio between an already align_key'd read key `rk` and a raw witness line, keyed
+    and truncated to match rk's length (simdiag2.py's sim())."""
+    wk = align_key(wline)[:max(len(rk), 1)]
+    return difflib.SequenceMatcher(None, rk, wk).ratio()
+
+
+def align_witness(read_keys, witness_lines, mid=ALIGN_SIM_MID):
+    """Order-preserving (strictly increasing i and j), max-weight alignment between read_keys
+    (already align_key'd+truncated text keys, one per verse head in reading order) and
+    witness_lines (raw witness line strings, one per witness verse head in order). Weight
+    w(i,j) = sim(read_keys[i], witness_lines[j]) - mid; a pair is only allowed if w > 0. The verse
+    NUMBERS are never an input here.
+
+    A pair (i,j) is ESSENTIAL iff it is present in EVERY optimal alignment: forbidding it strictly
+    lowers the achievable total weight. Returns a list, one entry per read head (reading order):
+    ("paired", j)      -- has an essential partner j.
+    ("ambiguous", None) -- appears in at least one optimal alignment but has no essential partner
+                           (e.g. two witness lines with near-identical keys competing for it).
+    ("unpaired", None)  -- never appears in any optimal alignment (no candidate pair, or always
+                           loses to a better one)."""
+    n, m = len(read_keys), len(witness_lines)
+    W = [[_align_sim(rk, wl) - mid for wl in witness_lines] for rk in read_keys]
+
+    def best_table(forbid=None):
+        # dp[i][j] = best achievable weight using read[i:], witness[j:].
+        dp = [[0.0] * (m + 1) for _ in range(n + 1)]
+        for i in range(n - 1, -1, -1):
+            for j in range(m - 1, -1, -1):
+                val = dp[i + 1][j] if dp[i + 1][j] > dp[i][j + 1] else dp[i][j + 1]
+                w = W[i][j]
+                if w > 0 and (forbid is None or (i, j) != forbid):
+                    cand = dp[i + 1][j + 1] + w
+                    if cand > val:
+                        val = cand
+                dp[i][j] = val
+        return dp
+
+    suf = best_table()
+    opt = suf[0][0]
+
+    # pre[i][j] = best achievable weight using read[0:i], witness[0:j] (forward/prefix DP).
+    pre = [[0.0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            val = pre[i - 1][j] if pre[i - 1][j] > pre[i][j - 1] else pre[i][j - 1]
+            w = W[i - 1][j - 1]
+            if w > 0:
+                cand = pre[i - 1][j - 1] + w
+                if cand > val:
+                    val = cand
+            pre[i][j] = val
+
+    candidates = [
+        (i, j) for i in range(n) for j in range(m)
+        if W[i][j] > 0 and abs(pre[i][j] + W[i][j] + suf[i + 1][j + 1] - opt) < 1e-9
+    ]
+
+    essential = {}
+    ambiguous_i = set()
+    for (i, j) in candidates:
+        without = best_table(forbid=(i, j))[0][0]
+        if without < opt - 1e-9:
+            essential[i] = j
+        else:
+            ambiguous_i.add(i)
+
+    out = []
+    for i in range(n):
+        if i in essential:
+            out.append(("paired", essential[i]))
+        elif i in ambiguous_i:
+            out.append(("ambiguous", None))
+        else:
+            out.append(("unpaired", None))
+    return out
 
 
 # ==============================================================================================
@@ -955,6 +1126,69 @@ def _count_sliver_bands(region, page_s1_by_page):
     return count
 
 
+_CHAIN_KINDS = {"verse", "chapter_intro", "book_intro", "continuation_unanchored"}
+
+
+def _chains(regions):
+    """Split `regions` (in order) into chains of consecutive VERSE regions, exactly as
+    ascdiag.chains: a chapter_intro or book_intro region always starts a new chain; any region
+    (of a recognized kind) whose file_page_first is not the previous recognized region's page or
+    that page + 1 also starts a new chain (a chain must not silently cross a page the walk never
+    saw); any kind outside _CHAIN_KINDS is invisible to this walk -- it neither enters a chain nor
+    resets one. Only verse regions are ever appended to a chain; chapter_intro/book_intro/
+    continuation_unanchored participate only as reset/continuity markers."""
+    chains_out = []
+    cur = []
+    prev = None
+    for r in regions:
+        kind = r.get("kind")
+        if kind not in _CHAIN_KINDS:
+            continue
+        fp = r["file_page_first"]
+        if kind in ("chapter_intro", "book_intro") or (prev is not None and fp not in (prev, prev + 1)):
+            if cur:
+                chains_out.append(cur)
+            cur = []
+        if kind == "verse":
+            cur.append(r)
+        prev = fp
+    if cur:
+        chains_out.append(cur)
+    return chains_out
+
+
+def disputed(seq):
+    """Given `seq` (one entry per chain element, each a list of numbers for that element's source
+    or a falsy value when the source has nothing for it), return the set of indices that violate
+    the ascending invariant for THIS source alone -- exactly ascdiag.disputed.
+
+    lt(a, b) is true iff element a's numbers are entirely below element b's (max(seq[a]) <
+    min(seq[b])): a range only counts as "ascending into" another range if there is no overlap.
+    f[i]/g[i] are the longest lt-chain ending/starting at i (a longest-increasing-subsequence DP
+    over the partial order lt); an index is KEPT (not disputed) only if it lies on a longest chain
+    (f[i]+g[i]-1 == the global longest chain length L) AND is the UNIQUE element at its f-layer
+    among on-chain elements (ties at a layer mean more than one candidate claims that position in
+    the longest run, so none of them is trustworthy on its own). Every element with numbers that
+    is not kept is disputed; elements with nothing (falsy) are never disputed (nothing to check)."""
+    idx = [i for i, v in enumerate(seq) if v]
+    if not idx:
+        return set()
+
+    def lt(a, b):
+        return max(seq[a]) < min(seq[b])
+
+    f, g = {}, {}
+    for i in idx:
+        f[i] = 1 + max([f[j] for j in idx if j < i and lt(j, i)], default=0)
+    for i in reversed(idx):
+        g[i] = 1 + max([g[j] for j in idx if j > i and lt(i, j)], default=0)
+    L = max(f.values())
+    on = [i for i in idx if f[i] + g[i] - 1 == L]
+    layer = Counter(f[i] for i in on)
+    keep = {i for i in on if layer[f[i]] == 1}
+    return set(idx) - keep
+
+
 def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected_by_page,
                       witness_by_page, config):
     """Walk confirmed heads in reading order across `page_records` (ordered list of dicts with
@@ -980,7 +1214,9 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
         rejected = rejected_by_page.get(fp, [])
         heads_by_key = {(h["col"], h["y0"]): h for h in confirmed}
 
-        # witness pairing for this page's verse heads, in reading-order position
+        # witness pairing for this page's verse heads, by TEXT-SIMILARITY SEQUENCE ALIGNMENT
+        # (align_witness) -- never by position and never by the verse numbers themselves (see the
+        # comment above align_witness for why positional pairing was replaced).
         witness = witness_by_page.get(fp)
         events = _bucket_by_interval(s1["full"], s1["left"], s1["right"], H)
         verse_head_keys_in_order = [
@@ -988,12 +1224,29 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
             if (col, band["y0"]) in heads_by_key and heads_by_key[(col, band["y0"])]["kind"] == "verse"
         ]
         layout_verse_count = len(verse_head_keys_in_order)
+        n_witness_paired = n_witness_ambiguous = n_witness_unpaired = 0
         if witness is not None:
-            witness_per_head, head_count_vs_witness = pair_witness_numbers(
-                layout_verse_count, witness["verse_heads"])
+            read_keys = [align_key(_read_key_text(heads_by_key[key].get("head_confirm")), ALIGN_KEY_CHARS)
+                         for key in verse_head_keys_in_order]
+            witness_lines = witness["verse_lines"]
+            alignment = align_witness(read_keys, witness_lines)
+            head_count_vs_witness = layout_verse_count != len(witness["verse_heads"])
+            witness_slot = {}
+            for key, rk, (status, j) in zip(verse_head_keys_in_order, read_keys, alignment):
+                if status == "paired":
+                    witness_slot[key] = {"pairing": "paired", "numbers": witness["verse_heads"][j],
+                                          "sim": round(_align_sim(rk, witness_lines[j]), 3)}
+                    n_witness_paired += 1
+                else:
+                    witness_slot[key] = {"pairing": status, "numbers": None, "sim": None}
+                    if status == "ambiguous":
+                        n_witness_ambiguous += 1
+                    else:
+                        n_witness_unpaired += 1
         else:
-            witness_per_head, head_count_vs_witness = [None] * layout_verse_count, None
-        witness_slot = dict(zip(verse_head_keys_in_order, witness_per_head))
+            head_count_vs_witness = None
+            witness_slot = {key: {"pairing": "no_witness", "numbers": None, "sim": None}
+                            for key in verse_head_keys_in_order}
 
         chapter_heads_here = sum(1 for h in confirmed if h["kind"] == "chapter")
         chapter_count_vs_witness = (
@@ -1037,9 +1290,15 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
                     hc = head.get("head_confirm")
                     if hc and hc.get("ver") is True:
                         read_numbers = hc.get("numbers")
-                    sources = {"count": count, "read": read_numbers,
-                               "witness": witness_slot.get(key)}
+                    wp = witness_slot.get(key, {"pairing": "no_witness", "numbers": None, "sim": None})
+                    sources = {"count": count, "read": read_numbers, "witness": wp["numbers"]}
                     region = _new_region("verse", fp, col, head, sources, config)
+                    region["witness_pairing"] = wp["pairing"]
+                    region["witness_sim"] = wp["sim"]
+                    if wp["pairing"] == "ambiguous":
+                        region["flags"] = list(region.get("flags") or []) + ["witness_alignment_ambiguous"]
+                    elif wp["pairing"] == "unpaired":
+                        region["flags"] = list(region.get("flags") or []) + ["witness_unpaired"]
                 elif kind == "chapter":
                     awaiting_count = True
                     region = _new_region("chapter_intro", fp, col, head,
@@ -1085,6 +1344,10 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
             "file_page": fp,
             "n_heads": len(confirmed),
             "n_rejected_candidates": len(rejected),
+            "n_verse_heads": layout_verse_count,
+            "n_witness_paired": n_witness_paired,
+            "n_witness_ambiguous": n_witness_ambiguous,
+            "n_witness_unpaired": n_witness_unpaired,
             "flags": page_flags,
             "column_order_suspect": column_order_suspect,
             "gutter_ink_crossing": gutter_ambiguous_y0,
@@ -1099,20 +1362,12 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
     if open_region is not None:
         regions.append(_finalize_region(open_region))
 
-    # S3 numbering + S5 verse_not_ascending (within chapter, against agreed numbers)
-    last_in_chapter = None
+    # S3 numbering (reconcile per-source numbers into the agreed region["verse"])
     for region in regions:
         rn = reconcile_numbers(region["number_sources"])
         region["numbers_link_status"] = rn["numbers_link_status"]
         region["numbers_disagree_pairs"] = rn["numbers_disagree_pairs"]
         region["verse"] = rn["verse"]
-        if region["kind"] == "chapter_intro":
-            last_in_chapter = None
-        elif region["kind"] == "verse" and region["verse"] is not None:
-            first_num = region["verse"][0]
-            if last_in_chapter is not None and first_num <= last_in_chapter:
-                region["flags"] = list(region.get("flags") or []) + ["verse_not_ascending"]
-            last_in_chapter = max(last_in_chapter or first_num, first_num)
         # FIX5: emptiness FROM BANDS, not a counter -- region_empty (ERROR) and head_only (info).
         n_ink_bands = _count_ink_bands(region, page_s1_by_page)
         region["n_ink_bands"] = n_ink_bands
@@ -1127,6 +1382,25 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
         if head_only:
             flags.append("head_only")
         region["flags"] = flags
+
+    # S5 ascending invariant, per NUMBER SOURCE (replaces the single-source verse_not_ascending
+    # check). That check only looked at the RECONCILED region["verse"], which is None on a
+    # disagreement, so it could not see one: 0d5622e's check never fired on 126R 22->32,
+    # 127R 24->21, 404R 2->35. It also chained across page gaps (92->126); _chains resets there.
+    # Checked independently per source (read, witness); flags only -- never changes region["verse"].
+    for chain in _chains(regions):
+        disputed_by = [set() for _ in chain]
+        for src in ("read", "witness"):
+            seq = [r["number_sources"].get(src) for r in chain]
+            for i in disputed(seq):
+                disputed_by[i].add(src)
+        for region, srcs in zip(chain, disputed_by):
+            region["disputed"] = bool(srcs)
+            region["disputed_by"] = sorted(srcs)
+            if srcs:
+                flags = list(region.get("flags") or [])
+                flags.extend(f"verse_order_disputed:{src}" for src in sorted(srcs))
+                region["flags"] = flags
 
     return regions, page_summaries
 

@@ -21,6 +21,14 @@ import endpoint_guard
 DEFAULT_MODEL = "qwen3.6-16k:35b"
 READ_TIMEOUT_S = 300
 
+# guard_crop straddle test: 0.5 = half of the band's own peak row-ink, i.e. the "core" (x-height)
+# zone of whatever line is in the crop -- reasoned from what an x-height zone IS (half-max), not
+# derived from an empty band in a measured distribution. min rows 2/4/6 were tried against 87 real
+# crops and gave IDENTICAL whole/straddle calls at every value, so 2 (the smallest, least likely to
+# miss a genuinely thin straddling line) was kept.
+STRADDLE_CORE_FRAC = 0.5
+STRADDLE_CORE_MIN_ROWS = 2
+
 # Head read = transcription, code parses: the model's ONLY job is to transcribe the line exactly;
 # verse_regions.parse_ver_head alone decides ver/numbers/status. A prior JSON yes/no PROMPT asked
 # the model to CLASSIFY the line itself, which put the parsing rule inside the model instead of in
@@ -33,10 +41,24 @@ TRANSCRIBE_PROMPT = "Transcribe the text in this image exactly. Output only the 
 # --------------------------------------------------------------------------------------------
 
 def guard_crop(gray_array, box, page_shape, blank_floor=0.01, uniform_std=2.0):
-    """(status) in {"ok","clamped","blank","uniform"}. box=(x0,y0,x1,y1); page_shape=(H,W).
-    'clamped' fires BEFORE pixels are even looked at: a box exceeding image bounds must never be
-    silently clipped. 'blank'/'uniform' mirror crop_gate's crop_darkness / a flat crop (std
-    below floor) -- a blank or textureless crop cannot carry a readable 'Ver.' token."""
+    """(status) in {"ok","clamped","blank","uniform","too_short","blank_band","straddle"}.
+    box=(x0,y0,x1,y1); page_shape=(H,W). 'clamped' fires BEFORE pixels are even looked at: a box
+    exceeding image bounds must never be silently clipped. 'blank'/'uniform' mirror crop_gate's
+    crop_darkness / a flat crop (std below floor) -- a blank or textureless crop cannot carry a
+    readable 'Ver.' token.
+
+    'straddle' (checked AFTER clamped/blank/uniform, on the same crop, same order): a crop whose
+    padded top/bottom margin (CROP_PAD_Y) was meant to hold whitespace around ONE full line, but
+    whose actual ink runs into the pad from outside -- i.e. the crop's y-bounds cut through the
+    MIDDLE of a line rather than bracketing it -- cannot be trusted to carry the line's start
+    ('Ver.' sits wherever the crop happened to begin, not where the real line begins). Detected
+    from the "core" (x-height) ink band only (ignore ascenders/descenders, which taper and would
+    otherwise make every crop look like it straddles): ink = crop < INK (note_start_detect.INK, as
+    verse_regions.page_ink); band = ink rows strictly inside the pad margins; core rows = those
+    whose ink-row-sum is >= STRADDLE_CORE_FRAC of the band's peak row-sum; a core RUN (consecutive
+    core rows) at least STRADDLE_CORE_MIN_ROWS long that touches row 0 or the last row of the band
+    means a line's core is still present right at the pad boundary -- i.e. the line was cut, not
+    bracketed."""
     H, W = page_shape
     x0, y0, x1, y1 = box
     if x0 < 0 or y0 < 0 or x1 > W or y1 > H or x1 <= x0 or y1 <= y0:
@@ -49,6 +71,35 @@ def guard_crop(gray_array, box, page_shape, blank_floor=0.01, uniform_std=2.0):
         return "blank"
     if float(crop.std()) < uniform_std:
         return "uniform"
+
+    from note_start_detect import INK
+    import verse_regions
+
+    pad = verse_regions.CROP_PAD_Y
+    h = crop.shape[0]
+    ink = crop < INK
+    band = ink[pad:h - pad]
+    if band.shape[0] == 0:
+        return "too_short"
+    prof = band.sum(axis=1).astype(float)
+    peak = prof.max()
+    if peak == 0:
+        return "blank_band"
+    core = prof >= STRADDLE_CORE_FRAC * peak
+    n = len(core)
+    runs = []
+    s = None
+    for i, v in enumerate(core):
+        if v and s is None:
+            s = i
+        if not v and s is not None:
+            runs.append((s, i))
+            s = None
+    if s is not None:
+        runs.append((s, n))
+    big = [r for r in runs if r[1] - r[0] >= STRADDLE_CORE_MIN_ROWS]
+    if any(a == 0 or b == n for a, b in big):
+        return "straddle"
     return "ok"
 
 
@@ -106,7 +157,7 @@ def read_head(client, png_bytes):
     """client: object with a `.post(url, json=...) -> response` method (response has `.json()` /
     `.status_code`, or raises on transport failure) OR a plain callable client(png_bytes) ->
     raw_text, for the simplest fakes in tests. Returns {"text","ver","numbers","raw_head","status",
-    "raw"} -- the model TRANSCRIBES (TRANSCRIBE_PROMPT), code alone parses it via
+    "raw","ver_case"} -- the model TRANSCRIBES (TRANSCRIBE_PROMPT), code alone parses it via
     verse_regions.parse_ver_head (one code-owned parser, never a second one here).
 
     Raises DegenerateReplyError for an explicit done:false, or an empty/whitespace/'/'-only reply
@@ -133,7 +184,8 @@ def read_head(client, png_bytes):
     import verse_regions
     parsed = verse_regions.parse_ver_head(raw_text)
     return {"text": raw_text, "ver": parsed["ver"], "numbers": parsed["numbers"],
-            "raw_head": parsed["raw_head"], "status": parsed["status"], "raw": raw_text}
+            "raw_head": parsed["raw_head"], "status": parsed["status"], "raw": raw_text,
+            "ver_case": parsed["ver_case"]}
 
 
 def guarded_read_head(client, gray_array, box, page_shape, blank_floor=0.01, uniform_std=2.0):
@@ -143,7 +195,7 @@ def guarded_read_head(client, gray_array, box, page_shape, blank_floor=0.01, uni
     status = guard_crop(gray_array, box, page_shape, blank_floor, uniform_std)
     if status != "ok":
         return {"text": None, "ver": None, "numbers": None, "raw_head": None,
-                "status": f"guard_refused:{status}", "raw": None}
+                "status": f"guard_refused:{status}", "raw": None, "ver_case": None}
     from io import BytesIO
     from PIL import Image
     x0, y0, x1, y1 = box
