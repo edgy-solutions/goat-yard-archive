@@ -288,3 +288,68 @@ punt belongs in the result as a named hazard.
    instrument must not change mid-arm.
 3. **P1 needs to name its population.** "`errored == 0`" without "over scored runs, warmup excluded"
    is what let me misread my own prediction within an hour of locking it.
+
+---
+
+## Outcome: P1 HELD. The arm is VOID anyway, on two counts P1 cannot see. 2026-10-04
+
+**P1, first, because it is the arm's validity verdict** — `off/summary.json`,
+`integrity.stage_health`:
+
+```
+scored_runs 65
+expansion   {"errored": 0, "healthy": 65, "distinct_fallback": ["<none>"]}
+```
+
+65 of 65 scored runs ran query expansion live, no fallback on any of them. This is the first arm
+in this lane with verified-live expansion on every scored run — the condition whose absence voided
+fourteen arms and 266 questions
+(`docs/audits/VOID_arms_without_expansion_laneA_20261004.md`). The population is the one the
+retraction above named: scored runs, warmup excluded.
+
+**And the arm is still void, on two faults neither P1 nor the new gate is able to see.**
+
+1. **CORPUS CHANGED MID-RUN** (`integrity.violations`). Vector sha `a1e37d2f12c7 → 0b903608df60`,
+   with `chunks` 7294 and text sha `6cbb33635352` identical at both ends, and 7294/7294 vectors
+   hashed in both samples. Read before assuming an instrument artifact: `content_hash` is an
+   XOR-fold of per-object digests (`backend/corpus_fingerprint.py:46-53`), so it is
+   order-independent, and `_vec_digest` rounds to 6 decimals (lines 39-44), so it is float-tolerant.
+   A text sha that holds while the vector sha moves is a **re-embedding** of the gya-test corpus
+   between 10:23 and ~11:30. **The source is unattributed** and must be found before the arm is
+   rerun. Only `--corpus-fingerprint vectors` (~80s/sample) can see this.
+2. **HEAD moved mid-run** (`integrity.git`: `changed_during_run: true, provisional: true`),
+   `25c6f78 → c89b69b`. Four documentation commits of mine, landed while the arm was scoring. The
+   rule was already written down — "commit before anything else touches a JSONL", runs over a
+   moving tree are provisional — and I broke it myself. `git_at_start` is captured at
+   `run_eval.py:1181` and compared at `:1379`.
+
+**The lesson, against my own framing.** The directive asked for P1's tally as the arm's validity
+verdict, and P1 passed. One gate is not a verdict: an arm is valid only if every axis held, and
+two did not. Reporting P1 alone would have been a true number in service of a false conclusion.
+Related: a gate names a direction, and passing means "the failure I imagined didn't happen".
+
+**Figures that exist but are NOT citable** (provisional on two axes): 11/13 pass, 9 stable-pass,
+4 flaky, 0 stable-fail. Other predictions that held: P3 (`runs_pin_honored_false 0`,
+`runs_pin_unchecked 0`), P4 (`distinct_provider_served ["StreamLake"]`), P5 (65/65 runs carry an
+answer_lm record), P6 (temperature `distinct [0.0]`, `runs_explicit 65`), P8
+(`entity_lookup.distinct_mode ["full"]`), verifier failures 0.
+
+**Arm ON was never launched** and stays unlaunched. The OFF arm must be rerun from the top — never
+spliced — after the re-embedding source is identified and with HEAD frozen for the whole run.
+
+### Defect 1 is closed in code
+
+`953b94a feat(evals): scored-run preflight is a launcher refusal, not a doc rule`. The ruling was
+the first option, not the second: `preflight()` now returns 3 on a warmup expansion error instead
+of printing a warning, so this exact arm would have been refused at launch. Two conditions joined
+it — pin honored (`pin_honored is not True`, because unchecked is not honored) and header written
+(`run_header.json`, before the first scored question, so a partial arm is not anonymous). Each
+health condition has one named override and an override in force is recorded in the header and in
+`summary.integrity.preflight`; waiving the launch refusal does not silence `check_run_integrity`,
+which still exits 4. Born-tested: 23 of the 26 new tests fail against the parent commit, including
+`test_main_scores_NOTHING_when_the_warmup_expansion_is_broken`.
+
+Defects 2 and 3 remain open and deliberately deferred: the `baml_punt:<reason>` split waits on
+`release-0.3.2` deploying, because `backend/stage_health.py` is byte-identical there and the
+instrument must not change mid-arm; P1 naming its population belongs in the next locked document,
+not in a patch to this one.
