@@ -61,9 +61,12 @@ GIT_START = git_state(_HERE)
 cut = json.load(io.open(str(CUT), encoding="utf-8"))
 assert cut.get("provisional") is False, "the cut artifact is PROVISIONAL -- not a decision surface"
 assert cut["set_sha16"] == SET and cut["n"] == SET_N, "this is not the re-frozen set"
-pairs = [r for r in cut["rows"] if r.get("clip")
-         and len(r["clip"]["word_runs"]) != len(r["crop"]["word_runs"])]
-assert len(pairs) == len(cut["clip"]["word_runs_differ"]), "the pair list disagrees with the artifact"
+# EVERY CLIP IS A PAIR. This used to show only clips whose resolved run count MOVED, which selects the
+# population by the very proxy that cannot see the failure: p381:n1 kept 17px of a crop whose thickest
+# line was 30px and its run count did not change, so it would never have been offered for an eye. The
+# ranking is by how much the clip cuts, which is a statement about the trim and not about the reading.
+pairs = [r for r in cut["rows"] if r.get("clip")]
+assert len(pairs) == cut["clip"]["written"], "the pair list disagrees with the artifact's clip count"
 
 
 def trim(r):
