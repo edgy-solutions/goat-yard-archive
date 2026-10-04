@@ -263,3 +263,24 @@ differs" — but I wrote that falsifier expecting it to mean a real write. It me
    number.
 3. **Experiment design.** Resolving a 4-run effect against a 7-run null needs more runs per
    question and a paired per-question test, not a sixth attempt at 5×13.
+
+## Addendum: the false cause is fixed (`e9b99e3`)
+
+The wrong reason is repaired; the gate is not relaxed. `corpus_fingerprint.difference_kind` now
+holds the read-vs-write rule once, `classify_change` calls it instead of its own inline copy, and
+`reread_verdict` reports `differs-write` or `differs-digest-only` with the uuids split. Both kinds
+remain non-confirming and both keep the arm provisional, per Ruling 2 — item 1 under **Open
+decisions** is still open.
+
+Run over the data that produced the false claim (real `at_start` sidecar, live read-only re-read),
+both arms now report `differs-digest-only` ... "so NOTHING was written", which is what the live
+timestamps say. The console no longer reports readable samples as unreadable: that text moved out
+of `run_eval` main into `provisional_console_lines`, where a test can reach it.
+
+Fourteen born tests, each run against the pre-fix source and shown to fail there before being
+kept; two more are labelled regression-only because they pass in both columns. Suites 27/27 and
+45/45.
+
+**Still not explained:** why the vector read corrupts at correct `dim`. Three live reads agree with
+each other and disagree with the stored sample, so it is not random per-read noise. That is a
+separate investigation and this commit does not touch it.
