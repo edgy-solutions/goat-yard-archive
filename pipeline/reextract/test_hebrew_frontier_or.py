@@ -764,6 +764,54 @@ check("run() archives before the header, so recorded hashes name preserved pixel
       src.find("diag.sent_archive_put(") < src.find("hdr = build_header("))
 check("the header records what it archived", '"crops_archived": _arch' in src)
 
+print("\n(15) the input-guard control reads PIXELS, and says so when it cannot")
+# Chris's law, 2026-10-04: a read is evidence only about a crop that passed the input guard. The
+# control that enforces it is cited in REPORT_laneB_20260928d, so it gets a watcher. The defect it
+# replaced selected on `"crop-fault" in unscorable` -- a tag about a BOX -- and printed "these arms
+# were shown nothing" over p900:n4, whose crop has ink. A control that asserts what was shown must
+# derive it from what was shown.
+_BLANKS = [r for r in diag.sent_archive_index()
+           if F.crop_ink_state(r["sha16"]) == "BLANK"]
+check("the archive still holds the blank sends, so the proof case has not been groomed away",
+      len(_BLANKS) == 2, [r["sha16"][:16] for r in _BLANKS])
+check("every archived blank is identified as BLANK from its own pixels, not from a fault tag",
+      all(F.crop_ink_state(r["sha16"]) == "BLANK" for r in _BLANKS))
+_INKED = [r for r in diag.sent_archive_index() if r["sha16"] not in {b["sha16"] for b in _BLANKS}]
+check("and every other archived state reads INK -- the predicate discriminates, it does not just say BLANK",
+      _INKED and all(F.crop_ink_state(r["sha16"]) == "INK" for r in _INKED),
+      [r["sha16"][:16] for r in _INKED if F.crop_ink_state(r["sha16"]) != "INK"])
+
+# The third state. An unknown hash must come back None, never a guess in either direction.
+check("an unarchived hash is UNKNOWABLE, not BLANK and not INK",
+      F.crop_ink_state("0" * 16) is None)
+check("a hash-less read on a RE-CUT span is unknowable (its pixels are not recoverable)",
+      all(F.crop_ink_state(None, sid) is None for sid in diag.crops_changed(F.APERTURE)),
+      sorted(diag.crops_changed(F.APERTURE)))
+_STABLE = [s["span_id"] for s, _c, _x in CS
+           if s["span_id"] not in set(diag.crops_changed(F.APERTURE))]
+check("but a hash-less read on a NEVER-re-cut span resolves against the live crop",
+      _STABLE and all(F.crop_ink_state(None, sid) == "INK" for sid in _STABLE),
+      [sid for sid in _STABLE if F.crop_ink_state(None, sid) != "INK"])
+check("and that set is not empty -- the clause above would otherwise pass on nothing",
+      bool(_STABLE))
+
+# p900:n4 is the span the old control libelled. Name it, and assert the thing that was false.
+_P900 = next((s for s in diag.build_set(include_sealed=True) if s["span_id"] == "p900:n4"), None)
+if _P900:
+    check("p900:n4's crop carries INK -- the old control called it 'shown nothing' on a box tag",
+          F.crop_ink_state(None, "p900:n4") in ("INK", None))
+    check("p900:n4 is unscorable for a BOX reason, which is not a statement about its pixels",
+          "crop-fault" in (_P900["unscorable"] or ""), _P900["unscorable"])
+
+# The stale_read_why blindness: support() must agree with score() about n.
+_sup = src[src.index("def support():"):]
+check("support() mutes void reads (it tallied 20 spans against score()'s 19 until 2026-10-04)",
+      "if read_key(o) in mute:" in _sup)
+check("support() reports the void reads it dropped rather than absorbing them",
+      "VOID and excluded from the table above" in _sup)
+check("the control is derived from crop_ink_state, and the fault-tag selector is gone",
+      "crop_ink_state(" in _sup and 'if unsc and "crop-fault" in unsc:' not in _sup)
+
 print()
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")

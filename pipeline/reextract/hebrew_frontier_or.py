@@ -901,6 +901,46 @@ def _family(model):
     return model.split("/")[0] if "/" in model else model.split(":")[0].rstrip("0123456789.")
 
 
+def crop_ink_state(sha16, span_id=None):
+    """What the pixels a read was SHOWN actually contained: "BLANK", "INK", or None for unknowable.
+
+    Chris's law for the production path, 2026-10-04: *a read is evidence only about a crop that passed
+    the input guard.* The proof is on `p423:n3` -- one arm returned the exact signed string
+    `ותגע לרגליו` from a crop containing no ink at all, so a correct-looking answer is not evidence that
+    anything was read. No output-side check can catch that, which is why the guard has to be on the
+    input and why this function exists on the pixel side of the question.
+
+    The third state is the point. `None` means UNKNOWABLE -- a read taken before `crop_sha16` was
+    stamped cannot be tied to any pixels, so "blank" and "inked" are both unavailable claims about it,
+    and reporting it as either is the fabrication this whole file is about. The previous version of the
+    control had no such state: it selected on `"crop-fault" in unscorable`, which is a tag about a BOX,
+    and then printed "no ink was sent; these arms were shown nothing" over it. Its one member was
+    `p900:n4`, whose fault is `out-of-strip` and whose crop is 238x86 with extrema (0, 255) -- ink. The
+    control assserted what 26 arms were shown and was wrong about it, which is
+    [[a-blank-channel-is-not-an-absent-input]] running in reverse."""
+    p = None
+    if sha16:
+        q = diag.SENT_SHA / (sha16 + ".png")
+        if q.exists():
+            p = q
+    if p is None:
+        # No hash on the read -- but that is not automatically unknowable. `stale_read_why` keeps a
+        # pre-hash read LIVE only when its span's crop was never re-cut, and for such a span the crop
+        # on disk IS the crop that read was shown. Resolving it here is what separates "we cannot say"
+        # from "we never wrote it down", and only the first deserves to suppress a finding.
+        if span_id is None or span_id in set(diag.crops_changed(APERTURE)):
+            return None
+        q = diag.CROPDIR / ("%s_%s.png" % (span_id.replace(":", "_"), APERTURE))
+        if not q.exists():
+            return None
+        p = q
+    try:
+        lo, hi = Image.open(p).convert("L").getextrema()
+    except Exception:
+        return None
+    return "BLANK" if lo == hi else "INK"
+
+
 def support():
     """Per span: how many arms READ it, how many agree on the top reading, and whether that reading
     agrees WITH the signature or AGAINST it. The card list Chris asked for comes out of here.
@@ -921,11 +961,19 @@ def support():
     diag.DROPPED_ARMS); the share is over arms that actually produced a reading; and `families` is
     distinct vendors agreeing, because 4 OpenAI arms on one string is one witness with four voices."""
     sets = {s["span_id"]: s for s in diag.build_set(include_sealed=True)}
-    keep = {}
+    # VOID READS ARE DROPPED HERE. This table ignored `stale_read_why` until 2026-10-04 and therefore
+    # tallied 20 spans where `score()` tallied 19: all 26 of `p900:n4`'s reads are about a rectangle
+    # that no longer exists, and they were being published as that span's support distribution. Same
+    # defect as `contains_counts()`, found the same way -- by two counters disagreeing about n.
+    mute = stale_reads()
+    keep, voided = {}, {}
     for o in diag._lines(OUT):
         if o.get("kind") != "read" or o.get("span_id") not in sets:
             continue
         if o.get("model") in diag.DROPPED_ARMS:
+            continue
+        if read_key(o) in mute:
+            voided[o["span_id"]] = voided.get(o["span_id"], 0) + 1
             continue
         keep.setdefault(o["span_id"], {})[o["model"]] = o
     tab = []
@@ -966,11 +1014,77 @@ def support():
         print(f"    {sid}  {n}/{nlive} arms = {share:.0%} across {fams} families")
     if not cards:
         print("    none")
-    print("\nblank-crop control (no ink was sent; these arms were shown nothing):")
-    for share, sid, arms, ab, nlive, ndist, n, fams, cls, unsc in sorted(tab, reverse=True):
-        if unsc and "crop-fault" in unsc:
-            print(f"    {sid}  {ab}/{arms} abstained, {nlive} read, {ndist} distinct readings "
-                  f"among them")
+    if voided:
+        print(f"\n{sum(voided.values())} read(s) VOID and excluded from the table above "
+              f"(the crop was re-cut after the read):")
+        for sid in sorted(voided):
+            tail = "" if sid in keep else "   -- this span has NO live read, so it is absent above"
+            print(f"    {sid:10s} {voided[sid]:3d} void{tail}")
+
+    # The control, derived from the pixels each read recorded rather than from a tag about its box.
+    print("\ninput-guard control -- what the PIXELS were, taken from the by-sha archive:")
+    rows_ = []
+    for sid in sorted(keep):
+        st = collections.Counter()
+        for _m, o in keep[sid].items():
+            st[crop_ink_state(o.get("crop_sha16"), sid) or "UNKNOWABLE"] += 1
+        if "BLANK" in st or "UNKNOWABLE" in st:
+            rows_.append((sid, st))
+    if not rows_:
+        print("    none: every live read names an archived crop that carries ink")
+    for sid, st in rows_:
+        per = keep[sid]
+        ab = sum(1 for _m, o in per.items()
+                 if diag.classify(o.get("gated") or "", sets[sid]["truth"]) == "abstain")
+        ex = sum(1 for _m, o in per.items()
+                 if diag.classify(o.get("gated") or "", sets[sid]["truth"]) in ("exact", "punct-only"))
+        print(f"    {sid:10s} {dict(st)}  {ab}/{len(per)} abstained, {ex} EXACT")
+        if st.get("BLANK") and ex:
+            print(f"      ^^ {ex} exact read(s) on a crop with NO INK. A correct string is not "
+                  f"evidence that anything was read -- gate the INPUT.")
+
+    # THE PROOF, over every read in the artifact including the void ones. It has to be stated here and
+    # not left to a report, because the reads that carry it are void -- their crop was re-cut after the
+    # blank was sent -- and a control that only looks at live reads would lose the one measurement that
+    # establishes why an input guard is not optional. Chris's law, 2026-10-04: a read is evidence only
+    # about a crop that passed the input guard.
+    blank_sha = {}
+    for p_ in sorted(diag.SENT_SHA.glob("*.png")):
+        try:
+            lo, hi = Image.open(p_).convert("L").getextrema()
+        except Exception:
+            continue
+        if lo == hi:
+            blank_sha[p_.stem] = Image.open(p_).size
+    print("\nblank crops EVER sent, and what the arms did with nothing (void reads included):")
+    if not blank_sha:
+        print("    none archived")
+    for sha, size in blank_sha.items():
+        hits = [o for o in diag._lines(OUT)
+                if o.get("kind") == "read" and o.get("crop_sha16") == sha]
+        sid = hits[0].get("span_id") if hits else None
+        if not hits:
+            # The blank sends predate `crop_sha16`, so no read names them by hash. The archive index
+            # does record which span each archived state came from, and `stale_read_why` records which
+            # reads are about a retired crop -- so the attribution is recoverable from two things the
+            # tree already holds, and the proof does not have to live in a report. A span may only be
+            # attributed this way when the blank is its ONLY retired state; otherwise the pre-hash reads
+            # cannot be apportioned between two retired crops and the honest answer is to say so.
+            sid = next((r.get("span_id") for r in diag.sent_archive_index()
+                        if r.get("sha16") == sha), None)
+            retired = {r["sha16"] for r in diag.sent_archive_index()
+                       if r.get("span_id") == sid} - {diag.crop_sha(sid, APERTURE)} if sid else set()
+            hits = [o for o in diag._lines(OUT)
+                    if o.get("kind") == "read" and o.get("span_id") == sid
+                    and not o.get("crop_sha16") and read_key(o) in mute]
+            if not sid or len(retired) != 1 or not hits:
+                print(f"    {sha[:16]} {size}  attribution unavailable "
+                      f"({len(retired)} retired states for {sid}, {len(hits)} pre-hash void reads)")
+                continue
+        t = sets[sid]["truth"] if sid in sets else ""
+        ab = sum(1 for o in hits if diag.classify(o.get("gated") or "", t) == "abstain")
+        ex = sum(1 for o in hits if diag.classify(o.get("gated") or "", t) in ("exact", "punct-only"))
+        print(f"    {sha[:16]} {size} {sid}: {len(hits)} reads, {ab} ABSTAIN, {ex} EXACT on no ink")
 
 
 CARD_AT = 0.80
