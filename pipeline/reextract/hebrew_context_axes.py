@@ -65,7 +65,7 @@ import hebrew_aperture_diag as D
 import hebrew_local_arms as L
 import nikud_gate
 import script_gate
-from hebrew_frontier_or import _ctx
+from hebrew_frontier_or import _ctx, diag_sha
 from hebrew_recrop import _RECROP_PROMPT
 from run_header import build_header, endpoint_id, model_digest, normalize_hostport, _git_head, _git_dirty
 
@@ -170,9 +170,9 @@ def run(hostport, models, out=OUT, cells=None):
                                          "cells": [[c, s, t] for c, s, t in cells],
                                          "api_path": "/api/chat", "think": False, "temperature": 0,
                                          "num_ctx": L.NUM_CTX,
-                                         "prompt_strip_sha16": D.diag_sha(HEAD_STRIP + TAIL),
-                                         "prompt_bare_sha16": D.diag_sha(HEAD_BARE + TAIL),
-                                         "text_block_sha16": D.diag_sha(TEXT_BLOCK),
+                                         "prompt_strip_sha16": diag_sha(HEAD_STRIP + TAIL),
+                                         "prompt_bare_sha16": diag_sha(HEAD_BARE + TAIL),
+                                         "text_block_sha16": diag_sha(TEXT_BLOCK),
                                          "base_is_recorded_config": True},
                          extra={"n_spans": len(pop), "spans": [s["span_id"] for s in pop],
                                 "git_at_start": g0, "dead_run_at": DEAD_RUN_AT}),
