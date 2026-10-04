@@ -46,12 +46,18 @@ class _FakeHTTP:
         bodies = self.pages[_after_of(url)]
         return _Resp(bodies.pop(0) if len(bodies) > 1 else bodies[0])
 
-def _drive(pages, faults=None):
-    """Run stream_chunks against a fake transport with sleeps neutered. Returns (yielded, fake)."""
+def _drive(pages, faults=None, verify_twice=True):
+    """Run stream_chunks against a fake transport with sleeps neutered. Returns (yielded, fake).
+
+    `verify_twice` is threaded through because the double read adds one fetch per vector-bearing
+    page, which shifts every assertion about the fetch SEQUENCE. A test about cursor walking or
+    retry accounting turns it off so it measures the thing it names; the default-on behaviour is
+    pinned by its own tests below rather than being assumed by all of them."""
     real_http, real_sleep = FR.httpx, time.sleep
     FR.httpx, time.sleep = _FakeHTTP(pages), lambda *_a, **_k: None
     try:
-        return list(FR.stream_chunks("192.0.2.1", faults=faults)), FR.httpx
+        return (list(FR.stream_chunks("192.0.2.1", faults=faults, verify_twice=verify_twice)),
+                FR.httpx)
     finally:
         FR.httpx, time.sleep = real_http, real_sleep
 
@@ -72,7 +78,7 @@ def test_the_cursor_walks_pages_by_the_last_objects_id():
     pages = {None: [_page([_obj("u1"), _obj("u2")])],
              "u2": [_page([_obj("u3"), _obj("u4")])],
              "u4": [_page([])]}
-    got, fake = _drive(pages)
+    got, fake = _drive(pages, verify_twice=False)      # this test is about the CURSOR
     ids = [m["id"] for _p, _v, m in got]
     assert ids == ["u1", "u2", "u3", "u4"], ids              # no skip, no double-count
     assert [u for _m, u in fake.calls] == [PAGE_1_URL, PAGE_1_URL + "&after=u2",
@@ -80,7 +86,8 @@ def test_the_cursor_walks_pages_by_the_last_objects_id():
 
 def test_an_empty_body_is_retried_not_read_as_the_end_of_the_stream():
     faults = []
-    got, fake = _drive({None: ["", _page([_obj("u1")])], "u1": [_page([])]}, faults)
+    got, fake = _drive({None: ["", _page([_obj("u1")])], "u1": [_page([])]}, faults,
+                       verify_twice=False)             # this test is about the RETRY count
     assert [m["id"] for _p, _v, m in got] == ["u1"], got     # an empty body is not an empty corpus
     assert [f["kind"] for f in faults] == ["json_decode_retry"], faults
     assert len(fake.calls) == 3, fake.calls                  # empty, retry, terminator
@@ -137,9 +144,72 @@ def test_an_object_with_no_vector_is_yielded_and_is_not_an_anomaly():
 
 def test_faults_is_optional_and_a_bad_page_still_streams():
     bad = _page([_obj("u1"), _obj("u2", dim=5)])
-    got, fake = _drive({None: [bad], "u2": [_page([])]})
+    got, fake = _drive({None: [bad], "u2": [_page([])]}, verify_twice=False)
     assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got
     assert len(fake.calls) == 5, fake.calls                  # 1 + 3 re-fetches + terminator
+
+# --- the double read at sampling time (ruling, 2026-10-04) ------------------------------------
+
+def test_every_vector_bearing_page_is_fetched_TWICE_by_default():
+    # Default-on is the whole point: a verification that has to be switched on is a verification
+    # that was off during the run that needed it. The terminator page is not re-fetched because
+    # the stream breaks on an empty page before the check.
+    got, fake = _drive(_one_page())
+    urls = [u for _m, u in fake.calls]
+    assert urls.count(PAGE_1_URL) == 2, urls
+    assert urls[-1] == PAGE_1_URL + "&after=u2", urls
+    assert len(got) == 2, got
+
+def test_a_vector_that_reads_back_DIFFERENTLY_is_faulted_with_its_uuid():
+    # The fault the dim check is blind to: same length, different contents. This is the signature
+    # measured on both attempt-5 arms, where it silently poisoned the start sample instead.
+    faults = []
+    first = _page([_obj("u1"), _obj("u2")])
+    second = _page([_obj("u1"), _obj("u2")])
+    second["objects"][1]["vector"] = [0.1, 0.1, 0.1, 0.9]      # same dim 4, one element moved
+    got, _fake = _drive({None: [first, second], "u2": [_page([])]}, faults)
+    assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got  # the first read is what streams
+    assert [f["kind"] for f in faults] == ["vector_unstable"], faults
+    f = faults[0]
+    assert f["uuid"] == "u2", f
+    assert f["reason"] == "elements", f
+    assert (f["n_differing"], f["first_index"], f["n_total"]) == (1, 3, 4), f
+    assert f["first_pair"] == [0.1, 0.9], f                    # the evidence, not just a flag
+
+def test_a_SUB_PRECISION_float_difference_is_not_faulted():
+    # LOAD-BEARING, and the reason the comparison is made on the digest rather than element-wise.
+    # The fingerprint rounds to 6 places, so a difference in the 9th does not move the
+    # measurement and must not refuse a run. A strict float comparison would fire here, make
+    # every sample unstable, and the real fault above would be lost in the noise.
+    faults = []
+    first = _page([_obj("u1")])
+    second = _page([_obj("u1")])
+    second["objects"][0]["vector"] = [0.1, 0.1, 0.1, 0.1 + 1e-9]
+    got, _fake = _drive({None: [first, second], "u1": [_page([])]}, faults)
+    assert len(got) == 1, got
+    assert faults == [], faults
+
+def test_an_object_that_vanishes_from_the_second_read_is_faulted_not_ignored():
+    # A page whose membership changes between two reads is not a vector fault, but it is not
+    # nothing either, and silence would be the same class of defect: an absence treated as an
+    # agreement.
+    faults = []
+    first = _page([_obj("u1"), _obj("u2")])
+    second = _page([_obj("u1")])
+    got, _fake = _drive({None: [first, second], "u2": [_page([])]}, faults)
+    assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got
+    assert [f["kind"] for f in faults] == ["vector_unstable"], faults
+    assert faults[0]["reason"] == "absent-on-reread" and faults[0]["uuid"] == "u2", faults[0]
+
+def test_vector_disagreement_is_silent_on_two_reads_that_agree():
+    # The null. A detector that reported a disagreement for everything would satisfy every test
+    # above and refuse every run ever made.
+    assert FR.vector_disagreement([0.1] * 4, [0.1] * 4) is None
+    assert FR.vector_disagreement(None, None) is None
+    d = FR.vector_disagreement([0.1] * 4, None)
+    assert d and d["reason"] == "one-read-had-no-vector" and d["first_read_had_one"] is True, d
+    d = FR.vector_disagreement([0.1] * 4, [0.1] * 5)
+    assert d and d["reason"] == "length" and (d["len_first"], d["len_second"]) == (4, 5), d
 
 def test_the_module_issues_nothing_but_GET():
     _got, fake = _drive(_one_page())
@@ -149,7 +219,7 @@ def test_the_module_issues_nothing_but_GET():
 # A hand-rolled suite reports what it happened to collect. Assert the COUNT so a test that is
 # renamed out of the prefix, deleted, or shadowed by a duplicate name fails loudly instead of
 # printing a healthy-looking tally.
-EXPECTED_TESTS = 11
+EXPECTED_TESTS = 16
 
 if __name__ == "__main__":
     import traceback

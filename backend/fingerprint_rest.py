@@ -1,6 +1,21 @@
 """READ-ONLY fingerprint of a Weaviate instance over its REST API (robust across engine versions) —
 cursor-pages every CommentaryChunk, feeds the stable fields into corpus_fingerprint's deterministic
-hash. No writes. Usage: python fingerprint_rest.py <name> <ip>"""
+hash. No writes. Usage: python fingerprint_rest.py <name> <ip>
+
+UNDIAGNOSED, AND INHERITED EVERYWHERE (ruling, 2026-10-04): reading a vector back out of this
+instance is not reliable. Two reads of an object that nobody has written can return different
+embeddings at a CORRECT length of 4096 -- measured on both arms of the attempt-5 pair, where
+`last_update_ms` had not moved for four months. The mechanism is not known: it could be this
+client, a hop in between, or something that tracks response size (a page at limit=20 with
+include=vector is about 1.1 MB).
+
+Until it is located, the fault is a property of the READ PATH and not of this module, so ANY
+Python path that reads vectors back from Weaviate inherits it -- the eval sampler here, the
+re-read in `fetch_objects`, the ingestion verifier, and any future consumer that compares
+embeddings it fetched. Guard every such path the way `stream_chunks` now does (read twice,
+compare on the rounded digest, refuse on a mismatch) or state explicitly that its numbers rest
+on a single unverified read.
+"""
 import sys, json, httpx
 import corpus_fingerprint as CF
 
@@ -36,12 +51,51 @@ def _page_dims(objs, vecs):
             hist[len(v)] = hist.get(len(v), 0) + 1
     return hist
 
+_ABSENT = object()
+
+def vector_disagreement(a, b):
+    """How two reads of ONE object's vector differ, or None if they agree. READ-ONLY, pure.
+
+    The decision is made on `_vec_digest`, NOT element-wise, and that is load-bearing: the digest
+    rounds to 6 decimal places, so a float that comes back differing in the 9th place does not
+    move the fingerprint and must not trigger a refusal. Refusing on raw float inequality would
+    fire on noise the measurement already tolerates
+    (see test_vector_rounding_tolerates_float_noise).
+
+    What it returns is the SHAPE of the disagreement rather than a boolean, because the mechanism
+    is unknown and the shape is the only evidence there is about it: one element off in the last
+    retained place is a precision or serialisation story, a run of elements from one offset is a
+    truncation or framing story, and a wholly different vector is a wrong-object story.
+    """
+    if b is _ABSENT:
+        return {"reason": "absent-on-reread"}
+    if a is None or b is None:
+        if a is None and b is None:
+            return None
+        return {"reason": "one-read-had-no-vector", "first_read_had_one": a is not None}
+    if CF._vec_digest(a) == CF._vec_digest(b):
+        return None
+    if len(a) != len(b):
+        return {"reason": "length", "len_first": len(a), "len_second": len(b)}
+    idx = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+    if not idx:
+        # Digests differ while every element compares equal: the digest arithmetic itself is not
+        # a function of the elements alone. That is a different and worse defect, so say so
+        # rather than reporting "no difference" about two values that hash apart.
+        return {"reason": "digests-differ-while-elements-match", "n_total": len(a)}
+    worst = max(idx, key=lambda i: abs(a[i] - b[i]))
+    return {"reason": "elements", "n_differing": len(idx), "n_total": len(a),
+            "first_index": idx[0], "last_index": idx[-1],
+            "max_abs_delta": abs(a[worst] - b[worst]),
+            "at_max_index": worst, "at_max_pair": [a[worst], b[worst]],
+            "first_pair": [a[idx[0]], b[idx[0]]]}
+
 def _anomalous_uuids(objs, vecs, modal_dim):
     if modal_dim is None:
         return []
     return [o.get("id") for o, v in zip(objs, vecs) if v and len(v) != modal_dim]
 
-def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None):
+def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None, verify_twice=True):
     """Cursor-page CommentaryChunk objects, yielding (props, vector, meta) 3-tuples where meta
     carries the REST object's own 'id' and 'lastUpdateTimeUnix' (read, not synthesised).
     include=vector fetches the embedding so the fingerprint can hash vector-identity too
@@ -55,7 +109,13 @@ def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None):
     still anomalous, the last-fetched page is yielded as-is (never silently dropped, never a
     substituted zero vector) and the page URL + offending uuids are appended to `faults`. EVERY
     re-fetch is counted on `faults` (`dim_anomaly_retry`), not only the giving-up: a retry nobody
-    counts is how the visible half of this defect stayed invisible in the first place."""
+    counts is how the visible half of this defect stayed invisible in the first place.
+
+    `verify_twice` (default True, vectors only) fetches each page a SECOND time and compares every
+    object's vector digest across the two reads, appending a `vector_unstable` fault per uuid that
+    disagrees. It catches what the dim check cannot: a vector that reads back differently at a
+    correct length. It doubles the page fetches of a vector-bearing sample, which is the price of
+    a start sample that can be reproduced at all."""
     import time as _t
     after = None
     inc = "&include=vector" if include_vector else ""
@@ -91,6 +151,25 @@ def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None):
                 break
         if anomalies and faults is not None:
             faults.append({"kind": "dim_anomaly", "url": url, "uuids": list(anomalies)})
+
+        # Ruling (2026-10-04): read every vector TWICE at sampling time and refuse on mismatch.
+        # The dim check above is structurally blind to the fault this catches -- two reads of an
+        # unchanged object disagreeing at a CORRECT length of 4096. That fault silently poisoned
+        # the at_start sample of both attempt-5 arms, and no output-side check can recover from
+        # it: a digest taken over bytes that cannot be reproduced is not a measurement of
+        # anything, and the later comparison then reports a corpus change that never happened.
+        #
+        # A separate HTTP fetch of the SAME page URL, compared per uuid. No third-read repair:
+        # the ruling is to refuse, and a quiet repair would hide the rate at which this happens
+        # -- which is the only number that can tell us whether the read path is usable at all.
+        if verify_twice and include_vector:
+            rv = _fetch_page(url, faults)
+            second = {o.get("id"): _extract_vector(o) for o in rv.get("objects", [])}
+            for o, vec in zip(objs, vecs):
+                uid = o.get("id")
+                d = vector_disagreement(vec, second.get(uid, _ABSENT))
+                if d is not None and faults is not None:
+                    faults.append(dict(d, kind="vector_unstable", url=url, uuid=uid))
 
         for v in vecs:                                          # keep the running dim current
             if v:

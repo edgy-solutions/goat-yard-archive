@@ -128,6 +128,24 @@ def corpus_state(url: Optional[str] = None, include_vectors: bool = True,
     if st.get("dim_anomalies"):
         n = len(st["dim_anomalies"])
         return unavailable_state(f"read-fault:vector-dim-anomaly:{n}", url, include_vectors)
+    # Ruling (2026-10-04): the sampler reads every vector twice and this REFUSES on a mismatch.
+    # An unstable read makes the sample unusable in a way no later check can repair -- the stored
+    # digest is over bytes that do not reproduce, so every comparison against it is meaningless
+    # and the arms that carried it reported a corpus change that never happened. Refusing here
+    # costs a run; not refusing costs the measurement, silently.
+    #
+    # The faults are carried onto the refusal record. `read_faults` is already in KEYS, so the
+    # shape every aggregator relies on is unchanged, and dropping the evidence to report only a
+    # count would discard the one description of the mechanism this path ever produces.
+    unstable = [f for f in (st.get("read_faults") or []) if f.get("kind") == "vector_unstable"]
+    if unstable:
+        uu = sorted({str(f.get("uuid")) for f in unstable if f.get("uuid")})
+        stu = unavailable_state(
+            "read-fault:vector-unstable:" + str(len(unstable)) + ": two reads of the same "
+            "object disagreed at sampling time, so this sample cannot be reproduced and nothing "
+            "may be compared against it; uuid(s) " + _named(uu), url, include_vectors)
+        stu["read_faults"] = st.get("read_faults")
+        return stu
     # A fingerprint over zero objects has a well-defined hash and means the corpus is EMPTY or the
     # class name is wrong. Either way it is not a corpus a run can be scored against.
     if not st.get("chunk_count"):

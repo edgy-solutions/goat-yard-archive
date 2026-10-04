@@ -73,6 +73,30 @@ def test_a_state_with_no_url_and_no_env_claims_nothing():
 
 # --- a successful read ----------------------------------------------------------------
 
+def test_an_unstable_vector_read_REFUSES_the_sample_and_keeps_the_evidence():
+    # Ruling (2026-10-04): the sampler reads every vector twice and this refuses on a mismatch.
+    # A digest over bytes that do not reproduce cannot be compared against anything, and the
+    # arms that carried one reported a corpus change that never happened.
+    faults = [{"kind": "vector_unstable", "uuid": "u9", "reason": "elements", "n_differing": 1},
+              {"kind": "json_decode_retry", "url": "x", "attempt": 0}]
+    st = _state(read_faults=faults)
+    assert st["available"] is False, st
+    assert "read-fault:vector-unstable:1" in st["unavailable_reason"], st["unavailable_reason"]
+    assert "u9" in st["unavailable_reason"], st["unavailable_reason"]
+    # The evidence has to survive the refusal: a count alone describes no mechanism, and this is
+    # the only place the mechanism is ever described.
+    assert st["read_faults"] == faults, st["read_faults"]
+    assert set(st) == set(CS.KEYS), sorted(set(st) ^ set(CS.KEYS))
+
+
+def test_an_ordinary_retry_fault_does_NOT_refuse_the_sample():
+    # The null for the refusal above. json_decode_retry is counted on every sample and means the
+    # read recovered; refusing on it would refuse every run and discriminate nothing.
+    st = _state(read_faults=[{"kind": "json_decode_retry", "url": "x", "attempt": 0}])
+    assert st["available"] is True, st
+    assert st["unavailable_reason"] is None, st
+
+
 def test_a_successful_state_carries_both_hashes_and_the_url():
     st = _state()
     assert st["available"] is True, st
@@ -674,7 +698,7 @@ if __name__ == "__main__":
     # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
     # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
     # failed" and looks healthy. Assert the COUNT so a dropped test is caught.
-    EXPECTED_TESTS = 51
+    EXPECTED_TESTS = 53
     if len(tests) != EXPECTED_TESTS:
         print("FAIL suite: collected " + str(len(tests)) + " tests, expected " +
               str(EXPECTED_TESTS) + " - a test was lost or added without updating EXPECTED_TESTS")
