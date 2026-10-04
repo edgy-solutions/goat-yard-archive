@@ -42,9 +42,11 @@ import hebrew_frontier_or as F
 from run_header import require_endpoint, HeaderMissingEndpoint
 
 fails = []
+ran = []            # every check that actually EXECUTED -- see CHECK_FLOOR at the bottom of this file
 
 
 def check(name, cond, detail=""):
+    ran.append(name)
     print(f"  {'ok  ' if cond else 'FAIL'}  {name}" + (f"   {detail}" if detail and not cond else ""))
     if not cond:
         fails.append(f"{name}: {detail}")
@@ -918,12 +920,76 @@ check("the text axis sends the same A2 crops through the same offnet gate -- no 
 check("the header says whether the channel was sent, in the hashed identity block",
       '"text_context_sent": TEXT_CONTEXT' in src)
 
+print("\n(18) the contact sheet is an APPROVAL RECORD, not a report")
+import hebrew_contact_sheet as SHEET   # NOT `CS` -- that name is the A2 cell list
+
+# The defect that cost item 6 its approval: one fixed filename, so a later single-span build landed on
+# the 19-span record and the gate had nothing left to check against.
+_cssrc = (HERE / "hebrew_contact_sheet.py").read_text(encoding="utf-8")
+# The literal still appears in the comment that explains the defect; what must be gone is any
+# EXECUTABLE default. Comment lines stripped, then the name must not be there at all.
+_cscode = chr(10).join(l for l in _cssrc.splitlines()
+                       if not l.lstrip().startswith("#"))
+check("no executable line names a fixed default sheet file any more",
+      "contact_sheet_2" not in _cscode,
+      [l.strip() for l in _cscode.splitlines() if "contact_sheet_2" in l][:2])
+check("and the defect is still documented in a comment, so the naming rule has its reason attached",
+      "contact_sheet_20260927.html" in _cssrc)
+check("the default name is DERIVED from the scope, like scope() itself",
+      "def derived_out(" in _cssrc and "out = out or derived_out(want, cells)" in _cssrc)
+
+_c19 = {s["span_id"]: (s, c, x) for s, c, x in SHEET.F.cells()}
+_w19 = sorted(_c19)
+_n19 = SHEET.derived_out(_w19, _c19)
+check("the name carries the span COUNT, so a 1-span sheet cannot be mistaken for the 19-span one",
+      "_%dspan_" % len(_w19) in _n19.name, _n19.name)
+check("same scope, same pixels -> same name (a rebuild is idempotent, not a second record)",
+      SHEET.derived_out(_w19, _c19).name == _n19.name)
+check("one span dropped from the scope moves the name",
+      SHEET.derived_out(_w19[:-1], _c19).name != _n19.name)
+
+# A re-cut crop must move the name, or an approval could silently cover pixels nobody saw.
+class _FakeCrop(str):
+    pass
+_orig = SHEET.F.crop_sha
+try:
+    _flip = {"n": 0}
+    def _shim(p):
+        _flip["n"] += 1
+        return "ffffffffffffffff" if _flip["n"] == 1 else _orig(p)
+    SHEET.F.crop_sha = _shim
+    _moved = SHEET.derived_out(_w19, _c19).name != _n19.name
+finally:
+    SHEET.F.crop_sha = _orig
+check("one crop re-cut after approval moves the name, so it lands on a NEW file", _moved)
+
+# And the assertion that watches the naming.
+try:
+    SHEET.refuse_to_clobber(str(_n19), {"zzz:n9": "deadbeefdeadbeef"})
+    _r = "NO RAISE"
+except RuntimeError as e:
+    _r = "REFUSED" if "destroy the record" in str(e) else str(e)[:60]
+check("a sidecar describing DIFFERENT pixels is never overwritten", _r == "REFUSED", _r)
+check("and the refusal names the spans whose approval would have been lost",
+      "' '.join(sorted(was))" in _cssrc)
+
+# The spend figure Chris approves must not count arms that cannot be called.
+check("excluded arms are out of the approved arm count (astra is the priciest arm in the set)",
+      "m not in getattr(F, \"EXCLUDED_ARMS\", {})" in _cssrc)
+
 print()
+# An abort is not a failure, so the count is the gate. Raise the floor when you add a section; never
+# pin it to the exact number, or the suite starts failing on its own growth.
+CHECK_FLOOR = 205
+if len(ran) < CHECK_FLOOR:
+    fails.append(f"only {len(ran)} checks executed, floor is {CHECK_FLOOR} -- a section was dropped or "
+                 f"something raised mid-file. Last check to run: {ran[-1] if ran else '(none)'}")
+
 if fails:
     print(f"FAIL: {len(fails)} assertion(s)")
     for f in fails:
         print(f"  - {f}")
     sys.exit(1)
-print(f"PASS: A2-only n={len(CS)}, {len(_ALL_LEAK)}/{len(CS)} context leaks blocked "
+print(f"PASS: {len(ran)} checks, A2-only n={len(CS)}, {len(_ALL_LEAK)}/{len(CS)} context leaks blocked "
       f"({len(raw_leaks)} of them literal), no note-box crop reachable.")
 sys.exit(0)

@@ -42,8 +42,45 @@ import hebrew_aperture_diag as diag                                          # n
 import hebrew_frontier_or as F                                              # noqa: E402
 
 APERTURE = "A2_spanbox"
-OUT = diag.CROPDIR.parent / "contact_sheet_20260927.html"
 PRINTED_OFFSET = 88
+
+# A contact sheet is not a report. It is the APPROVAL RECORD for a spend: the pixels Chris said yes to.
+# This module used to write one fixed filename, `contact_sheet_20260927.html`, and that is exactly how
+# the 19-span approval for item 6 was destroyed -- later single-span builds landed on the same path, so
+# when the gate went to check the 19 crops against what had been approved, the record it found described
+# one span. The gate refused, correctly, and the thing it was protecting was already gone.
+#
+# So the default name is CONTENT-ADDRESSED: the date, the span count, and a digest over
+# (span_id, crop_sha16) for the whole scope. A rebuild of the same scope over the same pixels lands on
+# the same file and is idempotent; a different scope, or the same scope after one crop was re-cut, lands
+# on a DIFFERENT file and cannot touch the old record. The name is derived, never typed -- the same
+# reason `scope()` is derived.
+def derived_out(want, cells):
+    import time
+    sig = ";".join(f"{sid}:{F.crop_sha(cells[sid][1])}" for sid in sorted(want))
+    return (diag.CROPDIR.parent /
+            ("contact_sheet_%s_%dspan_%s.html"
+             % (time.strftime("%Y%m%d"), len(want), F.diag_sha(sig)[:8])))
+
+
+def refuse_to_clobber(out, crop_sha16):
+    """An existing sidecar that describes DIFFERENT pixels is an approval record. Never overwrite it.
+
+    With a content-addressed name this should be unreachable, which is the point of asserting it: it is
+    the check that watches the naming. If it ever fires, the name stopped depending on the pixels."""
+    side = Path(out).with_suffix(".json")
+    if not side.exists():
+        return
+    try:
+        was = (json.loads(side.read_text(encoding="utf-8")) or {}).get("crop_sha16") or {}
+    except Exception:
+        return
+    if was and was != crop_sha16:
+        raise RuntimeError(
+            f"{side.name} already records an approval over DIFFERENT pixels -- {len(was)} span(s) "
+            f"{' '.join(sorted(was))}. Overwriting it would destroy the record of what was approved, "
+            f"which is how item 6's 19-span approval was lost on 2026-10-04. Write a new sheet (omit "
+            f"--out and let the name derive) and leave this one where it is.")
 
 
 def _b64(p):
@@ -116,11 +153,13 @@ def _img(uri, w, h, label, note=""):
             f'<figcaption>{html.escape(label)}</figcaption></figure>')
 
 
-def build(spans=None, out=OUT, include_a1=False):
+def build(spans=None, out=None, include_a1=False):
     want, voided, never, a1 = scope(include_a1)
     if spans:
         want = list(spans)
     cells = {s["span_id"]: (s, c, x) for s, c, x in F.cells(want)}
+    # Derived AFTER the scope and the crops are known, because the name is a function of them.
+    out = out or derived_out(want, cells)
     live, sent = _man(diag.CROPDIR), _man(diag.AS_SENT)
     sfaults = diag.sent_faults(APERTURE) or {}
     changed = diag.crops_changed(APERTURE)
@@ -130,7 +169,11 @@ def build(spans=None, out=OUT, include_a1=False):
         prices = F.catalog(refresh=False)["models"]
     except Exception:
         prices = {}
-    arms_ok = [m for m in F.ARMS if prices.get(m, {}).get("status") == "ok"]
+    # EXCLUDED_ARMS are not callable, so they are not part of the spend Chris is approving. An arm
+    # count that included them would overstate the cost of a yes by one arm, and astra is the most
+    # expensive arm in the set.
+    arms_ok = [m for m in F.ARMS if prices.get(m, {}).get("status") == "ok"
+               and m not in getattr(F, "EXCLUDED_ARMS", {})]
 
     P = []
     P.append("""<!doctype html><meta charset="utf-8"><title>Contact sheet</title>
@@ -341,6 +384,8 @@ def build(spans=None, out=OUT, include_a1=False):
              'of every crop it sends in the run header — so this sheet and the run are checkable '
              'against each other afterwards.</div>')
 
+    _sha = {sid: F.crop_sha(cells[sid][1]) for sid in want}
+    refuse_to_clobber(out, _sha)
     Path(out).write_text("\n".join(P), encoding="utf-8")
     # The sidecar is what `run` checks against: the exact crop each span was shown as. The HTML is for
     # the human; this is for the gate. Keyed by sha, so a crop re-cut after approval fails closed.
@@ -350,7 +395,7 @@ def build(spans=None, out=OUT, include_a1=False):
         "built": __import__("time").strftime("%Y-%m-%dT%H:%M:%S"),
         "aperture": APERTURE,
         "pages": "FILE pages (printed = file - 88)",
-        "crop_sha16": {sid: F.crop_sha(cells[sid][1]) for sid in want},
+        "crop_sha16": _sha,
         # The standard at build time. NOT a gate: Chris approves the pixels, and a truth change
         # does not move a pixel. `run` compares this with the digest at send and records both, which
         # is the honest shape -- a refusal would misdescribe what the approval was about.
@@ -373,7 +418,7 @@ def build(spans=None, out=OUT, include_a1=False):
 if __name__ == "__main__":
     a = sys.argv[1:]
     sv = [x for i, t in enumerate(a) if t == "--span" for x in a[i + 1].split(",") if x] or None
-    ov = a[a.index("--out") + 1] if "--out" in a else OUT
+    ov = a[a.index("--out") + 1] if "--out" in a else None   # None => the name derives from the scope
     p, want, n = build(sv, ov, include_a1="--include-a1" in a)
     print("scope (%d span%s): %s" % (len(want), "" if len(want) == 1 else "s", " ".join(want)))
     print("arms: %d   outbound calls if approved: %d" % (n, n * len(want)))
