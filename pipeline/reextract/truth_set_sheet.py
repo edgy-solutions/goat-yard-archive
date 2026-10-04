@@ -29,6 +29,27 @@ Where a band-clip exists it is shown beside its parent with the rows it removed,
 badged when the two recipes resolve a different number of word runs -- the subset where the pad probe's
 unresolved question actually bites.
 
+THREE SECTIONS, IN THIS ORDER, EACH WITH A DERIVED COUNT IN ITS HEADING (Chris, 2026-10-04): the
+over-full boxes, then the crops where a neighbouring word is sliced by the crop edge, then the clean
+rest. A decision at row 70 of 74 is a decision nobody makes, and "flagged first" was not the same thing
+as telling the signer which KIND of judgement each row needs. The sections are disjoint -- a span that is
+both over-full and edge-sliced appears once, in the first section, and carries both badges, so moving it
+cannot hide the second hazard. Every count is derived from the cut and asserted against the rendered
+document.
+
+EVERY ROW LINKS OUT TWICE, by path and never by embedding: to the note the box was drawn inside, and to
+the native page PNG. "So I can check a truncated-looking word against the page before applying the
+edge-cut rule" -- which is a judgement this sheet asks for 18 times and a 123x45 crop cannot support.
+The note crop is cut from the SAME note region the localizer placed the box in, at the same PAD, and the
+containment is asserted at cut time. These are note pixels: they stay on this machine, the sheet carries
+file:// paths to them, and the assertion that none of them is EMBEDDED here is made over the emitted
+bytes with its own liveness check (the same detector must find the span crops, which are embedded).
+
+A PER-SPAN FAULT BUTTON, because a drop that the measurements could not make must still be recordable.
+23 spans were dropped from the 96 for faults a script could measure; the two found by eye say the script
+cannot see script. The button records a FAULT, not a signature or an abstain -- "there is nothing here to
+sign" is a different fact from "I decline to sign this" -- and it writes a file beside the skeleton.
+
 THREE BADGES, NONE OF WHICH DROPS A SPAN (exclusions happen afterwards and with a reason):
   DUP-BOX      two spans were handed the same box, so their crops are byte-identical. At least one box
                is wrong and no signature from these pixels can tell them apart. A redraw question.
@@ -100,12 +121,30 @@ def _uri_im(im):
     return "data:image/png;base64," + base64.b64encode(b.getvalue()).decode("ascii")
 
 
+def _furl(p):
+    """A LOCAL PATH, NOT PIXELS. The note crops are note-box pixels and they do not leave this machine:
+    the sheet carries a file:// path to each one and never embeds it, and that is asserted over the bytes
+    below with a liveness check. A path cannot be mailed anywhere useful; a base64 payload can."""
+    return "file:///" + str(p).replace("\\", "/")
+
+
 def _views(path):
     """(native uri, comparison uri, scale, band height) for one crop file."""
     im = Image.open(str(path)).convert("L")
     cmp_im, scale, band = G.comparison(im)
     return _uri(path), _uri_im(cmp_im), scale, band, im.size
 
+
+# EDGE-SLICED NEIGHBOURS, taken from the cut rather than from a report. The figure behind the sheet's
+# edge-cut instruction was quoted as "19 crops" in one place and measured as 18 crops carrying 19 sliced
+# EDGES in another -- `p796:n0` is sliced on both sides. Two units, one number, used interchangeably;
+# the same shape as "five faults, four names". Both are rendered, both derived.
+EDGE = {x["span_id"]: x for x in flags.get("edge_sliced_neighbour", [])}
+EDGE_N_EDGES = sum(x["n_edges"] for x in EDGE.values())
+assert flags.get("edge_sliced_note"), "the cut carries no rule for the edge-slice population"
+assert not flags.get("edge_truncated_span"), \
+    "the cut found %d crop(s) where the SPAN itself is cut by the crop edge; the edge-cut instruction " \
+    "on this sheet is the wrong instruction for them" % len(flags.get("edge_truncated_span") or [])
 
 OVERFULL = {x["span_id"]: x for x in flags.get("runs_not_measurable", [])}
 assert all(x["lines_of_type"] > 1 for x in OVERFULL.values()),     "a span is listed as not-measurable without covering more than one line of type"
@@ -140,6 +179,14 @@ def badges(r):
                                  "its span is a redraw, not a reading question."
                     % (OVERFULL[r["span_id"]]["lines_of_type"],
                        ", ".join(str(x) for x in OVERFULL[r["span_id"]].get("bands", [])) or "measured at cut time")))
+    if r["span_id"] in EDGE:
+        # CARRIED BY THE ROW, NOT BY THE SECTION. Three of these spans are also over-full, so they are
+        # rendered in the first section; without a badge on the row, sorting them there would have HIDDEN
+        # the edge hazard from the signer, which is the sectioning turning into a filter.
+        out.append(("EDGE-CUT", "a word on this line is sliced by the %s crop edge and sits in the pad. "
+                                "It is not this span and it is not a whole word. Do not sign it; the "
+                                "note crop and the page link under the badges show what it is part of."
+                    % " and ".join(EDGE[r["span_id"]]["edges"])))
     if r.get("clip") and len(r["clip"]["word_runs"]) != len(r["crop"]["word_runs"]):
         out.append(("RECIPE", "PAD=12 resolves %d word run(s), band-clip %d -- the pair below is the "
                               "recipe question, and it is yours to call"
@@ -147,8 +194,32 @@ def badges(r):
     return out
 
 
-# Flagged rows first: they are decisions, and a decision at row 70 of 96 is a decision nobody makes.
-rows.sort(key=lambda r: (not badges(r), r["page"], r["note_index"], r["span_id"]))
+# THREE SECTIONS, DISJOINT, FIRST MATCH WINS, in the order Chris named them. The assignment is a
+# function of the derived populations only -- nothing is typed here -- and the three counts are asserted
+# to account for every span, so a span cannot fall between two sections or appear in both.
+SECTIONS = [
+    ("overfull", "Over-full boxes", lambda r: r["span_id"] in OVERFULL),
+    ("edge", "Edge-sliced neighbours", lambda r: r["span_id"] in EDGE),
+    ("clean", "Clean", lambda r: True),
+]
+
+
+def _section(r):
+    for key, _t, pred in SECTIONS:
+        if pred(r):
+            return key
+    raise AssertionError("no section claims %s" % r["span_id"])
+
+
+SEC = {r["span_id"]: _section(r) for r in rows}
+SEC_ROWS = {k: sorted([r for r in rows if SEC[r["span_id"]] == k],
+                      key=lambda r: (r["page"], r["note_index"], r["span_id"]))
+            for k, _t, _p in SECTIONS}
+assert sum(len(v) for v in SEC_ROWS.values()) == SET_N, \
+    "the three sections hold %d of %d spans -- a span is in none of them or in two" \
+    % (sum(len(v) for v in SEC_ROWS.values()), SET_N)
+assert len(SEC_ROWS["overfull"]) == len(OVERFULL), "the over-full section is not the over-full population"
+rows = SEC_ROWS["overfull"] + SEC_ROWS["edge"] + SEC_ROWS["clean"]
 
 CSS = """
 body{background:#14161a;color:#e6e6e6;font:13px/1.5 system-ui,Segoe UI,sans-serif;margin:0;padding:24px}
@@ -169,6 +240,14 @@ figcaption{color:#9aa;font-size:11px;margin-top:6px;max-width:460px}
 img{image-rendering:pixelated;background:#fff;display:block;margin-bottom:6px}
 .pair{outline:1px dashed #468;outline-offset:6px}
 .note{background:#1b2127;border-left:3px solid #468;padding:10px 14px;margin:14px 0}
+.badge.edgecut{background:#5a4a12;color:#fff3d0;border-color:#ca6}
+.links{margin:6px 0 4px;font-size:11px}
+button.fault{background:#2a1416;color:#ffd9d9;border:1px solid #a44;border-radius:3px;padding:3px 8px;
+ font:11px system-ui,sans-serif;cursor:pointer;margin-top:4px}
+button.fault.on{background:#a44;color:#fff;font-weight:700}
+#bar{position:fixed;right:14px;bottom:14px;background:#1b2127;border:1px solid #468;border-radius:4px;
+ padding:8px 12px;font-size:12px;z-index:9}
+h2 .cnt{color:#fff;background:#2a3a4a;border-radius:3px;padding:0 7px;margin-left:6px}
 """
 
 H = ['<!doctype html><meta charset="utf-8"><title>truth set %s - %d spans, candidate withheld</title>'
@@ -184,7 +263,11 @@ H.append('<div class="note"><b>What is deliberately missing.</b> The extractor&r
          'the candidate, once affirmed verbatim. Write what the pixels show, or abstain.<br>'
          '<b>What is present and is NOT a hint:</b> resolved column runs, counted from the ink by gaps '
          'rather than by recognising letters.<br>'
-         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it. <b>Do not sign a word that the crop edge cuts.</b> Measured on this set: the span&rsquo;s own ink never reaches a vertical edge, but in 19 crops a NEIGHBOURING word on the same line is sliced by the edge and sits in the pad. It is noise, not a span, and a fragment signed as a word is a wrong truth.</div>')
+         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it. <b>Do not sign a word that the crop edge cuts.</b> Measured on this set, by the rule the cut records: in <b>%d</b> crops a NEIGHBOURING word on the same line is sliced by a vertical crop edge and sits in the pad &mdash; <b>%d</b> sliced edges in all, since %s is cut on both sides. In <b>%d</b> crops is the span&rsquo;s OWN ink cut: edge ink never runs continuously across the box boundary, which is the measurement that could have shown otherwise. A sliced neighbour is noise, not a span, and a fragment signed as a word is a wrong truth. Every row carries a link to the note the box was drawn inside and to the native page, so a word that merely LOOKS truncated can be checked instead of guessed at.<br>'
+         '<b>If a crop holds no Hebrew at all, or nothing legible, do not sign it &mdash; press its button.</b> That records a fault against the box, which is a different fact from declining to sign, and the faults download as a file beside the signing skeleton. 23 spans have already been dropped from 96 for faults a script could measure; two of those were found by eye, because no script here can ask what SCRIPT the pixels are in.</div>'
+         % (len(EDGE), EDGE_N_EDGES,
+            " and ".join(sorted(x for x in EDGE if EDGE[x]["n_edges"] == 2)) or "no crop",
+            len(flags.get("edge_truncated_span") or [])))
 H.append('<table class="sum">'
          '<tr><td>spans</td><td><b>%d</b> on %d pages, 0 refused by the crop gate &mdash; the 96 set minus 20 spans at measured box faults (14 on the printed rule, 6 at the three duplicate boxes)</td></tr>'
          '<tr><td>band-clips</td><td>%s</td></tr>'
@@ -195,6 +278,13 @@ H.append('<table class="sum">'
          '<tr><td>NO-TYPE</td><td><b>%d</b> crop(s) hold no line of type at all &mdash; the box is on '
          'the printed rule: %s</td></tr>'
          '<tr><td>SHORT-BOX</td><td><b>%d</b>: %s</td></tr>'
+         '<tr><td>sections</td><td><b>%d</b> over-full &nbsp;&middot;&nbsp; <b>%d</b> edge-sliced shown '
+         'in section 2 (<b>%d</b> in the set; %d of those are also over-full and are in section 1) '
+         '&nbsp;&middot;&nbsp; <b>%d</b> clean</td></tr>'
+         '<tr><td>edge slices</td><td><b>%d</b> crop(s), <b>%d</b> sliced edge(s). Span itself cut: '
+         '<b>%d</b>.</td></tr>'
+         '<tr><td>note context</td><td><b>%d</b> of %d spans link to the note the box was drawn inside '
+         '(same PAD=%d recipe, containment asserted at cut time) and to the native page PNG. %s</td></tr>'
          '</table>'
          % (SET_N, len({r["page"] for r in rows}),
             ('applied: see the detail row below' if cut["clip"].get("applied_as_set_recipe") else
@@ -208,7 +298,14 @@ H.append('<table class="sum">'
             len(cut["clip"]["word_runs_differ"]), len(flags["duplicate_box"]),
             html.escape("; ".join(" = ".join(v) for v in flags["duplicate_box"].values())),
             len(NOTYPE), html.escape(", ".join(sorted(NOTYPE))),
-            len(SHORT), html.escape(", ".join(sorted(SHORT)))))
+            len(SHORT), html.escape(", ".join(sorted(SHORT))),
+            len(SEC_ROWS["overfull"]), len(SEC_ROWS["edge"]), len(EDGE),
+            len(set(EDGE) & set(OVERFULL)), len(SEC_ROWS["clean"]),
+            len(EDGE), EDGE_N_EDGES, len(flags.get("edge_truncated_span") or []),
+            cut["note_context"]["written"], SET_N, cut["note_context"]["pad_native_px"],
+            ("Every one derived." if not cut["note_context"]["faults"] else
+             "NOT derived for: %s &mdash; those rows link to the page only."
+             % html.escape(", ".join(sorted(cut["note_context"]["faults"]))))))
 
 assert not cut["clip"]["word_runs_regressed"], "a clip resolves fewer runs than its parent"
 assert SET_N == (cut["clip"]["written"] + cut["clip"]["no_trim"] + len(cut["clip"]["abstained_ids"])
@@ -219,9 +316,38 @@ assert cut["clip"].get("applied_as_set_recipe") or cut["clip"]["written"] == 0, 
 assert (cut["clip"]["written"] > 0) == any(r.get("clip") for r in rows), \
     "the clip count and the rows the sheet would render a clip for disagree"
 
-shown, nflag = {}, 0
+_both = sorted(set(EDGE) & set(OVERFULL))
+SECTION_HEAD = {
+    "overfull": '<h2>1 &middot; Over-full boxes <span class="cnt">%d</span></h2>'
+                '<div class="note">The box covers more than one line of type, so the crop holds a whole '
+                'extra line of print that is not this span. Each row is badged with the number of lines '
+                'its box covers, which is what tells you what &ldquo;all the Hebrew visible&rdquo; means '
+                'here. <b>Sign every Hebrew span you can see and nothing you cannot.</b> These boxes are '
+                'not redrawn: a hand-placed box in a localizer-placed set would change what the set '
+                'measures, so the box stays as the localizer drew it and the badge carries the '
+                'consequence.%s</div>'
+                % (len(SEC_ROWS["overfull"]),
+                   (" %d of these are ALSO edge-sliced (%s) and carry both badges."
+                    % (len(_both), ", ".join(_both))) if _both else ""),
+    "edge": '<h2>2 &middot; Edge-sliced neighbours <span class="cnt">%d</span></h2>'
+            '<div class="note">A word on the span&rsquo;s own line is sliced by a vertical crop edge and '
+            'sits in the pad. <b>Do not sign a word the crop edge cuts.</b> %d crops in the set carry a '
+            'sliced edge (%d edges in all); the %d also in section 1 are shown there with both badges. '
+            'The note crop and page links on each row are there for exactly this: a short word and a cut '
+            'word look the same inside the crop.</div>'
+            % (len(SEC_ROWS["edge"]), len(EDGE), EDGE_N_EDGES, len(_both)),
+    "clean": '<h2>3 &middot; Clean <span class="cnt">%d</span></h2>'
+             '<div class="note">One line of type in the box, no neighbour cut by a crop edge. Nothing '
+             'measured here needs a caveat &mdash; which is not a claim that the box is right, only that '
+             'no measurement this lane has says otherwise.</div>' % len(SEC_ROWS["clean"]),
+}
+
+shown, nflag, _cur = {}, 0, None
 for r in rows:
     sid = r["span_id"]
+    if SEC[sid] != _cur:
+        _cur = SEC[sid]
+        H.append(SECTION_HEAD[_cur])
     bg = badges(r)
     nflag += 1 if bg else 0
     u_nat, u_cmp, scale, band, size = _views(r["crop"]["path"])
@@ -236,8 +362,24 @@ for r in rows:
                 r["crop"]["word_runs"], r["crop"]["sha16"]))
     for name, why in bg:
         H.append('<span class="badge%s">%s</span><div class="why">%s</div>'
-                 % ({"RECIPE": " recipe", "NO-TYPE": " notype", "OVER-FULL": " overfull"}.get(name, ""), name,
+                 % ({"RECIPE": " recipe", "NO-TYPE": " notype", "OVER-FULL": " overfull",
+                     "EDGE-CUT": " edgecut"}.get(name, ""), name,
                     html.escape(why)))
+    # TWO LINKS OUT, BY PATH. The note the box was drawn inside, and the page it came off. A failure
+    # to derive the note is PRINTED on the row, because a missing link that looks like an absent link is
+    # how a narrowed view passes for a complete one.
+    nc = r.get("note_context")
+    H.append('<div class="links">')
+    if nc:
+        H.append('<a href="%s">note it was drawn in &mdash; %d&times;%d, %d line(s)%s</a> &nbsp;&middot;&nbsp; '
+                 % (_furl(nc["path"]), nc["size"][0], nc["size"][1], nc["lines_in_segment"],
+                    "" if nc["segment_held_the_span"] else ", FIRST segment of a stitched note"))
+    else:
+        H.append('<span class="why">no note crop derived: %s</span> &nbsp;&middot;&nbsp; '
+                 % html.escape(r.get("note_fault") or "unrecorded"))
+    H.append('<a href="%s">native page PNG, file p%d</a></div>' % (_furl(r["page_png"]), r["page"]))
+    H.append('<button class="fault" data-s="%s" onclick="mark(this)">not Hebrew / blank '
+             '&mdash; record a fault</button>' % html.escape(sid))
     H.append("</div><div>")
     pair = ' class="pair"' if any(n == "RECIPE" for n, _ in bg) else ""
     H.append('<figure%s><img src="%s" width="%d" height="%d"><img src="%s" width="%d" height="%d">'
@@ -263,6 +405,36 @@ for r in rows:
                 G.TARGET_BAND, scale))
     H.append("</div></div>")
 
+# A FAULT IS NOT AN ABSTAIN AND NOT A SIGNATURE. 23 of the 96 were dropped for faults a script could
+# measure; the last two were found by eye, because nothing here can ask what SCRIPT the pixels are in.
+# So the signer needs a way to say "there is nothing here to sign" that lands as a RECORD rather than as
+# an empty row, and it has to name the span and the pixels it was given -- the crop hash, so a re-cut
+# span cannot inherit the fault any more than it could inherit a signature.
+H.append('<div id="bar">faults recorded: <b id="fc">0</b> &nbsp;&middot;&nbsp; '
+         '<a id="dl" download="truthset_faults_%s.jsonl" href="#" style="display:none">download</a></div>'
+         % SET)
+H.append('<script>\n'
+         'var CH=%s, SETID=%s, F={};\n'
+         'function mark(b){var s=b.getAttribute("data-s");\n'
+         ' if(F[s]){delete F[s];b.className="fault";}else{F[s]=1;b.className="fault on";}\n'
+         ' upd();}\n'
+         'function upd(){var k=Object.keys(F).sort();\n'
+         ' document.getElementById("fc").textContent=k.length;\n'
+         ' var L=k.map(function(s){return JSON.stringify({span_id:s,crop_sha16:CH[s],\n'
+         '   fault:"not-hebrew-or-blank",basis:"human, from the pixels",set_sha16:SETID});}).join("\\n");\n'
+         ' var a=document.getElementById("dl");\n'
+         ' a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(L+(L?"\\n":""));\n'
+         ' a.style.display=k.length?"inline":"none";}\n'
+         '</script>' % (json.dumps({_s: shown[_s]["A2_spanbox"] for _s in sorted(shown)}),
+                        json.dumps(SET)))
+H.append('<h2>How to record a fault</h2><div class="sub">The button on a row records a fault against '
+         'that BOX &mdash; nothing legible, or nothing in the script this span is supposed to be in. It '
+         'is not an abstain and not a signature: &ldquo;there is nothing here to sign&rdquo; and &ldquo;I '
+         'will not sign this&rdquo; are different facts and the set needs the first one recorded. Press '
+         'as many as apply, then use <b>download</b> at the bottom right; it writes one line per fault, '
+         'each naming the span and the hash of the pixels you were shown, beside the signing skeleton. '
+         'The 23 spans already dropped took every non-legible crop that could be MEASURED, so this '
+         'should be empty or nearly so &mdash; it is here for the ones no measurement could find.</div>')
 H.append('<h2>How to record a signature</h2><div class="sub">A skeleton with one row per span, in this '
          'order, is written beside this sheet: <code>%s</code>. Each row has an '
          'empty LIST to fill from the pixels &mdash; one entry per span of Hebrew visible in that crop, '
@@ -271,8 +443,9 @@ H.append('<h2>How to record a signature</h2><div class="sub">A skeleton with one
          'cannot inherit an old signature. (The field is not named here on purpose: this file asserts '
          'that no candidate-derived field name appears in it, and that guard is worth more than the '
          'convenience of writing it out.)</div>' % SKEL_NAME)
-H.append('<div class="sub" style="margin-top:18px">Flagged rows: %d of %d, shown first. Sheet built '
-         'from <code>%s</code>.</div>' % (nflag, SET_N, CUT.name))
+H.append('<div class="sub" style="margin-top:18px">Flagged rows: %d of %d &mdash; no longer shown '
+         'first, but grouped into the three sections above, so what a row needs from you is stated '
+         'before you reach it. Sheet built from <code>%s</code>.</div>' % (nflag, SET_N, CUT.name))
 doc = "\n".join(H)
 by_id = {r["span_id"]: r for r in rows}
 assert set(by_id) >= set(shown), "a span is shown without a row to badge it from"
@@ -288,6 +461,46 @@ low = doc.lower()
 for k in FORBIDDEN_KEYS:
     assert ('"%s"' % k) not in low and (">%s<" % k) not in low, \
         "a candidate-derived field (%r) is named in the sheet" % k
+# THE SECTIONS, PROVED OVER THE RENDERED DOCUMENT. A section is a claim about which rows need which
+# judgement, so it is asserted where the signer reads it, not where it was computed.
+_pos = [doc.index(SECTION_HEAD[k]) for k, _t, _p in SECTIONS]
+assert all(doc.count(SECTION_HEAD[k]) == 1 for k, _t, _p in SECTIONS), \
+    "a section heading is rendered twice or not at all"
+assert _pos == sorted(_pos), "the sections are not rendered in the order they were named"
+for _i, (_k, _t, _p) in enumerate(SECTIONS):
+    _lo = _pos[_i]
+    _hi = _pos[_i + 1] if _i + 1 < len(_pos) else len(doc)
+    for _r in SEC_ROWS[_k]:
+        _at = doc.index("<b>%s</b>" % html.escape(_r["span_id"]))
+        assert _lo < _at < _hi, \
+            "%s is rendered outside the %s section it was assigned to" % (_r["span_id"], _k)
+assert doc.count(">EDGE-CUT<") == len(EDGE), \
+    "the sheet renders %d EDGE-CUT badges for %d edge-sliced crops" % (doc.count(">EDGE-CUT<"), len(EDGE))
+assert doc.count("record a fault</button>") == SET_N, \
+    "the fault button is on %d of %d rows" % (doc.count("record a fault</button>"), SET_N)
+
+# ---- NO NOTE-BOX PIXELS IN THIS FILE, AND A DETECTOR THAT CAN SEE THEM -----------------------------
+# The standing rule is that no note-box crop leaves the network. Chris asked for each span to link to its
+# full note crop (2026-10-04, "file:// is fine"), and a path is not pixels: this file stays free of note
+# pixels and the links resolve only on this machine. The old guard was the string "notebox", which these
+# crops do not contain -- a name check is not a pixel check, so the guard is now made over the BYTES.
+# A middle slice of the base64 is used, not a prefix: every PNG shares its header, so a prefix test would
+# fire on anything. LIVENESS FIRST -- the same construction must FIND the span crops, which are embedded
+# here on purpose. A probe that misses passes on nothing.
+def _mid64(p):
+    b = base64.b64encode(io.open(str(p), "rb").read()).decode("ascii")
+    return b[len(b) // 2:len(b) // 2 + 64]
+
+
+assert all(_mid64(r["crop"]["path"]) in doc for r in rows), \
+    "the embed detector cannot find the span crops, which ARE embedded in this document -- it would " \
+    "pass on a note crop too"
+_emb = [r["span_id"] for r in rows if r.get("note_context") and _mid64(r["note_context"]["path"]) in doc]
+assert not _emb, "note pixels are EMBEDDED in the sheet, not linked, for %s" % _emb
+_nolink = [r["span_id"] for r in rows
+           if r.get("note_context") and _furl(r["note_context"]["path"]) not in doc]
+assert not _nolink, "a note crop was derived at cut time and the sheet does not link it: %s" % _nolink
+assert all(_furl(r["page_png"]) in doc for r in rows), "a row does not link its native page PNG"
 assert "A1_notebox" not in doc and "notebox" not in low, "an A1 note-box crop is referenced"
 assert str(HAD.CROPDIR) not in doc, "the sheet points at the 19-span corpus instead of its own crops"
 # A BADGE THAT MISSES FLAGS NOTHING. The OVER-FULL population is the one thing on this sheet that
@@ -314,9 +527,30 @@ assert doc.count("<div class=\"row\">") == SET_N, \
 # signer that the box is over-full and to sign only what they can see, and a signature given
 # with that instruction is not the same record as one given without it. So the badges are in the
 # address.
+# AND IT MUST ADDRESS THE PROSE. Named as unfixed on 2026-10-04 and fixed the same day at Chris's
+# instruction: "put the prose rules in the sheet's address along with the badges." A reworded header used
+# to produce the same digest, and the header is where the signing rules live -- the edge-cut rule, the
+# over-full rule, what a fault means. A signature given under one wording is not a record of a signature
+# given under another. So the address covers the whole document with the image payloads stripped out,
+# which is everything the signer can READ. The strip is asserted to have hit every payload and only
+# payloads, so nothing silently leaves the address.
+#
+# CONSEQUENCE, NAMED: the subheader carries the commit the crops were cut at, so a new HEAD gives a new
+# sheet name even when the pixels and the words are identical. That is churn, not loss, and it is the
+# honest side of the trade -- the code that made the pixels is part of the task the signature records.
+# The clobber guard still compares crop hashes only, so it remains the pixel-level protection it was.
+PROSE = re.sub(r"data:image/png;base64,[A-Za-z0-9+/=]+", "<payload>", doc)
+assert doc.count("data:image/png;base64,") >= SET_N, \
+    "the payload pattern matches %d things in a document with %d rows -- it does not describe this file" \
+    % (doc.count("data:image/png;base64,"), SET_N)
+assert PROSE.count("<payload>") == doc.count("data:image/png;base64,"), \
+    "the payload strip hit %d of %d payloads" % (PROSE.count("<payload>"),
+                                                 doc.count("data:image/png;base64,"))
+assert "base64," not in PROSE, "a payload survived the strip and is inside the prose digest"
+PDIG = hashlib.sha256(PROSE.encode("utf-8")).hexdigest()[:8]
 sig = ";".join("%s:%s:%s:%s" % (s, shown[s]["A2_spanbox"], shown[s].get("A2_bandclip") or "-",
                                ",".join(n for n, _ in badges(by_id[s])) or "-")
-               for s in sorted(shown))
+               for s in sorted(shown)) + "|prose:" + PDIG
 DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
 OUT = HAD.DATA / ("truthset_sheet_%s_%dspan_%s.html" % (SET, len(shown), DIG))
 SIDE = OUT.with_suffix(".json")
@@ -339,8 +573,24 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "withheld": ["the extracted Hebrew", "the extractor's word count", "its nikud flag",
                         "the note text"],
            "asserted_over_bytes": ["no Hebrew/Greek/presentation forms", "no candidate-derived field "
-                                   "names", "no A1 note-box reference", "%d rows" % SET_N],
+                                   "names", "no A1 note-box reference",
+                                   "no note pixels EMBEDDED (byte test, with its liveness check against "
+                                   "the span crops that are)", "%d rows" % SET_N,
+                                   "three sections in order, every row inside the one it was assigned",
+                                   "one EDGE-CUT badge per edge-sliced crop",
+                                   "a fault button on every row",
+                                   "every derived note crop and every page PNG linked"],
+           "prose_digest": PDIG,
+           "address_covers": ["every crop hash", "every badge name per span",
+                              "the whole readable document (image payloads stripped)"],
+           "sections": {k: [r["span_id"] for r in SEC_ROWS[k]] for k, _t, _p in SECTIONS},
+           "edge_sliced": {"crops": len(EDGE), "edges": EDGE_N_EDGES,
+                           "also_over_full": sorted(set(EDGE) & set(OVERFULL)),
+                           "span_truncations": len(flags.get("edge_truncated_span") or [])},
+           "note_context": {"linked": sum(1 for r in rows if r.get("note_context")),
+                            "embedded": 0, "how": "file:// path, never a payload"},
            "badges": {"NO-TYPE": sorted(NOTYPE), "DUP-BOX": sorted(DUP), "SHORT-BOX": sorted(SHORT),
+                      "EDGE-CUT": sorted(EDGE),
                       "RECIPE": [d["span_id"] for d in cut["clip"]["word_runs_differ"]],
                       "OVER-FULL": sorted(OVERFULL)},
            "crop_sha16": shown},
@@ -351,6 +601,10 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
 # question. One reading per visible span, in printed order; an empty list with abstain set means the
 # pixels support none.
 skel = [{"span_id": s, "crop_sha16": shown[s], "readings": [], "abstain": False, "note": "",
+         "fault": "", "fault_means": "set to not-hebrew-or-blank when the crop holds nothing to sign. "
+                                     "A fault is about the BOX and is not an abstain: the sheet's "
+                                     "per-row button writes these lines for you",
+         "section": SEC[s],
          "readings_are": "one entry per span of Hebrew VISIBLE in this crop, in printed order; the crop may hold more than the span it was drawn for",
          "signed_from": "pixels, candidate withheld", "sheet": OUT.name} for s in sorted(shown)]
 sk = "\n".join(json.dumps(x, ensure_ascii=False) for x in skel) + "\n"
@@ -358,6 +612,11 @@ assert not READABLE.search(sk), "the signing skeleton carries readable script"
 io.open(str(SKEL), "w", encoding="utf-8").write(sk)
 
 print("sheet %s" % OUT.name)
+print("  sections: over-full %d, edge-sliced %d (of %d in the set, %d also over-full), clean %d"
+      % (len(SEC_ROWS["overfull"]), len(SEC_ROWS["edge"]), len(EDGE),
+         len(set(EDGE) & set(OVERFULL)), len(SEC_ROWS["clean"])))
+print("  note crops linked %d, embedded 0; page PNGs linked %d; prose digest %s"
+      % (sum(1 for r in rows if r.get("note_context")), SET_N, PDIG))
 print("  rows %d   flagged %d   clips shown %d   recipe pairs %d"
       % (SET_N, nflag, sum(1 for s in shown.values() if "A2_bandclip" in s),
          len(cut["clip"]["word_runs_differ"])))

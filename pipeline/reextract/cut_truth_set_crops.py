@@ -74,6 +74,8 @@ from PIL import Image                                                      # noq
 import numpy as np                                                         # noqa: E402
 import cv_footnote_presplit as ps                                          # noqa: E402
 import note_region                                                        # noqa: E402
+import note_line_region as NLR                                            # noqa: E402
+import assembler as ASM                                                   # noqa: E402
 import crop_quality                                                        # noqa: E402
 import hebrew_glyph_card as G                                              # noqa: E402
 import hebrew_aperture_diag as HAD                                        # noqa: E402
@@ -96,6 +98,29 @@ TRUTH = HAD.DATA / ("truth_set%d_%s.json" % (SET_N, SET))
 OUTDIR = HAD.DATA / ("truthset%d_crops_%s" % (SET_N, SET))
 OUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
 PAD = HAD.PAD
+
+# THE NOTE THE SPAN SITS IN, AT THE SAME RECIPE. Chris, 2026-10-04: "each span links to its full
+# note crop and to the native page PNG on disk, so I can check a truncated-looking word against the
+# page before applying the edge-cut rule." A span crop is 123x45 px of an 1900x5400 page; nobody can
+# tell a cut word from a short word inside it, and the sheet asks for exactly that judgement 18 times.
+#
+# The note region is re-derived from the SAME call the localizer made when it drew these boxes
+# (`draw_pool.py`: note_line_regions(strip, notes_on_page, book profile) -> regions[note_index-1]),
+# so the context crop is the note the box was placed INSIDE, not some other patch of page that
+# happens to contain it. That is asserted per span: the span's native rect must sit inside the note's.
+# A link that points at the wrong note is worse than no link, because it would be believed.
+#
+# Cut at PAD as well, so the note crop is a strict superset of the span crop in both axes rather
+# than a differently-cropped sibling. One recipe for the set includes the context crop.
+#
+# THESE ARE NOTE PIXELS AND THEY DO NOT LEAVE THE MACHINE. The standing rule is that no note-box
+# crop leaves the network; it is about what is SENT and what is embedded in a portable file. The
+# sheet links these by path (file://) and never embeds them, and `truth_set_sheet.py` asserts that
+# over the bytes it writes -- the note crop's own base64 must not appear in the document. Nothing
+# here is an outbound aperture: it is not named A1_notebox, it is not in APERTURES, and no sender
+# reads this field.
+PROFILE = ASM.load_profile(os.path.join(_HERE, "book_profile.gill.yaml"))
+assert PROFILE, "no book profile -- note_line_regions would take None and die on .get"
 
 # The column-run convention, taken from the pad probe unchanged so the two runs are comparable: a word
 # run is a maximal inked column range separated by >= GAP_MIN empty columns and at least RUN_MIN wide.
@@ -225,7 +250,7 @@ def clip_rows(im, n_rects):
 
 
 OUTDIR.mkdir(parents=True, exist_ok=True)
-built, page_cache, faults, clip_faults = [], {}, {}, {}
+built, page_cache, faults, clip_faults, region_cache = [], {}, {}, {}, {}
 for r in rows:
     pg, sid, box = r["page"], r["span_id"], r["box"]
     if pg not in page_cache:
@@ -273,6 +298,49 @@ for r in rows:
                    "band_overshoot_px": [x.get("band_overshoot_px") for x in rects],
                    "ink_px": int(sum(prof)), "ink_rows": int(sum(1 for v in prof if v)),
                    "word_runs": word_runs(im)}
+
+    # The note the box was placed inside, and the page it came off. Both are LOCAL paths for the
+    # signer; neither is an aperture. A failure to derive the note is NAMED, never silent: a row
+    # with no context link and no reason is a row where the sheet quietly shows less.
+    nkey = (pg, r["notes_on_page"])
+    if nkey not in region_cache:
+        region_cache[nkey] = NLR.note_line_regions(strip, r["notes_on_page"], PROFILE)
+    regions, rst = region_cache[nkey]
+    rec["note_context"], rec["note_fault"] = None, ""
+    rec["page_png"] = str(HAD.IMG / ("page%d_image1.png" % pg))
+    if regions is None:
+        rec["note_fault"] = "page-abstain:" + rst
+    elif not (0 <= r["note_index"] - 1 < len(regions)):
+        rec["note_fault"] = "note-idx-oob:%d-of-%d" % (r["note_index"], len(regions))
+    else:
+        reg = regions[r["note_index"] - 1]
+        # A STITCHED note is two rectangles in two columns and never one spanning box. Take the
+        # segment whose own lines hold the span's top edge; falling back to the first segment is
+        # recorded, not assumed, because a fallback that looks like a hit is the whole failure class.
+        seg = next((sg for sg in reg["segments"]
+                    if any(y0 <= box[1] <= y1 for y0, y1 in sg["lines"])), None)
+        held = seg is not None
+        seg = seg or reg["segments"][0]
+        nx1 = min(seg["x1"], (r["band_w"] or (seg["x1"] + 1)) - 1)
+        nsb = (0, seg["lines"][0][0], nx1, seg["lines"][-1][1])
+        try:
+            nim, nrects = HAD._native_crop(native, nsb, info, bands, PAD)
+        except ValueError as e:
+            nim, nrects = None, []
+            rec["note_fault"] = "map-error:%s" % e
+        if nim is None:
+            rec["note_fault"] = rec["note_fault"] or "no-rect"
+        else:
+            npath = OUTDIR / ("%s_notecontext.png" % sid.replace(":", "_"))
+            nim.save(str(npath))
+            rec["note_context"] = {
+                "path": str(npath), "size": list(nim.size),
+                "sha16": hashlib.sha256(npath.read_bytes()).hexdigest()[:16],
+                "strip_box": list(nsb), "native_rects": [x["box"] for x in nrects],
+                "lines_in_segment": len(seg["lines"]), "segments_in_note": len(reg["segments"]),
+                "segment_held_the_span": held, "pad_native_px": PAD,
+                "derived_by": "note_line_region.note_line_regions(strip, notes_on_page, book "
+                              "profile)[note_index-1] -- the same call that placed the box"}
 
     cand, why = clip_rows(im, len(rects)) if CLIP_AS_SET_RECIPE else (None, NOT_ATTEMPTED)
     rec["clip_abstain"] = why
@@ -406,6 +474,74 @@ assert floor_margin["empty_band_px"] is None or floor_margin["empty_band_px"] >=
     ("the empty band around the floor is only %dpx wide on this population -- Lane A2 measured a 4px "
      "empty band that turned out to be a sampling hole, so this is too narrow to call a gap"
      % floor_margin["empty_band_px"])
+# ---- the note-context link, accounted for and PROVED to point at the right note -----------------
+note_faults = {b["span_id"]: b["note_fault"] for b in cut if b.get("note_fault")}
+assert all(bool(b.get("note_context")) != bool(b.get("note_fault")) for b in cut), \
+    "a row carries both a note-context crop and a reason it has none, or neither"
+n_note = sum(1 for b in cut if b.get("note_context"))
+assert n_note + len(note_faults) == len(cut), \
+    "note-context crops (%d) plus named failures (%d) do not account for the %d cut spans" \
+    % (n_note, len(note_faults), len(cut))
+# CONTAINMENT. The only thing that makes this link trustworthy is that the span is INSIDE the note
+# it points at. Asserted over the recorded native rectangles, per span, every run.
+for b in cut:
+    nc = b.get("note_context")
+    if not nc:
+        continue
+    nr = nc["native_rects"][0]
+    for q in b["crop"]["native_rects"]:
+        assert nr[0] <= q[0] and nr[1] <= q[1] and nr[2] >= q[2] and nr[3] >= q[3], \
+            ("%s: the note-context crop %s does not contain the span rect %s, so the link would "
+             "show the signer a DIFFERENT note from the one the box was drawn in" % (b["span_id"], nr, q))
+assert all(os.path.exists(b["note_context"]["path"]) for b in cut if b.get("note_context")), \
+    "a note-context crop is recorded and not on disk"
+assert all(os.path.exists(b["page_png"]) for b in cut), "a page PNG path does not exist on disk"
+
+# ---- EDGE-SLICED NEIGHBOURS, DERIVED. The sheet tells the signer not to sign a word the crop edge
+# cuts, and the population behind that instruction was a figure in a report ("19 sliced neighbours").
+# A section heading quoting a number nobody re-measures is the defect this lane keeps finding, so it
+# is measured here, with its rule stated, and both units reported -- 18 CROPS carrying 19 sliced
+# EDGES on the 76 set, `p796:n0` sliced on both sides. The two numbers were used interchangeably.
+#
+# The rule: ink on the crop's own left or right column, within the span's line band. The box is
+# inset from the crop edge by PAD, so anything touching a vertical crop edge is by construction NOT
+# the box's own ink -- it is a neighbour on the same line sitting in the pad.
+# The companion measurement is the one that makes "0 truncations of the span" a FACT rather than a
+# reassurance: edge ink that runs CONTINUOUSLY from the crop edge across the box boundary would be
+# the span's own word cut off. A claim about one population needs the test that could falsify it.
+def _edge_slices(path):
+    im = Image.open(path).convert("L")
+    a = np.asarray(im) < INK_THR
+    _h, w = a.shape
+    b0, b1 = G.line_band(im)                     # y1 EXCLUSIVE
+    return [side for side, col in (("left", 0), ("right", w - 1)) if a[b0:b1, col].any()]
+
+
+def _edge_truncations(path):
+    im = Image.open(path).convert("L")
+    a = np.asarray(im) < INK_THR
+    _h, w = a.shape
+    if w <= 2 * PAD:
+        return []
+    b0, b1 = G.line_band(im)
+    out = []
+    for side, cols in (("left", list(range(0, PAD + 1))),
+                       ("right", list(range(w - 1 - PAD, w)))):
+        if any(a[y, cols].all() for y in range(b0, b1)):
+            out.append(side)
+    return out
+
+
+edge_sliced = [{"span_id": b["span_id"], "edges": e, "n_edges": len(e)}
+               for b in cut for e in [_edge_slices(b["crop"]["path"])] if e]
+edge_truncated = [{"span_id": b["span_id"], "edges": t}
+                  for b in cut for t in [_edge_truncations(b["crop"]["path"])] if t]
+assert not edge_truncated, \
+    ("%d crop(s) have ink running continuously from the crop edge across the box boundary -- the "
+     "SPAN is cut, not a neighbour, and the sheet's edge-cut instruction is the wrong one for them: "
+     "%s" % (len(edge_truncated), edge_truncated))
+assert all(0 < x["n_edges"] <= 2 for x in edge_sliced), "an edge-slice row counts no edge or three"
+
 _meas = [b for b in cut if _lines_of_type(b) <= 1]
 assert len(_meas) + len(blind) == len(cut), "every crop is either measurable or named as blind"
 over = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in _meas
@@ -430,6 +566,18 @@ GEOM_FLAGS = {
     "box_shorter_note": "the unpadded box is thinner than MIN_BAND_PX, the lane's derived floor for an "
                         "ink run to be a line of type at all -- so the box cannot hold a word of this "
                         "fount whatever the crop looks like",
+    "edge_sliced_neighbour": edge_sliced,
+    "edge_sliced_note": "ink on the crop's own left or right column within the span's line band. "
+                        "The box is inset from the crop edge by PAD=%d native px, so edge ink is "
+                        "never the box's own -- it is a neighbouring word on the same line, sliced "
+                        "by the crop edge and sitting in the pad. Reported in BOTH units because "
+                        "they were used interchangeably once: %d CROPS carrying %d sliced EDGES. "
+                        "Companion measurement, which is what makes the other half of the claim "
+                        "checkable: %d crop(s) have edge ink running CONTINUOUSLY across the box "
+                        "boundary, i.e. the span's own word cut off rather than a neighbour."
+                        % (PAD, len(edge_sliced), sum(x["n_edges"] for x in edge_sliced),
+                           len(edge_truncated)),
+    "edge_truncated_span": edge_truncated,
     "runs_exceed_words": over, "runs_below_words": under,
     "runs_not_measurable": blind,
     "runs_not_measurable_note": "the crop shown for these holds more than one line of type, and a "
@@ -464,6 +612,15 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},
        "crop_dir": str(OUTDIR), "faults": faults, "clip_faults": clip_faults,
        "floor_margin": floor_margin,
+       "note_context": {"written": n_note, "faults": note_faults,
+                        "pad_native_px": PAD,
+                        "source": "note_line_region.note_line_regions(strip, notes_on_page, book "
+                                  "profile)[note_index-1], the call that placed the box",
+                        "containment_asserted": "the span's native rect lies inside the note's",
+                        "outbound": False,
+                        "why_not_an_aperture": "local context for the human signer. Linked by path "
+                                               "from the sheet, never embedded in it, and asserted "
+                                               "so over the sheet's bytes. No sender reads it."},
        "stale_clips_swept": _stale,
        "clip": {"applied_as_set_recipe": CLIP_AS_SET_RECIPE,
                 "written": len(clipped), "no_trim": sum(1 for b in cut if b["clip_abstain"].startswith("no-trim")),
@@ -520,6 +677,10 @@ print("word runs DIFFER on %d span(s): %s"
 print("word runs REGRESSED (clip resolves fewer): %s" % (regressed or "none"))
 print("NO LINE OF TYPE (box on a rule): %d  %s"
       % (len(rule_only), [x["span_id"] for x in rule_only]))
+print("note context: %d of %d spans linked to the note the box was drawn in (PAD=%d, containment asserted)%s"
+      % (n_note, len(cut), PAD, "" if not note_faults else "   NOT DERIVED: %s" % note_faults))
+print("edge-sliced neighbours: %d crop(s) carrying %d sliced edge(s); span truncations %d"
+      % (len(edge_sliced), sum(x["n_edges"] for x in edge_sliced), len(edge_truncated)))
 print("geometry flags: duplicate-box groups %d %s   box shorter than a line %s"
       % (len(dup), list(dup.values()) or "", [x["span_id"] for x in short] or "none"))
 print("resolved runs vs claimed words (single-line crops only, n=%d of %d): more %d  fewer %d  equal %d"
