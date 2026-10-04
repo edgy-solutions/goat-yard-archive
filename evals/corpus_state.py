@@ -157,6 +157,131 @@ def _live_fingerprint(url: str, include_vectors: bool) -> Dict[str, Any]:
     return fp
 
 
+REREAD_KEYS = ("available", "unavailable_reason", "weaviate_url", "include_vectors",
+               "requested", "per_object", "read_faults", "seconds")
+
+
+def reread_state(uuids, url: Optional[str] = None, include_vectors: bool = True,
+                 _reread=None) -> Dict[str, Any]:
+    """Re-read the NAMED read-faulted objects after the run, READ-ONLY, and digest them exactly
+    the way the two samples were digested -- by handing fingerprint_rest's own 3-tuples to
+    corpus_fingerprint.fingerprint(). Not one line of digest arithmetic is restated here, because a
+    re-read computed differently would mismatch the stored sample on the arithmetic and look like
+    the very corruption it is trying to rule out.
+
+    `_reread(url, uuids, include_vectors) -> {uuid: {text, vec, dim, last_update_ms}}` is
+    injectable for born-tests, same pattern as `corpus_state`'s `_fingerprint`.
+    """
+    uuids = list(uuids or [])
+    if url is None:
+        url, reason = resolve_corpus_url()
+        if reason:
+            return {"available": False, "unavailable_reason": reason, "weaviate_url": None,
+                    "include_vectors": include_vectors, "requested": uuids,
+                    "per_object": None, "read_faults": None, "seconds": None}
+    fn = _reread or _live_reread
+    t0 = time.perf_counter()
+    faults: list = []
+    try:
+        per_object = fn(url, uuids, include_vectors)
+    except Exception as exc:
+        return {"available": False,
+                "unavailable_reason": (UNAVAILABLE + "reread-failed:" + type(exc).__name__
+                                       + ": " + str(exc)[:160]),
+                "weaviate_url": url, "include_vectors": include_vectors, "requested": uuids,
+                "per_object": None, "read_faults": None, "seconds": None}
+    if isinstance(per_object, tuple):          # (per_object, faults) from the live reader
+        per_object, faults = per_object
+    return {"available": True, "unavailable_reason": None, "weaviate_url": url,
+            "include_vectors": bool(include_vectors), "requested": uuids,
+            "per_object": dict(per_object or {}), "read_faults": list(faults or []),
+            "seconds": round(time.perf_counter() - t0, 1)}
+
+
+def _live_reread(url: str, uuids, include_vectors: bool):
+    """The real by-uuid read. Lazily imported for the same reason as `_live_fingerprint`."""
+    import sys
+    from pathlib import Path
+    backend = Path(__file__).resolve().parent.parent / "backend"
+    if str(backend) not in sys.path:
+        sys.path.insert(0, str(backend))
+    import corpus_fingerprint as CF
+    import fingerprint_rest as FR
+    faults: list = []
+    fp = CF.fingerprint(FR.fetch_objects(url, uuids, include_vector=include_vectors,
+                                         faults=faults),
+                        {}, ingestion_sha=os.getenv("INGESTION_SHA"))
+    return fp.get("per_object") or {}, faults
+
+
+# The fields a re-read must reproduce for an object to count as unchanged. `last_update_ms` is
+# included on purpose: if it moved between the end sample and the re-read, something WROTE, which
+# is the opposite of the finding this check exists to confirm.
+REREAD_COMPARE_FIELDS = ("text", "vec", "dim", "last_update_ms")
+
+
+def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[str, Any]:
+    """Did a post-run re-read confirm that the read-faulted objects never actually changed?
+
+    `confirms` is True ONLY when every named uuid came back and matched the AT_START sample on
+    every field in REREAD_COMPARE_FIELDS. Matching the END sample would prove nothing -- the end
+    sample is the one suspected of being misread.
+
+    Every other outcome is a typed non-confirmation, and each is kept distinct because they are
+    distinct findings: no re-read was attempted, the re-read itself could not be read, there is no
+    baseline to compare against, an object did not come back, or an object came back DIFFERENT --
+    and that last one is the only one of the five that is evidence of a real write.
+    """
+    base = {"confirms": False, "status": None, "checked": list(read_fault_uuids or []),
+            "matched": [], "differing": [], "missing": [], "detail": None}
+    if not base["checked"]:
+        base["status"] = "not-needed"
+        base["detail"] = "no read-faulted objects to re-read"
+        return base
+    if reread is None:
+        base["status"] = "not-attempted"
+        base["detail"] = ("no post-run re-read was performed, so the read fault is unconfirmed "
+                          "and this arm stays provisional")
+        return base
+    if not reread.get("available"):
+        base["status"] = "unavailable"
+        base["detail"] = ("the re-read itself could not be performed: "
+                          + str(reread.get("unavailable_reason")))
+        return base
+    start_po = at_start.get("per_object")
+    if not start_po:
+        base["status"] = "no-baseline"
+        base["detail"] = ("the start sample carries no per_object map, so there is nothing for a "
+                          "re-read to match against")
+        return base
+    got = reread.get("per_object") or {}
+    for u in base["checked"]:
+        if u not in got:
+            base["missing"].append(u)
+            continue
+        a, c = start_po.get(u) or {}, got[u] or {}
+        if all(a.get(f) == c.get(f) for f in REREAD_COMPARE_FIELDS):
+            base["matched"].append(u)
+        else:
+            base["differing"].append(u)
+    if base["differing"]:
+        base["status"] = "differs"
+        base["detail"] = (str(len(base["differing"])) + " re-read object(s) do NOT match the start "
+                          "sample (" + _named(base["differing"]) + ") -- that is evidence of a "
+                          "real write, not a bad read; this arm stays provisional")
+    elif base["missing"]:
+        base["status"] = "missing"
+        base["detail"] = (str(len(base["missing"])) + " object(s) could not be re-read ("
+                          + _named(base["missing"]) + "), so nothing was confirmed")
+    else:
+        base["status"] = "confirmed"
+        base["confirms"] = True
+        base["detail"] = ("all " + str(len(base["matched"])) + " read-faulted object(s) were "
+                          "re-read after the run and match the start sample on "
+                          + "+".join(REREAD_COMPARE_FIELDS))
+    return base
+
+
 def _classify_change(fp_a: Dict[str, Any], fp_b: Dict[str, Any]) -> Dict[str, Any]:
     """Lazy-imported wrapper over corpus_fingerprint.classify_change (same import pattern as
     `_live_fingerprint`), shared by `corpus_changed` and `corpus_run_block`."""
@@ -238,7 +363,8 @@ def corpus_changed(at_start: Dict[str, Any], at_end: Dict[str, Any]) -> Tuple[Op
 
 
 def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
-                     skipped: bool = False) -> Dict[str, Any]:
+                     skipped: bool = False,
+                     reread: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The `integrity.corpus` block, shaped like `integrity.git` and for the same reason: a function
     so the comparison can be born-tested. Asserting that the SOURCE mentions changed_during_run
     proves nothing about whether it is ever True."""
@@ -255,7 +381,20 @@ def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
         cls = _attributable_classification(at_start, at_end)
         if cls is not None:
             read_fault_uuids = cls["read_fault"]
-    provisional = bool(skipped or changed or changed is None)
+    # `provisional` is narrowed to ATTRIBUTABLE change (ruling, 2026-10-04). A difference that
+    # classify_change attributes to a BAD READ -- digest moved, last_update_ms did not -- no longer
+    # makes an arm uncitable BY ITSELF, because the transport produces that on nearly every run and
+    # a permanent uncitable flag is an instrument that has stopped discriminating.
+    #
+    # The condition that makes this a narrowing and not a loosening: the named objects must be
+    # RE-READ after the run and still match the AT_START sample. That turns "we failed to read two
+    # objects" into "we failed once, re-read, and they had not changed", which is verified rather
+    # than hopeful. No re-read, a failed re-read, or a re-read that DIFFERS -> still provisional.
+    rr = reread_verdict(at_start, read_fault_uuids, reread)
+    read_fault_only = changed is None and bool(read_fault_uuids)
+    reread_confirmed = bool(read_fault_only and rr["confirms"])
+    provisional = bool(skipped or changed is True or (changed is None and not reread_confirmed))
+    caveats: list = []
     note = ("changed_during_run is three-state: None means at least one sample could not be "
             "read, NOT that the corpus held still. A change is a violation (the measurement is "
             "of a moving target); an unread corpus is provisional only (it cannot be cited, but "
@@ -263,8 +402,17 @@ def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
     if read_fault_uuids:
         note += (" " + str(len(read_fault_uuids)) + " object(s) (" +
                  _named(read_fault_uuids) + ") differ only by a bad read, not a corpus "
-                 "change -- this is PROVISIONAL, not a violation; the remedy is a RE-READ, "
-                 "never a re-ingest.")
+                 "change; the remedy is a RE-READ, never a re-ingest.")
+        note += " Re-read verdict: " + str(rr["status"]) + " -- " + str(rr["detail"]) + "."
+    if reread_confirmed:
+        # A caveat, not a violation and not silence. The arm is citable AND the reader is told
+        # exactly which objects were misread and on what evidence that was decided.
+        caveats.append(
+            "READ-FAULT CAVEAT: " + str(len(read_fault_uuids)) + " object(s) (" +
+            _named(read_fault_uuids) + ") were misread during this run -- their digests moved "
+            "while last_update_ms held still. They were re-read after the run and match the "
+            "start sample, so nothing was written and this arm is citable. The corpus comparison "
+            "for these objects rests on the re-read, not on the end sample.")
     return {
         "at_start": at_start,
         "at_end": at_end,
@@ -274,6 +422,9 @@ def corpus_run_block(at_start: Dict[str, Any], at_end: Dict[str, Any],
         "provisional": provisional,
         "violations": violations,
         "read_fault_uuids": read_fault_uuids,
+        "reread": rr,
+        "reread_confirmed": reread_confirmed,
+        "caveats": caveats,
         "note": note,
     }
 

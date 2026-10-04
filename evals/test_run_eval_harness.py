@@ -833,7 +833,7 @@ def _corpus(content="a" * 64, vector="b" * 64, chunks=7294):
             "n_vectors_hashed": chunks, "seconds": 1.0}
 
 
-def _run_main(responses, ids, corpus=None, fingerprint="skip"):
+def _run_main(responses, ids, corpus=None, fingerprint="skip", reread=None):
     """Drive RE.main offline.
 
     `fingerprint` defaults to "skip" because the default ("vectors") reads the live Weaviate
@@ -857,6 +857,14 @@ def _run_main(responses, ids, corpus=None, fingerprint="skip"):
             raise AssertionError("the offline suite must not read the live corpus")
 
         RE.corpus_state = _refuse
+    orig_rr = RE.reread_state
+    if reread is not None:
+        RE.reread_state = lambda uuids, **kw: dict(reread, requested=list(uuids))
+    else:
+        def _refuse_rr(*a, **kw):
+            raise AssertionError("the offline suite must not re-read the live corpus")
+
+        RE.reread_state = _refuse_rr
     try:
         rc = RE.main(["--endpoint", "http://x/api/search", "--output-dir", str(out),
                       "--ids"] + ids + ["--runs", "1", "--no-warmup", "--allow-dirty-tree",
@@ -866,6 +874,7 @@ def _run_main(responses, ids, corpus=None, fingerprint="skip"):
     finally:
         RE.call_endpoint = orig
         RE.corpus_state = orig_cs
+        RE.reread_state = orig_rr
     return rc, out, stub
 
 
@@ -1509,6 +1518,7 @@ def _run_main_with_warmup(responses, ids, extra_argv=()):
         raise AssertionError("the offline suite must not read the live corpus")
 
     RE.corpus_state = _refuse
+    orig_rr, RE.reread_state = RE.reread_state, _refuse
     try:
         rc = RE.main(["--endpoint", "http://x/api/search", "--output-dir", str(out),
                       "--ids"] + list(ids) + ["--runs", "1", "--allow-dirty-tree",
@@ -1516,6 +1526,7 @@ def _run_main_with_warmup(responses, ids, extra_argv=()):
     finally:
         RE.call_endpoint = orig
         RE.corpus_state = orig_cs
+        RE.reread_state = orig_rr
     return rc, out, stub
 
 
@@ -1655,7 +1666,87 @@ def test_the_warmup_query_is_not_one_of_the_scored_questions():
     assert RE.WARMUP_QUERY.strip().lower() not in queries, RE.WARMUP_QUERY
 
 
-EXPECTED_TESTS = 149
+EXPECTED_TESTS = 152
+
+# --- the post-run re-read of read-faulted objects (ruling, 2026-10-04) --------------------
+
+_RF_GOOD = {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}
+_RF_BAD = {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500}
+
+
+def _rf_pair():
+    """Two samples whose only difference is a vector digest at an UNCHANGED timestamp -- a bad
+    read, which is what the transport produces on nearly every real run."""
+    def _with(po):
+        st = _corpus()
+        st.update({"per_object": {"u1": dict(po)}, "per_object_complete": True})
+        return st
+
+    return _with(_RF_GOOD), _with(_RF_BAD)
+
+
+def test_the_consumer_RE_READS_read_faulted_objects_and_the_arm_is_then_citable():
+    # LOAD-BEARING on the WIRING, not on the policy: corpus_state owns the verdict, but if main()
+    # never calls reread_state, the verdict can only ever be "not-attempted" and every run with a
+    # bad read stays permanently uncitable. `reread.status == "confirmed"` below is only reachable
+    # if the stub was actually called, so that assertion is what proves the wiring exists.
+    a, b = _rf_pair()
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"], corpus=[a, b],
+                              fingerprint="vectors",
+                              reread={"available": True, "unavailable_reason": None,
+                                      "weaviate_url": "10.0.0.1:80", "include_vectors": True,
+                                      "requested": ["u1"],
+                                      "per_object": {"u1": dict(_RF_GOOD)},
+                                      "read_faults": [], "seconds": 0.1})
+    c = _summary(out)["integrity"]["corpus"]
+    assert c["read_fault_uuids"] == ["u1"], c["read_fault_uuids"]
+    assert c["reread"]["status"] == "confirmed", c["reread"]
+    assert c["reread_confirmed"] is True, c["reread"]
+    assert c["provisional"] is False, c
+    assert c["violations"] == [], c["violations"]
+    assert rc == 0, rc
+    # citable is not silent: the misread objects are named where a human reads the result.
+    assert len(c["caveats"]) == 1, c["caveats"]
+    assert "u1" in c["caveats"][0], c["caveats"][0]
+
+
+def test_a_reread_that_fails_leaves_the_arm_provisional_and_still_exits_zero():
+    # The asymmetry the corpus axis is built on, at the far end of the wiring: an unconfirmed read
+    # fault cannot be cited, and also must not fail a run whose answers were really scored.
+    a, b = _rf_pair()
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"], corpus=[a, b],
+                              fingerprint="vectors",
+                              reread={"available": False,
+                                      "unavailable_reason": "unavailable:reread-failed:ReadError",
+                                      "weaviate_url": "10.0.0.1:80", "include_vectors": True,
+                                      "requested": ["u1"], "per_object": None,
+                                      "read_faults": None, "seconds": None})
+    c = _summary(out)["integrity"]["corpus"]
+    assert c["reread"]["status"] == "unavailable", c["reread"]
+    assert c["provisional"] is True, c
+    assert c["caveats"] == [], c["caveats"]
+    assert c["violations"] == [], c["violations"]
+    assert rc == 0, rc
+
+
+def test_the_report_renders_the_read_fault_caveat_and_does_NOT_call_the_run_clean():
+    # A report that renders the pass rate while swallowing the caveat is the same defect as one
+    # that swallows the provisional flag -- the arm is citable, and the reader has to be told on
+    # what evidence.
+    a, b = _rf_pair()
+    block = RE.corpus_run_block(a, b, reread={"available": True,
+                                              "per_object": {"u1": dict(_RF_GOOD)}})
+    summary = {"integrity": {"violations": [],
+                             "git": {"at_start": {"head": "0" * 16, "dirty": False},
+                                     "at_end": {"head": "0" * 16, "dirty": False},
+                                     "changed_during_run": False, "provisional": False},
+                             "corpus": block}}
+    txt = "".join(RE.integrity_report_lines(summary))
+    assert "THIS RUN IS PROVISIONAL" not in txt, txt
+    assert "Clean on both axes" not in txt, txt
+    assert "MISREAD" in txt, txt
+    assert "CAVEAT" in txt and "u1" in txt, txt
+
 
 if __name__ == "__main__":
     passed = failed = 0

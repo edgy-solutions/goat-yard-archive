@@ -103,6 +103,47 @@ def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None):
                                                   "last_update_ms": o.get("lastUpdateTimeUnix")}
         after = objs[-1]["id"]
 
+def fetch_objects(ip, uuids, include_vector=True, faults=None):
+    """Re-read NAMED objects by uuid, yielding the SAME (props, vector, meta) 3-tuples as
+    stream_chunks so a caller can feed them to the same corpus_fingerprint.fingerprint() and get
+    digests computed identically. A re-read whose digests were computed any other way would
+    mismatch the stored sample on the arithmetic rather than on the data.
+
+    Why this exists: a vector digest that moved while lastUpdateTimeUnix held still is a BAD READ,
+    not a corpus change, and the remedy for a bad read is to read again. The scored-run integrity
+    block may only downgrade such a difference to a caveat if the named objects are re-read and
+    still match the start sample -- so the re-read has to be a real, separate fetch of those uuids.
+
+    Two URL shapes are tried in order (class-scoped, then bare id) because this file is deliberately
+    robust across engine versions. An object that cannot be read at all is NOT yielded and is NOT
+    substituted with anything: the caller detects it by absence and keeps its arm provisional. Every
+    failure is appended to `faults`.
+    """
+    inc = "?include=vector" if include_vector else ""
+    for u in uuids:
+        obj = None
+        for path in ("CommentaryChunk/%s" % u, "%s" % u):
+            url = f"http://{ip}/v1/objects/{path}{inc}"
+            try:
+                r = _fetch_page(url, faults)
+            except Exception as e:
+                if faults is not None:
+                    faults.append({"kind": "reread_failed", "uuid": u, "url": url,
+                                   "error": repr(e)[:200]})
+                continue
+            # A Weaviate 404 is a parseable JSON error body, not an exception, so the shape of the
+            # response -- not the absence of a raise -- is what says whether an object came back.
+            if isinstance(r, dict) and r.get("id") and r.get("properties") is not None:
+                obj = r
+                break
+            if faults is not None:
+                faults.append({"kind": "reread_not_an_object", "uuid": u, "url": url,
+                               "body_head": str(r)[:160]})
+        if obj is None:
+            continue
+        yield (obj.get("properties", {}), _extract_vector(obj),
+               {"id": obj.get("id"), "last_update_ms": obj.get("lastUpdateTimeUnix")})
+
 def counts(ip):
     q = lambda cls: httpx.post(f"http://{ip}/v1/graphql", json={"query": "{Aggregate{%s{meta{count}}}}" % cls},
                                timeout=30).json()["data"]["Aggregate"][cls][0]["meta"]["count"]

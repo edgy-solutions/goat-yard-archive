@@ -74,7 +74,8 @@ from degradation import (  # noqa: E402
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from corpus_state import corpus_run_block, corpus_state, unavailable_state  # noqa: E402
+from corpus_state import (corpus_run_block, corpus_state,  # noqa: E402
+                          reread_state, unavailable_state)
 
 # Degradation reasons this harness assigns itself (the backend assigns the rest).
 DEGRADED_HARNESS_TIMEOUT = "harness_read_timeout"
@@ -475,8 +476,17 @@ def integrity_report_lines(summary: dict) -> List[str]:
     if provisional:
         out.append("> **THIS RUN IS PROVISIONAL.** It may withdraw an earlier claim but asserts "
                    "nothing new, and it cannot be cited in an ADR or a tier change.\n\n")
+    elif corpus.get("caveats"):
+        # Citable, but not "clean": the corpus comparison for the named objects rests on a
+        # post-run re-read rather than on the end sample, and a report that renders the pass rate
+        # while swallowing that is the same defect as one that swallows the provisional flag.
+        out.append("Code did not move. The corpus did not move either, but %d of its objects "
+                   "were MISREAD during the run -- see the caveat below.\n\n"
+                   % len(corpus.get("read_fault_uuids") or []))
     else:
         out.append("Clean on both axes: the code did not move and the corpus did not move.\n\n")
+    for _cav in (corpus.get("caveats") or []):
+        out.append("> **CAVEAT.** %s\n\n" % _cav)
     out.append("| axis | at start | at end | moved during run |\n|---|---|---|---|\n")
     out.append("| code | `%s`%s | `%s`%s | %s |\n" % (
         str(git.get("at_start", {}).get("head", "?"))[:12],
@@ -1728,10 +1738,22 @@ def main(argv: Optional[list] = None) -> int:
         _unread = unavailable_state("--corpus-fingerprint-skip", include_vectors=False)
         summary["integrity"]["corpus"] = corpus_run_block(_unread, _unread, skipped=True)
     else:
-        summary["integrity"]["corpus"] = corpus_run_block(
-            corpus_at_start,
-            corpus_state(include_vectors=args.corpus_fingerprint == "vectors"),
-            skipped=False)
+        _at_end = corpus_state(include_vectors=args.corpus_fingerprint == "vectors")
+        _block = corpus_run_block(corpus_at_start, _at_end, skipped=False)
+        if _block["read_fault_uuids"]:
+            # The remedy for a BAD READ is to read again (ruling, 2026-10-04). Only the named
+            # objects: a second full fingerprint costs another ~80s and does not answer the
+            # question, which is whether THESE objects ever moved. The block is then rebuilt from
+            # scratch rather than patched, so one function still owns the whole verdict.
+            print("")
+            print("corpus: %d read-faulted object(s) -- re-reading them before deciding whether "
+                  "this arm is provisional" % len(_block["read_fault_uuids"]))
+            _rr = reread_state(_block["read_fault_uuids"],
+                               include_vectors=args.corpus_fingerprint == "vectors")
+            _block = corpus_run_block(corpus_at_start, _at_end, skipped=False, reread=_rr)
+            print("corpus: re-read %s -- %s"
+                  % (_block["reread"]["status"], _block["reread"]["detail"]))
+        summary["integrity"]["corpus"] = _block
     _c = summary["integrity"]["corpus"]
     # A corpus that MOVED is a violation: the arm measured a moving target. A corpus that
     # could not be READ is provisional only -- see corpus_state for why the two are not the
@@ -1745,15 +1767,28 @@ def main(argv: Optional[list] = None) -> int:
             print("    " + v)
     elif _c["changed_during_run"] is None:
         print("")
-        print("Corpus state was NOT established at both ends: "
-              + str(_c["at_start"].get("unavailable_reason") or "")
-              + " / " + str(_c["at_end"].get("unavailable_reason") or ""))
-        print("    This run is PROVISIONAL on the corpus axis. It is not a violation: the\n"
-              "    answers that were scored were really scored.")
+        if _c["reread_confirmed"]:
+            # changed_during_run is still None -- the END sample is not trusted for these objects
+            # -- but the arm is NOT provisional, because the re-read answered the question the end
+            # sample could not. Saying "PROVISIONAL" here would contradict the flag below it.
+            print("Corpus: %d object(s) were MISREAD during this run; the post-run re-read "
+                  "confirms they never changed." % len(_c["read_fault_uuids"]))
+        else:
+            print("Corpus state was NOT established at both ends: "
+                  + str(_c["at_start"].get("unavailable_reason") or "")
+                  + " / " + str(_c["at_end"].get("unavailable_reason") or ""))
+            print("    This run is PROVISIONAL on the corpus axis. It is not a violation: the\n"
+                  "    answers that were scored were really scored.")
     else:
         print(f"Corpus is UNCHANGED across the run ({_c['comparison_scope']}): "
               f"{_c['at_start']['chunk_count']} chunks, text "
               f"{str(_c['at_start']['content_sha256'])[:12]}.")
+    for _cav in (_c.get("caveats") or []):
+        # A confirmed read fault leaves the arm citable, which is exactly why it must not leave the
+        # arm silent: the misread objects are named on stdout as well as in the summary, so nobody
+        # reads a clean exit as "nothing happened to the corpus".
+        print("")
+        print("*** " + _cav)
     _g = summary["integrity"]["git"]
     if _g["provisional"]:
         print("")

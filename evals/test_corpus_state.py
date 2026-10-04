@@ -230,7 +230,9 @@ def test_corpus_changed_is_None_for_a_read_fault_only_difference_and_names_the_u
     assert "u1" in scope, scope
 
 
-def test_corpus_run_block_read_fault_only_is_provisional_with_zero_violations():
+def test_read_fault_only_is_provisional_when_no_reread_was_attempted():
+    # The DEFAULT branch, and the one that keeps the narrowing honest: with no
+    # post-run re-read, a read fault is unconfirmed and the arm is still uncitable.
     po_a = {"u1": {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}}
     po_b = {"u1": {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500}}
     a = _state(per_object=po_a, per_object_complete=True)
@@ -302,6 +304,158 @@ def test_a_long_read_fault_list_is_capped_in_the_prose_and_whole_in_the_field():
     assert "(+2 more)" in block["note"], block["note"]
 
 
+# --- the post-run re-read: what lets a read fault become a caveat instead of provisional -------
+#
+# Ruling (2026-10-04): `provisional` narrows to ATTRIBUTABLE change, on the condition that the
+# read-faulted objects are RE-READ after the run and still match the START sample. The tests that
+# could not pass against a weaker implementation are marked below; the rest pin the typed
+# non-confirmations, which exist so that "we did not check" can never read as "it was fine".
+
+
+def _rr(per_object, available=True, reason=None):
+    return {"available": available, "unavailable_reason": reason,
+            "weaviate_url": "192.168.1.54:80", "include_vectors": True,
+            "requested": sorted(per_object or {}), "per_object": per_object,
+            "read_faults": [], "seconds": 0.1}
+
+
+_GOOD = {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}
+_BAD = {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500}
+
+
+def _fault_pair():
+    """Start/end samples differing on u1 ONLY by a vector digest at an identical timestamp --
+    classify_change's read_fault signature, which is what the run actually produced."""
+    return (_state(per_object={"u1": dict(_GOOD)}, per_object_complete=True),
+            _state(per_object={"u1": dict(_BAD)}, per_object_complete=True))
+
+
+def test_a_read_fault_confirmed_by_a_reread_is_a_caveat_and_NOT_provisional():
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_GOOD)}))
+    assert block["changed_during_run"] is None, block["changed_during_run"]
+    assert block["provisional"] is False, block            # the whole point of the ruling
+    assert block["reread_confirmed"] is True, block["reread"]
+    assert block["violations"] == [], block["violations"]
+    assert block["reread"]["status"] == "confirmed", block["reread"]
+    # citable, but never silent: the uuids survive into a caveat a reader sees.
+    assert block["read_fault_uuids"] == ["u1"], block["read_fault_uuids"]
+    assert len(block["caveats"]) == 1, block["caveats"]
+    assert "u1" in block["caveats"][0], block["caveats"][0]
+    assert "READ-FAULT CAVEAT" in block["caveats"][0], block["caveats"][0]
+
+
+def test_the_reread_must_match_the_START_sample_not_the_end_sample():
+    # LOAD-BEARING. The end sample is the one suspected of being misread, so an implementation
+    # that compared the re-read against it would "confirm" exactly the corrupt value it was
+    # supposed to rule out -- and would pass every other test in this section.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    assert block["provisional"] is True, block
+    assert block["reread_confirmed"] is False, block["reread"]
+    assert block["reread"]["status"] == "differs", block["reread"]
+    assert block["reread"]["differing"] == ["u1"], block["reread"]
+
+
+def test_a_reread_whose_timestamp_moved_is_a_write_not_a_confirmation():
+    # Same digests as at_start but a later last_update_ms: something WROTE between the end sample
+    # and the re-read. That is the opposite of the finding being confirmed, so it must not match.
+    a, b = _fault_pair()
+    moved = dict(_GOOD, last_update_ms=900)
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": moved}))
+    assert block["provisional"] is True, block
+    assert block["reread"]["status"] == "differs", block["reread"]
+
+
+def test_a_reread_that_could_not_be_performed_keeps_the_arm_provisional():
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr(None, available=False,
+                                                 reason=CS.UNAVAILABLE + "reread-failed:ReadError"))
+    assert block["provisional"] is True, block
+    assert block["reread"]["status"] == "unavailable", block["reread"]
+    assert "reread-failed" in block["reread"]["detail"], block["reread"]["detail"]
+
+
+def test_a_reread_that_does_not_return_the_object_confirms_nothing():
+    # An absent object is NOT a match. Treating "not in the response" as "unchanged" is the
+    # silent-success shape this module exists to refuse.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({}))
+    assert block["provisional"] is True, block
+    assert block["reread"]["status"] == "missing", block["reread"]
+    assert block["reread"]["missing"] == ["u1"], block["reread"]
+
+
+def test_a_reread_cannot_rescue_an_ATTRIBUTABLE_change():
+    # LOAD-BEARING. The narrowing applies to read faults only. A real (timestamp-moved) change
+    # must stay a violation no matter what any re-read says about it.
+    po_a = {"u1": {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}}
+    po_b = {"u1": {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 999}}
+    a = _state(per_object=po_a, per_object_complete=True)
+    b = _state(per_object=po_b, per_object_complete=True)
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_GOOD)}))
+    assert block["changed_during_run"] is True, block["changed_during_run"]
+    assert block["provisional"] is True, block
+    assert block["reread_confirmed"] is False, block["reread"]
+    assert len(block["violations"]) == 1, block["violations"]
+
+
+def test_a_reread_cannot_rescue_an_UNREAD_sample():
+    # changed is None for two reasons -- a read fault, and a sample that could not be read at all.
+    # Only the first is attributable, so only the first is eligible for the caveat.
+    bad = CS.unavailable_state("read-failed:ReadError", "192.168.1.54:80")
+    block = CS.corpus_run_block(bad, bad, reread=_rr({"u1": dict(_GOOD)}))
+    assert block["changed_during_run"] is None, block["changed_during_run"]
+    assert block["provisional"] is True, block
+    assert block["read_fault_uuids"] == [], block["read_fault_uuids"]
+    assert block["reread"]["status"] == "not-needed", block["reread"]
+    assert block["caveats"] == [], block["caveats"]
+
+
+def test_a_skipped_fingerprint_is_provisional_whatever_a_reread_says():
+    unread = CS.unavailable_state("--corpus-fingerprint-skip", include_vectors=False)
+    block = CS.corpus_run_block(unread, unread, skipped=True, reread=_rr({"u1": dict(_GOOD)}))
+    assert block["provisional"] is True, block
+
+
+def test_reread_state_records_what_it_asked_for_and_what_came_back():
+    st = CS.reread_state(["u1"], url="192.168.1.54:80",
+                         _reread=lambda url, uuids, iv: {"u1": dict(_GOOD)})
+    assert st["available"] is True, st
+    assert st["requested"] == ["u1"], st
+    assert st["per_object"] == {"u1": _GOOD}, st
+    assert set(st) == set(CS.REREAD_KEYS), sorted(set(st) ^ set(CS.REREAD_KEYS))
+
+
+def test_reread_state_turns_a_raising_reader_into_a_typed_unavailable():
+    def boom(url, uuids, iv):
+        raise RuntimeError("connection reset")
+
+    st = CS.reread_state(["u1"], url="192.168.1.54:80", _reread=boom)
+    assert st["available"] is False, st
+    assert st["unavailable_reason"].startswith(CS.UNAVAILABLE), st
+    assert "RuntimeError" in st["unavailable_reason"], st
+    assert "connection reset" in st["unavailable_reason"], st
+    assert set(st) == set(CS.REREAD_KEYS), sorted(set(st) ^ set(CS.REREAD_KEYS))
+
+
+def test_reread_state_claims_nothing_when_no_url_is_resolvable():
+    st = CS.reread_state(["u1"], _reread=lambda url, uuids, iv: {"u1": dict(_GOOD)})
+    if st["weaviate_url"] is None:                 # WEAVIATE_URL unset in this environment
+        assert st["available"] is False, st
+        assert st["unavailable_reason"].startswith(CS.UNAVAILABLE), st
+
+
+def test_the_live_reread_reuses_the_fingerprint_digest_arithmetic():
+    # The re-read must digest objects EXACTLY as the samples were digested; a second copy of that
+    # arithmetic would mismatch the stored sample on the arithmetic rather than on the data, and
+    # would read as the corruption it is trying to rule out. This asserts the derivation (one
+    # digest implementation, fed by fingerprint_rest's own tuples) rather than re-deriving it.
+    src = (Path(__file__).resolve().parent / "corpus_state.py").read_text(encoding="utf-8")
+    assert "CF.fingerprint(FR.fetch_objects(" in src, "the re-read no longer digests via fingerprint"
+    assert "hashlib" not in src, "corpus_state has grown its own digest arithmetic"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
@@ -319,7 +473,7 @@ if __name__ == "__main__":
     # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
     # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
     # failed" and looks healthy. Assert the COUNT so a dropped test is caught.
-    EXPECTED_TESTS = 25
+    EXPECTED_TESTS = 37
     if len(tests) != EXPECTED_TESTS:
         print("FAIL suite: collected " + str(len(tests)) + " tests, expected " +
               str(EXPECTED_TESTS) + " - a test was lost or added without updating EXPECTED_TESTS")
