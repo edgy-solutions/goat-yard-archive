@@ -107,6 +107,42 @@ def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
         "dim_anomalies": dim_anomalies,
     }
 
+_MISSING = object()
+
+
+def difference_kind(oa, ob, fields=("text", "vec")):
+    """Which KIND of difference separates two reads of ONE object. READ-ONLY, pure.
+
+    ONE rule, because there were two. This discriminator lived inline in `classify_change` and
+    `reread_verdict` had its own, wrong one: it attributed ANY field difference to a write, which
+    put two clean eval arms on the record as "evidence of a real write" when nothing had been
+    written -- see docs/audits/RESULT_off_vs_on_rerun3_laneA_20261004.md.
+
+      "same"        -- no difference in `fields`, and last_update_ms agrees
+      "stamp-only"  -- the digests agree but last_update_ms moved or is unknowable
+      "digest-only" -- a digest moved while last_update_ms held still: a BAD READ in one of the
+                       two reads, not a change to the object
+      "write"       -- a digest moved AND last_update_ms moved or is unknowable
+
+    What a kind MEANS for the caller is the caller's policy and differs per axis; this names the
+    kind and nothing else. A field absent from both reads raises: a compare list that has drifted
+    from the sampler's shape would otherwise compare None to None and report "same" forever.
+    """
+    differs = False
+    for f in fields:
+        va, vb = oa.get(f, _MISSING), ob.get(f, _MISSING)
+        if va is _MISSING and vb is _MISSING:
+            raise KeyError("neither read carries %r, so comparing on it proves nothing: the "
+                           "compare field list and the per_object shape have diverged" % (f,))
+        if va != vb:
+            differs = True
+    lu_a, lu_b = oa.get("last_update_ms"), ob.get("last_update_ms")
+    stamp_moved = lu_a is None or lu_b is None or lu_a != lu_b
+    if not differs:
+        return "stamp-only" if stamp_moved else "same"
+    return "write" if stamp_moved else "digest-only"
+
+
 def classify_change(fp_a, fp_b):
     """Attribute a diff between two `per_object`-carrying fingerprints to named uuids instead of a
     corpus-wide fold. READ-ONLY. This is what turns 'vector_sha256 moved' into 'object X's vector
@@ -119,14 +155,15 @@ def classify_change(fp_a, fp_b):
     removed = sorted(ids_a - ids_b)
     rewritten, read_fault = [], []
     for uuid in sorted(ids_a & ids_b):
-        oa, ob = pa[uuid], pb[uuid]
-        if oa["text"] == ob["text"] and oa["vec"] == ob["vec"]:
-            continue                      # no digest difference at all -> not a change of any kind
-        lu_a, lu_b = oa.get("last_update_ms"), ob.get("last_update_ms")
-        if lu_a is None or lu_b is None or lu_a != lu_b:
-            rewritten.append(uuid)        # the timestamp moved, or is unknowable -> treat as real
-        else:
+        kind = difference_kind(pa[uuid], pb[uuid], fields=("text", "vec"))
+        if kind == "write":
+            rewritten.append(uuid)        # a digest moved and the timestamp moved -> real
+        elif kind == "digest-only":
             read_fault.append(uuid)       # digest moved, timestamp identical -> the read is bad
+        # "same" and "stamp-only" are both unchanged on THIS axis, exactly as before the rule was
+        # extracted. A timestamp that moved while every digest held still has never counted as a
+        # change here. That is a gap -- identical bytes rewritten is still a write -- and it is
+        # left standing deliberately: widening a gate is not part of fixing a wrong reason.
     dim_anoms = sorted(set(fp_a.get("dim_anomalies") or []) | set(fp_b.get("dim_anomalies") or []))
     return {
         "added": added,

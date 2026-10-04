@@ -170,10 +170,66 @@ def test_classify_change_negative_control_identical_fingerprints():
     assert cls["real_change"] is False, cls
     assert cls["attributable"] is True, cls
 
+# --- difference_kind: ONE rule for read-vs-write ------------------------------------------
+
+_A = {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}
+
+
+def test_difference_kind_names_a_digest_move_at_a_frozen_timestamp_a_bad_read():
+    # LOAD-BEARING. This is the whole point of the function. An implementation that reported any
+    # difference as a change would pass every other test here and would be the defect that put
+    # two clean eval arms on the record as evidence of a write that never happened.
+    b = dict(_A, vec="v2")
+    assert CF.difference_kind(_A, b) == "digest-only", CF.difference_kind(_A, b)
+
+
+def test_difference_kind_names_a_digest_move_with_a_moved_timestamp_a_write():
+    # The other direction, asserted so the function cannot be "fixed" by always saying bad read.
+    b = dict(_A, vec="v2", last_update_ms=900)
+    assert CF.difference_kind(_A, b) == "write", CF.difference_kind(_A, b)
+
+
+def test_difference_kind_treats_an_unknowable_timestamp_as_a_write():
+    # No timestamp means no discriminator. Guessing "bad read" here would launder a real write
+    # into a caveat, so the unknowable case resolves the strict way.
+    b = dict(_A, vec="v2", last_update_ms=None)
+    assert CF.difference_kind(_A, b) == "write", CF.difference_kind(_A, b)
+    assert CF.difference_kind({"text": "t", "vec": "v1"}, {"text": "t", "vec": "v2"}) == "write"
+
+
+def test_difference_kind_separates_an_identical_read_from_a_stamp_only_move():
+    assert CF.difference_kind(_A, dict(_A)) == "same"
+    # Digests agree but the timestamp moved: something touched the object. Whether that matters
+    # is the caller policy -- the kind is still not "same".
+    assert CF.difference_kind(_A, dict(_A, last_update_ms=900)) == "stamp-only"
+
+
+def test_difference_kind_raises_when_a_compare_field_is_absent_from_BOTH_reads():
+    # A compare list that has drifted from the sampler shape would compare None to None and
+    # report "same" forever -- a check that cannot see its own failure. It fails loudly instead.
+    try:
+        CF.difference_kind(_A, dict(_A), fields=("text", "vec", "nonexistent_field"))
+    except KeyError as e:
+        assert "diverged" in str(e), str(e)
+    else:
+        raise AssertionError("a field absent from both reads was compared silently")
+
+
+def test_a_stamp_only_move_is_still_not_a_change_on_the_start_end_axis():
+    # Documents a KNOWN gap rather than hiding it: identical digests with a moved timestamp means
+    # identical bytes were rewritten, which is a write, and classify_change has never counted it.
+    # Extracting the rule did not widen the gate; closing it is a separate, deliberate decision.
+    a = {"per_object": {"u1": dict(_A)}, "per_object_complete": True}
+    b = {"per_object": {"u1": dict(_A, last_update_ms=900)}, "per_object_complete": True}
+    cls = CF.classify_change(a, b)
+    assert cls["real_change"] is False, cls
+    assert cls["rewritten"] == [] and cls["read_fault"] == [], cls
+
+
 # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
 # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
 # failed" and looks healthy. Assert the COUNT so a silently shrinking suite fails loudly.
-EXPECTED_TESTS = 21
+EXPECTED_TESTS = 27
 
 if __name__ == "__main__":
     import traceback

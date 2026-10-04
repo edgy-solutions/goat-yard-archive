@@ -353,7 +353,7 @@ def test_the_reread_must_match_the_START_sample_not_the_end_sample():
     block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
     assert block["provisional"] is True, block
     assert block["reread_confirmed"] is False, block["reread"]
-    assert block["reread"]["status"] == "differs", block["reread"]
+    assert block["reread"]["status"] == "differs-digest-only", block["reread"]
     assert block["reread"]["differing"] == ["u1"], block["reread"]
 
 
@@ -364,7 +364,108 @@ def test_a_reread_whose_timestamp_moved_is_a_write_not_a_confirmation():
     moved = dict(_GOOD, last_update_ms=900)
     block = CS.corpus_run_block(a, b, reread=_rr({"u1": moved}))
     assert block["provisional"] is True, block
-    assert block["reread"]["status"] == "differs", block["reread"]
+    assert block["reread"]["status"] == "differs-write", block["reread"]
+
+
+def test_a_digest_only_reread_difference_is_NOT_reported_as_a_write():
+    # LOAD-BEARING, and the reason this group exists. The attempt-5 pair produced exactly this
+    # shape -- a vector digest that moved while last_update_ms held still -- and the verdict
+    # called it "evidence of a real write". Three live re-reads showed the timestamp had not moved
+    # in four months. The reason on the record was false, and the record contradicted its own
+    # start/end comparator about the same uuid:
+    # docs/audits/RESULT_off_vs_on_rerun3_laneA_20261004.md.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    rr = block["reread"]
+    assert rr["status"] == "differs-digest-only", rr
+    assert rr["differing_digest_only"] == ["u1"], rr
+    assert rr["differing_write"] == [], rr
+    assert "real write" not in rr["detail"], rr["detail"]
+    assert "NOTHING was written" in rr["detail"], rr["detail"]
+
+
+def test_a_digest_only_reread_difference_STILL_keeps_the_arm_provisional():
+    # Naming the cause correctly is not the same as relaxing the gate. Ruling 2 (2026-10-04) is
+    # that a re-read which differs leaves the arm provisional, and a digest-only difference means
+    # the start sample digest itself could not be reproduced. Changing that is a decision to be
+    # taken, not a side effect of fixing a wrong reason -- so it is pinned here.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    assert block["provisional"] is True, block
+    assert block["reread_confirmed"] is False, block["reread"]
+    assert block["reread"]["confirms"] is False, block["reread"]
+
+
+def test_a_reread_difference_WITH_a_moved_timestamp_is_reported_as_a_write():
+    # The opposite direction. A verdict that said "bad read" for everything would satisfy the two
+    # tests above and would hide the one case the check was built to catch.
+    a, b = _fault_pair()
+    wrote = dict(_BAD, last_update_ms=900)
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": wrote}))
+    rr = block["reread"]
+    assert rr["status"] == "differs-write", rr
+    assert rr["differing_write"] == ["u1"], rr
+    assert rr["differing_digest_only"] == [], rr
+    assert "real write" in rr["detail"], rr["detail"]
+    assert block["provisional"] is True, block
+
+
+def test_a_MIXED_reread_verdict_reports_the_write_and_still_names_the_bad_reads():
+    # A write dominates the status, because it is the stronger finding. The digest-only uuids are
+    # still named: a verdict that mentioned only the write would quietly drop a second finding.
+    start = _state(per_object={"u1": dict(_GOOD), "u2": dict(_GOOD)}, per_object_complete=True)
+    end = _state(per_object={"u1": dict(_BAD), "u2": dict(_BAD)}, per_object_complete=True)
+    rr = CS.corpus_run_block(start, end, reread=_rr({"u1": dict(_BAD),
+                                                    "u2": dict(_BAD, last_update_ms=900)}))["reread"]
+    assert rr["status"] == "differs-write", rr
+    assert rr["differing_write"] == ["u2"], rr
+    assert rr["differing_digest_only"] == ["u1"], rr
+    assert "u1" in rr["detail"] and "u2" in rr["detail"], rr["detail"]
+    assert sorted(rr["differing"]) == ["u1", "u2"], rr
+
+
+def test_every_reread_compare_field_is_either_compared_or_the_discriminator():
+    # The companion assertion to splitting the tuple. If a field were added to
+    # REREAD_COMPARE_FIELDS and to neither the digest subset nor the discriminator, it would
+    # silently stop being examined and every re-read would confirm a little more easily.
+    assert set(CS.REREAD_DIGEST_FIELDS) | {"last_update_ms"} == set(CS.REREAD_COMPARE_FIELDS)
+    assert "last_update_ms" not in CS.REREAD_DIGEST_FIELDS
+
+
+def test_a_provisional_corpus_names_the_REREAD_as_the_reason_not_the_samples():
+    # LOAD-BEARING. The exact shape both attempt-5 arms produced: both samples read fine, the
+    # post-run re-read did not confirm, and the operator was told "Corpus state was NOT
+    # established at both ends:  / " with two empty reasons. The reason printed has to be the
+    # reason the record holds.
+    a, b = _fault_pair()
+    block = CS.corpus_run_block(a, b, reread=_rr({"u1": dict(_BAD)}))
+    lines = CS.provisional_console_lines(block)
+    text = "\n".join(lines)
+    assert "PROVISIONAL" in lines[0], lines
+    assert "NOT established at both ends" not in text, text
+    assert "differs-digest-only" in text, text
+    assert "u1" in text, text
+
+
+def test_an_unreadable_sample_still_names_its_unavailable_reason():
+    # The other direction: the branch was written for this case and must keep serving it, with a
+    # reason that is actually present rather than an empty string.
+    unread = CS.unavailable_state(CS.UNAVAILABLE + "connect-failed:ReadError",
+                                 url="192.168.1.54:80")
+    block = CS.corpus_run_block(unread, unread, skipped=False)
+    lines = CS.provisional_console_lines(block)
+    text = "\n".join(lines)
+    assert "NOT established at both ends" in text, text
+    assert "connect-failed:ReadError" in text, text
+    assert " / " in text, text
+
+
+def test_the_provisional_corpus_message_says_what_a_provisional_arm_cannot_do():
+    # A reason with no consequence attached invites a clean exit being read as a citable run.
+    a, b = _fault_pair()
+    text = "\n".join(CS.provisional_console_lines(CS.corpus_run_block(a, b)))
+    assert "cannot be" in text and "cited in an ADR" in text, text
+    assert "really scored" in text, text
 
 
 def test_a_reread_that_could_not_be_performed_keeps_the_arm_provisional():
@@ -473,7 +574,7 @@ if __name__ == "__main__":
     # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
     # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
     # failed" and looks healthy. Assert the COUNT so a dropped test is caught.
-    EXPECTED_TESTS = 37
+    EXPECTED_TESTS = 45
     if len(tests) != EXPECTED_TESTS:
         print("FAIL suite: collected " + str(len(tests)) + " tests, expected " +
               str(EXPECTED_TESTS) + " - a test was lost or added without updating EXPECTED_TESTS")

@@ -75,7 +75,7 @@ from degradation import (  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from corpus_state import (corpus_run_block, corpus_state,  # noqa: E402
-                          reread_state, unavailable_state)
+                          provisional_console_lines, reread_state, unavailable_state)
 
 # Degradation reasons this harness assigns itself (the backend assigns the rest).
 DEGRADED_HARNESS_TIMEOUT = "harness_read_timeout"
@@ -1774,11 +1774,14 @@ def main(argv: Optional[list] = None) -> int:
             print("Corpus: %d object(s) were MISREAD during this run; the post-run re-read "
                   "confirms they never changed." % len(_c["read_fault_uuids"]))
         else:
-            print("Corpus state was NOT established at both ends: "
-                  + str(_c["at_start"].get("unavailable_reason") or "")
-                  + " / " + str(_c["at_end"].get("unavailable_reason") or ""))
-            print("    This run is PROVISIONAL on the corpus axis. It is not a violation: the\n"
-                  "    answers that were scored were really scored.")
+            # Why this arm is provisional, named from the record by a function a test can
+            # reach. This was inline here, and it printed only the two samples'
+            # unavailable_reason -- so when both samples read fine and it was the post-run
+            # RE-READ that did not confirm, it printed two empty strings and told the reader
+            # nothing. Both arms of the attempt-5 pair did exactly that:
+            # docs/audits/RESULT_off_vs_on_rerun3_laneA_20261004.md.
+            for _line in provisional_console_lines(_c):
+                print(_line)
     else:
         print(f"Corpus is UNCHANGED across the run ({_c['comparison_scope']}): "
               f"{_c['at_start']['chunk_count']} chunks, text "

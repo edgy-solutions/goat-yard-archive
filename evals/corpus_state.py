@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Same convention as answer_lm_record: a reason string that begins with this prefix means "we did
 # not find out", and is never confused with a finding.
@@ -218,6 +218,11 @@ def _live_reread(url: str, uuids, include_vectors: bool):
 # included on purpose: if it moved between the end sample and the re-read, something WROTE, which
 # is the opposite of the finding this check exists to confirm.
 REREAD_COMPARE_FIELDS = ("text", "vec", "dim", "last_update_ms")
+# ...and the digest subset, which is what gets compared. `last_update_ms` is not compared as a
+# field; it is the DISCRIMINATOR that says whether a digest difference was a write or a bad read,
+# and `difference_kind` reads it directly. Both tuples are reported so a reader can see that
+# nothing in REREAD_COMPARE_FIELDS goes unexamined.
+REREAD_DIGEST_FIELDS = tuple(f for f in REREAD_COMPARE_FIELDS if f != "last_update_ms")
 
 
 def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[str, Any]:
@@ -229,11 +234,26 @@ def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[s
 
     Every other outcome is a typed non-confirmation, and each is kept distinct because they are
     distinct findings: no re-read was attempted, the re-read itself could not be read, there is no
-    baseline to compare against, an object did not come back, or an object came back DIFFERENT --
-    and that last one is the only one of the five that is evidence of a real write.
+    baseline to compare against, an object did not come back, or an object came back DIFFERENT.
+
+    That last one is TWO findings, not one, and conflating them was a defect. A digest that moved
+    while `last_update_ms` held still is a bad read in one of the two reads -- nothing was written
+    -- while a digest that moved alongside its timestamp is a real write. The rule that tells them
+    apart already existed for the start/end axis; this function used to attribute every difference
+    to a write, and so put two clean arms on the record as "evidence of a real write" when the
+    live timestamps proved no write had happened
+    (docs/audits/RESULT_off_vs_on_rerun3_laneA_20261004.md).
+
+    Both kinds are NON-CONFIRMING and both keep the arm provisional. Ruling 2 is that a re-read
+    which differs leaves the arm provisional, and a digest-only difference is not a reason to
+    relax that: it means the start sample's own digest for those objects was computed over bytes
+    that could not be reproduced, so "the corpus held still" is a weaker claim either way.
+    Whether that should stay provisional is a decision to be made, not one to be assumed here;
+    what this function owes the record is the right REASON.
     """
     base = {"confirms": False, "status": None, "checked": list(read_fault_uuids or []),
-            "matched": [], "differing": [], "missing": [], "detail": None}
+            "matched": [], "differing": [], "differing_write": [], "differing_digest_only": [],
+            "missing": [], "detail": None}
     if not base["checked"]:
         base["status"] = "not-needed"
         base["detail"] = "no read-faulted objects to re-read"
@@ -260,15 +280,37 @@ def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[s
             base["missing"].append(u)
             continue
         a, c = start_po.get(u) or {}, got[u] or {}
-        if all(a.get(f) == c.get(f) for f in REREAD_COMPARE_FIELDS):
+        kind = _difference_kind(a, c, REREAD_DIGEST_FIELDS)
+        if kind == "same":
             base["matched"].append(u)
+            continue
+        base["differing"].append(u)
+        # "stamp-only" belongs with "write": on THIS axis a timestamp that moved between the end
+        # sample and the re-read means something wrote, whether or not the digests show it.
+        if kind == "digest-only":
+            base["differing_digest_only"].append(u)
         else:
-            base["differing"].append(u)
-    if base["differing"]:
-        base["status"] = "differs"
-        base["detail"] = (str(len(base["differing"])) + " re-read object(s) do NOT match the start "
-                          "sample (" + _named(base["differing"]) + ") -- that is evidence of a "
-                          "real write, not a bad read; this arm stays provisional")
+            base["differing_write"].append(u)
+    if base["differing_write"]:
+        # A real write dominates a mixed verdict: it is the stronger finding and the reason the
+        # check exists. The digest-only uuids are still named so neither group is hidden.
+        base["status"] = "differs-write"
+        base["detail"] = (str(len(base["differing_write"])) + " re-read object(s) differ from the "
+                          "start sample AND their last_update_ms moved ("
+                          + _named(base["differing_write"]) + ") -- that is evidence of a real "
+                          "write, not a bad read; this arm stays provisional"
+                          + (("; a further " + str(len(base["differing_digest_only"]))
+                              + " differ by digest only ("
+                              + _named(base["differing_digest_only"]) + ")")
+                             if base["differing_digest_only"] else ""))
+    elif base["differing_digest_only"]:
+        base["status"] = "differs-digest-only"
+        base["detail"] = (str(len(base["differing_digest_only"])) + " re-read object(s) differ "
+                          "from the start sample by digest ONLY, at an identical last_update_ms ("
+                          + _named(base["differing_digest_only"]) + ") -- so NOTHING was written: "
+                          "one of the two reads is bad, and since the re-read is the later one the "
+                          "start sample's digest for those objects is the suspect. Non-confirming "
+                          "either way, so this arm stays provisional")
     elif base["missing"]:
         base["status"] = "missing"
         base["detail"] = (str(len(base["missing"])) + " object(s) could not be re-read ("
@@ -282,6 +324,44 @@ def reread_verdict(at_start: Dict[str, Any], read_fault_uuids, reread) -> Dict[s
     return base
 
 
+def provisional_console_lines(block: Dict[str, Any]) -> List[str]:
+    """The human-readable WHY for a corpus axis that did not resolve, as lines to print.
+
+    A pure function because this text was inline in `run_eval` main, where no test could reach
+    it -- and it was wrong there. It printed the two samples' `unavailable_reason` and nothing
+    else, so a run whose samples BOTH read fine and whose post-run re-read did not confirm
+    printed the words "Corpus state was NOT established at both ends:  / " with two empty
+    reasons. Both arms of the attempt-5 pair printed exactly that
+    (docs/audits/RESULT_off_vs_on_rerun3_laneA_20261004.md): the operator was told the samples
+    could not be read when the real reason was a re-read verdict with its own typed status.
+
+    Every reason the block carries is named, and if it carries none that is said out loud rather
+    than printed as an empty string.
+    """
+    reread = block.get("reread") or {}
+    unavailable = [str(side.get("unavailable_reason")) for side in
+                   (block.get("at_start") or {}, block.get("at_end") or {})
+                   if not side.get("available")]
+    out = []
+    if block.get("provisional"):
+        out.append("*** THIS RUN IS PROVISIONAL ON THE CORPUS AXIS ***")
+    else:
+        out.append("Corpus: the comparison is INCOMPLETE, but this arm is not provisional.")
+    if unavailable:
+        out.append("    Corpus state was NOT established at both ends: " + " / ".join(unavailable))
+    if reread.get("status") and reread["status"] != "not-needed":
+        out.append("    post-run re-read: " + str(reread["status"]) + " -- "
+                   + str(reread.get("detail")))
+    if not unavailable and not reread.get("status"):
+        out.append("    The reason is not in the record, which is its own defect: see"
+                   " summary.integrity.corpus.")
+    out.append("    It is not a violation: the answers that were scored were really scored.")
+    if block.get("provisional"):
+        out.append("    It may withdraw an earlier claim but asserts nothing new, and cannot be")
+        out.append("    cited in an ADR or a tier change.")
+    return out
+
+
 def _classify_change(fp_a: Dict[str, Any], fp_b: Dict[str, Any]) -> Dict[str, Any]:
     """Lazy-imported wrapper over corpus_fingerprint.classify_change (same import pattern as
     `_live_fingerprint`), shared by `corpus_changed` and `corpus_run_block`."""
@@ -292,6 +372,19 @@ def _classify_change(fp_a: Dict[str, Any], fp_b: Dict[str, Any]) -> Dict[str, An
         sys.path.insert(0, str(backend))
     import corpus_fingerprint as CF
     return CF.classify_change(fp_a, fp_b)
+
+
+def _difference_kind(oa: Dict[str, Any], ob: Dict[str, Any], fields) -> str:
+    """Lazy-imported wrapper over corpus_fingerprint.difference_kind. The read-vs-write rule is
+    imported rather than restated: `reread_verdict` having its own copy of it is precisely the
+    defect this wrapper exists to remove."""
+    import sys
+    from pathlib import Path
+    backend = Path(__file__).resolve().parent.parent / "backend"
+    if str(backend) not in sys.path:
+        sys.path.insert(0, str(backend))
+    import corpus_fingerprint as CF
+    return CF.difference_kind(oa, ob, fields=fields)
 
 
 def _named(uuids: list, limit: int = 10) -> str:
