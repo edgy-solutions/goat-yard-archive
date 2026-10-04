@@ -214,6 +214,94 @@ def test_the_block_records_both_samples_verbatim():
     assert b["at_start"] == a and b["at_end"] == z, "a summary that cannot say what it read is worse"
 
 
+# --- attributed comparison (classify_change wired through corpus_changed / corpus_run_block) ----
+
+def test_corpus_changed_is_None_for_a_read_fault_only_difference_and_names_the_uuid():
+    # THE false positive this spec closes: vector_sha256 moved, last_update_ms did not. That is a
+    # bad read, not a corpus change, and it must say which uuid -- not just that something moved.
+    po_a = {"u1": {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}}
+    po_b = {"u1": {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500}}
+    a = _state(per_object=po_a, per_object_complete=True)
+    b = _state(per_object=po_b, per_object_complete=True)
+    changed, scope = CS.corpus_changed(a, b)
+    assert changed is None, changed
+    assert scope.startswith("not-compared:"), scope
+    assert "bad read" in scope, scope
+    assert "u1" in scope, scope
+
+
+def test_corpus_run_block_read_fault_only_is_provisional_with_zero_violations():
+    po_a = {"u1": {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}}
+    po_b = {"u1": {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500}}
+    a = _state(per_object=po_a, per_object_complete=True)
+    b = _state(per_object=po_b, per_object_complete=True)
+    block = CS.corpus_run_block(a, b)
+    assert block["changed_during_run"] is None, block
+    assert block["provisional"] is True, block
+    assert block["violations"] == [], block["violations"]
+    assert block["read_fault_uuids"] == ["u1"], block["read_fault_uuids"]
+    assert "re-read" in block["note"].lower(), block["note"]
+
+
+def test_corpus_run_block_an_attributable_real_change_is_still_a_violation():
+    # The companion assertion: a real (timestamp-moved) change must still trip the SAME violation
+    # wording as the old corpus-wide fold, not a quieter one just because it is now attributed.
+    po_a = {"u1": {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500}}
+    po_b = {"u1": {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 999}}
+    a = _state(per_object=po_a, per_object_complete=True)
+    b = _state(per_object=po_b, per_object_complete=True)
+    block = CS.corpus_run_block(a, b)
+    assert block["changed_during_run"] is True, block
+    assert block["provisional"] is True, block
+    assert len(block["violations"]) == 1, block["violations"]
+    assert "CORPUS CHANGED MID-RUN" in block["violations"][0]
+
+
+def test_a_sample_with_dim_anomalies_is_unavailable_with_a_read_fault_reason():
+    # Page-level re-fetching in fingerprint_rest already tried to repair this; if an anomaly
+    # survives to corpus_state, every attempt failed and the sample cannot be trusted at all.
+    st = _state(dim_anomalies=["u9"])
+    assert st["available"] is False, st
+    assert "read-fault" in st["unavailable_reason"], st["unavailable_reason"]
+    assert set(st) == set(CS.KEYS)
+
+
+def test_the_verdict_and_the_naming_cannot_disagree_about_a_read_fault():
+    # corpus_changed decides the verdict and corpus_run_block names the objects. They used to
+    # derive attributability independently, which is two copies of one policy; if they ever drift
+    # the block can print zero uuids under a None verdict that was caused by named uuids.
+    po_a = {"u1": {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500},
+            "u2": {"text": "t", "vec": "v9", "dim": 4096, "last_update_ms": 700}}
+    po_b = {"u1": {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500},
+            "u2": {"text": "t", "vec": "v9", "dim": 4096, "last_update_ms": 700}}
+    a = _state(per_object=po_a, per_object_complete=True)
+    b = _state(per_object=po_b, per_object_complete=True)
+    changed, scope = CS.corpus_changed(a, b)
+    block = CS.corpus_run_block(a, b)
+    assert changed is None, changed
+    assert block["changed_during_run"] is None, block["changed_during_run"]
+    assert block["read_fault_uuids"] == ["u1"], block["read_fault_uuids"]
+    assert "u1" in scope and "u2" not in scope, scope       # only the object that actually moved
+
+
+def test_a_long_read_fault_list_is_capped_in_the_prose_and_whole_in_the_field():
+    # A reason a human reads must not be hundreds of uuids. The machine-readable field is NOT
+    # truncated: capping the attribution itself would be the quiet loss this change exists to end.
+    uuids = ["u%02d" % i for i in range(12)]
+    po_a = {u: {"text": "t", "vec": "v1", "dim": 4096, "last_update_ms": 500} for u in uuids}
+    po_b = {u: {"text": "t", "vec": "v2", "dim": 4096, "last_update_ms": 500} for u in uuids}
+    a = _state(per_object=po_a, per_object_complete=True)
+    b = _state(per_object=po_b, per_object_complete=True)
+    changed, scope = CS.corpus_changed(a, b)
+    block = CS.corpus_run_block(a, b)
+    assert changed is None, changed
+    assert "12 objects differ" in scope, scope
+    assert "(+2 more)" in scope, scope
+    assert "u11" not in scope, scope
+    assert block["read_fault_uuids"] == uuids, block["read_fault_uuids"]
+    assert "(+2 more)" in block["note"], block["note"]
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
@@ -228,4 +316,12 @@ if __name__ == "__main__":
             traceback.print_exc()
     print("")
     print(str(len(tests) - failed) + "/" + str(len(tests)) + " passed")
+    # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
+    # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
+    # failed" and looks healthy. Assert the COUNT so a dropped test is caught.
+    EXPECTED_TESTS = 25
+    if len(tests) != EXPECTED_TESTS:
+        print("FAIL suite: collected " + str(len(tests)) + " tests, expected " +
+              str(EXPECTED_TESTS) + " - a test was lost or added without updating EXPECTED_TESTS")
+        failed += 1
     sys.exit(1 if failed else 0)

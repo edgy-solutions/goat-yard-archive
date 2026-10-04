@@ -53,22 +53,45 @@ def content_hash(object_digests):
     return hashlib.sha256(hex(acc).encode()).hexdigest()
 
 def _split(item):
-    """Accept either a (props, vector) tuple or a bare props dict (vector under '_vector' or absent)."""
+    """Accept a (props, vector) tuple, a (props, vector, meta) tuple, or a bare props dict
+    (vector under '_vector' or absent). `meta` is a dict that may carry 'id' and
+    'last_update_ms'; it defaults to {} for the 2-tuple and bare-dict forms, which is what makes
+    them "incomplete" for per-object attribution (no id -> no attribution)."""
     if isinstance(item, tuple):
-        return item[0], item[1]
-    return item, (item.get("_vector") if isinstance(item, dict) else None)
+        if len(item) >= 3:
+            return item[0], item[1], (item[2] or {})
+        return item[0], item[1], {}
+    return item, (item.get("_vector") if isinstance(item, dict) else None), {}
 
 def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
     """Fingerprint from an iterator of CommentaryChunk objects + per-collection counts. READ-ONLY.
-    Each item is a (props, vector) tuple or a props dict. Hashes TEXT identity AND VECTOR identity
-    separately (text-identity was proven; vector-identity was assumed — this closes it)."""
+    Each item is a (props, vector) tuple, a (props, vector, meta) tuple, or a props dict. Hashes
+    TEXT identity AND VECTOR identity separately (text-identity was proven; vector-identity was
+    assumed — this closes it), and when `meta` carries an id, also builds a `per_object` map so a
+    later diff can be attributed to named objects instead of only a corpus-wide fold."""
     text_digests, vec_digests = [], []
+    per_object = {}
+    per_object_complete = True
+    dim_histogram = {}
     for item in iter_objects:
-        props, vector = _split(item)
-        text_digests.append(_obj_digest(props))
+        props, vector, meta = _split(item)
+        td = _obj_digest(props)
+        text_digests.append(td)
         vd = _vec_digest(vector)
         if vd is not None:
             vec_digests.append(vd)
+        dim = len(vector) if vector else None
+        if dim is not None:
+            dim_histogram[dim] = dim_histogram.get(dim, 0) + 1
+        uuid = meta.get("id") if meta else None
+        if uuid is None:
+            per_object_complete = False
+            continue
+        per_object[uuid] = {"text": td, "vec": vd, "dim": dim,
+                             "last_update_ms": meta.get("last_update_ms")}
+    vector_dim = max(dim_histogram, key=dim_histogram.get) if dim_histogram else None
+    dim_anomalies = sorted(uuid for uuid, o in per_object.items()
+                           if o["dim"] is not None and o["dim"] != vector_dim)
     return {
         "counts": dict(counts),
         "chunk_count": counts.get("CommentaryChunk", 0),
@@ -77,6 +100,42 @@ def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
         "n_hashed": len(text_digests),
         "n_vectors_hashed": len(vec_digests),
         "ingestion_sha": ingestion_sha,
+        "per_object": per_object,
+        "per_object_complete": per_object_complete,
+        "dim_histogram": dim_histogram,
+        "vector_dim": vector_dim,
+        "dim_anomalies": dim_anomalies,
+    }
+
+def classify_change(fp_a, fp_b):
+    """Attribute a diff between two `per_object`-carrying fingerprints to named uuids instead of a
+    corpus-wide fold. READ-ONLY. This is what turns 'vector_sha256 moved' into 'object X's vector
+    digest changed while its last_update_ms did not, which is a bad read, not a corpus change.'"""
+    pa = fp_a.get("per_object") or {}
+    pb = fp_b.get("per_object") or {}
+    attributable = bool(fp_a.get("per_object_complete") and fp_b.get("per_object_complete"))
+    ids_a, ids_b = set(pa), set(pb)
+    added = sorted(ids_b - ids_a)
+    removed = sorted(ids_a - ids_b)
+    rewritten, read_fault = [], []
+    for uuid in sorted(ids_a & ids_b):
+        oa, ob = pa[uuid], pb[uuid]
+        if oa["text"] == ob["text"] and oa["vec"] == ob["vec"]:
+            continue                      # no digest difference at all -> not a change of any kind
+        lu_a, lu_b = oa.get("last_update_ms"), ob.get("last_update_ms")
+        if lu_a is None or lu_b is None or lu_a != lu_b:
+            rewritten.append(uuid)        # the timestamp moved, or is unknowable -> treat as real
+        else:
+            read_fault.append(uuid)       # digest moved, timestamp identical -> the read is bad
+    dim_anoms = sorted(set(fp_a.get("dim_anomalies") or []) | set(fp_b.get("dim_anomalies") or []))
+    return {
+        "added": added,
+        "removed": removed,
+        "rewritten": rewritten,
+        "read_fault": read_fault,
+        "dim_anomalies": dim_anoms,
+        "real_change": bool(added or removed or rewritten),
+        "attributable": attributable,
     }
 
 def compare(fp_a, fp_b):

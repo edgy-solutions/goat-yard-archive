@@ -19,12 +19,17 @@ sidecar cannot reintroduce the drift.
 #   run_header.json -- the provenance header, written BEFORE the first scored question
 #   ABORTED.json    -- the run-level fault marker (ruling 4): this directory is not a run
 #   PUBLISHED.json  -- publish_run's manifest, present only in a published copy
+#   corpus_objects_at_start.json -- the fingerprint's per_object map at run start (too large for
+#                                   summary.json; see corpus_fingerprint.classify_change)
+#   corpus_objects_at_end.json   -- same, at run end
 NON_QUESTION_FILES = frozenset({
     "summary.json",
     "report.md",
     "run_header.json",
     "ABORTED.json",
     "PUBLISHED.json",
+    "corpus_objects_at_start.json",
+    "corpus_objects_at_end.json",
 })
 
 

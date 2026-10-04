@@ -353,6 +353,7 @@ def test_no_warmup_refuses_and_sends_no_request():
 # --- wiring (a constant nothing calls is the defect this work exists to fix) ------
 
 SRC = (Path(__file__).resolve().parent / "run_eval.py").read_text(encoding="utf-8")
+CS_SRC = (Path(__file__).resolve().parent / "corpus_state.py").read_text(encoding="utf-8")
 
 
 def test_debug_flag_is_actually_sent():
@@ -1580,7 +1581,60 @@ def test_the_header_write_precedes_the_scoring_loop_in_SOURCE():
 # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
 # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
 # failed" and looks healthy. Assert the COUNT so a silently shrinking suite fails loudly.
-EXPECTED_TESTS = 144
+def test_the_skipped_corpus_state_is_built_by_corpus_state_not_a_literal():
+    """--corpus-fingerprint-skip cannot be driven from a test without a live run, so guard its
+    call site structurally instead. It used to hand-roll the state dict, and that copy was already
+    missing keys before the per-object map existed -- the same second-copy defect run_dir.py was
+    created to end. The `if corpus_skip:` assertion is the companion check: without it this test
+    would pass just as happily on a region it failed to find."""
+    assert SRC.count("if corpus_skip:") == 2, "the two regions this test checks are not there"
+    assert "corpus_run_block(" in SRC, "the consumer this test checks is not there"
+    region = SRC.rsplit("if corpus_skip:", 1)[1].split("else:")[0]    # the block-building one
+    assert "unavailable_state(" in region, region
+    assert '"available": False' not in SRC, "run_eval hand-rolls a corpus-state shape again"
+    assert "def unavailable_state" in CS_SRC, "the builder being required does not exist"
+
+
+def test_the_per_object_map_goes_to_a_sidecar_and_leaves_summary_json():
+    import tempfile
+    po = {"u1": {"text": "t", "vec": "v", "dim": 4096, "last_update_ms": 500}}
+    block = {"at_start": {"available": True, "per_object": po, "dim_histogram": {"4096": 1}},
+             "at_end": {"available": True, "per_object": po, "dim_histogram": {"4096": 1}}}
+    with tempfile.TemporaryDirectory() as d:
+        out = RE.write_per_object_sidecars(Path(d), block)
+        assert out["per_object_sidecars"] == RE.PER_OBJECT_SIDECARS, out["per_object_sidecars"]
+        for fname in RE.PER_OBJECT_SIDECARS.values():
+            back = json.loads((Path(d) / fname).read_text(encoding="utf-8"))
+            assert back == po, back
+        for which in ("at_start", "at_end"):
+            assert "per_object" not in out[which], out[which]       # stripped from summary.json
+            assert out[which]["dim_histogram"] == {"4096": 1}, out[which]   # the small ones stay
+
+
+def test_a_sample_with_no_per_object_map_writes_no_sidecar_at_all():
+    import tempfile
+    # An empty sidecar would read as "no objects", which is a claim about the corpus, not an
+    # absence of a measurement. An unavailable sample writes nothing and records nothing.
+    block = {"at_start": {"available": False, "per_object": None},
+             "at_end": {"available": False, "per_object": None}}
+    with tempfile.TemporaryDirectory() as d:
+        out = RE.write_per_object_sidecars(Path(d), block)
+        assert "per_object_sidecars" not in out, out
+        assert sorted(x.name for x in Path(d).iterdir()) == [], list(Path(d).iterdir())
+        assert "per_object" not in out["at_start"], out["at_start"]
+
+
+def test_every_sidecar_name_is_registered_as_a_non_question_file():
+    # Derived from the writer's own constant, not restated: an unregistered sidecar becomes a
+    # phantom question in compare_arms and a zero-stage row in expansion_census -- a defect this
+    # repo has already paid for once.
+    import run_dir
+    for fname in RE.PER_OBJECT_SIDECARS.values():
+        assert fname in run_dir.NON_QUESTION_FILES, fname
+        assert not run_dir.is_question_file(fname), fname
+
+
+EXPECTED_TESTS = 148
 
 if __name__ == "__main__":
     passed = failed = 0

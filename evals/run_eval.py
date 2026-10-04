@@ -74,7 +74,7 @@ from degradation import (  # noqa: E402
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from corpus_state import corpus_run_block, corpus_state  # noqa: E402
+from corpus_state import corpus_run_block, corpus_state, unavailable_state  # noqa: E402
 
 # Degradation reasons this harness assigns itself (the backend assigns the rest).
 DEGRADED_HARNESS_TIMEOUT = "harness_read_timeout"
@@ -987,6 +987,37 @@ def build_run_header(endpoint: str, question_ids: List[str], n_runs: int, timeou
     return header
 
 
+PER_OBJECT_SIDECARS = {"at_start": "corpus_objects_at_start.json",
+                       "at_end": "corpus_objects_at_end.json"}
+
+
+def write_per_object_sidecars(out_dir, corpus_block):
+    """`per_object` is a complete uuid->digest map over the whole corpus -- far too large for
+    summary.json, which is the point of the sidecar. Write each sample's map to its own file,
+    record the filenames on the block so a reader can find them, and strip the map out of what
+    summary.json carries. dim_histogram / vector_dim / dim_anomalies / read_faults are small and
+    stay in summary.json untouched. Mutates and returns `corpus_block`.
+
+    A sample that carries no map (unavailable, or an older arm) writes NOTHING and records
+    nothing: an empty sidecar would read as "no objects", which is a claim, not an absence."""
+    written = {}
+    for which, fname in PER_OBJECT_SIDECARS.items():
+        state = corpus_block.get(which)
+        if not isinstance(state, dict) or "per_object" not in state:
+            continue
+        per_object = state.get("per_object")
+        if per_object is not None:
+            (Path(out_dir) / fname).write_text(
+                json.dumps(per_object, sort_keys=True, ensure_ascii=False), encoding="utf-8")
+            written[which] = fname
+        stripped = dict(state)
+        stripped.pop("per_object", None)
+        corpus_block[which] = stripped
+    if written:
+        corpus_block["per_object_sidecars"] = written
+    return corpus_block
+
+
 def write_run_header(out_dir: Path, header: Dict[str, Any]) -> Optional[str]:
     """Condition 3. Writes the header, reads it back, and returns a refusal or None.
 
@@ -1681,11 +1712,9 @@ def main(argv: Optional[list] = None) -> int:
     summary["integrity"]["answer_temperature"] = answer_temperature_block(run_ledger)
     summary["integrity"]["stage_health"] = stage_health_block(run_ledger)
     if corpus_skip:
-        _unread = {"available": False,
-                   "unavailable_reason": "unavailable:--corpus-fingerprint-skip",
-                   "weaviate_url": None, "include_vectors": False, "counts": None,
-                   "chunk_count": None, "content_sha256": None, "vector_sha256": None,
-                   "n_hashed": None, "n_vectors_hashed": None, "seconds": None}
+        # Built by corpus_state, never hand-copied here: a literal was a second copy of that
+        # shape and it was already missing fields before the per-object map was added to it.
+        _unread = unavailable_state("--corpus-fingerprint-skip", include_vectors=False)
         summary["integrity"]["corpus"] = corpus_run_block(_unread, _unread, skipped=True)
     else:
         summary["integrity"]["corpus"] = corpus_run_block(
@@ -1813,6 +1842,8 @@ def main(argv: Optional[list] = None) -> int:
     print(f"\nBy category:")
     for cat, stats in sorted(summary["by_category"].items()):
         print(f"  {cat:30s}  {stats['pass']}/{stats['total']}  ({stats['pct']:.0f}%)")
+
+    write_per_object_sidecars(out_dir, summary["integrity"].get("corpus") or {})
 
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8",
