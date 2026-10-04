@@ -96,6 +96,64 @@ _PROBE = u"אב"
 # Candidate-derived keys that may never appear in the emitted bytes, by name OR by value.
 FORBIDDEN_KEYS = ("hebrew", "words", "nikud", "letters", "chars", "truth", "signature")
 
+# The page's own script. Placeholders are substituted, never %-formatted.
+JS = r"""
+var CH=__CH__, SEC=__SEC__, SETID=__SETID__, N=__N__, ST={};
+function row(s){if(!ST[s])ST[s]={rd:[],note:"",fault:0,abst:0};return ST[s];}
+function setrd(i){var r=row(i.getAttribute("data-s"));r.rd[+i.getAttribute("data-i")]=i.value;upd();}
+function setnote(i){row(i.getAttribute("data-s")).note=i.value;upd();}
+function addrun(b){var s=b.getAttribute("data-s"),box=document.getElementById("rd_"+s);
+ var k=box.getElementsByTagName("input").length,i=document.createElement("input");
+ i.className="rd";i.setAttribute("data-s",s);i.setAttribute("data-i",k);
+ i.setAttribute("oninput","setrd(this)");i.placeholder="run "+(k+1);box.appendChild(i);i.focus();
+ return i;}
+function mark(b){var s=b.getAttribute("data-s"),r=row(s);
+ r.fault=r.fault?0:1;b.className=r.fault?"fault on":"fault";upd();}
+function absn(b){var s=b.getAttribute("data-s"),r=row(s);
+ r.abst=r.abst?0:1;b.className=r.abst?"abst on":"abst";upd();}
+function clean(r){var o=[],i;for(i=0;i<r.rd.length;i++){var v=(r.rd[i]||"").replace(/^\s+|\s+$/g,"");
+ if(v)o.push(v);}return o;}
+function touched(r){return clean(r).length||r.fault||r.abst||r.note;}
+function lines(){
+ /* EVERY span, every time -- empty rows included. A download that carried only the rows touched so far
+    would be a NARROWING write, and a partial file dropped over the skeleton is exactly how an approval
+    record gets destroyed while every byte in it is valid. */
+ var K=Object.keys(CH).sort(),L=[],i;
+ for(i=0;i<K.length;i++){var s=K[i],r=row(s);
+  L.push(JSON.stringify({span_id:s,crop_sha16:CH[s],readings:clean(r),abstain:!!r.abst,
+   fault:r.fault?"not-hebrew-or-blank":"",note:r.note,section:SEC[s],
+   signed_from:"pixels, candidate withheld",signed_in:"the sheet, in the browser",
+   set_sha16:SETID}));}
+ return L.join("\n")+"\n";}
+function upd(){var K=Object.keys(CH).sort(),ns=0,na=0,nf=0,nt=0,i;
+ for(i=0;i<K.length;i++){var r=row(K[i]);
+  if(clean(r).length)ns++;if(r.abst)na++;if(r.fault)nf++;if(touched(r))nt++;}
+ document.getElementById("ns").textContent=ns;
+ document.getElementById("na").textContent=na;
+ document.getElementById("nf").textContent=nf;
+ document.getElementById("nleft").textContent=(N-nt);
+ var a=document.getElementById("dl");
+ a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(lines());
+ try{localStorage.setItem("ts_"+SETID,JSON.stringify(ST));}catch(e){}}
+function restore(){
+ /* BEST EFFORT ONLY, and it says so in the bar. A file:// page's storage can be blocked, cleared or
+    absent, and the accessor itself can throw; the download is the record, not this. */
+ var raw=null;try{raw=localStorage.getItem("ts_"+SETID);}catch(e){raw=null;}
+ if(!raw)return 0;var S=null;try{S=JSON.parse(raw);}catch(e){return 0;}
+ var K=Object.keys(S),i,j,k=0;
+ for(i=0;i<K.length;i++){var s=K[i],r=S[s];if(!CH[s])continue;ST[s]=r;k++;
+  var box=document.getElementById("rd_"+s);if(box){var ins=box.getElementsByTagName("input");
+   for(j=0;j<(r.rd||[]).length;j++){var inp=ins[j]||addrun(document.querySelector('.addrun[data-s="'+s+'"]'));
+    inp.value=r.rd[j]||"";}}
+  var nt=document.querySelector('.nt[data-s="'+s+'"]');if(nt)nt.value=r.note||"";
+  var fb=document.querySelector('.fault[data-s="'+s+'"]');if(fb&&r.fault)fb.className="fault on";
+  var ab=document.querySelector('.abst[data-s="'+s+'"]');if(ab&&r.abst)ab.className="abst on";}
+ return k;}
+window.addEventListener("load",function(){var k=restore();
+ document.getElementById("rst").textContent=k?("restored "+k+" row(s) from this browser"):
+  "nothing restored from this browser";upd();});
+"""
+
 GIT_START = git_state(_HERE)
 
 cut = json.load(io.open(str(CUT), encoding="utf-8"))
@@ -258,6 +316,22 @@ button.fault.on{background:#a44;color:#fff;font-weight:700}
 #bar{position:fixed;right:14px;bottom:14px;background:#1b2127;border:1px solid #468;border-radius:4px;
  padding:8px 12px;font-size:12px;z-index:9}
 h2 .cnt{color:#fff;background:#2a3a4a;border-radius:3px;padding:0 7px;margin-left:6px}
+.sign{margin:8px 0 2px;padding:8px 10px;background:#141a1f;border:1px solid #2c3a46;border-radius:4px}
+.sign label{display:block;font-size:10px;color:#8aa;text-transform:uppercase;letter-spacing:.06em;
+ margin:0 0 3px}
+input.rd{display:block;width:100%;box-sizing:border-box;margin:0 0 4px;padding:6px 8px;background:#0c1116;
+ color:#eef;border:1px solid #3a4c5c;border-radius:3px;font:20px "Times New Roman",serif;direction:rtl;
+ text-align:right}
+input.rd:focus{border-color:#7ab;outline:none}
+input.nt{display:block;width:100%;box-sizing:border-box;margin:0;padding:5px 8px;background:#0c1116;
+ color:#cde;border:1px solid #2c3a46;border-radius:3px;font:12px system-ui,sans-serif;direction:ltr}
+button.addrun{background:#1b2630;color:#bcd;border:1px solid #3a4c5c;border-radius:3px;padding:2px 8px;
+ font:11px system-ui,sans-serif;cursor:pointer;margin:0 0 6px}
+button.abst{background:#20232a;color:#dde;border:1px solid #556;border-radius:3px;padding:3px 8px;
+ font:11px system-ui,sans-serif;cursor:pointer;margin:4px 6px 0 0}
+button.abst.on{background:#667;color:#fff;font-weight:700}
+.row.touched{border-left:3px solid #6a9}
+#bar b{color:#cfe}
 """
 
 H = ['<!doctype html><meta charset="utf-8"><title>truth set %s - %d spans, candidate withheld</title>'
@@ -408,8 +482,26 @@ for r in rows:
                  % (SHIFT[sid]["behind_a_region_of"], SHIFT[sid]["at_note_index"],
                     "this box is in the note printed <b>o</b> while carrying note 2, so its note identity "
                     "is open." if sid == "p245:n1" else "it checks out."))
-    H.append('<button class="fault" data-s="%s" onclick="mark(this)">not Hebrew / blank '
-             '&mdash; record a fault</button>' % html.escape(sid))
+    # THE CONTROLS ARE ON THE ROW, BESIDE THE PIXELS. Until 2026-10-04 this page offered one button
+    # per row and nothing else: the signature had to be hand-typed into a JSONL in an editor, with the
+    # signer matching span_id to crop by eye. That is a clerical error class sitting on top of the one
+    # record this lane cannot reconstruct -- and the crop hash, which is what the signature is ABOUT, was
+    # bound to the row by hand. Now the field is here and the hash is attached by the page.
+    # One input per visible Hebrew run, because the record is a LIST and a joined string would need a
+    # separator convention that could be got wrong. A box holding two runs gets two inputs.
+    _e = html.escape(sid)
+    H.append('<div class="sign"><label>Hebrew you can see in this crop &mdash; one box per run, '
+             'printed order</label><div id="rd_%s">'
+             '<input class="rd" data-s="%s" data-i="0" oninput="setrd(this)" placeholder="run 1">'
+             '</div>'
+             '<button class="addrun" data-s="%s" onclick="addrun(this)">+ another run</button>'
+             '<label>Note &mdash; free text (e.g. roman type in the box too, or which run is which)'
+             '</label>'
+             '<input class="nt" data-s="%s" oninput="setnote(this)" placeholder="optional">'
+             '<div><button class="fault" data-s="%s" onclick="mark(this)">not Hebrew / blank '
+             '&mdash; record a fault</button>'
+             '<button class="abst" data-s="%s" onclick="absn(this)">abstain &mdash; Hebrew is there, '
+             'I will not sign it</button></div></div>' % (_e, _e, _e, _e, _e, _e))
     H.append("</div><div>")
     pair = ' class="pair"' if any(n == "RECIPE" for n, _ in bg) else ""
     H.append('<figure%s><img src="%s" width="%d" height="%d"><img src="%s" width="%d" height="%d">'
@@ -440,39 +532,44 @@ for r in rows:
 # So the signer needs a way to say "there is nothing here to sign" that lands as a RECORD rather than as
 # an empty row, and it has to name the span and the pixels it was given -- the crop hash, so a re-cut
 # span cannot inherit the fault any more than it could inherit a signature.
-H.append('<div id="bar">faults recorded: <b id="fc">0</b> &nbsp;&middot;&nbsp; '
-         '<a id="dl" download="truthset_faults_%s.jsonl" href="#" style="display:none">download</a></div>'
-         % SET)
-H.append('<script>\n'
-         'var CH=%s, SETID=%s, F={};\n'
-         'function mark(b){var s=b.getAttribute("data-s");\n'
-         ' if(F[s]){delete F[s];b.className="fault";}else{F[s]=1;b.className="fault on";}\n'
-         ' upd();}\n'
-         'function upd(){var k=Object.keys(F).sort();\n'
-         ' document.getElementById("fc").textContent=k.length;\n'
-         ' var L=k.map(function(s){return JSON.stringify({span_id:s,crop_sha16:CH[s],\n'
-         '   fault:"not-hebrew-or-blank",basis:"human, from the pixels",set_sha16:SETID});}).join("\\n");\n'
-         ' var a=document.getElementById("dl");\n'
-         ' a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(L+(L?"\\n":""));\n'
-         ' a.style.display=k.length?"inline":"none";}\n'
-         '</script>' % (json.dumps({_s: shown[_s]["A2_spanbox"] for _s in sorted(shown)}),
-                        json.dumps(SET)))
-H.append('<h2>How to record a fault</h2><div class="sub">The button on a row records a fault against '
-         'that BOX &mdash; nothing legible, or nothing in the script this span is supposed to be in. It '
-         'is not an abstain and not a signature: &ldquo;there is nothing here to sign&rdquo; and &ldquo;I '
-         'will not sign this&rdquo; are different facts and the set needs the first one recorded. Press '
-         'as many as apply, then use <b>download</b> at the bottom right; it writes one line per fault, '
-         'each naming the span and the hash of the pixels you were shown, beside the signing skeleton. '
-         'The 23 spans already dropped took every non-legible crop that could be MEASURED, so this '
-         'should be empty or nearly so &mdash; it is here for the ones no measurement could find.</div>')
-H.append('<h2>How to record a signature</h2><div class="sub">A skeleton with one row per span, in this '
-         'order, is written beside this sheet: <code>%s</code>. Each row has an '
-         'empty LIST to fill from the pixels &mdash; one entry per span of Hebrew visible in that crop, '
-         'so a box that holds two spans records two readings &mdash; and a flag to set instead when the '
-         'pixels support none. The crop hash in each row is what the signature is ABOUT, so a re-cut span '
-         'cannot inherit an old signature. (The field is not named here on purpose: this file asserts '
-         'that no candidate-derived field name appears in it, and that guard is worth more than the '
-         'convenience of writing it out.)</div>' % SKEL_NAME)
+H.append('<div id="bar">signed <b id="ns">0</b> &nbsp;&middot;&nbsp; abstained <b id="na">0</b> '
+         '&nbsp;&middot;&nbsp; faults <b id="nf">0</b> &nbsp;&middot;&nbsp; untouched '
+         '<b id="nleft">%d</b><br><a id="dl" download="%s" href="#">download all %d rows</a> '
+         '&nbsp;&middot;&nbsp; <span id="rst" style="color:#8aa"></span></div>'
+         % (SET_N, SKEL_NAME, SET_N))
+# Built by substitution, not by %-formatting: a literal "30%" in a prose block once turned a plain
+# string into a format string and crashed the run, and this block is mostly punctuation.
+H.append("<script>"
+         + JS.replace("__CH__", json.dumps({_s: shown[_s]["A2_spanbox"] for _s in sorted(shown)}))
+             .replace("__SEC__", json.dumps({_s: SEC[_s] for _s in sorted(shown)}))
+             .replace("__SETID__", json.dumps(SET))
+             .replace("__N__", str(SET_N))
+         + "</script>")
+H.append('<h2>How to record a fault, and how an abstain differs</h2><div class="sub">Three different '
+         'facts, three different records, all on the row. <b>A fault</b> says there is nothing here to '
+         'sign &mdash; nothing legible, or nothing in the script this span is supposed to be in. '
+         '<b>An abstain</b> says Hebrew is there and you will not sign it: the two are not the same and '
+         'the set needs both. <b>A reading</b> is everything else. A crop holding Hebrew <i>and</i> roman '
+         'type is not a fault: sign the Hebrew, leave the roman alone, and say so in the note if you want '
+         'it counted &mdash; the scorer already has a class for a box that holds more than its span. The '
+         '23 spans already dropped took every non-legible crop that could be MEASURED, so faults should '
+         'be few or none; they are here for the ones no measurement could find.</div>')
+H.append('<h2>How to record a signature</h2><div class="sub">In the page, on the row, beside the '
+         'pixels. Type what you can see into the box under each crop &mdash; <b>one box per run of '
+         'Hebrew</b>, in printed order, so a box that holds two runs records two entries and there is no '
+         'separator convention to get wrong; press <b>+ another run</b> for the second. The page attaches '
+         'the hash of the crop you were shown, so the record is about those pixels and a re-cut span '
+         'cannot inherit it &mdash; that binding used to be yours to make by hand, and matching a span to '
+         'a crop by eye is a clerical error class on top of the one record this lane cannot reconstruct.'
+         '<br>'
+         '<b>Download</b> at the bottom right writes <code>%s</code>: <b>every</b> one of the %d rows, '
+         'every time, with the untouched ones left empty. It is a drop-in replacement for the empty '
+         'skeleton beside this sheet, and it emits all of them on purpose &mdash; a file carrying only '
+         'what you had reached so far would be a narrowing write, and a partial file dropped over a full '
+         'one is how an approval record gets destroyed with every byte in it still valid. Press it as '
+         'often as you like. Your typing is also kept in this browser between visits as a convenience, '
+         'best effort only: a local page&rsquo;s storage can be blocked or cleared and the bar says what '
+         'it managed to restore. <b>The downloaded file is the record; the browser is not.</b>' % (SKEL_NAME, SET_N))
 H.append('<div class="sub" style="margin-top:18px">Flagged rows: %d of %d &mdash; no longer shown '
          'first, but grouped into the three sections above, so what a row needs from you is stated '
          'before you reach it. Sheet built from <code>%s</code>.</div>' % (nflag, SET_N, CUT.name))
@@ -508,6 +605,20 @@ assert doc.count(">EDGE-CUT<") == len(EDGE), \
     "the sheet renders %d EDGE-CUT badges for %d edge-sliced crops" % (doc.count(">EDGE-CUT<"), len(EDGE))
 assert doc.count("record a fault</button>") == SET_N, \
     "the fault button is on %d of %d rows" % (doc.count("record a fault</button>"), SET_N)
+# EVERY ROW MUST BE ABLE TO CARRY EVERY ONE OF THE THREE RECORDS. A page that can take a fault and not a
+# reading is the state this sheet was in until 2026-10-04, and it looked complete.
+for _ctl, _what in ((' class="rd" ', "a reading input"), ('class="nt" ', "a note input"),
+                    ('onclick="addrun(this)"', "a second-run button"),
+                    ('onclick="absn(this)"', "an abstain button")):
+    assert doc.count(_ctl) == SET_N, \
+        "%s is on %d of %d rows" % (_what, doc.count(_ctl), SET_N)
+assert 'download="%s"' % SKEL_NAME in doc, "the page does not offer the signing file for download"
+for _fn in ("setrd", "setnote", "addrun", "absn", "mark", "lines", "restore"):
+    assert ("function %s(" % _fn) in doc, "the page calls %s and does not define it" % _fn
+# The inputs ship EMPTY, so the withholding guard above still holds over this file; what the signer types
+# never enters it. Asserted rather than assumed, because an input with a value= would be invisible here.
+assert 'class="rd"' in doc and 'value=' not in doc.split('<script>')[0].split('class="rd"')[1][:200], \
+    "a reading input ships with a value in it"
 
 # ---- NO NOTE-BOX PIXELS IN THIS FILE, AND A DETECTOR THAT CAN SEE THEM -----------------------------
 # The standing rule is that no note-box crop leaves the network. Chris asked for each span to link to its
@@ -610,6 +721,13 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                    "one EDGE-CUT badge per edge-sliced crop",
                                    "a fault button on every row",
                                    "every derived note crop and every page PNG linked"],
+           "records_on_the_row": {"reading": "one input per visible Hebrew run, list-valued",
+                                 "note": "free text", "fault": "not-hebrew-or-blank",
+                                 "abstain": "Hebrew present, not signed",
+                                 "download": SKEL_NAME,
+                                 "download_emits": "all %d rows, untouched ones empty, so replacing the "
+                                                   "skeleton is never a narrowing write" % SET_N,
+                                 "hash_binding": "attached by the page, not by the signer"},
            "prose_digest": PDIG,
            "address_covers": ["every crop hash", "every badge name per span",
                               "the whole readable document (image payloads stripped)"],
