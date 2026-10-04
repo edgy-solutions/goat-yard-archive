@@ -867,6 +867,56 @@ check("N consecutive dead items faults the RUN, and a faulted artifact refuses t
       "dead >= DEAD_RUN_AT" in _axsrc and "cannot be scored" in _axsrc)
 check("the footer records git at start AND end, and whether they matched",
       '"clean_run": clean' in _axsrc and "g0 == g1" in _axsrc)
+# 2026-10-04: the tree was dirtied WHILE a run was in flight. Both halves of that accident are now
+# guarded in code rather than in my memory of it.
+check("a run refuses to resume onto an artifact that holds reads and no footer (never splice)",
+      "NO footer -- its run never closed" in _axsrc and "raise RuntimeError" in _axsrc)
+check("scoring refuses a footerless artifact, and a PROVISIONAL one unless it is named as such",
+      "has no footer" in _axsrc and "allow_provisional" in _axsrc
+      and "cannot be cited" in _axsrc)
+
+print("\n(17) item 6, frontier half: the TEXT axis")
+# The channel is removed by removing it. An empty paragraph would still say "a note surrounds this crop
+# and its Hebrew was taken out", which is most of what the channel carries.
+_on, _off = F._prompt_text("a \u2022 b"), F._prompt_text(None)
+check("text OFF is head+tail exactly -- the told-about-the-note block is ABSENT, not empty",
+      _off == F.PROMPT_HEAD + F.PROMPT_TAIL)
+check("and it carries no bullet, no context sentence and no citation sentence",
+      "\u2022" not in _off and "Context from" not in _off and "citation" not in _off)
+check("text ON carries the ctx it was handed", "a \u2022 b" in _on and "Context from" in _on)
+
+# The ablation must not be able to delete its own control.
+check("the text-off run writes a DIFFERENT artifact (rows() keeps the last read per span+model)",
+      F.OUT_NOTEXT != F.OUT and "notext" in F.OUT_NOTEXT.name)
+
+# prompt_sha16 must keep meaning what it meant in the recorded artifact.
+_hdr = next((o for o in diag._lines(F.OUT) if o.get("kind") == "config_header"), None)
+if _hdr and _hdr.get("prompt_sha16"):
+    check("prompt_sha16 still hashes head+tail, so the recorded run's header value is unchanged",
+          _hdr["prompt_sha16"] == F.diag_sha(F.PROMPT_HEAD + F.PROMPT_TAIL), _hdr["prompt_sha16"])
+check("the ASSEMBLED prompt gets its own hash, and the two variants differ under it",
+      F.diag_sha(F._prompt_text("<CTX>")) != F.diag_sha(F._prompt_text(None)))
+
+# astra: measured, recorded, and never called again.
+check("astra is still in ARMS, so the recorded 19/19 keeps its meaning",
+      "openai/gpt-6-astra" in F.ARMS)
+check("astra is excluded from new spend, with the reason recorded rather than implied",
+      "openai/gpt-6-astra" in F.EXCLUDED_ARMS
+      and "Chris" in F.EXCLUDED_ARMS["openai/gpt-6-astra"])
+_run = src[src.index("def run(only=None"):src.index("def diag_sha(")]
+check("the excluded arm is skipped BEFORE the catalog status check, and records why",
+      _run.index("if model in EXCLUDED_ARMS:") < _run.index('if c.get("status") != "ok":')
+      and "EXCLUDED_ARMS[model]" in _run)
+
+# The axis is applied at exactly one point, and it changes no pixel.
+check("the channel is withheld at ONE call site, not scattered through the run",
+      src.count("ctx if TEXT_CONTEXT else None") == 1)
+check("--no-text is applied before dispatch, so score() reads the file run() wrote",
+      src.index('if "--no-text" in a:') < src.index('if cmd == "catalog":'))
+check("the text axis sends the same A2 crops through the same offnet gate -- no new pixel class",
+      src.count('diag.b64_gated(cpath, what="frontier crop", offnet=True)') == 1)
+check("the header says whether the channel was sent, in the hashed identity block",
+      '"text_context_sent": TEXT_CONTEXT' in src)
 
 print()
 if fails:

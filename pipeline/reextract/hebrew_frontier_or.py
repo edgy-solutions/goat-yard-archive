@@ -88,6 +88,21 @@ APERTURE = "A2_spanbox"
 OUT = diag.DATA / "hebrew_frontier_or_reads_20260927.jsonl"
 CATALOG = diag.DATA / "hebrew_frontier_or_catalog_20260927.json"
 
+# Item 6's text axis writes its OWN artifact. `rows()` keeps the LAST read per (span, model), so a
+# text-off read appended to the recorded file would overwrite the text-on read it is supposed to be
+# compared against -- the ablation would delete its own control. A separate file, and `--no-text`
+# repoints every command at it.
+OUT_NOTEXT = diag.DATA / "hebrew_frontier_or_notext_20261004.jsonl"
+TEXT_CONTEXT = True           # the text channel is ON unless --no-text says otherwise
+
+# Chris's instruction, 2026-10-04: astra is not to be called again. Two reasons, both his -- the price
+# point, and OpenAI. It stays in ARMS and its recorded 19/19 stays in the run record, because deleting
+# a measurement is the one thing this project does not do; what stops is the SPEND. A skipped arm is
+# recorded as skipped with the reason, so an arm that silently stopped appearing cannot be mistaken for
+# an arm that failed.
+EXCLUDED_ARMS = {"openai/gpt-6-astra": "excluded from new spend by Chris's instruction 2026-10-04 "
+                                       "(price point, and OpenAI); its recorded 19/19 stands"}
+
 ARMS = [
     "openai/gpt-6-astra", "openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna",
     "openai/gpt-6-luna", "openai/gpt-4o-mini",
@@ -268,12 +283,32 @@ REASONING_LADDER = [
 ]
 
 
-def _body(model, ctx, img_b64, structured, reasoning=None):
-    text = PROMPT_HEAD + (
+def _prompt_text(ctx):
+    """The assembled prompt. `ctx is None` means the TEXT CHANNEL IS OFF: the paragraph is absent, not
+    empty.
+
+    Item 6's text axis, 2026-10-04. An empty context paragraph would still tell the model that a note
+    surrounds the crop and that its Hebrew was removed, which is most of what the channel carries; and a
+    bulleted line with nothing in it would say "this note has no words", which is false. The channel is
+    removed by removing it. The sentence about the missing citation goes with it, because it is part of
+    the same told-about-the-note block.
+
+    This is the one cut that can size the inflation found on 2026-09-28: three arms reconstructed the
+    canonical Masoretic verse from a crop with NO INK, one of them matching the signed string exactly.
+    Any span whose printed form agrees with the canonical text therefore scores `exact` for an arm that
+    read nothing, and the context is where the verse comes from. With the context gone, an exact read is
+    about the pixels or it is nothing."""
+    if ctx is None:
+        return PROMPT_HEAD + PROMPT_TAIL
+    return PROMPT_HEAD + (
         "Context from the surrounding footnote text. Hebrew has been removed; each • marks one "
         f"Hebrew word that stood there:\n  {ctx}\n"
         "No scripture citation is recorded for this note in the local extraction."
     ) + PROMPT_TAIL
+
+
+def _body(model, ctx, img_b64, structured, reasoning=None):
+    text = _prompt_text(ctx)
     b = {
         "model": model,
         "temperature": 0,
@@ -637,6 +672,16 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                            identity_extra={"aperture": APERTURE, "n_scorable": len(cs),
                                            "arms": ARMS, "prompt_sha16": diag_sha(PROMPT_HEAD +
                                                                                  PROMPT_TAIL),
+                                           # `prompt_sha16` is unchanged and still hashes head+tail,
+                                           # so it keeps meaning what it meant in the recorded
+                                           # artifact. It cannot tell the text axis apart -- both
+                                           # variants share a head and a tail -- so the ASSEMBLED
+                                           # prompt gets its own hash, over a fixed <CTX> placeholder
+                                           # so it is stable across spans and differs across cells.
+                                           "text_context_sent": TEXT_CONTEXT,
+                                           "prompt_assembled_sha16": diag_sha(
+                                               _prompt_text("<CTX>" if TEXT_CONTEXT else None)),
+                                           "excluded_arms": EXCLUDED_ARMS,
                                            # Chris's rule: record the hash of every crop sent, in
                                            # the run header. A run is then answerable for exactly
                                            # the pixels it paid for.
@@ -675,10 +720,16 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                                   "catalog_pulled": cat["pulled"],
                                   "budget_before": _budget(),
                                   "note_box_crops_sent": 0,
-                                  "text_context": "latin_context with Hebrew runs replaced by U+2022",
+                                  "text_context": ("latin_context with Hebrew runs replaced by U+2022"
+                                                   if TEXT_CONTEXT else
+                                                   "ABSENT -- item 6 text axis, the channel was not sent"),
                                   "pages": "FILE pages (printed = file - 88)"})
         f.header(hdr, "frontier run")   # calls require_endpoint, then writes it FIRST
         for model in (only or ARMS):
+            if model in EXCLUDED_ARMS:
+                f.row({"kind": "arm_skipped", "model": model, "why": EXCLUDED_ARMS[model]})
+                print(f"SKIP {model}: {EXCLUDED_ARMS[model]}")
+                continue
             c = cat["models"].get(model, {})
             if c.get("status") != "ok":
                 f.row({"kind": "arm_skipped", "model": model,
@@ -696,7 +747,8 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                 if (s["span_id"], model) in done:
                     continue
                 try:
-                    row = call(model, s, cpath, ctx, c["structured"])
+                    # The axis, applied at ONE point. `None` is "the channel is off"; see _prompt_text.
+                    row = call(model, s, cpath, ctx if TEXT_CONTEXT else None, c["structured"])
                 except diag.CropRefused as e:
                     # Pre-send refusal: no request was made, no tokens were spent, and the span is
                     # UNSCORABLE rather than wrongly read. It is kept in the file because a silent
@@ -1134,6 +1186,12 @@ def matrix():
 if __name__ == "__main__":
     a = sys.argv[1:]
     cmd = a[0] if a else "plan"
+    # BEFORE dispatch, so `score --no-text` reads the artifact `run --no-text` wrote. Every command
+    # that touches OUT follows the flag; nothing silently scores one run against the other's file.
+    if "--no-text" in a:
+        TEXT_CONTEXT = False
+        OUT = OUT_NOTEXT
+        print(f"TEXT CHANNEL OFF -- item 6 text axis. artifact: {OUT.name}")
     mv = a[a.index("--model") + 1] if "--model" in a else None
     # --span p423:n3,p726:n3   or   --span p423:n3 --span p726:n3
     sv = [x for i, t in enumerate(a) if t == "--span" for x in a[i + 1].split(",") if x] or None

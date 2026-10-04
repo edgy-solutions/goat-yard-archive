@@ -159,7 +159,18 @@ def run(hostport, models, out=OUT, cells=None):
     g0 = {"git_head": _git_head(), "git_dirty": _git_dirty()}
     done = set()
     if out.exists():
-        done = {(o["cell"], o["span_id"], o["model"]) for o in D._lines(out) if "span_id" in o}
+        # A run that was killed, crashed or faulted leaves rows and NO footer. Resuming onto it is the
+        # splice the run-level fault rule forbids: the result would be one artifact holding two runs'
+        # reads under one header, with no record of where the first stopped. 2026-10-04: this happened
+        # -- the tree was dirtied mid-run, the run was stopped, and only a manual delete kept the next
+        # run from appending to its 86 orphaned rows. So the guard is in the code now, not in my memory.
+        rows_ = [o for o in D._lines(out) if "span_id" in o]
+        if rows_ and not any(o.get("kind") == "axes_run_footer" for o in D._lines(out)):
+            raise RuntimeError(
+                f"{out.name} holds {len(rows_)} read(s) and NO footer -- its run never closed. "
+                "Rerun from the top: delete it, or pass a new --out. Never splice onto a run that "
+                "did not finish.")
+        done = {(o["cell"], o["span_id"], o["model"]) for o in rows_}
     aborted, dead, faulted = [], 0, None
 
     with io.open(out, "a", encoding="utf-8") as f:
@@ -264,11 +275,26 @@ def run(hostport, models, out=OUT, cells=None):
 # ------------------------------------------------------------------ scoring
 
 
-def score(out=OUT):
+def score(out=OUT, allow_provisional=False):
+    """Scored rows, or a refusal. A run that is not clean cannot be cited, so it is not scored either.
+
+    The clean-run rule binding both lanes: a run is clean only if git state at start and at end are both
+    clean and identical. A run over a dirty tree, or one where HEAD or the tree moved mid-run, is
+    PROVISIONAL. `allow_provisional=True` exists for diagnosis and says so on every line it prints;
+    there is deliberately no way to get a provisional artifact scored without naming it as one."""
     sets = {s["span_id"]: s for s in D.build_set(include_sealed=True)}
     foot = [o for o in D._lines(out) if o.get("kind") == "axes_run_footer"]
     if any(o.get("run_faulted") for o in foot):
         raise RuntimeError("this artifact carries a run_faulted footer -- it cannot be scored")
+    if not foot:
+        raise RuntimeError(f"{out.name} has no footer -- its run never closed, so its rows are a "
+                           "fragment of an unknown run. Rerun from the top.")
+    if not foot[-1].get("clean_run") and not allow_provisional:
+        raise RuntimeError(
+            f"{out.name} is PROVISIONAL: git at start {foot[-1].get('git_at_start')} != at end "
+            f"{foot[-1].get('git_at_end')}, or the tree was dirty. A provisional run cannot be cited "
+            "in a report, an ADR or a tier change. Rerun over a clean tree, or pass "
+            "allow_provisional=True and label every figure it produces.")
     rows = [o for o in D._lines(out)
             if "span_id" in o and o.get("model") not in D.DROPPED_ARMS]
     for o in rows:
@@ -282,8 +308,11 @@ def score(out=OUT):
     return rows, sets, (foot[-1] if foot else None)
 
 
-def report(out=OUT):
-    rows, sets, foot = score(out)
+def report(out=OUT, allow_provisional=False):
+    rows, sets, foot = score(out, allow_provisional=allow_provisional)
+    if not foot.get("clean_run"):
+        print("*** PROVISIONAL RUN -- every figure below is uncitable. git moved or the tree was "
+              "dirty mid-run. ***")
     by = defaultdict(list)
     for o in rows:
         by[o["cell"]].append(o)
@@ -365,6 +394,8 @@ def main():
     ap.add_argument("--model", action="append", default=None)
     ap.add_argument("--cell", action="append", default=None)
     ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--allow-provisional", action="store_true",
+                    help="score an uncitable run for diagnosis; every figure is labelled PROVISIONAL")
     a = ap.parse_args()
     out = Path(a.out)
     if a.cmd == "plan":
@@ -373,7 +404,7 @@ def main():
         cells = [c for c in CELLS if c[0] in set(a.cell)] if a.cell else CELLS
         run(a.host, a.model or L.ARMS, out=out, cells=cells)
     else:
-        report(out)
+        report(out, allow_provisional=a.allow_provisional)
 
 
 if __name__ == "__main__":
