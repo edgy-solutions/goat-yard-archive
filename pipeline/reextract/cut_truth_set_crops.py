@@ -177,7 +177,15 @@ for r in rows:
     p = OUTDIR / ("%s_A2_spanbox.png" % sid.replace(":", "_"))
     im.save(str(p))
     prof = G.row_profile(im)
-    rec["crop"] = {"path": str(p), "size": list(im.size),
+    # A CROP CAN PASS THE BLANK GATE ON A PRINTED RULE. `crop_quality.crop_has_line()` asks whether
+    # there is an inked band, and the footnote rule is one: 14 of these 96 crops are a single 7-13px
+    # run spanning the full width with no type in them at all, and every one passed the gate. The
+    # lane's own derived constant already says what they are -- MIN_BAND_PX is the floor for an ink
+    # run to be a line of TYPE -- it had simply never been asked about a crop. No span is dropped
+    # here (Chris: exclusions happen afterwards and with a reason); it is recorded so that nobody is
+    # asked to sign a word from a rule.
+    n_text_bands = len(G.text_bands(im))
+    rec["crop"] = {"path": str(p), "size": list(im.size), "text_bands": n_text_bands,
                    "sha16": hashlib.sha256(p.read_bytes()).hexdigest()[:16],
                    "native_rects": [x["box"] for x in rects], "n_rects": len(rects),
                    "rect_edges": [x.get("edge") for x in rects],
@@ -246,6 +254,9 @@ dup = {("p%d:%s" % (k[0], list(k[1]))): v for k, v in seen.items() if len(v) > 1
 short = [{"span_id": b["span_id"], "box_h_native": b["crop"]["native_rects"][0][3] - b["crop"]["native_rects"][0][1],
           "min_band_px": G.MIN_BAND_PX}
          for b in cut if (b["crop"]["native_rects"][0][3] - b["crop"]["native_rects"][0][1]) < G.MIN_BAND_PX]
+rule_only = [{"span_id": b["span_id"], "size": b["crop"]["size"],
+              "ink_runs_px": [r[1] - r[0] + 1 for r in G.ink_runs(Image.open(b["crop"]["path"]))]}
+             for b in cut if b["crop"]["text_bands"] == 0]
 over = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in cut
         if _bestruns(b) > b["words"]]
 under = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in cut
@@ -255,6 +266,12 @@ GEOM_FLAGS = {
     "duplicate_box_note": "two spans with one box cut byte-identical crops; at least one box is wrong "
                           "and a signature from these pixels cannot distinguish them. REDRAW, not a "
                           "reading question.",
+    "no_line_of_type": rule_only,
+    "no_line_of_type_note": "the crop holds no ink run thick enough to be a line of type, so there is "
+                            "nothing in it to read. Measured by the lane's own MIN_BAND_PX. These are "
+                            "boxes on the footnote RULE, and every one of them passed crop_has_line() "
+                            "-- a printed rule satisfies `there is an inked band`. The gate is Lane "
+                            "A's crop_quality.py: REQUEST, do not edit.",
     "box_shorter_than_a_line": short,
     "box_shorter_note": "the unpadded box is thinner than MIN_BAND_PX, the lane's derived floor for an "
                         "ink run to be a line of type at all -- so the box cannot hold a word of this "
@@ -308,6 +325,8 @@ print("clips written %d   no trim needed %d   abstains %s"
 print("word runs DIFFER on %d span(s): %s"
       % (len(differ), [(d["span_id"], len(d["base"]), len(d["clip"])) for d in art["clip"]["word_runs_differ"]]))
 print("word runs REGRESSED (clip resolves fewer): %s" % (regressed or "none"))
+print("NO LINE OF TYPE (box on a rule): %d  %s"
+      % (len(rule_only), [x["span_id"] for x in rule_only]))
 print("geometry flags: duplicate-box groups %d %s   box shorter than a line %s"
       % (len(dup), list(dup.values()) or "", [x["span_id"] for x in short] or "none"))
 print("resolved runs vs claimed words: more %d   fewer %d   equal %d"
