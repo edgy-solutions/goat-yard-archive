@@ -87,6 +87,30 @@ def no_call_record(path: str, why: str, pin: Optional[dict]) -> Dict[str, Any]:
     return rec
 
 
+
+def resolve_answer_lm(pred_record: Optional[dict], structured_on: bool, history_grew: bool,
+                      last_entry: Any, pin: Optional[dict]) -> Dict[str, Any]:
+    """Pick the record for ONE answered request, told which path ran rather than guessing.
+
+    The caller used to infer the path from the absence of a record: no record attached meant the
+    DSPy path, so look in the DSPy history. That inference is unsound on the structured path,
+    where a branch can answer and return without attaching one -- and it cost a whole scored arm
+    (RESULT_off_vs_on_rerun2_laneA_20261004.md): one real BAML call, whose provider and
+    temperature were sitting in the collector, was recorded as an unchecked DSPy non-call.
+
+    So the path is an INPUT here. When the structured path ran and brought back nothing, that is
+    a `baml` record saying exactly that, which an aggregator counts as unavailable under the right
+    path instead of inventing a second configuration for the arm.
+    """
+    if pred_record:
+        return pred_record
+    if structured_on:
+        return no_call_record("baml", "structured-path-returned-no-record", pin)
+    if history_grew:
+        return record_from_dspy_history(last_entry, pin)
+    return no_call_record("dspy", "no-dspy-call-added-to-history-during-this-request", pin)
+
+
 def record_from_baml_call(call: Any, pin: Optional[dict]) -> Dict[str, Any]:
     """From one `baml_py` Collector LLMCall (`collector.last.calls[-1]`)."""
     rec = _base("baml")

@@ -1179,6 +1179,10 @@ class GroundedGillBot(dspy.Module):
                     answer=flat_refusal,
                     citations=[],
                     raw_answer=pred.answer,
+                    # Carried on EVERY return, not only the success one. A branch that answers
+                    # without saying who answered it costs the whole arm: see
+                    # docs/audits/RESULT_off_vs_on_rerun2_laneA_20261004.md.
+                    answer_lm=answer_lm,
                     # The reasoning has to come out on the refusal paths, not only the success
                     # ones. main.py computes `refused` as "no inline SIDs in the answer", which is
                     # exactly the state these returns produce -- so dropping `reasoning` here made
@@ -1195,6 +1199,7 @@ class GroundedGillBot(dspy.Module):
                 answer=pred.answer,
                 citations=[],
                 raw_answer=pred.answer,
+                answer_lm=answer_lm,
                 reasoning=getattr(pred, "reasoning", "") or "",
             )
 
@@ -1260,6 +1265,7 @@ class GroundedGillBot(dspy.Module):
              return dspy.Prediction(
                  answer=VERIFICATION_FAILURE_ANSWER,
                  citations=[],
+                 answer_lm=answer_lm,
                  reasoning=getattr(pred, "reasoning", "") or "",
                  raw_answer=pred.answer,
                  verification_failure="cited_sources_not_in_context",

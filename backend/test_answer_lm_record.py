@@ -272,9 +272,107 @@ def test_both_paths_produce_the_same_keys():
     assert set(R.no_call_record("dspy", "why", None)) == set(a)
 
 
+# --- the resolver: which record belongs to ONE answered request -----------------------
+# The defect these guard cost a whole scored arm. The ON arm of attempt 4 had one run that
+# returned early from the structured path (a correct refusal: the model cited a sentence id that
+# was not in the context). That return dropped the record, and the caller INFERRED the path from
+# its absence -- "no record attached means DSPy" -- so a real BAML call was written down as an
+# unchecked DSPy non-call, the arm became a mixture, and the gate refused all 65 runs.
+
+_DSPY_HIST = {"model": "deepseek/deepseek-chat",
+              "response": _Resp(provider="StreamLake", model="deepseek/deepseek-chat",
+                                optional_params={"temperature": 0.0})}
+
+
+def test_the_resolver_returns_the_record_the_path_already_attached():
+    attached = {"path": "baml", "provider_served": "StreamLake"}
+    got = R.resolve_answer_lm(attached, structured_on=True, history_grew=False,
+                              last_entry=None, pin=PIN)
+    assert got is attached, got
+
+
+def test_an_unrecorded_STRUCTURED_answer_is_a_BAML_record_not_a_dspy_one():
+    # LOAD-BEARING: this is the exact defect. The old code produced path "dspy" here.
+    got = R.resolve_answer_lm(None, structured_on=True, history_grew=False,
+                              last_entry=None, pin=PIN)
+    assert got["path"] == "baml", got
+    assert got["provider_served_source"] == "unavailable:structured-path-returned-no-record", got
+    assert got["provider_pin"] == PIN, got
+    # An unavailable record claims nothing about the pin: it is never False.
+    assert got["pin_honored"] is None, got
+
+
+def test_the_resolver_does_not_read_the_DSPY_history_on_the_structured_path():
+    # The inference "falsy means DSPy" must not come back in another form. A history entry that
+    # WOULD produce a fully-populated pinned record is offered and must be ignored, because it
+    # belongs to some other request -- attributing it here is how a wrong record is manufactured
+    # rather than merely missed.
+    got = R.resolve_answer_lm(None, structured_on=True, history_grew=True,
+                              last_entry=_DSPY_HIST, pin=PIN)
+    assert got["path"] == "baml", got
+    assert got["model_returned"] is None, got
+    assert got["provider_served"] is None, got
+
+
+def test_the_DSPY_path_still_reads_its_own_history():
+    # The companion assertion. Without it, a resolver that always returned an "unavailable"
+    # record would pass every other test here.
+    got = R.resolve_answer_lm(None, structured_on=False, history_grew=True,
+                              last_entry=_DSPY_HIST, pin=PIN)
+    assert got["path"] == "dspy", got
+    assert got["provider_served"] == "StreamLake", got
+    assert got["pin_honored"] is True, got
+    assert got["temperature_on_the_wire"] == 0.0, got
+
+
+def test_the_DSPY_path_with_no_call_in_the_window_says_so_exactly_as_before():
+    # The OFF arm is unaffected by the fix: this is the old behaviour, byte for byte.
+    got = R.resolve_answer_lm(None, structured_on=False, history_grew=False,
+                              last_entry=None, pin=PIN)
+    assert got["path"] == "dspy", got
+    assert (got["provider_served_source"]
+            == "unavailable:no-dspy-call-added-to-history-during-this-request"), got
+
+
+def test_every_return_in_the_bot_carries_the_record():
+    """Source-level, and anchored on a COUNT so it cannot quietly stop checking anything.
+
+    The missing keyword argument was invisible to every behavioural test in this repo because the
+    branch that drops it answers correctly -- only the eval's attribution table saw it. A count
+    that must match is what makes a fifth return, added later without the record, fail here.
+    """
+    import re
+    src = (Path(__file__).resolve().parent / "bot.py").read_text(encoding="utf-8")
+    starts = [m.start() for m in re.finditer(r"return\s+dspy\.Prediction\(", src)]
+    assert len(starts) == 4, ("bot.py has %d `return dspy.Prediction(` sites, not the 4 this test "
+                              "was written against -- read them and update the count deliberately"
+                              % len(starts))
+    missing = []
+    for i in starts:
+        depth, j = 0, src.index("(", i)
+        for j in range(j, len(src)):
+            if src[j] == "(":
+                depth += 1
+            elif src[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+        call = src[i:j + 1]
+        if "answer_lm=" not in call:
+            missing.append(src[:i].count("\n") + 1)
+    assert not missing, ("bot.py returns a Prediction with no answer_lm= at line(s) %s: a branch "
+                         "that answers without saying who answered costs the whole arm" % missing)
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
+    EXPECTED_TESTS = 28
+    if len(tests) != EXPECTED_TESTS:
+        print("COLLECTED %d test(s), EXPECTED %d -- a test was lost or added without updating "
+              "the count; a suite that silently shrinks asserts nothing" % (len(tests),
+                                                                            EXPECTED_TESTS))
+        sys.exit(1)
     failed = 0
     for name, fn in tests:
         try:

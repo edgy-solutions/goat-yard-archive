@@ -35,7 +35,8 @@ from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
-from .answer_lm_record import no_call_record, record_from_dspy_history
+from .answer_lm_record import resolve_answer_lm
+from .structured_answer import structured_enabled
 from . import stage_health
 from .degradation import (
     DEGRADED_LLM_TIMEOUT,
@@ -990,18 +991,21 @@ async def search(request: Request, req: SearchRequest):
                     answer = pred.answer
                     citations = pred.citations
 
-                    # Ruling 2, the recording half. The ON (BAML) path carries its own record out
-                    # of bot.py, read from the Collector's HTTP request/response. The OFF (DSPy)
-                    # path cannot: the LM object lives here, so the record is built here.
-                    answer_lm = getattr(pred, "answer_lm", None)
-                    if not answer_lm:
-                        _hist = getattr(target_lm, "history", None) or []
-                        if len(_hist) > _lm_hist_before:
-                            answer_lm = record_from_dspy_history(_hist[-1], provider_pin())
-                        else:
-                            answer_lm = no_call_record(
-                                "dspy", "no-dspy-call-added-to-history-during-this-request",
-                                provider_pin())
+                    # Ruling 2, the recording half. Which path answered is an INPUT below, never
+                    # inferred from whether a record came back. The BAML path attaches its own
+                    # record in bot.py off the Collector's request/response; the DSPy record is
+                    # built here because the LM object lives here. But a structured branch can
+                    # answer and return with nothing attached, and reading "nothing attached" as
+                    # "the DSPy path ran" wrote a real BAML call down as a DSPy non-call and cost
+                    # a whole scored arm -- docs/audits/RESULT_off_vs_on_rerun2_laneA_20261004.md.
+                    _hist = getattr(target_lm, "history", None) or []
+                    answer_lm = resolve_answer_lm(
+                        getattr(pred, "answer_lm", None),
+                        structured_on=structured_enabled(),
+                        history_grew=len(_hist) > _lm_hist_before,
+                        last_entry=_hist[-1] if _hist else None,
+                        pin=provider_pin(),
+                    )
 
                     if stages_capture is not None:
                         stages_capture["bot_raw_answer"] = getattr(pred, "raw_answer", None) or pred.answer
