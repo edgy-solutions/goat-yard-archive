@@ -369,6 +369,43 @@ def _lines_of_type(b):
 
 blind = [{"span_id": b["span_id"], "words": b["words"], "lines_of_type": _lines_of_type(b)}
          for b in cut if _lines_of_type(b) > 1]
+
+# THE FLOOR'S EMPTY BAND, RE-MEASURED ON THE POPULATION IT IS APPLIED TO. MIN_BAND_PX = 20 was derived
+# from a gap between two dense populations of ink runs in the SIGNED corpus -- 27 runs of 1-14px and 18
+# of 30-38px, a 16px gap with 20 in it. Those were single-line boxes. The OVER-FULL badge applies the
+# same floor to MULTI-LINE boxes, which is a different population, and Lane A2 warned (2026-10-04, their
+# 26e68f2) that a narrow empty band in a sparse trough can be a SAMPLING HOLE rather than a real gap:
+# one re-cut band moved their inset_thr from 41 to 80 and cost them a declared run. A threshold taken
+# from a gap is only derived while the gap is still there, so it is re-measured here rather than trusted
+# from the comment that derived it. The assertion is about the GAP, not about the count: if the two
+# populations ever touch at the floor, these badges are a coin flip on some crop and this run must say so
+# instead of shipping a number.
+_t = [b - a + 1 for x in blind
+      for a, b in G.ink_runs(Image.open((lambda r: (r["clip"] or r["crop"])["path"])(
+          [c for c in cut if c["span_id"] == x["span_id"]][0])))]
+_below = [t for t in _t if t < G.MIN_BAND_PX]
+_above = [t for t in _t if t >= G.MIN_BAND_PX]
+floor_margin = {"floor": G.MIN_BAND_PX, "population": "the %d crops the OVER-FULL badge is applied to" % len(blind),
+                "runs_below": len(_below), "runs_at_or_above": len(_above),
+                "thickest_below": max(_below) if _below else None,
+                "thinnest_above": min(_above) if _above else None,
+                "empty_band_px": (min(_above) - max(_below) - 1) if (_below and _above) else None,
+                "derived_from": "a 16px gap in the SIGNED corpus (27 runs of 1-14px, 18 of 30-38px); "
+                                "re-measured here on the multi-line population because a gap is only a "
+                                "derivation while it is still empty (Lane A2's sampling-hole caution)"}
+assert not (_below and _above) or min(_above) > max(_below) + 1, \
+    ("the two ink-run populations TOUCH at the floor on the over-full crops (%dpx below, %dpx above): "
+     "MIN_BAND_PX is no longer taken from an empty band here and the OVER-FULL count is a coin flip on "
+     "some crop" % (max(_below), min(_above)))
+# THE WIDTH BAR. Lane A2 MEASURED a 4px empty band that turned out to be a sampling hole (their
+# 26e68f2: one re-cut band moved inset_thr from 41 to 80 and cost them a declared run), so 4 is
+# known-insufficient and twice it is the floor for calling a gap a gap. 9 is also well inside both
+# gaps actually measured -- 16px in the signed corpus, 15px here -- so it is a bar neither
+# population is pinned to.
+assert floor_margin["empty_band_px"] is None or floor_margin["empty_band_px"] >= 9, \
+    ("the empty band around the floor is only %dpx wide on this population -- Lane A2 measured a 4px "
+     "empty band that turned out to be a sampling hole, so this is too narrow to call a gap"
+     % floor_margin["empty_band_px"])
 _meas = [b for b in cut if _lines_of_type(b) <= 1]
 assert len(_meas) + len(blind) == len(cut), "every crop is either measurable or named as blind"
 over = [{"span_id": b["span_id"], "words": b["words"], "runs": _bestruns(b)} for b in _meas
@@ -426,6 +463,7 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                             "rule keeps 14-78 and resolves the same 2 runs",
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},
        "crop_dir": str(OUTDIR), "faults": faults, "clip_faults": clip_faults,
+       "floor_margin": floor_margin,
        "stale_clips_swept": _stale,
        "clip": {"applied_as_set_recipe": CLIP_AS_SET_RECIPE,
                 "written": len(clipped), "no_trim": sum(1 for b in cut if b["clip_abstain"].startswith("no-trim")),
@@ -473,6 +511,10 @@ if not CLIP_AS_SET_RECIPE:
           "already signed." % (len(cut), PAD))
 for _s, _r in sorted(art["clip"]["abstained_ids"].items()):
     print("   ABSTAIN %-10s %s" % (_s, _r))
+print("floor %dpx sits in a %spx empty band on the %d over-full crops (%d runs below, thickest %s; %d at or above, thinnest %s)"
+      % (floor_margin["floor"], floor_margin["empty_band_px"], len(blind),
+         floor_margin["runs_below"], floor_margin["thickest_below"],
+         floor_margin["runs_at_or_above"], floor_margin["thinnest_above"]))
 print("word runs DIFFER on %d span(s): %s"
       % (len(differ), [(d["span_id"], len(d["base"]), len(d["clip"])) for d in art["clip"]["word_runs_differ"]]))
 print("word runs REGRESSED (clip resolves fewer): %s" % (regressed or "none"))
