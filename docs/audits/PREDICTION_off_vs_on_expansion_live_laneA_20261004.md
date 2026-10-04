@@ -4,6 +4,15 @@
 answer-LM provider on OpenRouter and record it per call; it's the remaining churn source. Then OFF
 vs ON at t=0, N=5, flip gate, predict first."*
 
+**Correction, same day, before any run.** The first commit of this document said the run was
+blocked on a local Weaviate and a port conflict. That was wrong, and wrong in an avoidable way: I
+probed `localhost:8080` and reasoned from a dead local service, without checking what the previous
+arms actually addressed. They used the **gya-test Weaviate at `192.168.1.54:80`**, recorded in the
+handoff for the floor pair itself. It is up, and it holds the same corpus. **Nothing is blocked.**
+The port conflict on `localhost:8080` is real and irrelevant — no arm here uses it. No number had
+been seen when this correction was made; the predictions below are unchanged from the locked commit,
+and the configuration table gained the rows it should have had from the start.
+
 This pair is the first measurement in this lane taken with the query-expansion stage alive. Every
 previous arm is void (`VOID_arms_without_expansion_laneA_20261004.md`), so **this pair re-measures
 the floor as well as the flag.**
@@ -36,6 +45,9 @@ move retrieval. The direction is unknown and I am not guessing at it.
 | `GILL_STRUCTURED_ANSWER` | **OFF** in arm 1, **ON** in arm 2 — the only difference |
 | `--runs` | 5 (so 65 scored runs per arm over 13 questions) |
 | `--timeout` | 200 |
+| `WEAVIATE_URL` | `192.168.1.54:80` — the **gya-test** instance, the same one the floor pair used |
+| corpus | verified 2026-10-04: Weaviate **1.38.1**, `CommentaryChunk` **7294**, `TheologicalEntity` **8433** — identical to the counts the handoff recorded for the floor pair, so the corpus is not a variable between that pair and this one |
+| LiteLLM proxy | `localhost:4000`, model list `local-router` + `qwen3-embedding` (gya-test). Embedding traffic goes through the proxy own model_list, which is the pre-existing sanctioned path; nothing here addresses a GPU host directly |
 | HEAD | clean and committed before the first request; `integrity.git.git_dirty` must read clean in both |
 
 Question set, the same 13 stochastic ids as the void floor pair: `scapegoat_001`,
@@ -140,14 +152,21 @@ python evals/run_eval.py --endpoint http://localhost:8000/api/search --runs 5 \
   --timeout 200 --output-dir evals/output/off_vs_on_20261004/off --ids <the 13 ids>
 ```
 
-**Blocked, 2026-10-04.** Weaviate is not running on this machine, and its compose service binds host
-port **8080**, currently held by `openddil-demo-restate-server` — an unrelated project's container,
-up 2 days. The backend cannot serve retrieval without Weaviate, so no arm can start. Freeing that
-port or remapping Weaviate is Chris's call: stopping another workload's container to run an eval is
-not a decision an agent should take.
+## Preconditions, verified 2026-10-04 before locking
 
-**This document is locked and committed now, before the environment is available**, which is the
-strongest available form of the discipline — it cannot have been written after seeing a number.
+| precondition | state |
+| --- | --- |
+| gya-test Weaviate `192.168.1.54:80` | **UP**, `/v1/meta` 200, version 1.38.1 |
+| corpus counts | **7294 / 8433**, matching the floor pair exactly |
+| LiteLLM proxy `localhost:4000` | **UP**, `/health/liveliness` 200, 2 models |
+| Ollama `localhost:11434` | UP (not on this path; embedding goes through the proxy) |
+| `localhost:8080` | held by an unrelated container and **not used by this run** |
+
+The only thing left before the first request is launching the two servers with the environment in
+the table above, and confirming on the warmup that `/health/stages` reports `expansion.errored == 0`
+with empty `causes`. **If the warmup shows an expansion error, no scored question is sent** — that
+is P1 and P2 acting as a preflight rather than a post-mortem, which is the one procedural change
+this whole void episode earns.
 
 If the configuration at launch differs from the table above in any row, **this document is void and
 a new one is locked.** A prediction edited to match its run is not a prediction.
