@@ -97,6 +97,14 @@ CATALOG = diag.DATA / "hebrew_frontier_or_catalog_20260927.json"
 OUT_NOTEXT = diag.DATA / "hebrew_frontier_or_notext_20261004.jsonl"
 TEXT_CONTEXT = True           # the text channel is ON unless --no-text says otherwise
 
+# The same-config REPEAT of the text-OFF run, in its own artifact. It cannot share the base run's file,
+# for two independent reasons and either alone is sufficient: the resume set is keyed on (span, model),
+# so every cell would be skipped as already done and the run would spend nothing and write nothing; and
+# a replicate interleaved with the rows it is compared against is not a replicate, because no reader can
+# tell the two measurements apart afterwards.
+OUT_NOTEXT_REP = diag.DATA / "hebrew_frontier_or_notext_rep_20261004.jsonl"
+REPLICATE_OF = None           # set by --replicate: the artifact this run is a same-config repeat of
+
 # Chris's instruction, 2026-10-04: astra is not to be called again. Two reasons, both his -- the price
 # point, and OpenAI. It stays in ARMS and its recorded 19/19 stays in the run record, because deleting
 # a measurement is the one thing this project does not do; what stops is the SPEND. A skipped arm is
@@ -795,6 +803,75 @@ def refuse_footerless(out):
             % (Path(out).name, len(rows_)))
 
 
+def replicate_gate(cs, only):
+    """A replicate is only a replicate if its inputs are PROVABLY identical to the run it repeats.
+
+    A moved crop or an edited prompt would not widen the error bar on the null -- it would measure
+    something else and report it as the null, which is worse than having no null at all. So this
+    refuses unless the base artifact agrees with what this run is about to send, on every axis the
+    base artifact itself recorded:
+
+      * the text channel (`text_context_sent`) and the ASSEMBLED prompt hash, which is the only field
+        that can tell the two text variants apart;
+      * the aperture;
+      * the pixels, checked PER READ against each base read's own `crop_sha16` rather than against the
+        header's crop map. Per-read sidesteps `read_header()` returning the first header of a
+        multi-run file: whatever header a base artifact carries, each read states the pixels it was
+        taken off, and that is the thing this run has to match.
+
+    Every in-scope (span, arm) must be present in the base, or the replicate would be computing a
+    null over a different set of cells than the figures it is the floor for.
+    """
+    base = Path(REPLICATE_OF)
+    if not base.exists():
+        raise RuntimeError(
+            "--replicate: base artifact %s does not exist, so there is nothing to repeat." % base.name)
+    L = list(diag._lines(base))
+    hdrs = [o for o in L if o.get("kind") == "config_header"]
+    if not hdrs:
+        raise RuntimeError(
+            "--replicate: %s carries no config_header, so its configuration is unknown and this run"
+            " cannot claim to repeat it." % base.name)
+    if len(hdrs) > 1:
+        raise RuntimeError(
+            "--replicate: %s carries %d config_headers, so there is no single configuration to"
+            " repeat. Replicate against one run, not a file of runs." % (base.name, len(hdrs)))
+    h = hdrs[0]
+    want = {"text_context_sent": TEXT_CONTEXT,
+            "prompt_assembled_sha16": diag_sha(_prompt_text("<CTX>" if TEXT_CONTEXT else None)),
+            "prompt_sha16": diag_sha(PROMPT_HEAD + PROMPT_TAIL),
+            "aperture": APERTURE}
+    bad = {k: (h.get(k), v) for k, v in want.items() if h.get(k) != v}
+    if bad:
+        raise RuntimeError(
+            "--replicate: this run's configuration differs from %s, so it would not be a replicate:\n"
+            % base.name
+            + "\n".join("  %-26s base=%r  now=%r" % (k, b, n) for k, (b, n) in sorted(bad.items())))
+    arms = [m for m in (only or ARMS) if m not in EXCLUDED_ARMS]
+    bpix = {(o["span_id"], o["model"]): o.get("crop_sha16")
+            for o in L if o.get("kind") == "read"}
+    now = {s["span_id"]: crop_sha(c) for s, c, _x in cs}
+    missing = [(sid, m) for sid in sorted(now) for m in arms if (sid, m) not in bpix]
+    if missing:
+        raise RuntimeError(
+            "--replicate: %d in-scope cell(s) have no read in %s, so the null would be computed over a"
+            " different set of cells than the figures it is the floor for:\n%s"
+            % (len(missing), base.name,
+               "\n".join("  %s %s" % t for t in missing[:12])))
+    moved = sorted({(sid, bpix[(sid, m)], now[sid]) for sid in now for m in arms
+                    if bpix[(sid, m)] != now[sid]})
+    if moved:
+        raise RuntimeError(
+            "--replicate: %d span(s) are no longer the pixels the base run read, so a repeat on them"
+            " would vary the crop and the run together:\n%s"
+            % (len(moved), "\n".join("  %-12s base=%s  now=%s" % t for t in moved[:12])))
+    print("  replicate gate: %s -- config identical on %d field(s), %d span(s) x %d arm(s) on"
+          " byte-identical pixels." % (base.name, len(want), len(now), len(arms)))
+    return {"replicate_of": base.name, "base_config_sha16": h.get("config_sha16"),
+            "base_started": h.get("started"), "base_git_head": h.get("git_head"),
+            "fields_checked": sorted(want), "cells_matched": len(now) * len(arms)}
+
+
 def run(only=None, spans=None, approved=False, sheet_path=None):
     cs = cells(spans)
     # Gate BEFORE the catalog pull, so a refusal costs nothing and cannot be mistaken for a run that
@@ -804,6 +881,10 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
     # Second gate, same principle, different property: the hash proves the pixels, this proves that
     # what was cut away from them was on the page Chris approved. Also before the catalog pull.
     _clip = clip_gate(cs, sheet)
+    # FOURTH GATE, and only for a replicate. Here with the others so a configuration mismatch costs
+    # nothing: the null this run produces is the floor under every figure in the design memo, and a
+    # null measured at a configuration that is not the base run's configuration is not a null.
+    _rep = replicate_gate(cs, only) if REPLICATE_OF else None
     # Recorded, never enforced: the approval was about pixels, and the truth table is not a pixel.
     # A mismatch is a fact about the run, so it goes in the header and on the console; it is not a
     # reason to refuse a send Chris authorised on what the crops show.
@@ -910,7 +991,11 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
                                            "contact_sheet": sheet["sheet"],
                                            "contact_sheet_built": sheet.get("built"),
                                            "approval": "recorded claim via --approved; "
-                                                       "human approval is NOT machine-verifiable"},
+                                                       "human approval is NOT machine-verifiable",
+                                           # Present only on a replicate, so an ordinary run's
+                                           # config_sha16 keeps meaning what it meant in every
+                                           # artifact already recorded.
+                                           **({"replicate": _rep} if _rep else {})},
                            extra={"privacy": {"request_filter": "provider.data_collection=deny",
                                               "account_toggle": "not-readable-via-api",
                                               "verified": "per-request filter only; "
@@ -1428,6 +1513,17 @@ if __name__ == "__main__":
         TEXT_CONTEXT = False
         OUT = OUT_NOTEXT
         print(f"TEXT CHANNEL OFF -- item 6 text axis. artifact: {OUT.name}")
+    # --replicate: a same-config REPEAT of the text-OFF run, into its own artifact. It cannot share
+    # the base run's file, for two independent reasons and either alone is sufficient: the resume set
+    # is keyed on (span, model), so every cell would be skipped as already done and the run would
+    # spend nothing and write nothing; and a replicate interleaved with the rows it is compared
+    # against is not a replicate, because no reader can tell the two measurements apart afterwards.
+    if "--replicate" in a:
+        if TEXT_CONTEXT:
+            sys.exit("--replicate repeats the text-OFF run, which is the column the design is ranked"
+                     " on; pass --no-text with it. There is no text-ON replicate artifact.")
+        REPLICATE_OF, OUT = OUT_NOTEXT, OUT_NOTEXT_REP
+        print(f"REPLICATE of {Path(REPLICATE_OF).name} -- same config, own artifact: {OUT.name}")
     mv = a[a.index("--model") + 1] if "--model" in a else None
     # --span p423:n3,p726:n3   or   --span p423:n3 --span p726:n3
     sv = [x for i, t in enumerate(a) if t == "--span" for x in a[i + 1].split(",") if x] or None
