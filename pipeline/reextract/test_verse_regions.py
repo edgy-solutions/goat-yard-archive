@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 48
+EXPECTED_TESTS = 49
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -699,6 +699,36 @@ def test_ascending_invariant_wired_into_assemble_regions():
     assert "verse_order_disputed:read" in regions[2]["flags"]
     assert "verse_order_disputed:witness" in regions[2]["flags"]
     assert "verse_order_disputed:read" not in regions[0]["flags"]
+
+
+def test_chapter_count_resets_at_page_gap_404_to_745():
+    # Rerun 2's leak, born-tested on exactly that pair: a chapter head on 404 with no verse head after
+    # it, then 745 (a page gap) whose first verse head is "Ver. 4". The count must be None on 745 and
+    # the drop flagged on 404. Control: the same chapter head on 404 followed by 405 (consecutive)
+    # still gives count 1.
+    def page(fp, kind):
+        band = _band("left", 10, 20, 0, 400, 20, 380)
+        hc = None
+        if kind == "verse":
+            hc = {"text": "Ver. 4. x", "ver": True, "numbers": [4], "raw_head": "Ver. 4",
+                  "status": "ok", "raw": "Ver. 4. x", "ver_case": "upper"}
+        cand = {"file_page": fp, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 400, 20],
+                "kind": kind, "signature": {}, "head_confirm": hc, "flags": []}
+        s1 = {"file_page": fp, "H": 100, "W": 800, "xdiv": 400, "left": [band], "right": [], "full": []}
+        return s1, [cand]
+
+    for nxt, want_count, want_flag in ((745, None, True), (405, 1, False)):
+        s1a, ca = page(404, "chapter")
+        s1b, cb = page(nxt, "verse")
+        regions, summaries = VR.assemble_regions(
+            [{"file_page": 404}, {"file_page": nxt}], {404: s1a, nxt: s1b}, {404: ca, nxt: cb},
+            {404: [], nxt: []}, {404: None, nxt: None}, config={})
+        verse = [r for r in regions if r["kind"] == "verse"]
+        assert len(verse) == 1 and verse[0]["file_page_first"] == nxt
+        assert verse[0]["number_sources"]["count"] == want_count, (nxt, verse[0]["number_sources"])
+        assert verse[0]["number_sources"]["read"] == [4]
+        assert ("chapter_count_dropped_at_page_gap" in summaries[404]["flags"]) is want_flag, nxt
+        assert "chapter_count_dropped_at_page_gap" not in summaries[nxt]["flags"]
 
 
 # 9. region_empty / head_only, derived from bands not a counter (FIX5) --------------------------------

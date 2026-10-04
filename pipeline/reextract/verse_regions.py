@@ -1288,6 +1288,14 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
         fp = rec["file_page"]
         s1 = page_s1_by_page[fp]
 
+        # A pending chapter count never crosses a page gap -- the same rule _chains applies to the
+        # ascending check. Rerun 2: the chapter head on 404 set it, 404's verse heads were not
+        # candidates, and it leaked to 745R "Ver. 4" as count 1. Dropping it is flagged on the page
+        # that set it, never silent.
+        if awaiting_count and not (prev_fp is not None and fp == prev_fp + 1):
+            page_summaries[prev_fp]["flags"].append("chapter_count_dropped_at_page_gap")
+            awaiting_count = False
+
         if abstained:
             page_summaries[fp] = {
                 "file_page": fp,
