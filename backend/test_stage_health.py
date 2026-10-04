@@ -46,8 +46,8 @@ def test_fresh_snapshot_shape_and_zero_counters():
     assert set(snap["process"].keys()) == {"pid", "commit_sha", "started_at", "uptime_s"}
     assert set(snap["expansion"].keys()) == {"ok", "errored", "causes", "fallbacks"}
     assert set(snap["entity_lookup"].keys()) == {"modes"}
-    assert set(snap["answer"].keys()) == {"ok", "not_run", "degraded"}
-    assert set(snap["verifier"].keys()) == {"ok", "not_run", "failures"}
+    assert set(snap["answer"].keys()) == {"ok", "not_run", "unobservable", "degraded"}
+    assert set(snap["verifier"].keys()) == {"ok", "not_run", "unobservable", "failures"}
 
     assert snap["requests_recorded"] == 0
     assert snap["expansion"]["ok"] == 0
@@ -57,9 +57,11 @@ def test_fresh_snapshot_shape_and_zero_counters():
     assert snap["entity_lookup"]["modes"] == {}
     assert snap["answer"]["ok"] == 0
     assert snap["answer"]["not_run"] == 0
+    assert snap["answer"]["unobservable"] == 0
     assert snap["answer"]["degraded"] == {}
     assert snap["verifier"]["ok"] == 0
     assert snap["verifier"]["not_run"] == 0
+    assert snap["verifier"]["unobservable"] == 0
     assert snap["verifier"]["failures"] == {}
 
 
@@ -357,6 +359,58 @@ def test_an_empty_retrieval_exit_still_reports_its_expansion_cause():
     assert snap["answer"]["not_run"] == 1, snap["answer"]
 
 
+def test_unobservable_is_a_fourth_state_and_never_counts_as_ok():
+    # The 0.3.x production line has no degradation.py and no
+    # verification_failure local, so those two stages RAN and cannot be read.
+    # "ok" would be a fabricated pass; "not_run" would be a false statement
+    # about what happened.
+    sh._reset_for_tests()
+    sh.record_request(
+        expansion_error=None, expansion_fallback="dedup_only",
+        entity_lookup_mode="full",
+        answer_degraded=sh.UNOBSERVABLE,
+        verification_failure=sh.UNOBSERVABLE,
+    )
+    snap = sh.snapshot()
+    assert snap["answer"]["unobservable"] == 1, snap["answer"]
+    assert snap["answer"]["ok"] == 0, snap["answer"]
+    assert snap["answer"]["not_run"] == 0, snap["answer"]
+    assert snap["answer"]["degraded"] == {}, snap["answer"]
+    assert snap["verifier"]["unobservable"] == 1, snap["verifier"]
+    assert snap["verifier"]["ok"] == 0, snap["verifier"]
+    assert snap["verifier"]["failures"] == {}, snap["verifier"]
+    # the observable stages are unaffected
+    assert snap["expansion"]["ok"] == 1, snap["expansion"]
+    assert snap["entity_lookup"]["modes"] == {"full": 1}, snap["entity_lookup"]
+
+
+def test_the_unobservable_sentinel_never_appears_in_the_snapshot_json():
+    # It is a wire sentinel, not a bucket label. If it leaked into a degraded
+    # reason key it would read as a real degradation reason to an operator.
+    sh._reset_for_tests()
+    sh.record_request(
+        expansion_error=None, expansion_fallback=None, entity_lookup_mode=None,
+        answer_degraded=sh.UNOBSERVABLE, verification_failure=sh.UNOBSERVABLE,
+    )
+    blob = json.dumps(sh.snapshot())
+    assert sh.UNOBSERVABLE not in blob, blob
+    assert "__" not in blob, blob
+
+
+def test_not_run_wins_over_unobservable():
+    # Both say "no health reading", but "did not run" is the stronger and more
+    # specific statement and must not be masked.
+    sh._reset_for_tests()
+    sh.record_request(
+        expansion_error=None, expansion_fallback=None, entity_lookup_mode=None,
+        answer_degraded=sh.UNOBSERVABLE, verification_failure=sh.UNOBSERVABLE,
+        answer_ran=False, verifier_ran=False,
+    )
+    snap = sh.snapshot()
+    assert snap["answer"]["not_run"] == 1 and snap["answer"]["unobservable"] == 0, snap["answer"]
+    assert snap["verifier"]["not_run"] == 1 and snap["verifier"]["unobservable"] == 0, snap["verifier"]
+
+
 def test_source_has_health_stages_route():
     assert '@app.get("/health/stages")' in _MAIN
 
@@ -402,7 +456,7 @@ def test_source_expansion_error_assigned_outside_stages_capture_guard():
 
 
 if __name__ == "__main__":
-    EXPECTED_TEST_COUNT = 19
+    EXPECTED_TEST_COUNT = 22
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print(

@@ -81,6 +81,14 @@ ANSWER_DEGRADED_REASONS = frozenset({
     "generation_error",
 })
 
+# A stage can be in a FOURTH state, distinct from ok / degraded / not_run:
+# the stage ran, and this build cannot say whether it was healthy. That is the
+# case on the 0.3.x production line, which has no backend/degradation.py and no
+# verification_failure local at all -- so there is nothing to read, and
+# reporting "ok" would be a fabricated pass in the one tool built to detect
+# fabricated health. A caller passes this sentinel instead of a reason.
+UNOBSERVABLE = "__unobservable__"
+
 # backend/bot.py:1265 -- the only verification_failure= value currently
 # emitted by the bot.
 VERIFICATION_FAILURE_KINDS = frozenset({
@@ -149,8 +157,8 @@ def _fresh_state() -> dict:
         # configured) never exercised these stages, and counting that as "ok"
         # would fold "did not run" into "was healthy" -- the exact silence this
         # whole module exists to remove.
-        "answer": {"ok": 0, "not_run": 0, "degraded": {}},
-        "verifier": {"ok": 0, "not_run": 0, "failures": {}},
+        "answer": {"ok": 0, "not_run": 0, "unobservable": 0, "degraded": {}},
+        "verifier": {"ok": 0, "not_run": 0, "unobservable": 0, "failures": {}},
     }
 
 
@@ -201,6 +209,10 @@ def record_request(
     internal sub-check inside a reached stage executed -- see the residual
     named in docs/releases/RELEASE_0.3.2.md.
 
+    Passing UNOBSERVABLE for answer_degraded or verification_failure says the
+    stage RAN and this build cannot read its health. It counts into
+    "unobservable" and never into "ok".
+
     Never raises: the whole body is wrapped in a broad except so a bug in
     telemetry can never turn into a failed response for a real user request.
     """
@@ -226,6 +238,8 @@ def record_request(
 
             if not answer_ran:
                 _bump(_state["answer"], "not_run")
+            elif answer_degraded == UNOBSERVABLE:
+                _bump(_state["answer"], "unobservable")
             elif answer_degraded is None:
                 _bump(_state["answer"], "ok")
             else:
@@ -234,6 +248,8 @@ def record_request(
 
             if not verifier_ran:
                 _bump(_state["verifier"], "not_run")
+            elif verification_failure == UNOBSERVABLE:
+                _bump(_state["verifier"], "unobservable")
             elif verification_failure is None:
                 _bump(_state["verifier"], "ok")
             else:
@@ -262,11 +278,13 @@ def snapshot() -> dict:
         answer = {
             "ok": _state["answer"]["ok"],
             "not_run": _state["answer"]["not_run"],
+            "unobservable": _state["answer"]["unobservable"],
             "degraded": dict(_state["answer"]["degraded"]),
         }
         verifier = {
             "ok": _state["verifier"]["ok"],
             "not_run": _state["verifier"]["not_run"],
+            "unobservable": _state["verifier"]["unobservable"],
             "failures": dict(_state["verifier"]["failures"]),
         }
         requests_recorded = _state["requests_recorded"]
