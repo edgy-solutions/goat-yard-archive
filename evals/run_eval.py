@@ -635,7 +635,18 @@ MIN_REAL_GENERATION_SECONDS = 0.05
 # for those models is declared where the routing is declared (chart model_list carries
 # `keep_alive: -1`, duplicated into extra_body for the chat route); it is not the harness's
 # to send.
-WARMUP_QUERY = "warmup request, not scored: what is this commentary?"
+# The warmup is also the ONLY evidence the expansion_healthy gate has before it decides
+# whether to score, so the query has to be representative of what gets scored. The old
+# string, "what is this commentary?", was not: it is a meta-question about the artifact,
+# carries no scriptural entity, and the extractor returning none for it is the extractor
+# being CORRECT. The gate read that honesty as a dead stage and refused a whole arm.
+# Measured on a live server before this change: the meta-question punted
+# (entities_given_none_returned, fallback poisoned_manifest_suppressed) while seven real
+# queries -- including entity-free abstractions like "What is election?" and "What is
+# grace?" -- all expanded healthily. The prefix is not what punts; the meta-question is.
+# This query is deliberately NOT in gill_reference_set.jsonl, so warming cannot prime
+# retrieval for a question that is about to be scored (asserted in the harness tests).
+WARMUP_QUERY = "warmup request, not scored: what does Gill say about the Nazarite vow?"
 KEEP_ALIVE_PIN_NOTE = (
     "declared at the LiteLLM routing layer (model_list keep_alive: -1, duplicated into "
     "extra_body for the chat route); harness sends no direct-host keep_alive because the "

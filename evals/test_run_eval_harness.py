@@ -1634,7 +1634,28 @@ def test_every_sidecar_name_is_registered_as_a_non_question_file():
         assert not run_dir.is_question_file(fname), fname
 
 
-EXPECTED_TESTS = 148
+def test_the_warmup_query_is_not_one_of_the_scored_questions():
+    # The warmup runs through the real /api/search path, so a warmup that asked a SCORED
+    # question could prime retrieval for it and the first run of that question would not be a
+    # sample of the same thing as the other four. Derived from the reference set, not a
+    # restated literal.
+    import json as _json
+    path = Path(__file__).resolve().parent / "gill_reference_set.jsonl"
+    queries = set()
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = _json.loads(line)
+            q = row.get("query") or row.get("question")
+            if q:
+                queries.add(q.strip().lower())
+    assert queries, "the reference set this test derives from is empty or unreadable"
+    assert RE.WARMUP_QUERY.strip().lower() not in queries, RE.WARMUP_QUERY
+
+
+EXPECTED_TESTS = 149
 
 if __name__ == "__main__":
     passed = failed = 0
