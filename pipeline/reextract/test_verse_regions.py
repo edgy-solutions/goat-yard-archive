@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 41
+EXPECTED_TESTS = 48
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -32,6 +32,95 @@ def test_derive_threshold_first_empty_band_above_median_and_raises():
         assert False, "expected ThresholdUndetermined"
     except VR.ThresholdUndetermined:
         pass
+
+
+# 1a. derive_inset_modes (flush/indent mode midpoint, abstain when not bimodal; rerun3 Lane A2 d) --
+
+# hist[i] = count of values placed at bin start + 2 (bin width 5) -- same 20-page-like profile used
+# throughout this section.
+_HIST_A = [667, 244, 113, 73, 38, 14, 5, 5, 4, 4, 5, 7, 17, 21, 8, 4, 2, 3]
+
+
+def _vals_from_hist(hist, bin_px=5):
+    vals = []
+    for i, c in enumerate(hist):
+        vals.extend([i * bin_px + 2] * c)
+    return vals
+
+
+def test_derive_inset_modes_bimodal_profile_ok():
+    vals = _vals_from_hist(_HIST_A)
+    r = VR.derive_inset_modes(vals, pitch_px=57)
+    assert r["status"] == "ok", r
+    assert r["flush_bin"] == 0
+    assert r["indent_bin"] == 13
+    assert r["value"] == 35.0
+    assert r["rule"] == "mode_midpoint"
+    assert r["pitch_px"] == 57
+    flush_centre, indent_centre = 0 * 5 + 2, 13 * 5 + 2
+    assert flush_centre < r["value"] < indent_centre
+
+
+def test_derive_inset_modes_stable_under_shift_and_drop():
+    # A first-empty-band-above-median rule here degenerated 41 -> 80 when one band's value shifted
+    # into a 4-px hole (MEASURE_step2_d_inset_modes) -- the mode-midpoint rule must NOT move when
+    # any single value shifts or disappears.
+    vals = _vals_from_hist(_HIST_A)
+    base = VR.derive_inset_modes(vals, pitch_px=57)["value"]
+    for delta in (40, -40):
+        trials = 0
+        for i in range(len(vals)):
+            trial = vals[:i] + [max(0, vals[i] + delta)] + vals[i + 1:]
+            assert VR.derive_inset_modes(trial, pitch_px=57)["value"] == base
+            trials += 1
+        assert trials == len(vals)
+    trials = 0
+    for i in range(len(vals)):
+        trial = vals[:i] + vals[i + 1:]
+        assert VR.derive_inset_modes(trial, pitch_px=57)["value"] == base
+        trials += 1
+    assert trials == len(vals)
+
+
+def test_derive_inset_modes_unimodal_abstains_no_second_mode():
+    vals = _vals_from_hist([500, 200, 80, 30, 10, 4, 2, 1])
+    r = VR.derive_inset_modes(vals, pitch_px=57)
+    assert r["status"] == "abstained"
+    assert r["reason"] == "no_second_mode"
+    assert r["value"] is None
+
+
+def test_derive_inset_modes_separation_is_pitch_relative():
+    vals = _vals_from_hist([44, 9, 3, 10, 4, 2, 2, 2, 1])
+    r_wide_pitch = VR.derive_inset_modes(vals, pitch_px=57)
+    assert r_wide_pitch["status"] == "abstained", r_wide_pitch
+    assert r_wide_pitch["reason"] == "no_second_mode"
+    r_narrow_pitch = VR.derive_inset_modes(vals, pitch_px=20)
+    assert r_narrow_pitch["status"] == "ok", r_narrow_pitch
+    assert r_narrow_pitch["flush_bin"] == 0
+    assert r_narrow_pitch["indent_bin"] == 3
+
+
+def test_derive_inset_modes_min_peak_and_valley_clause():
+    hist = list(_HIST_A)
+    for i in range(11, 18):
+        hist[i] = min(hist[i], 4)
+    vals = _vals_from_hist(hist)
+    r = VR.derive_inset_modes(vals, pitch_px=57)
+    assert r["status"] == "abstained"
+    assert r["reason"] == "no_second_mode"
+    r_empty = VR.derive_inset_modes([], pitch_px=57)
+    assert r_empty["status"] == "abstained"
+    assert r_empty["reason"] == "no_values"
+    assert r_empty["value"] is None
+
+
+def test_derive_inset_modes_no_trough_abstains():
+    hist = [100, 90, 80, 70, 60, 50, 40, 30, 20, 21, 22, 23, 24]
+    vals = _vals_from_hist(hist)
+    r = VR.derive_inset_modes(vals, pitch_px=20)
+    assert r["status"] == "abstained"
+    assert r["reason"] == "no_second_mode"
 
 
 # 1b. choose_line_h (line_h defect: collapsed-column fallback to the page-pooled median) ----------
@@ -900,8 +989,10 @@ def test_build_canary_failure_writes_header_only_aborted():
     orig_resolve = VHR.resolve_and_check
     orig_canary = VHR.run_canary
 
-    def fake_derive(s1_by_page, min_gap):
-        return {"value": 50.0, "lo": 40, "hi": 60, "gap": 20, "n_below": 1, "n_above": 1}, [45]
+    def fake_derive(s1_by_page):
+        return {"status": "ok", "reason": None, "value": 50.0, "rule": "mode_midpoint",
+                "bin_px": 5, "pitch_px": 57, "flush_bin": 0, "indent_bin": 10,
+                "flush_count": 100, "indent_count": 10, "n": 110, "hist": [100] + [0] * 9 + [10]}, [45]
 
     def fake_resolve(host, model, client=None):
         return "http://fake-host:11434", "sha256:fakedigest"
@@ -996,6 +1087,30 @@ def test_confirm_candidates_lowercase_ver_case_flags_confirmed_head():
     conf, rej = VR.confirm_candidates([c], head_reads={(1, "left", 10): hr})
     assert rej == []
     assert conf[0]["flags"] == ["head_ver_lowercase"], conf[0]["flags"]
+
+
+# 12. abstention wired into assemble_regions (rerun3 Lane A2 d) --------------------------------
+#
+# The build-level harness this spec also asks for (forced-abstained main() run -> page_abstained
+# JSONL records + run_summary["pages_head_abstained"]) has no synthetic equivalent: main() only
+# reads real geometry/image files (build_verse_regions.load_geometry/load_page_gray), and no
+# existing test harness drives it over synthetic input. Per spec, that is reported rather than
+# built here; this test instead exercises the one piece that IS a pure function over synthetic s1
+# -- assemble_regions(abstained=True) itself.
+
+def test_assemble_regions_abstained_flag_emits_zero_regions_and_head_detection():
+    head_band = _band("left", 10, 20, 0, 100, 10, 90)
+    s1_p1 = {"file_page": 1, "H": 100, "W": 200, "xdiv": 100, "left": [head_band], "right": [], "full": []}
+    cand = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20],
+            "kind": "verse", "signature": {}, "head_confirm": None, "flags": []}
+    regions, page_summaries = VR.assemble_regions(
+        [{"file_page": 1}], {1: s1_p1}, {1: [cand]}, {1: []}, {1: None}, config={}, abstained=True)
+    # Candidates are passed in here (as build_verse_regions.py would, pre-abstention-skip, if it
+    # forgot to clear them) to prove abstained=True alone is what suppresses regions -- not an
+    # empty candidates_by_page upstream.
+    assert regions == []
+    assert page_summaries[1]["head_detection"] == "abstained"
+    assert page_summaries[1]["n_heads"] == 0
 
 
 if __name__ == "__main__":

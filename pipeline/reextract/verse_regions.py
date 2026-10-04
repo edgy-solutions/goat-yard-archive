@@ -52,8 +52,15 @@ CENTRE_ASYM_FRAC = 0.10           # centred: |left - right margin| <= this * mea
                                   # (max 5.4%; binding offset). Was "<= inset_thr", a paragraph-indent unit
                                   # used as a centring tolerance -- it moved with the indent derivation and
                                   # dropped 151/197/404. n=6, not an empty-band derivation; named.
-# measured: flush mode continuous to 32, next value 36 (MEASURE_step2_gutter_inset_20261004.md)
-MIN_GAP_INSET_PX = 4.0            # derive_threshold min empty-band width accepted for the inset signal
+# Inset threshold: flush/indent mode midpoint (derive_inset_modes), replacing the old
+# derive_threshold/MIN_GAP_INSET_PX first-empty-band rule -- a first-gap selector on a trough
+# degenerated 41 -> 80 when one band filled a 4-px hole; bin centres make one band's shift
+# invisible (see derive_inset_modes docstring; rerun3 Lane A2 (d)).
+INSET_MODE_BIN_PX = 5             # histogram bin width; 3-10 px measured -> 33-36 (MEASURE_step2_d_inset_modes)
+INSET_MODE_MIN_PEAK = 5           # a mode is >= 5 bands, not a few strays (3/5/8 identical)
+INSET_MODE_MIN_SEP_PITCH_FRAC = 0.5  # indent mode >= half a line pitch from flush (an indent ~ an em ~ the pitch);
+                                     # added after page 745 alone gave a false mode at 15-20 px
+INSET_MODE_VALLEY_FRAC = 0.5      # a trough bin <= half the indent bin's count (0.3/0.7 identical)
 CROP_PAD_Y = 12                   # head-crop vertical padding (verse_head_read.py)
 HEAD_CROP_WIDTH_FRAC = 0.5        # head-crop width as a fraction of the column width
 
@@ -159,6 +166,70 @@ def derive_threshold(values, min_gap):
         f"derive_threshold: no empty band >= {min_gap}px found scanning upward from the median "
         f"(index {start} of {n} values); refusing to pick a threshold from a continuous "
         f"distribution.")
+
+
+def derive_inset_modes(values, pitch_px, bin_px=INSET_MODE_BIN_PX, min_peak=INSET_MODE_MIN_PEAK,
+                        min_sep_pitch_frac=INSET_MODE_MIN_SEP_PITCH_FRAC,
+                        valley_frac=INSET_MODE_VALLEY_FRAC):
+    """Inset threshold = the midpoint between a flush mode and an indent mode in a histogram of
+    `values` (bin width `bin_px`), taken ONLY when the two modes are actually separated -- never a
+    constant, never a guess from a continuous/unimodal distribution (abstains instead, like
+    derive_threshold/ThresholdUndetermined).
+
+    Replaces derive_threshold's first-empty-band-above-median rule for this signal: that rule
+    picks the first GAP it finds scanning up from the median, so one band's value drifting into a
+    4-px hole (filling it) silently moved the whole threshold 41 -> 80 (MEASURE_step2_d_inset_modes).
+    One band moves one count between two bins, which changes the threshold only if it changes
+    WHICH bin is a mode; the value is read off bin CENTRES, not in-bin medians (with medians a 40-px
+    shift of one band moved it 0.5 px in 15 of 1244 trials; with centres, 0 of 1244, and 0 of 1244
+    for one band dropped).
+
+    values: inset_px samples (>= 0). pitch_px: the page's own line pitch (median band height),
+    used to reject an indent mode too close to flush to be a real paragraph indent (an indent ~ an
+    em ~ the line pitch; a false mode 15-20px away from flush, not pitch-relative, was found on
+    page 745 alone and must not be confused for the real indent).
+
+    Returns {"status": "ok"|"abstained", "reason": None|str, "value": float|None,
+    "rule": "mode_midpoint", "bin_px", "pitch_px", "flush_bin", "indent_bin" (None when no second
+    mode is found), "flush_count", "indent_count", "n", "hist"} (hist truncated to the first 40
+    bins). Never raises for a data condition; never returns a constant -- an abstained result
+    means the caller must not derive a threshold from this run, not that it should fall back to
+    one."""
+    vals = list(values)
+    n = len(vals)
+    if n == 0:
+        return {"status": "abstained", "reason": "no_values", "value": None, "rule": "mode_midpoint",
+                "bin_px": bin_px, "pitch_px": pitch_px, "flush_bin": None, "indent_bin": None,
+                "flush_count": None, "indent_count": None, "n": 0, "hist": []}
+
+    counts = Counter(int(v // bin_px) for v in vals)
+    top = max(counts)
+    hist = [counts.get(i, 0) for i in range(top + 1)]
+
+    f = max(range(len(hist)), key=lambda i: (hist[i], -i))
+
+    candidates = []
+    for j in range(f + 1, len(hist)):
+        if hist[j] < min_peak:
+            continue
+        if (j - f) * bin_px < min_sep_pitch_frac * pitch_px:
+            continue
+        trough = hist[f + 1:j]
+        if not trough:
+            continue
+        if min(trough) <= valley_frac * hist[j]:
+            candidates.append(j)
+
+    if not candidates:
+        return {"status": "abstained", "reason": "no_second_mode", "value": None, "rule": "mode_midpoint",
+                "bin_px": bin_px, "pitch_px": pitch_px, "flush_bin": f, "indent_bin": None,
+                "flush_count": hist[f], "indent_count": None, "n": n, "hist": hist[:40]}
+
+    j = max(candidates, key=lambda k: (hist[k], -k))
+    value = (f + j + 1) * bin_px / 2.0
+    return {"status": "ok", "reason": None, "value": value, "rule": "mode_midpoint",
+            "bin_px": bin_px, "pitch_px": pitch_px, "flush_bin": f, "indent_bin": j,
+            "flush_count": hist[f], "indent_count": hist[j], "n": n, "hist": hist[:40]}
 
 
 # ==============================================================================================
@@ -1190,13 +1261,20 @@ def disputed(seq):
 
 
 def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected_by_page,
-                      witness_by_page, config):
+                      witness_by_page, config, abstained=False):
     """Walk confirmed heads in reading order across `page_records` (ordered list of dicts with
     at least 'file_page'; pages chain ONLY if consecutive file pages) and build region records.
 
     candidates_by_page: file_page -> confirmed-candidate list (from confirm_candidates).
     rejected_by_page: file_page -> rejected-candidate list (kept, never dropped).
     witness_by_page: file_page -> parsed witness dict (parse_witness output) or None.
+    abstained: True when the run-wide inset threshold could not be derived (not bimodal). Every
+    page is then skipped WITHOUT walking its bands at all -- no verse/continuation/intro regions
+    are claimed for it (an abstained page must not look like a page that was checked and found to
+    have no heads). page_summaries still gets an entry per page, with "head_detection": "abstained"
+    (vs. "ok" otherwise) and every count zeroed, so build_verse_regions.py can still emit its
+    per-page "page" record. Since every page is skipped, open_region never opens, so regions is []
+    and the S3/S5 passes below run over an empty list -- region_empty/invariant checks never fire.
 
     Returns (regions, page_summaries) where page_summaries carries S5 per-page flags/counts.
     """
@@ -1209,6 +1287,30 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
     for rec in page_records:
         fp = rec["file_page"]
         s1 = page_s1_by_page[fp]
+
+        if abstained:
+            page_summaries[fp] = {
+                "file_page": fp,
+                "n_heads": 0,
+                "n_rejected_candidates": len(rejected_by_page.get(fp, [])),
+                "n_verse_heads": 0,
+                "n_witness_paired": 0,
+                "n_witness_ambiguous": 0,
+                "n_witness_unpaired": 0,
+                "flags": ["head_detection_abstained:inset_not_bimodal"],
+                "column_order_suspect": False,
+                "gutter_ink_crossing": [],
+                "n_gutter_ambiguous": 0,
+                "n_slivers": len(s1.get("slivers") or []),
+                "n_centred_pairs": s1.get("n_centred_pairs", 0),
+                "n_full_unpaired": sum(1 for c in ("left", "right")
+                                        for b in (s1.get(c) or []) if b.get("full_unpaired")),
+                "rejected_candidates": rejected_by_page.get(fp, []),
+                "head_detection": "abstained",
+            }
+            prev_fp = fp
+            continue
+
         H = s1["H"]
         confirmed = candidates_by_page.get(fp, [])
         rejected = rejected_by_page.get(fp, [])
@@ -1356,6 +1458,7 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
             "n_centred_pairs": s1.get("n_centred_pairs", 0),
             "n_full_unpaired": sum(1 for c in ("left", "right") for b in (s1.get(c) or []) if b.get("full_unpaired")),
             "rejected_candidates": rejected,
+            "head_detection": "ok",
         }
         prev_fp = fp
 

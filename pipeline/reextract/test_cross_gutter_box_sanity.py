@@ -36,6 +36,11 @@ import build_verse_regions as BVR
 import box_sanity
 
 PAGES = [90, 403, 745]
+# The inset threshold is a property of a PAGE SET (mode midpoint, MEASURE_step2_d_inset_modes): three pages
+# hold too few indented lines for an indent mode and abstain by design, so it is derived on the 20-page set
+# of the step-2 runs and applied to PAGES.
+THRESHOLD_PAGES = [90, 91, 92, 126, 127, 128, 129, 130, 151, 197, 198, 199, 200, 402, 403, 404, 745, 923, 924,
+                   925]
 GEOMETRY = BVR.DEFAULT_GEOMETRY
 VOLUME_DIR = BVR.DEFAULT_VOLUME_DIR
 WITNESS_DIR = "C:/Users/cnogr/git/dr-voluminous/commentary/volume1/qwen_qwen3-vl-235b-a22b-thinking"
@@ -46,6 +51,9 @@ def _check_data_present():
     if not Path(GEOMETRY).exists():
         missing.append(f"geometry file missing: {GEOMETRY}")
     geom_all = BVR.load_geometry(GEOMETRY) if Path(GEOMETRY).exists() else {}
+    for fp in THRESHOLD_PAGES:
+        if fp not in geom_all or not (Path(VOLUME_DIR) / f"page{fp}_image1.png").exists():
+            missing.append(f"threshold page {fp}: geometry or image missing")
     for fp in PAGES:
         if fp not in geom_all:
             missing.append(f"page {fp}: no geometry record")
@@ -62,16 +70,19 @@ def _build_real_run():
     """Read off, witness on -- the same pipeline build_verse_regions.main() runs, inlined here
     so the test can inspect intermediate structures (s1, candidates) as well as final regions."""
     geom_all = BVR.load_geometry(GEOMETRY)
-    geom_by_page = {fp: geom_all[fp] for fp in PAGES}
-    gray_by_page = {fp: BVR.load_page_gray(VOLUME_DIR, fp) for fp in PAGES}
+    geom_by_page = {fp: geom_all[fp] for fp in THRESHOLD_PAGES}
+    gray_by_page = {fp: BVR.load_page_gray(VOLUME_DIR, fp) for fp in THRESHOLD_PAGES}
 
     s1_by_page = {}
-    for fp in PAGES:
+    for fp in THRESHOLD_PAGES:
         ink = VR.page_ink(gray_by_page[fp])
         s1_by_page[fp] = VR.analyze_page_s1(ink, geom_by_page[fp])
         geom_by_page[fp]["_s1"] = s1_by_page[fp]
 
-    inset_result, _ = BVR.derive_inset_thr(s1_by_page, min_gap=VR.MIN_GAP_INSET_PX)
+    inset_result, _ = BVR.derive_inset_thr(s1_by_page)
+    assert inset_result["status"] == "ok" and inset_result["value"] == 35.0, (
+        f"the 20-page set must derive a bimodal inset threshold of 35.0 (MEASURE_step2_d_inset_modes), "
+        f"got: {inset_result}")
     inset_thr = inset_result["value"]
 
     for fp in PAGES:

@@ -14,10 +14,14 @@ Threshold derivation (thresholds-from-empty-bands: never guessed, never per-page
   between the two edges stays a column band flagged 'gutter_ambiguous', never split.
   pass 1: analyze_page_s1 for real (full-width classification uses the fixed edges above), then
           derive inset_thr from the corpus-wide distribution of (left_ink_x - column median) over
-          every non-full band -- this IS still a derived threshold (derive_threshold), since the
-          inset population does have a real empty band (see the MEASURE file).
+          every non-full band -- the flush/indent histogram mode midpoint (VR.derive_inset_modes),
+          since a first-empty-band-above-median rule here degenerated 41 -> 80 when one band
+          filled a 4-px hole (MEASURE_step2_d_inset_modes; rerun3 Lane A2 (d)). When the two modes
+          are not separated, this ABSTAINS (never guesses): head detection is skipped for every
+          page in the run (see "pages_head_abstained" in main()), not aborted.
   pass 2: head_candidates / confirm_candidates / assemble_regions / check_region_rects with
-          inset_thr now fixed for the whole run (never re-derived per page).
+          inset_thr now fixed for the whole run (never re-derived per page), skipped entirely when
+          pass 1 abstains.
 
 Output is private data (derived from a copyrighted scan corpus) and must never land inside this
 repo or goat-yard-archive -- see FORBIDDEN_OUTPUT_ROOTS / validate_out_path(), copied verbatim
@@ -27,8 +31,14 @@ JSONL record kinds, in this order within one run:
   run_header   -- once, first line: config, resolved thresholds (with their bands), run inputs.
   run_invalid  -- one per requested page whose geometry record or image file is missing/unusable;
                   the page is excluded from the rest of the run (never silently dropped: named).
-  page         -- one per page that WAS processed: S1 summary + S5 per-page flags.
-  region       -- one per assembled region (after check_region_rects attaches rect sanity).
+  page         -- one per page that WAS processed: S1 summary + S5 per-page flags. page_summary's
+                  "head_detection" is "ok" normally, "abstained" when inset_thr could not be
+                  derived (see page_abstained below).
+  page_abstained -- one per usable page, ONLY when the run-wide inset_thr derivation abstained
+                  (not bimodal): no heads/regions are claimed for that page (an abstained page
+                  must not look like a page that was checked and found headless).
+  region       -- one per assembled region (after check_region_rects attaches rect sanity); none
+                  are emitted at all when the run abstained.
   run_summary  -- once, last line, on a clean finish: census + thresholds + flag tally.
   run_aborted  -- written INSTEAD of run_summary if the run-level fault fires (3 consecutive
                   transport-level read errors); the run exits nonzero and no run_summary follows.
@@ -39,6 +49,7 @@ import argparse
 import hashlib
 import json
 import os
+import statistics
 import subprocess
 import sys
 from collections import Counter
@@ -120,6 +131,10 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "endpoint_id": args.endpoint_id,
         "full_gap_max_px": VR.FULL_GAP_MAX_PX,
         "col_gap_min_px": VR.COL_GAP_MIN_PX,
+        "inset_mode_bin_px": VR.INSET_MODE_BIN_PX,
+        "inset_mode_min_peak": VR.INSET_MODE_MIN_PEAK,
+        "inset_mode_min_sep_pitch_frac": VR.INSET_MODE_MIN_SEP_PITCH_FRAC,
+        "inset_mode_valley_frac": VR.INSET_MODE_VALLEY_FRAC,
         "text_line_snap": VR.TEXT_LINE_SNAP,
         "straddle_core_frac": VHR.STRADDLE_CORE_FRAC,
         "straddle_core_min_rows": VHR.STRADDLE_CORE_MIN_ROWS,
@@ -196,26 +211,32 @@ def load_witness(witness_dir, file_page):
 # Pass 0/1: threshold derivation (never guessed, never per-page)
 # ---------------------------------------------------------------------------
 
-def derive_inset_thr(s1_by_page, min_gap):
+def derive_inset_thr(s1_by_page):
     """Pass 1b: inset_px (band left margin minus that column's own median left margin) over
     every non-full body band across the whole run, once -- the paragraph-break signal's
-    threshold, taken from the corpus distribution, never picked."""
+    threshold, taken from the corpus distribution as the flush/indent histogram mode midpoint
+    (VR.derive_inset_modes), never picked, never a constant; abstains (status "abstained") rather
+    than guess when the distribution is not bimodal -- see VR.derive_inset_modes docstring."""
     # SIGNED, non-negative only: the candidate test is signed (inset_px >= thr), so a line starting
     # LEFT of the column's median text-left (outdent, rule fragment) is not on the indent axis;
     # abs() folded -51/-54 px outdents into the gap and moved the threshold 50 -> 80.5. Bands
     # flagged full_unpaired (one-sided gutter-crossers: the rule under the running head) are not
     # text lines and are excluded.
     inset_values = []
+    pitch_values = []
     for fp, s1 in s1_by_page.items():
         for col in ("left", "right"):
             bands = [b for b in (s1.get(col) or []) if not b.get("full_unpaired")]
             med = VR._column_medians(bands)
             for b in bands:
+                pitch_values.append(b["y1"] - b["y0"])
                 inset_px = (b["left_ink_x"] - b["x0"]) - med["left_x"]
                 if inset_px >= 0:
                     inset_values.append(inset_px)
-    thr = VR.derive_threshold(inset_values, min_gap=min_gap)
-    return thr, inset_values
+    # no bands at all -> inset_values is empty too and derive_inset_modes abstains "no_values"
+    pitch_px = statistics.median(pitch_values) if pitch_values else None
+    result = VR.derive_inset_modes(inset_values, pitch_px)
+    return result, inset_values
 
 
 # ---------------------------------------------------------------------------
@@ -358,34 +379,35 @@ def main(argv=None):
         s1_by_page[fp] = VR.analyze_page_s1(ink, geom_by_page[fp])
         geom_by_page[fp]["_s1"] = s1_by_page[fp]  # consumed by check_region_rects (running_head)
 
-    try:
-        inset_result, _ = derive_inset_thr(s1_by_page, min_gap=VR.MIN_GAP_INSET_PX)
-    except VR.ThresholdUndetermined as e:
-        records.append({"kind": "run_aborted", "reason": "inset_thr_undetermined",
-                         "detail": str(e)})
-        records[0]["finished_utc"] = now_utc_iso()
-        _write(out_path, records)
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-    inset_thr = inset_result["value"]
+    inset_result, _ = derive_inset_thr(s1_by_page)
+    head_abstained = inset_result["status"] == "abstained"
 
     records[0]["thresholds"] = {
         "full_width_edges": {"full_gap_max_px": VR.FULL_GAP_MAX_PX, "col_gap_min_px": VR.COL_GAP_MIN_PX,
                               "basis": "MEASURE_step2_gutter_inset_20261004.md"},
-        "inset_thr": {"value": inset_thr, "lo": inset_result["lo"], "hi": inset_result["hi"],
-                      "gap": inset_result["gap"], "n_below": inset_result["n_below"],
-                      "n_above": inset_result["n_above"]},
+        "inset_thr": inset_result,
     }
 
-    # --- pass 1c: centred heads printed across the gutter (needs inset_thr) -------------------
-    for fp in usable_pages:
-        VR.pair_centred_across_gutter(s1_by_page[fp], inset_thr)
+    rejected_pre_read_by_page = {}
+    if head_abstained:
+        # Designed outcome, not a crash: the flush/indent distribution is not bimodal for this
+        # page set, so no threshold can be derived -- head detection (and therefore every region)
+        # is skipped for EVERY usable page rather than guessing a threshold. Exit code stays 0.
+        inset_thr = None
+        candidates_by_page = {fp: [] for fp in usable_pages}
+        print(f"WARNING: head detection abstained for {len(usable_pages)} page(s) "
+              f"(reason: {inset_result['reason']}): inset_not_bimodal", file=sys.stderr)
+    else:
+        inset_thr = inset_result["value"]
 
-    # --- pass 2: head candidates ------------------------------------------------------------
-    candidates_by_page, rejected_pre_read_by_page = {}, {}
-    for fp in usable_pages:
-        cands = VR.head_candidates(s1_by_page[fp], inset_thr=inset_thr)
-        candidates_by_page[fp] = cands
+        # --- pass 1c: centred heads printed across the gutter (needs inset_thr) ---------------
+        for fp in usable_pages:
+            VR.pair_centred_across_gutter(s1_by_page[fp], inset_thr)
+
+        # --- pass 2: head candidates --------------------------------------------------------
+        candidates_by_page = {}
+        for fp in usable_pages:
+            candidates_by_page[fp] = VR.head_candidates(s1_by_page[fp], inset_thr=inset_thr)
 
     # --- optional model reads (--read on) ----------------------------------------------------
     head_reads = {}
@@ -468,7 +490,7 @@ def main(argv=None):
     page_records_ordered = [{"file_page": fp} for fp in usable_pages]
     regions, page_summaries = VR.assemble_regions(
         page_records_ordered, s1_by_page, confirmed_by_page, rejected_by_page,
-        witness_by_page, config)
+        witness_by_page, config, abstained=head_abstained)
 
     VR.assert_numbering_invariant(regions)
     VR.check_region_rects(regions, geom_by_page)
@@ -478,6 +500,9 @@ def main(argv=None):
         records.append({"kind": "page", "file_page": fp, **{k: v for k, v in ps.items() if k != "file_page"},
                          "s1_flags": s1_by_page[fp]["flags"],
                          "running_head_present": s1_by_page[fp]["running_head"] is not None})
+        if head_abstained:
+            records.append({"kind": "page_abstained", "file_page": fp,
+                             "reason": "head_detection_abstained:inset_not_bimodal"})
 
     flag_counts = Counter()
     for region in regions:
@@ -494,6 +519,7 @@ def main(argv=None):
         "kind": "run_summary",
         "pages_requested": len(pages_requested), "pages_usable": len(usable_pages),
         "pages_invalid": len(invalid_records),
+        "pages_head_abstained": len(usable_pages) if head_abstained else 0,
         "regions": len(regions),
         "flags": dict(sorted(flag_counts.items())),
         "thresholds": records[0]["thresholds"],
