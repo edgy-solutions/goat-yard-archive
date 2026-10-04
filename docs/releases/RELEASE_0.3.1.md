@@ -106,6 +106,10 @@ merges forward.
 `evals/acceptance_entity_manifest.py` — the endpoint is **required and has no default**, so the
 script cannot silently address production.
 
+**The script lives on `body-path`, not on `release-0.3.1`** (the release branch is tag `0.3.0` plus
+the fix and one chart line, nothing else). Run it from the Lane A checkout
+(`C:/Users/cnogr/git/goatyard-laneA`), against the deployed host.
+
 ```bash
 python evals/acceptance_entity_manifest.py --base-url https://goatyardarchive.org --runs 5
 ```
