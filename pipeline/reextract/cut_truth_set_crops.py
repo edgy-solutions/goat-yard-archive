@@ -70,10 +70,12 @@ import hebrew_glyph_card as G                                              # noq
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 from clean_run import git_state, provisional, banner                      # noqa: E402
 
-SET = "4e73b10d46a41f4a"
-TRUTH = HAD.DATA / ("truth_set96_%s.json" % SET)
-OUTDIR = HAD.DATA / ("truthset96_crops_%s" % SET)
-OUT = HAD.DATA / ("truthset96_cut_%s.json" % SET)
+# The re-frozen set (2026-10-04). The 96 set keeps its own name, files and crop directory: a set is
+# dropped FROM, never edited, and its cut artifact is the record of the faults that caused the drop.
+SET, SET_N = "13e053b86b75a195", 76
+TRUTH = HAD.DATA / ("truth_set%d_%s.json" % (SET_N, SET))
+OUTDIR = HAD.DATA / ("truthset%d_crops_%s" % (SET_N, SET))
+OUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
 PAD = HAD.PAD
 
 # The column-run convention, taken from the pad probe unchanged so the two runs are comparable: a word
@@ -84,13 +86,38 @@ GIT_START = git_state(_HERE)
 
 tset = json.load(io.open(str(TRUTH), encoding="utf-8"))
 assert tset.get("provisional") is False, "the truth set is PROVISIONAL -- do not cut from it"
-assert tset["set_sha16"] == SET and tset["n"] == 96, "this is not the frozen 96"
+assert tset["set_sha16"] == SET and tset["n"] == SET_N, \
+    "this is not the frozen set: %r n=%r" % (tset["set_sha16"], tset["n"])
 rows = tset["rows"]
 SEALED = set(HAD.SEALED_TRUTH) if isinstance(HAD.SEALED_TRUTH, dict) else set()
 assert not (SEALED & {r["span_id"] for r in rows}), "a sealed span is in the cut list"
 # The pad is applied in NATIVE px after the strip->native map, exactly as `crops()` does. Read from the
 # harness rather than retyped, so a change there cannot leave this file describing different crops.
 assert PAD == 12, "the A2 recipe's pad moved (%r); the probe and this cut would disagree" % PAD
+
+
+def rule_band_fault(im):
+    """Refuse a crop that holds no line of TYPE -- the local pre-check Chris asked for, 2026-10-04.
+
+    `crop_quality.crop_has_line()` passes on a printed footnote RULE, because a rule IS an inked
+    band: 14 of the first 96 crops were a single 7-13px full-width run with nothing else in them,
+    and every one of them passed every gate this harness has. The lane already owns the right
+    constant -- MIN_BAND_PX is the floor for an ink run to be a line of type -- it had simply never
+    been asked about a crop. This asks.
+
+    It is a REFUSAL, not a flag, because the crop's only use is to be signed and nothing in it can
+    be read: writing the file is what puts it in front of somebody. The gate itself lives in Lane
+    A's `crop_quality.py` and is being requested there, not edited here; this is Lane B refusing to
+    hand out a crop it has measured as unreadable, which is the part Lane B owns.
+    """
+    runs = G.ink_runs(im)
+    if not runs:
+        return "blank:no-ink-run"                     # crop_fault should have caught this already
+    thick = [r for r in runs if (r[1] - r[0] + 1) >= G.MIN_BAND_PX]
+    if thick:
+        return None
+    return ("no-line-of-type:runs=%s:min_band_px=%d"
+            % ([r[1] - r[0] + 1 for r in runs], G.MIN_BAND_PX))
 
 
 def word_runs(im):
@@ -166,6 +193,8 @@ for r in rows:
         built.append(rec)
         continue
     fault = HAD.crop_fault(im, rects, native.size, box, strip.size)
+    if im is not None and not fault:
+        fault = rule_band_fault(im)       # a rule is an inked band; the blank gate cannot see this
     rec["fault"] = fault
     if im is None or fault:
         # A faulted crop is NOT written. A refused crop that exists on disk is a crop a later glob can
@@ -225,7 +254,9 @@ for r in rows:
 cut = [b for b in built if b.get("crop")]
 clipped = [b for b in built if b.get("clip")]
 assert cut, "nothing was cut -- do not write a manifest describing an empty population"
-assert len(built) == 96, "the cut list is %d, not the frozen 96" % len(built)
+assert len(built) == SET_N, "the cut list is %d, not the frozen %d" % (len(built), SET_N)
+assert not [b for b in cut if rule_band_fault(Image.open(b["crop"]["path"]))], \
+    "a crop with no line of type is on disk after the pre-check"
 assert all(not b["fault"] for b in cut), "a faulted crop was kept on disk"
 assert all(b["crop"]["ink_px"] > 0 for b in cut), "a kept crop has no ink"
 # Every clip on disk passed `bandclip_fault`. Re-asserted over the files rather than trusted from the
@@ -267,7 +298,10 @@ GEOM_FLAGS = {
                           "and a signature from these pixels cannot distinguish them. REDRAW, not a "
                           "reading question.",
     "no_line_of_type": rule_only,
-    "no_line_of_type_note": "the crop holds no ink run thick enough to be a line of type, so there is "
+    "no_line_of_type_note": "EMPTY BY CONSTRUCTION since 2026-10-04: rule_band_fault() now REFUSES "
+                            "such a crop at cut time, so it is in `faults`, not here. Kept as a "
+                            "flag so the artifact shape does not change. "
+                            "The crop holds no ink run thick enough to be a line of type, so there is "
                             "nothing in it to read. Measured by the lane's own MIN_BAND_PX. These are "
                             "boxes on the footnote RULE, and every one of them passed crop_has_line() "
                             "-- a printed rule satisfies `there is an inked band`. The gate is Lane "
@@ -292,6 +326,9 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "source": "hebrew_aperture_diag._native_crop + crop_fault, as crops() applies them",
                   "clip_rule": "remove only ink runs that do not overlap the span's line band and are "
                                "either >= %d px thick or touch the crop edge" % G.MIN_BAND_PX,
+                  "rule_band_precheck": "a crop with no ink run >= %d px is refused and not written "
+                                        "(rule_band_fault); crop_has_line() passes on a printed "
+                                        "rule and cannot see this" % G.MIN_BAND_PX,
                   "clip_validated_against": "p912:n2 hand-built clip (rows 14-72, 2 word runs); this "
                                             "rule keeps 14-78 and resolves the same 2 runs",
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},

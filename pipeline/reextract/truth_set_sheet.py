@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-"""The 96-span sheet: every crop at native size, the candidate WITHHELD, for Chris.
+"""The signing sheet: every crop at native size, the candidate WITHHELD, for Chris.
 
-    python truthset96_sheet.py
+    python truth_set_sheet.py        # the set it renders is named in SET/SET_N below
 
 This is two gates in one surface, and they are not the same gate:
 
   THE CONTACT-SHEET GATE -- "before any outbound call, produce a contact sheet: every crop to be sent,
   native size, beside its signed text; Chris approves it, then spend." Nothing has been sent for these
-  96 spans, so this is the pre-send look: 96 crops, their hashes, and the box faults a reader could
-  never repair.
+  these spans, so this is the pre-send look: every crop, its hash, and the box faults a reader
+  could never repair.
 
   RULING (4) -- sign from PIXELS with the candidate withheld. The last truth set was 30% wrong in the
   direction of the extracted text and one row was affirmed verbatim, so the signer must not be shown
   what the extractor read.
 
 Those two pull in opposite directions on one field: "beside its signed text" is exactly what ruling (4)
-forbids here, because these 96 are not yet signed -- the sheet exists to GET them signed. So the rule
+forbids here, because these spans are not yet signed -- the sheet exists to GET them signed. So the rule
 this file follows is: anything derived from the candidate is absent, and that is ASSERTED over the
 emitted bytes rather than arranged by being careful. Absent: the Hebrew, the extractor's word count,
 its nikud flag, the note text. Present: geometry, hashes, and measurements taken from the PIXELS --
@@ -59,9 +59,12 @@ import hebrew_glyph_card as G                                              # noq
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 from clean_run import git_state, provisional, banner                      # noqa: E402
 
-SET = "4e73b10d46a41f4a"
-CUT = HAD.DATA / ("truthset96_cut_%s.json" % SET)
+# The re-frozen set (2026-10-04): the 96 minus 20 spans at measured box faults. The 96 sheet keeps
+# its own name and sidecar -- an approval record is named by the pixels it describes.
+SET, SET_N = "13e053b86b75a195", 76
+CUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
 PRINTED_OFFSET = 88
+SKEL_NAME = "truthset_signing_%s.jsonl" % SET
 
 # The same check `truth_set_draw.py` makes, for the same reason: any readable script in this file
 # defeats the withholding. Hebrew, its presentation forms, and Greek.
@@ -76,10 +79,11 @@ GIT_START = git_state(_HERE)
 
 cut = json.load(io.open(str(CUT), encoding="utf-8"))
 assert cut.get("provisional") is False, "the cut artifact is PROVISIONAL -- not an approval record"
-assert cut["set_sha16"] == SET and cut["n"] == 96, "this is not the frozen 96"
+assert cut["set_sha16"] == SET and cut["n"] == SET_N, \
+    "this is not the frozen set: %r n=%r" % (cut["set_sha16"], cut["n"])
 rows = [r for r in cut["rows"] if r.get("crop")]
-assert len(rows) == 96, "the sheet would describe %d of 96 spans; a sheet that silently narrows is " \
-                        "how the 19-span approval was lost" % len(rows)
+assert len(rows) == SET_N, "the sheet would describe %d of %d spans; a sheet that silently narrows " \
+                           "is how the 19-span approval was lost" % (len(rows), SET_N)
 flags = cut["geometry_flags"]
 DUP = {sid: [o for o in ids if o != sid] for ids in flags["duplicate_box"].values() for sid in ids}
 SHORT = {x["span_id"]: x["box_h_native"] for x in flags["box_shorter_than_a_line"]}
@@ -148,9 +152,9 @@ img{image-rendering:pixelated;background:#fff;display:block;margin-bottom:6px}
 .note{background:#1b2127;border-left:3px solid #468;padding:10px 14px;margin:14px 0}
 """
 
-H = ['<!doctype html><meta charset="utf-8"><title>truth set %s - 96 spans, candidate withheld</title>'
-     % SET, "<style>%s</style>" % CSS]
-H.append("<h1>Truth set <code>%s</code> &mdash; 96 spans, candidate withheld</h1>" % SET)
+H = ['<!doctype html><meta charset="utf-8"><title>truth set %s - %d spans, candidate withheld</title>'
+     % (SET, SET_N), "<style>%s</style>" % CSS]
+H.append("<h1>Truth set <code>%s</code> &mdash; %d spans, candidate withheld</h1>" % (SET, SET_N))
 H.append('<div class="sub">FILE pages throughout; printed = file &minus; %d. Crops cut at laneB '
          '<code>%s</code> over a clean tree. A2 span box, PAD=12 native px; band-clip where a '
          'neighbouring line reached into the pad. Nothing here has been sent.</div>' % (
@@ -160,9 +164,10 @@ H.append('<div class="note"><b>What is deliberately missing.</b> The extractor&r
          'bytes before the file is written. The previous truth set was 30% wrong in the direction of '
          'the candidate, once affirmed verbatim. Write what the pixels show, or abstain.<br>'
          '<b>What is present and is NOT a hint:</b> resolved column runs, counted from the ink by gaps '
-         'rather than by recognising letters.</div>')
+         'rather than by recognising letters.<br>'
+         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it.</div>')
 H.append('<table class="sum">'
-         '<tr><td>spans</td><td><b>96</b> on %d pages, 0 refused by the crop gate</td></tr>'
+         '<tr><td>spans</td><td><b>%d</b> on %d pages, 0 refused by the crop gate &mdash; the 96 set minus 20 spans at measured box faults (14 on the printed rule, 6 at the three duplicate boxes)</td></tr>'
          '<tr><td>band-clips</td><td><b>%d</b> written, %d needed no trim (no foreign line in the pad), '
          '0 abstained, 0 resolved FEWER runs than its parent</td></tr>'
          '<tr><td>recipe differs</td><td><b>%d</b> span(s)</td></tr>'
@@ -171,7 +176,7 @@ H.append('<table class="sum">'
          'the printed rule: %s</td></tr>'
          '<tr><td>SHORT-BOX</td><td><b>%d</b>: %s</td></tr>'
          '</table>'
-         % (len({r["page"] for r in rows}), cut["clip"]["written"], cut["clip"]["no_trim"],
+         % (SET_N, len({r["page"] for r in rows}), cut["clip"]["written"], cut["clip"]["no_trim"],
             len(cut["clip"]["word_runs_differ"]), len(flags["duplicate_box"]),
             html.escape("; ".join(" = ".join(v) for v in flags["duplicate_box"].values())),
             len(NOTYPE), html.escape(", ".join(sorted(NOTYPE))),
@@ -222,14 +227,15 @@ for r in rows:
     H.append("</div></div>")
 
 H.append('<h2>How to record a signature</h2><div class="sub">A skeleton with one row per span, in this '
-         'order, is written beside this sheet: <code>truthset96_signing_%s.jsonl</code>. Each row has an '
-         'empty reading field to fill from the pixels and a flag to set instead when the pixels do not '
-         'support one. The crop hash in each row is what the signature is ABOUT, so a re-cut span '
+         'order, is written beside this sheet: <code>%s</code>. Each row has an '
+         'empty LIST to fill from the pixels &mdash; one entry per span of Hebrew visible in that crop, '
+         'so a box that holds two spans records two readings &mdash; and a flag to set instead when the '
+         'pixels support none. The crop hash in each row is what the signature is ABOUT, so a re-cut span '
          'cannot inherit an old signature. (The field is not named here on purpose: this file asserts '
          'that no candidate-derived field name appears in it, and that guard is worth more than the '
-         'convenience of writing it out.)</div>' % SET)
-H.append('<div class="sub" style="margin-top:18px">Flagged rows: %d of 96, shown first. Sheet built '
-         'from <code>%s</code>.</div>' % (nflag, CUT.name))
+         'convenience of writing it out.)</div>' % SKEL_NAME)
+H.append('<div class="sub" style="margin-top:18px">Flagged rows: %d of %d, shown first. Sheet built '
+         'from <code>%s</code>.</div>' % (nflag, SET_N, CUT.name))
 doc = "\n".join(H)
 
 # ---- the withholding, asserted over the bytes that will be written --------------------------------
@@ -245,14 +251,15 @@ for k in FORBIDDEN_KEYS:
         "a candidate-derived field (%r) is named in the sheet" % k
 assert "A1_notebox" not in doc and "notebox" not in low, "an A1 note-box crop is referenced"
 assert str(HAD.CROPDIR) not in doc, "the sheet points at the 19-span corpus instead of its own crops"
-assert doc.count("<div class=\"row\">") == 96, "the sheet does not render 96 rows"
+assert doc.count("<div class=\"row\">") == SET_N, \
+    "the sheet renders %d rows, not %d" % (doc.count("<div class=\"row\">"), SET_N)
 
 # ---- content-addressed name + the clobber guard ----------------------------------------------------
 sig = ";".join("%s:%s" % (s, shown[s]["A2_spanbox"]) for s in sorted(shown))
 DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
-OUT = HAD.DATA / ("truthset96_sheet_%s_%dspan_%s.html" % (SET, len(shown), DIG))
+OUT = HAD.DATA / ("truthset_sheet_%s_%dspan_%s.html" % (SET, len(shown), DIG))
 SIDE = OUT.with_suffix(".json")
-SKEL = HAD.DATA / ("truthset96_signing_%s.jsonl" % SET)
+SKEL = HAD.DATA / SKEL_NAME
 if SIDE.exists():
     was = (json.loads(io.open(str(SIDE), encoding="utf-8").read()) or {}).get("crop_sha16") or {}
     assert not was or was == shown, \
@@ -271,21 +278,26 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "withheld": ["the extracted Hebrew", "the extractor's word count", "its nikud flag",
                         "the note text"],
            "asserted_over_bytes": ["no Hebrew/Greek/presentation forms", "no candidate-derived field "
-                                   "names", "no A1 note-box reference", "96 rows"],
+                                   "names", "no A1 note-box reference", "%d rows" % SET_N],
            "badges": {"NO-TYPE": sorted(NOTYPE), "DUP-BOX": sorted(DUP), "SHORT-BOX": sorted(SHORT),
                       "RECIPE": [d["span_id"] for d in cut["clip"]["word_runs_differ"]]},
            "crop_sha16": shown},
           io.open(str(SIDE), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
-skel = [{"span_id": s, "crop_sha16": shown[s], "hebrew": None, "abstain": False, "note": "",
+# A LIST, not a field: Chris signs every Hebrew span visible in the crop, because 22 of these boxes
+# resolve more word runs than the extractor claims words and the box rule makes that a redraw
+# question. One reading per visible span, in printed order; an empty list with abstain set means the
+# pixels support none.
+skel = [{"span_id": s, "crop_sha16": shown[s], "readings": [], "abstain": False, "note": "",
+         "readings_are": "one entry per span of Hebrew VISIBLE in this crop, in printed order; the crop may hold more than the span it was drawn for",
          "signed_from": "pixels, candidate withheld", "sheet": OUT.name} for s in sorted(shown)]
 sk = "\n".join(json.dumps(x, ensure_ascii=False) for x in skel) + "\n"
 assert not READABLE.search(sk), "the signing skeleton carries readable script"
 io.open(str(SKEL), "w", encoding="utf-8").write(sk)
 
 print("sheet %s" % OUT.name)
-print("  rows 96   flagged %d   clips shown %d   recipe pairs %d"
-      % (nflag, sum(1 for s in shown.values() if "A2_bandclip" in s),
+print("  rows %d   flagged %d   clips shown %d   recipe pairs %d"
+      % (SET_N, nflag, sum(1 for s in shown.values() if "A2_bandclip" in s),
          len(cut["clip"]["word_runs_differ"])))
 print("  withheld: hebrew, word count, nikud flag, note text -- asserted over %d bytes" % len(doc))
 print("  sidecar %s   skeleton %s" % (SIDE.name, SKEL.name))
