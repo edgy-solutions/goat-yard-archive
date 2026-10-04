@@ -71,6 +71,40 @@ def test_text_lines_min_sep_frac_default_unchanged_and_separates_double_minimum_
     assert all(20 <= h <= 40 for h in sep_heights), \
         (sep_heights, "min_sep_frac bands should be ~1 line tall, not a sliver or a merged pair")
 
+def test_text_lines_line_h_keyword_default_byte_identical():
+    # Same merged 3-line band as test_text_lines_splits_merged_band: line_h=None (the default, not
+    # passed at all) must be byte-identical to calling with no line_h keyword -- this is the
+    # substrate-change contract (verse_regions' choose_line_h/analyze_page_s1 pass line_h
+    # explicitly only for a collapsed column; every other caller must see no change at all).
+    a = np.zeros((120, 300), bool)
+    for cy in (20, 60, 100):
+        a[cy - 8:cy + 8, 20:280] = True
+    assert NS.text_lines(a) == NS.text_lines(a, line_h=None)
+
+    # line_h, when GIVEN, drives the split instead of the column's own median: a band tall enough
+    # relative to an explicit (small) line_h must be split even though it would NOT be split
+    # against its own (large) median -- proving line_h, not med, is what decided it. Two shallow
+    # valleys (one local minimum each) give the split something to cut at.
+    b = np.zeros((60, 300), bool)
+
+    def setrow(y, c):
+        b[y, 20:20 + c] = True
+
+    for y in range(0, 16):
+        setrow(y, 260)
+    for y, c in zip(range(16, 21), (180, 90, 30, 90, 180)):
+        setrow(y, c)
+    for y in range(21, 38):
+        setrow(y, 260)
+    for y, c in zip(range(38, 43), (180, 90, 30, 90, 180)):
+        setrow(y, c)
+    for y in range(43, 60):
+        setrow(y, 260)
+
+    assert NS.text_lines(b) == [(0, 60)], "own-median split: a single 60px band has med=60, n=1, no split"
+    split = NS.text_lines(b, line_h=20)      # against line_h=20, h=60 -> n=3, 1.5x test fires
+    assert len(split) == 3, split
+
 def test_marker_opens_continuation_does_not():
     # marker line: a small RAISED isolated glyph, a gap, then text
     m = np.zeros((44, 400), bool)

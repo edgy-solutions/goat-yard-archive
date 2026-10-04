@@ -26,7 +26,7 @@ from collections import namedtuple
 
 import numpy as np
 
-from note_start_detect import INK, _line_geom, strip_vrules, text_lines  # noqa: F401 (INK re-exported)
+from note_start_detect import INK, _line_geom, strip_vrules, text_lines, _text_lines  # noqa: F401 (INK re-exported)
 import box_sanity
 
 # --------------------------------------------------------------------------------------------
@@ -82,6 +82,19 @@ SLIVER_MAX_H_PX = 20
 # ~63px, median single line ~60px). Requiring cuts to be this fraction of the median line height
 # apart from each other rejects the second, spurious minimum and lets the real valley win instead.
 TEXT_LINE_MIN_SEP_FRAC = 0.5
+
+# Defect: note_start_detect.text_lines estimates a column's single-line height as the median of
+# that column's OWN raw (pre-split) band heights. On an intact column most raw bands already are
+# single lines (measured raw-band medians 48-61px), so the median is a usable line height. On some
+# RIGHT columns most raw bands are themselves fused multi-line bands (collapsed), so the column's
+# own median is itself multi-line (measured collapsed medians: 92R 254, 126R 312, 197R 189, 923R
+# 308, 925R 120 -- raw band counts 7-20 there vs 31-72 on an intact column) and n=round(h/med)=1,
+# so nothing splits. Nothing was measured in the empty band between 61 and 120px, so 1.5x an
+# intact median (<=~92) separates the two populations below the lowest collapsed value (120)
+# without needing a derive_threshold-style empty-band measurement at this grain (no pooled
+# corpus-wide distribution of raw medians was available to run it on). See choose_line_h /
+# analyze_page_s1.
+LINE_H_EMPTY_BAND_MULT = 1.5
 
 
 # ==============================================================================================
@@ -371,6 +384,19 @@ def _split_slivers(bands, max_h=SLIVER_MAX_H_PX):
     return kept, slivers
 
 
+def choose_line_h(column_raw_median, page_line_h):
+    """Pure decision for the line_h defect: a column's own raw-band median is only a usable
+    single-line-height estimate when it is NOT itself multi-line. If it exceeds
+    LINE_H_EMPTY_BAND_MULT * the page-pooled raw median, the column is collapsed (most of its raw
+    bands are fused) and its own median must not be used -- fall back to the page-pooled median
+    instead. Returns (line_h_or_None, basis): basis "column" -> line_h=None (today's path, use the
+    column's own median inside text_lines); basis "page" -> line_h=page_line_h (pass it through
+    explicitly)."""
+    if column_raw_median > LINE_H_EMPTY_BAND_MULT * page_line_h:
+        return page_line_h, "page"
+    return None, "column"
+
+
 def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     """S1: per-column line bands (vertical rules stripped), sliver quarantine (R2), full-width
     band detection (gutter-ink test per band, classified by the two measured edges
@@ -381,13 +407,40 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     xdiv = geom_record["xdiv"]
     col_boxes = {r["col"]: tuple(r["box"]) for r in geom_record["body_regions"] if r["col"] in ("left", "right")}
 
-    bands = {}
-    slivers = []
+    # Raw (pre-split) band heights per column, on the SAME strip_vrules-cleaned column ink used
+    # for the real split below -- pooled median over BOTH columns' raw bands is the page-wide
+    # single-line-height estimate (choose_line_h / LINE_H_EMPTY_BAND_MULT). NOTE: if BOTH columns
+    # are collapsed, the pooled median is itself multi-line too and this cannot see it -- named,
+    # not solved here.
+    cleaned_by_col = {}
+    raw_heights_by_col = {}
+    pooled_raw_heights = []
     for col, box in col_boxes.items():
         x0, y0, x1, y1 = box
         cleaned = strip_vrules(ink[y0:y1, x0:x1])
+        cleaned_by_col[col] = cleaned
+        heights = [ry1 - ry0 for (ry0, ry1) in _text_lines(cleaned)]
+        raw_heights_by_col[col] = heights
+        pooled_raw_heights.extend(heights)
+
+    pooled_sorted = sorted(pooled_raw_heights) or [1]
+    page_line_h = pooled_sorted[len(pooled_sorted) // 2]
+
+    line_h = {}
+    bands = {}
+    slivers = []
+    flags = []
+    for col, box in col_boxes.items():
+        x0, y0, x1, y1 = box
+        cleaned = cleaned_by_col[col]
+        col_heights_sorted = sorted(raw_heights_by_col[col]) or [1]
+        column_raw_median = col_heights_sorted[len(col_heights_sorted) // 2]
+        col_line_h, basis = choose_line_h(column_raw_median, page_line_h)
+        line_h[col] = {"basis": basis, "column_raw_median": column_raw_median, "page_line_h": page_line_h}
+        if basis == "page":
+            flags.append(f"line_h_from_page:{col}")
         raw_bands = [_make_band(col, box, y0 + ly0, y0 + ly1, cleaned, ink, xdiv, gutter_window)
-                     for (ly0, ly1) in text_lines(cleaned, min_sep_frac=TEXT_LINE_MIN_SEP_FRAC)]
+                     for (ly0, ly1) in text_lines(cleaned, min_sep_frac=TEXT_LINE_MIN_SEP_FRAC, line_h=col_line_h)]
         kept, col_slivers = _split_slivers(raw_bands)
         bands[col] = kept
         slivers.extend(col_slivers)
@@ -411,7 +464,6 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     left_rest = [b for b in left_rest if id(b) not in rh_ids]
     right_rest = [b for b in right_rest if id(b) not in rh_ids]
 
-    flags = []
     all_local = left_rest + right_rest
     heights = sorted((b["y1"] - b["y0"]) for b in all_local) or [1]
     median_line_h = heights[len(heights) // 2]
@@ -421,7 +473,7 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     return {
         "file_page": geom_record.get("file_page"), "W": int(W), "H": int(H), "xdiv": xdiv,
         "left": left_rest, "right": right_rest, "full": other_full, "slivers": slivers,
-        "running_head": running_head, "flags": flags, "col_boxes": col_boxes,
+        "running_head": running_head, "flags": flags, "col_boxes": col_boxes, "line_h": line_h,
     }
 
 
@@ -636,7 +688,7 @@ def confirm_candidates(candidates, head_reads=None):
         ver = hr.get("ver")
         status = hr.get("status")
         if ver is False:
-            rejected.append(dict(c, head_confirm=hr, reason="head_reads:ver_false"))
+            rejected.append(dict(c, head_confirm=hr, reason="head_reads:no_ver"))
             continue
         if ver is None or status != "ok":
             confirmed.append(dict(c, head_confirm=hr, flags=list(c.get("flags") or []) + ["head_unconfirmed"]))
@@ -708,18 +760,113 @@ def assert_numbering_invariant(records):
                     f"(link_status={r.get('numbers_link_status')!r}, sources={srcs!r})")
 
 
-_VER_RE = re.compile(r'(?m)^\s*\**Ver\.\s*([0-9][0-9, ]*)')
+_VER_LINE_RE = re.compile(r'(?m)^\s*\**Ver\.\s*')
 _CHAP_RE = re.compile(r'(?m)^\s*#\s*Chapter\b.*$')
+
+# One code-owned verse-number parser, shared by parse_ver_head (the model-read / canary path) and
+# parse_witness (the old vol.1 .md). The old _VER_RE (`([0-9][0-9, ]*)`) stopped at a dash, so
+# witness "Ver. 12--14" parsed as [12] and "Ver. 28-34" as [28] -- this replaced it.
+_VER_HEAD_RE = re.compile(r'Ver[.,]?')
+_DASHES = "-–—"  # hyphen, en dash, em dash
+_NUM_ITEM_RE = re.compile(r'\s*([0-9]+)(?:\s*[' + _DASHES + r']\s*([0-9]+))?')
+RANGE_SPAN_MAX = 20  # a "Ver. N-M" range wider than this is implausible, never silently trusted
+
+
+def _parse_number_items(s):
+    """Parse a comma-separated list of 'N' or 'N<dash>M' items (dash in -, en dash, em dash) from
+    the START of s, whitespace tolerant. Returns (items, consumed_end): items is an ordered list of
+    (n, m_or_None) int tuples; consumed_end is the index in s right after the last matched item
+    (not including any trailing separator/whitespace). items == [] if nothing matched at position 0
+    ("Ver" with no number spec following)."""
+    items = []
+    pos = 0
+    first = True
+    while True:
+        start = pos
+        if not first:
+            sep = re.match(r'\s*,', s[pos:])
+            if not sep:
+                break
+            start = pos + sep.end()
+        m = _NUM_ITEM_RE.match(s, start)
+        if not m or m.start() != start:
+            break
+        n = int(m.group(1))
+        mm = int(m.group(2)) if m.group(2) else None
+        items.append((n, mm))
+        pos = m.end()
+        first = False
+    return items, pos
+
+
+def _expand_number_items(items):
+    """(expanded_list, implausible): expands each (n, m) range inclusively; implausible iff any
+    range has m<=n or a span > RANGE_SPAN_MAX, or the full expanded list is not strictly ascending."""
+    implausible = False
+    expanded = []
+    for n, mm in items:
+        if mm is None:
+            expanded.append(n)
+        else:
+            if not (mm > n and (mm - n) <= RANGE_SPAN_MAX):
+                implausible = True
+            expanded.extend(range(n, mm + 1))
+    if not implausible:
+        for a, b in zip(expanded, expanded[1:]):
+            if not (b > a):
+                implausible = True
+                break
+    return expanded, implausible
+
+
+def parse_ver_head(text):
+    """Code-owned transcription parser for a head-candidate crop read (verse_head_read.read_head):
+    the model's job is to TRANSCRIBE the line exactly, never to classify it -- this function alone
+    decides ver/numbers/status from the transcription, so there is one parser, not one per caller.
+
+    Returns dict(ver, numbers, raw_head, status):
+      status "empty"            -- text is empty/whitespace-only; ver=None, numbers=None.
+      status "no_ver"           -- does not start (after up to 3 leading non-alnum chars) with
+                                    capital "Ver" + optional '.'/','  (lowercase "ver." is NOT a
+                                    head); ver=False, numbers=None.
+      status "unparsed"         -- "Ver" present but no number spec follows; ver=True, numbers=None.
+      status "range_implausible"-- a number spec parsed but failed plausibility (see
+                                    _expand_number_items); ver=True, numbers=None.
+      status "ok"               -- ver=True, numbers = the expanded, strictly-ascending list.
+    raw_head is the matched "Ver..." prefix string (through the parsed number spec, when any)."""
+    s = (text or "").strip()
+    if not s:
+        return {"ver": None, "numbers": None, "raw_head": None, "status": "empty"}
+    i = 0
+    while i < min(3, len(s)) and not s[i].isalnum():
+        i += 1
+    rest = s[i:]
+    m = _VER_HEAD_RE.match(rest)
+    if not m:
+        return {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver"}
+    after = rest[m.end():]
+    items, consumed = _parse_number_items(after)
+    if not items:
+        return {"ver": True, "numbers": None, "raw_head": rest[:m.end()], "status": "unparsed"}
+    expanded, implausible = _expand_number_items(items)
+    raw_head = rest[:m.end() + consumed]
+    if implausible:
+        return {"ver": True, "numbers": None, "raw_head": raw_head, "status": "range_implausible"}
+    return {"ver": True, "numbers": expanded, "raw_head": raw_head, "status": "ok"}
 
 
 def parse_witness(md_text):
     """Pure string parse of the witness .md: verse-head numbers and chapter-head count, in
-    reading order top to bottom. Counts and numbers ONLY -- never geometry."""
+    reading order top to bottom. Counts and numbers ONLY -- never geometry. Witness lines are
+    matched as today (line start, optional leading '*'s, literal "Ver."); the number spec after it
+    uses the SAME shared parser as parse_ver_head, so e.g. "Ver. 12--14" -> [12,13,14], not [12]."""
     verse_heads = []
-    for m in _VER_RE.finditer(md_text or ""):
-        nums = [int(x) for x in re.findall(r"\d+", m.group(1))]
+    text = md_text or ""
+    for m in _VER_LINE_RE.finditer(text):
+        items, _ = _parse_number_items(text[m.end():])
+        nums, _implausible = _expand_number_items(items) if items else ([], False)
         verse_heads.append(nums)
-    chapter_count = len(_CHAP_RE.findall(md_text or ""))
+    chapter_count = len(_CHAP_RE.findall(text))
     return {"verse_heads": verse_heads, "chapter_count": chapter_count}
 
 

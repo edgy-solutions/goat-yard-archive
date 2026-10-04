@@ -11,6 +11,7 @@ client; nothing in this file or its tests sends a real request.
 from __future__ import annotations
 
 import json
+import re
 from typing import Optional
 
 import numpy as np
@@ -20,13 +21,11 @@ import endpoint_guard
 DEFAULT_MODEL = "qwen3.6-16k:35b"
 READ_TIMEOUT_S = 300
 
-PROMPT = (
-    "This image is the start of one printed line from an 18th-century two-column Bible "
-    "commentary. If the line begins with the abbreviation 'Ver.' followed by one or more verse "
-    "numbers, reply {\"ver\": true, \"numbers\": [..]} with the numbers as integers. If the line "
-    "does not begin with 'Ver.', reply {\"ver\": false, \"numbers\": null}. If you cannot read "
-    "it, reply {\"ver\": null, \"numbers\": null}. Reply with JSON only."
-)
+# Head read = transcription, code parses: the model's ONLY job is to transcribe the line exactly;
+# verse_regions.parse_ver_head alone decides ver/numbers/status. A prior JSON yes/no PROMPT asked
+# the model to CLASSIFY the line itself, which put the parsing rule inside the model instead of in
+# code (not testable, not one code-owned rule -- see verse_regions.parse_ver_head's docstring).
+TRANSCRIBE_PROMPT = "Transcribe the text in this image exactly. Output only the text."
 
 
 # --------------------------------------------------------------------------------------------
@@ -83,53 +82,58 @@ def verse_regions_frac():
 # read_head — one guarded model call, strictly parsed
 # --------------------------------------------------------------------------------------------
 
-def _parse_response(raw_text):
-    """Strict parse of the model's JSON reply. Returns (ver, numbers, status)."""
-    try:
-        obj = json.loads(raw_text)
-    except Exception:
-        return None, None, "error:parse"
-    if not isinstance(obj, dict) or "ver" not in obj:
-        return None, None, "error:parse"
-    ver = obj.get("ver")
-    numbers = obj.get("numbers")
-    if ver not in (True, False, None):
-        return None, None, "error:parse"
-    if numbers is not None:
-        if not isinstance(numbers, list) or not all(isinstance(n, int) for n in numbers):
-            return None, None, "error:parse"
-    if ver is True:
-        status = "ok" if numbers else "ok"
-    elif ver is False:
-        status = "ok"
-    else:
-        status = "abstain"
-    return ver, numbers, status
+class DegenerateReplyError(RuntimeError):
+    """Raised when a model reply carries no usable transcription: an explicit done:false
+    (mid-stream / truncated reply, real .post client only), or content that is empty/whitespace,
+    or content that is only '/' characters and whitespace (an observed degenerate failure mode on
+    this endpoint). Never silently treated as a valid abstain -- counted via counter.record_error()
+    in build_verse_regions.run_reads exactly like a transport failure."""
+
+
+_DEGENERATE_CONTENT_RE = re.compile(r"[/\s]*")
+
+
+def _is_degenerate_content(text):
+    """True iff text is None, empty/whitespace-only, or made of only '/' and whitespace."""
+    if text is None:
+        return True
+    if text.strip() == "":
+        return True
+    return _DEGENERATE_CONTENT_RE.fullmatch(text) is not None
 
 
 def read_head(client, png_bytes):
     """client: object with a `.post(url, json=...) -> response` method (response has `.json()` /
     `.status_code`, or raises on transport failure) OR a plain callable client(png_bytes) ->
-    raw_text, for the simplest fakes in tests. Returns {"ver", "numbers", "status", "raw"}.
-    Never raises on a malformed reply -- that is status "error:parse", not an exception. Transport
-    failures (timeout, connection error, non-2xx) propagate AS EXCEPTIONS to the caller, which is
-    how build_verse_regions.py's run-level fault counter (3 consecutive) tells a read error from
-    a guard refusal or an abstain."""
+    raw_text, for the simplest fakes in tests. Returns {"text","ver","numbers","raw_head","status",
+    "raw"} -- the model TRANSCRIBES (TRANSCRIBE_PROMPT), code alone parses it via
+    verse_regions.parse_ver_head (one code-owned parser, never a second one here).
+
+    Raises DegenerateReplyError for an explicit done:false, or an empty/whitespace/'/'-only reply
+    -- never a silent abstain. Transport failures (timeout, connection error, non-2xx) still
+    propagate as exceptions, exactly as before. Both raise paths are counted identically by
+    build_verse_regions.run_reads's consecutive-error counter."""
     raw_text = client(png_bytes) if callable(client) and not hasattr(client, "post") else None
     if raw_text is None and hasattr(client, "post"):
         import base64
         b64 = base64.b64encode(png_bytes).decode("ascii")
         payload = {
             "model": getattr(client, "model", DEFAULT_MODEL),
-            "messages": [{"role": "user", "content": PROMPT, "images": [b64]}],
-            "think": False, "stream": False, "format": "json",
-            "options": {"temperature": 0},
+            "messages": [{"role": "user", "content": TRANSCRIBE_PROMPT, "images": [b64]}],
+            "think": False, "stream": False,
+            "options": {"temperature": 0, "num_predict": 64},
         }
         resp = client.post(client.base_url.rstrip("/") + "/api/chat", json=payload, timeout=READ_TIMEOUT_S)
         body = resp.json()
+        if body.get("done") is False:
+            raise DegenerateReplyError(f"model reply had done:false: {body!r}")
         raw_text = (body.get("message") or {}).get("content", "")
-    ver, numbers, status = _parse_response(raw_text)
-    return {"ver": ver, "numbers": numbers, "status": status, "raw": raw_text}
+    if _is_degenerate_content(raw_text):
+        raise DegenerateReplyError(f"degenerate model reply: {raw_text!r}")
+    import verse_regions
+    parsed = verse_regions.parse_ver_head(raw_text)
+    return {"text": raw_text, "ver": parsed["ver"], "numbers": parsed["numbers"],
+            "raw_head": parsed["raw_head"], "status": parsed["status"], "raw": raw_text}
 
 
 def guarded_read_head(client, gray_array, box, page_shape, blank_floor=0.01, uniform_std=2.0):
@@ -138,7 +142,8 @@ def guarded_read_head(client, gray_array, box, page_shape, blank_floor=0.01, uni
     gray_array via PIL and calls read_head."""
     status = guard_crop(gray_array, box, page_shape, blank_floor, uniform_std)
     if status != "ok":
-        return {"ver": None, "numbers": None, "status": f"guard_refused:{status}", "raw": None}
+        return {"text": None, "ver": None, "numbers": None, "raw_head": None,
+                "status": f"guard_refused:{status}", "raw": None}
     from io import BytesIO
     from PIL import Image
     x0, y0, x1, y1 = box
@@ -188,6 +193,65 @@ class ConsecutiveErrorCounter:
         if self.consecutive >= self.limit:
             raise ConsecutiveReadErrorFault(
                 f"{self.consecutive} consecutive read errors (HTTP/timeout), aborting the run")
+
+
+# --------------------------------------------------------------------------------------------
+# Endpoint canary -- abort, never retry. A fixed, known-good pair of crops whose transcription is
+# already known (pages 126/130 of volume 1, verified against the witness .md): if the endpoint
+# stops reading them correctly, the model/endpoint has drifted or gone stale mid-run and the whole
+# run is suspect -- never spliced, never silently retried on a different endpoint.
+# --------------------------------------------------------------------------------------------
+
+CANARY_CROPS = [
+    {"file_page": 126, "col": "left", "box": (0, 3390, 963, 3464),
+     "expected": {"ver": True, "numbers": [21]}},
+    {"file_page": 130, "col": "left", "box": (0, 3079, 965, 3152),
+     "expected": {"ver": True, "numbers": [6]}},
+]
+CANARY_EVERY = 20
+
+
+class CanaryFault(RuntimeError):
+    """Raised by run_canary when any canary crop's read does not match its hardcoded `expected`
+    ver/numbers (or errors outright). Abort, never retry: build_verse_regions.main writes a
+    header-only aborted record (status='aborted', abort_reason='canary_failed batch <k>') and
+    exits nonzero without attempting the endpoint again."""
+
+
+def run_canary(client, load_gray, batch, at_read):
+    """Reads every CANARY_CROPS entry through `client` (real .post-style or callable fake) via
+    guarded_read_head, and compares the parsed ver/numbers against each entry's hardcoded
+    `expected`. load_gray(file_page) -> gray array|None, injected so this is testable without a
+    real page file (build_verse_regions.main passes load_page_gray(volume_dir, ...) bound to
+    file_page). `batch`/`at_read` are recorded on the result for the run header's canary log only
+    -- they never affect pass/fail. Any per-crop exception (transport failure, missing page,
+    DegenerateReplyError, guard refusal, mismatch) counts as that crop failing; the record still
+    carries every crop's outcome before CanaryFault is raised, so a failure is visible, not blind.
+    Returns the record dict on full success; raises CanaryFault otherwise."""
+    crops_out = []
+    ok = True
+    for crop in CANARY_CROPS:
+        try:
+            gray = load_gray(crop["file_page"])
+            if gray is None:
+                raise RuntimeError("canary page image missing")
+            H, W = gray.shape
+            res = guarded_read_head(client, gray, crop["box"], (H, W))
+            match = (res.get("ver") == crop["expected"].get("ver")
+                     and res.get("numbers") == crop["expected"].get("numbers"))
+            crops_out.append({"file_page": crop["file_page"], "col": crop["col"],
+                               "status": res.get("status"), "ver": res.get("ver"),
+                               "numbers": res.get("numbers"), "match": match})
+            if not match:
+                ok = False
+        except Exception as e:
+            crops_out.append({"file_page": crop["file_page"], "col": crop["col"],
+                               "status": f"error:{e}", "match": False})
+            ok = False
+    record = {"batch": batch, "at_read": at_read, "ok": ok, "crops": crops_out}
+    if not ok:
+        raise CanaryFault(f"canary_failed batch {batch}: {record}")
+    return record
 
 
 def resolve_and_check(explicit_host, model, client=None):

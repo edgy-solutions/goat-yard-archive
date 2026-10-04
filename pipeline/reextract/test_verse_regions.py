@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 21
+EXPECTED_TESTS = 31
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -32,6 +32,61 @@ def test_derive_threshold_first_empty_band_above_median_and_raises():
         assert False, "expected ThresholdUndetermined"
     except VR.ThresholdUndetermined:
         pass
+
+
+# 1b. choose_line_h (line_h defect: collapsed-column fallback to the page-pooled median) ----------
+
+def test_choose_line_h_basis_cases():
+    # Given cases: an intact column's own median (not >1.5x the page median) is trusted as-is
+    # (basis "column", line_h=None -- text_lines uses its own med, byte-identical to today); a
+    # collapsed column's own median (itself multi-line) is replaced by the page-pooled median.
+    assert VR.choose_line_h(54, 53) == (None, "column")
+    assert VR.choose_line_h(308, 53) == (53, "page")
+    assert VR.choose_line_h(120, 55) == (55, "page")
+    assert VR.choose_line_h(61, 50) == (None, "column")
+
+
+def test_line_h_from_page_splits_collapsed_right_column():
+    # LEFT column: 4 intact single-line raw bands (24px each) -> its own median (24) is trusted,
+    # basis "column". RIGHT column: ONE fused raw band (76px, three ~24-26px sub-lines bridged by
+    # two shallow valleys) -- its own median (76) is > 1.5x the page-pooled median (24), so
+    # analyze_page_s1 must fall back to the page-pooled line height (24) to split it, basis "page",
+    # and flag line_h_from_page:right. All content is kept far from the probed gutter window
+    # (xdiv +/- 120) and well below the running-head top zone so neither interferes.
+    H, W, xdiv = 3000, 1200, 600
+    ink = np.zeros((H, W), dtype=bool)
+
+    for i in range(4):                                   # left: 4 clean 24px single-line bands
+        y0 = 400 + i * 50
+        ink[y0:y0 + 24, 50:400] = True
+
+    row_widths = (
+        [350] * 22 +                                     # full sub-line A (22 rows)
+        [180, 90, 30, 90, 180] +                          # valley A, local min at relative row 24
+        [350] * 22 +                                      # full sub-line B
+        [180, 90, 30, 90, 180] +                          # valley B, local min at relative row 51
+        [350] * 22                                        # full sub-line C
+    )
+    assert len(row_widths) == 76
+    y0_right = 400
+    for i, wdt in enumerate(row_widths):
+        ink[y0_right + i, 750:750 + wdt] = True
+
+    geom = {"file_page": 999, "xdiv": xdiv,
+            "body_regions": [{"col": "left", "box": [0, 0, 500, H]},
+                              {"col": "right", "box": [700, 0, 1200, H]}]}
+    s1 = VR.analyze_page_s1(ink, geom)
+
+    assert s1["line_h"]["left"]["basis"] == "column", s1["line_h"]
+    assert s1["line_h"]["right"]["basis"] == "page", s1["line_h"]
+    assert "line_h_from_page:right" in s1["flags"], s1["flags"]
+    assert "line_h_from_page:left" not in s1["flags"], s1["flags"]
+
+    assert len(s1["left"]) == 4, [(b["y0"], b["y1"]) for b in s1["left"]]
+    assert len(s1["right"]) == 3, [(b["y0"], b["y1"]) for b in s1["right"]]
+    for b in s1["right"]:
+        h = b["y1"] - b["y0"]
+        assert 20 <= h <= 30, (h, "right split bands should be close to the ~24px line pitch")
 
 
 # 2. vertical-rule run treated as white vs. real crossing ---------------------------------------
@@ -317,7 +372,7 @@ def test_head_reads_ver_false_rejects_none_keeps_unconfirmed():
         (1, "left", 70): {"ver": False, "numbers": None, "status": "ok"},
     }
     confirmed, rejected = VR.confirm_candidates(cands, head_reads)
-    assert any(r["y0"] == 10 and r["reason"] == "head_reads:ver_false" for r in rejected)
+    assert any(r["y0"] == 10 and r["reason"] == "head_reads:no_ver" for r in rejected)
     y0_to_conf = {c["y0"]: c for c in confirmed}
     assert 30 in y0_to_conf and "head_unconfirmed" in y0_to_conf[30].get("flags", [])   # missing key
     assert 50 in y0_to_conf and "head_unconfirmed" in y0_to_conf[50].get("flags", [])   # ver None
@@ -362,6 +417,62 @@ def test_assert_numbering_invariant_raises_and_passes():
     good = {"file_page_first": 99, "verse": [3], "numbers_link_status": "numbers_agree",
             "number_sources": {"count": None, "read": [3], "witness": [3]}}
     VR.assert_numbering_invariant([good])    # must not raise
+
+
+# 7b. parse_ver_head / parse_witness -- one code-owned verse-number parser -----------------------
+
+def test_parse_ver_head_cases():
+    ok = VR.parse_ver_head("Ver. 21. And his")
+    assert ok == {"ver": True, "numbers": [21], "raw_head": "Ver. 21", "status": "ok"}, ok
+
+    for dash in ("-", "–", "—"):                # hyphen, en dash, em dash
+        r = VR.parse_ver_head(f"Ver. 12{dash}14 some text")
+        assert r["status"] == "ok" and r["numbers"] == [12, 13, 14], (dash, r)
+
+    r = VR.parse_ver_head("Ver. 3, 5, 7")
+    assert r["status"] == "ok" and r["numbers"] == [3, 5, 7], r
+
+    r = VR.parse_ver_head("Ver, 4")                        # comma variant, no period
+    assert r["status"] == "ok" and r["numbers"] == [4], r
+
+    r = VR.parse_ver_head("Ver. 5-3")                       # M not > N
+    assert r == {"ver": True, "numbers": None, "raw_head": "Ver. 5-3", "status": "range_implausible"}, r
+
+    r = VR.parse_ver_head("Ver. 5-30")                      # span 25 > RANGE_SPAN_MAX (20)
+    assert r["status"] == "range_implausible" and r["numbers"] is None, r
+
+    r = VR.parse_ver_head("Ver. 9, 5")                      # expands to [9,5], not strictly ascending
+    assert r["status"] == "range_implausible" and r["numbers"] is None, r
+
+    r = VR.parse_ver_head("Ver.")                           # "Ver" with no number spec
+    assert r == {"ver": True, "numbers": None, "raw_head": "Ver.", "status": "unparsed"}, r
+
+    r = VR.parse_ver_head("   ")                            # empty/whitespace-only
+    assert r == {"ver": None, "numbers": None, "raw_head": None, "status": "empty"}, r
+    assert VR.parse_ver_head("") == r
+
+    r = VR.parse_ver_head("ver. 5")                         # lowercase "ver." is NOT a head
+    assert r == {"ver": False, "numbers": None, "raw_head": None, "status": "no_ver"}, r
+
+    r = VR.parse_ver_head(' "Ver. 7 is the just')           # <=3 leading non-alnum chars tolerated
+    assert r["status"] == "ok" and r["numbers"] == [7], r
+
+    r = VR.parse_ver_head("And God said, Let there be light")  # no "Ver" at all
+    assert r["status"] == "no_ver" and r["ver"] is False, r
+
+
+def test_parse_witness_multiline_ranges_and_chapters():
+    md = (
+        "# Chapter I.\n"
+        "Ver. 1. In the beginning God created the heaven and the earth.\n"
+        "more running text here\n"
+        "Ver. 2—4. And the earth was without form, and void.\n"
+        "# Chapter II.\n"
+        "Ver. 5. Continuing text for the next chapter.\n"
+    )
+    w = VR.parse_witness(md)
+    assert w["chapter_count"] == 2, w
+    assert w["verse_heads"] == [[1], [2, 3, 4], [5]], w
 
 
 # 8. witness pairing --------------------------------------------------------------------------------
@@ -454,20 +565,121 @@ def test_guard_crop_statuses():
     assert VHR.guard_crop(ok, (0, 0, 50, 50), (100, 100)) == "ok"
 
 
-# 12. read_head with a fake client ---------------------------------------------------------------------
+# 12. read_head with a fake client -- head read = transcription, code parses ----------------------
 
 def test_read_head_fake_client_parses():
-    r = VHR.read_head(lambda b: '{"ver": true, "numbers": [3, 4]}', b"x")
-    assert r == {"ver": True, "numbers": [3, 4], "status": "ok", "raw": '{"ver": true, "numbers": [3, 4]}'}
+    r = VHR.read_head(lambda b: "Ver. 3, 4. In the beginning", b"x")
+    assert r == {"text": "Ver. 3, 4. In the beginning", "ver": True, "numbers": [3, 4],
+                 "raw_head": "Ver. 3, 4", "status": "ok", "raw": "Ver. 3, 4. In the beginning"}
 
-    r = VHR.read_head(lambda b: '{"ver": false, "numbers": null}', b"x")
-    assert r["ver"] is False and r["status"] == "ok"
+    r = VHR.read_head(lambda b: "And God said, Let there be light", b"x")
+    assert r["ver"] is False and r["status"] == "no_ver"
 
-    r = VHR.read_head(lambda b: '{"ver": null, "numbers": null}', b"x")
-    assert r["ver"] is None and r["status"] == "abstain"
+    r = VHR.read_head(lambda b: "Ver.", b"x")
+    assert r["ver"] is True and r["numbers"] is None and r["status"] == "unparsed"
 
-    r = VHR.read_head(lambda b: "not json at all", b"x")
-    assert r["status"] == "error:parse"
+
+def test_read_head_parses_ver21_transcription():
+    # The exact case named in the spec: a plain transcription, numbers parsed by code alone.
+    r = VHR.read_head(lambda b: "Ver. 21. And his", b"x")
+    assert r["ver"] is True and r["numbers"] == [21] and r["status"] == "ok"
+
+
+def test_read_head_payload_has_no_format_key_and_transcribe_prompt():
+    captured = {}
+
+    class FakeResp:
+        def json(self):
+            return {"done": True, "message": {"content": "Ver. 8. Thus saith the Lord"}}
+
+    class FakeClient:
+        base_url = "http://example:11434"
+        model = "m"
+
+        def post(self, url, json=None, timeout=None):
+            captured["payload"] = json
+            return FakeResp()
+
+    r = VHR.read_head(FakeClient(), b"png")
+    payload = captured["payload"]
+    assert "format" not in payload, payload
+    assert payload["messages"][0]["content"] == VHR.TRANSCRIBE_PROMPT
+    assert payload["options"] == {"temperature": 0, "num_predict": 64}, payload["options"]
+    assert payload["think"] is False and payload["stream"] is False
+    assert r["numbers"] == [8]
+
+
+def test_read_head_degenerate_reply_raises():
+    for bad in ("", "   ", "////", "/ / /"):
+        try:
+            VHR.read_head(lambda b, bad=bad: bad, b"x")
+            assert False, f"expected DegenerateReplyError for {bad!r}"
+        except VHR.DegenerateReplyError:
+            pass
+
+    class FakeResp:
+        def json(self):
+            return {"done": False, "message": {"content": "Ver. 1"}}
+
+    class FakeClient:
+        base_url = "http://example:11434"
+        model = "m"
+
+        def post(self, url, json=None, timeout=None):
+            return FakeResp()
+
+    try:
+        VHR.read_head(FakeClient(), b"png")
+        assert False, "expected DegenerateReplyError for done:false"
+    except VHR.DegenerateReplyError:
+        pass
+
+
+# 12b. endpoint canary -- abort, never retry -------------------------------------------------------
+
+def test_run_canary_ok_fake():
+    def load_gray(fp):
+        return np.full((10, 10), 255, dtype=np.uint8)
+
+    orig = VHR.guarded_read_head
+
+    def fake_guarded(client, gray, box, page_shape, blank_floor=0.01, uniform_std=2.0):
+        for crop in VHR.CANARY_CROPS:
+            if crop["box"] == box:
+                exp = crop["expected"]
+                return {"text": "x", "ver": exp["ver"], "numbers": exp["numbers"],
+                        "raw_head": None, "status": "ok", "raw": "x"}
+        raise AssertionError("unexpected box in canary test")
+
+    VHR.guarded_read_head = fake_guarded
+    try:
+        rec = VHR.run_canary(client=None, load_gray=load_gray, batch=0, at_read=0)
+    finally:
+        VHR.guarded_read_head = orig
+    assert rec["ok"] is True and rec["batch"] == 0 and rec["at_read"] == 0, rec
+    assert all(c["match"] for c in rec["crops"]), rec
+
+
+def test_run_canary_fail_stale_raises():
+    # The endpoint has drifted/gone stale: every canary crop now reads back the WRONG number.
+    def load_gray(fp):
+        return np.full((10, 10), 255, dtype=np.uint8)
+
+    orig = VHR.guarded_read_head
+
+    def fake_guarded_stale(client, gray, box, page_shape, blank_floor=0.01, uniform_std=2.0):
+        return {"text": "stale", "ver": True, "numbers": [999], "raw_head": None,
+                "status": "ok", "raw": "stale"}
+
+    VHR.guarded_read_head = fake_guarded_stale
+    try:
+        try:
+            VHR.run_canary(client=None, load_gray=load_gray, batch=3, at_read=60)
+            assert False, "expected CanaryFault"
+        except VHR.CanaryFault:
+            pass
+    finally:
+        VHR.guarded_read_head = orig
 
 
 # 13. run-level fault: 3 consecutive read errors abort ----------------------------------------------
@@ -499,6 +711,67 @@ def test_run_level_fault_aborts_after_3_consecutive_errors():
         aborted = True
     assert aborted
     assert client.calls == 3, f"must abort exactly at the 3rd consecutive error, got {client.calls} calls"
+
+
+# 13b. build-level: a canary failure aborts the whole run header-only --------------------------------
+
+def test_build_canary_failure_writes_header_only_aborted():
+    # A minimal, fully synthetic single-page fixture (blank 200x200 page, no real corpus data
+    # touched) driven through the real build_verse_regions.main() CLI entry point. derive_inset_thr
+    # / resolve_and_check / run_canary are monkeypatched on the MODULE objects (bare-name calls
+    # inside main() resolve via the module's globals dict at call time, so this reaches them) so
+    # the test never derives a real threshold, never resolves a real endpoint, and forces the
+    # canary to fail on its very first call (batch 0, before any head read) -- exercising only the
+    # abort path: exit 3, header-only write, status='aborted', abort_reason names batch 0, canary=[].
+    import json
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+    import build_verse_regions as BVR
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="dev_fix10_canary_"))
+    vol_dir = tmpdir / "vol"
+    vol_dir.mkdir()
+    Image.fromarray(np.full((200, 200), 255, dtype=np.uint8)).save(vol_dir / "page1_image1.png")
+    geom_path = tmpdir / "geom.jsonl"
+    geom_rec = {"file_page": 1, "xdiv": 100,
+                "body_regions": [{"col": "left", "box": [0, 0, 100, 200]},
+                                  {"col": "right", "box": [100, 0, 200, 200]}]}
+    geom_path.write_text(json.dumps(geom_rec) + "\n", encoding="utf-8")
+    out_path = tmpdir / "out" / "run.jsonl"
+
+    orig_derive = BVR.derive_inset_thr
+    orig_resolve = VHR.resolve_and_check
+    orig_canary = VHR.run_canary
+
+    def fake_derive(s1_by_page, min_gap):
+        return {"value": 50.0, "lo": 40, "hi": 60, "gap": 20, "n_below": 1, "n_above": 1}, [45]
+
+    def fake_resolve(host, model, client=None):
+        return "http://fake-host:11434", "sha256:fakedigest"
+
+    def fake_canary(client, load_gray, batch, at_read):
+        raise VHR.CanaryFault(f"canary_failed batch {batch}: forced-by-test")
+
+    BVR.derive_inset_thr = fake_derive
+    VHR.resolve_and_check = fake_resolve
+    VHR.run_canary = fake_canary
+    try:
+        rc = BVR.main(["--pages", "1", "--geometry", str(geom_path), "--volume-dir", str(vol_dir),
+                        "--out", str(out_path), "--read", "on", "--host", "fake-host"])
+    finally:
+        BVR.derive_inset_thr = orig_derive
+        VHR.resolve_and_check = orig_resolve
+        VHR.run_canary = orig_canary
+
+    assert rc == 3, f"canary failure must abort with exit 3, got {rc}"
+    lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(lines) == 1, f"header-only write must be exactly 1 line, got {len(lines)}"
+    rec = json.loads(lines[0])
+    assert rec["kind"] == "run_header", rec
+    assert rec["status"] == "aborted", rec
+    assert rec["abort_reason"] == "canary_failed batch 0", rec
+    assert rec["canary"] == [], rec
 
 
 def test_centred_chapter_head_measured_against_text_block_not_column_box():

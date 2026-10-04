@@ -224,13 +224,23 @@ class _RequestsClient:
         return requests.post(url, json=json, timeout=timeout)
 
 
-def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client, counter):
+def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client, counter,
+              canary_hook=None):
     """Guarded read_head over every 'verse'-kind candidate. Returns head_reads keyed exactly as
     verse_regions.confirm_candidates expects: {(file_page,col,y0): {...}}. Raises
     verse_head_read.ConsecutiveReadErrorFault if 3 CONSECUTIVE transport failures occur -- an
     abstain or a guard refusal is not a transport failure and resets nothing by itself (only a
-    successful call, including an abstain, resets the counter)."""
+    successful call, including an abstain, resets the counter). A DegenerateReplyError (empty/
+    '/'-only/done:false reply) is caught by the same bare `except Exception` as a transport
+    failure and counted identically via counter.record_error() -- it is never a silent abstain.
+
+    canary_hook(at_read), when given, is called after every verse_head_read.CANARY_EVERY
+    successful reads (at_read = the running count of reads done so far); build_verse_regions.main
+    wires it to verse_head_read.run_canary and writes the header after each call. A CanaryFault
+    from canary_hook propagates straight out (abort, never retry, never swallowed by the
+    per-candidate error handling above it)."""
     head_reads = {}
+    n_reads = 0
     for fp, cands in candidates_by_page.items():
         gray = gray_by_page[fp]
         H, W = gray.shape
@@ -246,7 +256,10 @@ def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client
                 counter.record_error()
                 continue
             head_reads[(fp, c["col"], c["y0"])] = result
-    return head_reads
+            n_reads += 1
+            if canary_hook is not None and n_reads % VHR.CANARY_EVERY == 0:
+                canary_hook(n_reads)
+    return head_reads, n_reads
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +376,7 @@ def main(argv=None):
 
     # --- optional model reads (--read on) ----------------------------------------------------
     head_reads = {}
+    records[0]["canary"] = None  # read off: no canary ran at all (overwritten below when --read on)
     if args.read == "on":
         try:
             base_url, digest = VHR.resolve_and_check(args.host, args.model)
@@ -379,15 +393,53 @@ def main(argv=None):
         _write(out_path, records[:1])
         client = _RequestsClient(base_url, args.model)
         counter = VHR.ConsecutiveErrorCounter(limit=3)
+        load_gray = lambda fp: load_page_gray(args.volume_dir, fp)  # noqa: E731
+        canary_log = []
+        next_batch = [0]
+
+        def _do_canary(at_read):
+            rec = VHR.run_canary(client, load_gray, next_batch[0], at_read)
+            canary_log.append(rec)
+            records[0]["canary"] = canary_log
+            next_batch[0] += 1
+            _write(out_path, records[:1])  # rewrite [header] immediately after EACH canary
+            return rec
+
+        def _abort_canary(e):
+            records[0]["status"] = "aborted"
+            records[0]["abort_reason"] = f"canary_failed batch {next_batch[0]}"
+            records[0]["canary"] = canary_log
+            _write(out_path, records[:1])  # header ONLY -- no retry, no partial page/region data
+            print(f"ERROR: canary failed: {e}", file=sys.stderr)
+
+        # Canary batch 0: before the first head read.
         try:
-            head_reads = run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page,
-                                    client, counter)
+            _do_canary(0)
+        except VHR.CanaryFault as e:
+            _abort_canary(e)
+            return 3
+
+        try:
+            head_reads, n_reads = run_reads(candidates_by_page, gray_by_page, geom_by_page,
+                                             s1_by_page, client, counter, canary_hook=_do_canary)
+        except VHR.CanaryFault as e:
+            _abort_canary(e)
+            return 3
         except VHR.ConsecutiveReadErrorFault as e:
-            records.append({"kind": "run_aborted", "reason": "consecutive_read_errors",
-                             "detail": str(e)})
-            _write(out_path, records)
+            records[0]["status"] = "aborted"
+            records[0]["abort_reason"] = f"consecutive_read_errors: {e}"
+            records[0]["canary"] = canary_log
+            _write(out_path, records[:1])  # header ONLY, same as a canary abort
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
+
+        # Canary, once more: after the last read (may coincide with the last periodic trigger
+        # inside run_reads above -- a harmless redundant check, never skipped for that reason).
+        try:
+            _do_canary(n_reads)
+        except VHR.CanaryFault as e:
+            _abort_canary(e)
+            return 3
 
     confirmed_by_page, rejected_by_page = {}, {}
     for fp in usable_pages:
@@ -417,6 +469,7 @@ def main(argv=None):
             flag_counts[fl] += 1
         records.append({"kind": "region", **{k: v for k, v in region.items()}})
 
+    records[0]["status"] = "complete"
     _write(out_path, records)
 
     print("\n=== run_summary ===")

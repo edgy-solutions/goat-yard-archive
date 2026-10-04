@@ -130,7 +130,7 @@ def line_opens_note(band, raised_frac=0.25, gap_min=3, marker_max_w=42, min_text
     return bool(col[g:].sum() >= min_text)             # in the full line. (Floating/reaches-baseline was too
                                                        # strict — it rejected low-sitting markers like `c`.)
 
-def text_lines(ink, min_sep_frac=None):
+def text_lines(ink, min_sep_frac=None, line_h=None):
     """Text lines with tall (merged multi-line) bands SPLIT at internal ink valleys. _text_lines groups
     rows on a global threshold, so densely-set apparatus lines fuse; a merged band then breaks the per-line
     baseline/x-height geometry the marker test needs. So: take the raw bands, estimate the single-line
@@ -143,26 +143,34 @@ def text_lines(ink, min_sep_frac=None):
     4-line merged band's two deepest minima sat 12 rows apart in one valley, leaving another valley
     uncut and a 2-line remainder). When min_sep_frac is given, candidates are instead accepted GREEDILY
     by depth (deepest first), each only if it is >= min_sep_frac * med rows from every already-accepted
-    cut, until n-1 cuts are chosen (or candidates run out)."""
+    cut, until n-1 cuts are chosen (or candidates run out).
+
+    line_h=None (default): the single-line height estimate is the column's OWN median of its raw band
+    heights (`med`, below) -- EXACTLY today's behaviour. When line_h is given, it is used instead of
+    `med` everywhere med drove the split (n, the 1.5x merged-band test, lo/hi, min_sep) -- for a column
+    whose own raw bands are themselves multi-line (so its own median is not a usable single-line
+    estimate; see verse_regions.choose_line_h / LINE_H_EMPTY_BAND_MULT), the caller passes a line height
+    measured elsewhere (the page-pooled median)."""
     raw = _text_lines(ink)
     if not raw:
         return raw
     heights = sorted(h for (y0, y1) in raw for h in [y1 - y0])
     med = heights[len(heights) // 2]
+    use_h = line_h if line_h is not None else med
     out = []
     for (y0, y1) in raw:
         h = y1 - y0
-        n = int(round(h / med)) if med else 1
-        if n <= 1 or h < 1.5 * med:
+        n = int(round(h / use_h)) if use_h else 1
+        if n <= 1 or h < 1.5 * use_h:
             out.append((y0, y1)); continue
         prof = ink[y0:y1].sum(axis=1).astype(float)    # split at the n-1 deepest interior valleys
-        lo, hi = int(0.4 * med), h - int(0.4 * med)
+        lo, hi = int(0.4 * use_h), h - int(0.4 * use_h)
         cand = [i for i in range(lo, hi) if prof[i] <= prof[i - 1] and prof[i] < prof[i + 1]]
         cand.sort(key=lambda i: prof[i])
         if min_sep_frac is None:
             cuts = sorted(cand[:n - 1])
         else:
-            min_sep = min_sep_frac * med
+            min_sep = min_sep_frac * use_h
             cuts = []
             for i in cand:
                 if all(abs(i - c) >= min_sep for c in cuts):
