@@ -1,5 +1,11 @@
 # The churn source in `get_relevant_entities`: found, fixed, born-tested
 
+> **CORRECTED (2026-10-04)** -- the fix and the born-tests in this document stand; they do not
+> depend on any eval arm. Two claims in it are wrong and are corrected in
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md):
+> the arm expansion-health rates quoted below counted *unrecorded* as *healthy* (no arm was
+> healthy), and the scope limit around the second-pass entity lookup was not stated.
+
 **Lane A, 2026-09-28.** Answers ruling 1 of the 2026-09-28 directive: *"The churn is located:
 get_relevant_entities is nondeterministic on identical input (scape-goat vs spiritual*). Diagnose
 which tier and why (ANN, tie-break, cache/time, concurrency); make it deterministic or document why

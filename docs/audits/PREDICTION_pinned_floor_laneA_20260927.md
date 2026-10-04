@@ -1,5 +1,11 @@
 # Prediction: pinned OFF vs OFF noise floor, N=3, 28 questions
 
+> **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
+> stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
+> pod, so production runs that stage live and none of these arms measures production behavior.
+> The numbers below are retired as evidence. Derivation and the full void list:
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md).
+
 Lane A, 2026-09-27. Written and committed **before the run**, per the standing rule. Ruling 2's
 second step: *"pinned OFF vs OFF, clean tree, N=3, predict first -> decide from that floor whether
 the 28-set needs N=5 majority or more questions."*

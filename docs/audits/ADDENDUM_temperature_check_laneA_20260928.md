@@ -1,5 +1,11 @@
 # Addendum — the `scapegoat_001` replicate retracts the temperature headline
 
+> **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
+> stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
+> pod, so production runs that stage live and none of these arms measures production behavior.
+> The numbers below are retired as evidence. Derivation and the full void list:
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md).
+
 Lane A, 2026-09-28. Addendum to `docs/audits/RESULT_temperature_check_laneA_20260928.md`.
 Read them together. The result document keeps a pointer banner at the top and is otherwise not
 edited -- no finding in it is changed -- and this file supersedes its headline.

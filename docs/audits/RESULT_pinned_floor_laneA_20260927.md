@@ -1,5 +1,11 @@
 # Pinned OFF-vs-OFF floor — result (Lane A, 2026-09-27)
 
+> **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
+> stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
+> pod, so production runs that stage live and none of these arms measures production behavior.
+> The numbers below are retired as evidence. Derivation and the full void list:
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md).
+
 Ruling 2 step 2. Both arms: `201a4b9`, clean tree at start **and** end, N=3, 28 questions,
 provider pinned to StreamLake, DSPy cache disabled, one server process throughout.
 Prediction locked before the runs in `PREDICTION_pinned_floor_laneA_20260927.md` (committed `201a4b9`).

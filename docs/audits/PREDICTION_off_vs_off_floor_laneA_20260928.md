@@ -1,5 +1,11 @@
 # Prediction — OFF-vs-OFF floor after the entity-lookup fix
 
+> **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
+> stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
+> pod, so production runs that stage live and none of these arms measures production behavior.
+> The numbers below are retired as evidence. Derivation and the full void list:
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md).
+
 **Locked 2026-09-28, before the first scored request.** Base `0545069`, tree clean.
 Answers *"Then one OFF vs OFF; report the new floor."*
 

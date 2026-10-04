@@ -1,4 +1,10 @@
 > **HEADLINE SUPERSEDED 2026-09-28** — a second t=0 arm returned `scapegoat_001` at 0/6.
+
+> **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
+> stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
+> pod, so production runs that stage live and none of these arms measures production behavior.
+> The numbers below are retired as evidence. Derivation and the full void list:
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md).
 > Both findings that survived the reading rule in this document were that one question, and the
 > divergence is in retrieval, upstream of the answer LM. Read
 > `docs/audits/ADDENDUM_temperature_check_laneA_20260928.md` first. The findings below are left

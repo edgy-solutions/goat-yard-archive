@@ -1,5 +1,11 @@
 # Result — item (a): the noise floor, OFF vs OFF
 
+> **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
+> stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
+> pod, so production runs that stage live and none of these arms measures production behavior.
+> The numbers below are retired as evidence. Derivation and the full void list:
+> [VOID_arms_without_expansion_laneA_20261004.md](VOID_arms_without_expansion_laneA_20261004.md).
+
 > **RETIRED AS A BASELINE — ruling 1, 2026-09-27.** Neither arm can state what it
 > measured: both ran over a dirty tree, nf1 predates `integrity.git` and `answer_lm`, and
 > neither recorded corpus state. pf1 — same day, same pin, same cache setting, same DSPy
