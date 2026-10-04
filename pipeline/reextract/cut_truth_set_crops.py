@@ -409,6 +409,11 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
        "crop_dir": str(OUTDIR), "faults": faults, "clip_faults": clip_faults,
        "stale_clips_swept": _stale,
        "clip": {"written": len(clipped), "no_trim": sum(1 for b in cut if b["clip_abstain"].startswith("no-trim")),
+                # `abstained` is a SET of reason strings and two spans can share one, so it under-
+                # counts: 18 abstains collapsed to 16 strings and written + no_trim + abstained did not
+                # add up to the set. The ids are the count; the strings are the vocabulary.
+                "abstained_ids": {b["span_id"]: b["clip_abstain"] for b in cut if b["clip_abstain"]
+                                  and not b["clip_abstain"].startswith("no-trim")},
                 "abstained": sorted({b["clip_abstain"] for b in cut if b["clip_abstain"]
                                      and not b["clip_abstain"].startswith("no-trim")}),
                 "word_runs_differ": [{"span_id": b["span_id"], "base": b["crop"]["word_runs"],
@@ -432,8 +437,12 @@ print("ink: min %d px on %d rows   sizes %dx%d..%dx%d"
       % (min(b["crop"]["ink_px"] for b in cut), min(b["crop"]["ink_rows"] for b in cut),
          min(b["crop"]["size"][0] for b in cut), min(b["crop"]["size"][1] for b in cut),
          max(b["crop"]["size"][0] for b in cut), max(b["crop"]["size"][1] for b in cut)))
-print("clips written %d   no trim needed %d   abstains %s"
-      % (len(clipped), art["clip"]["no_trim"], art["clip"]["abstained"] or "none"))
+assert (len(clipped) + art["clip"]["no_trim"] + len(art["clip"]["abstained_ids"])) == len(cut),     "written + no-trim + abstained does not account for every crop that was cut"
+print("clips written %d   no trim needed %d   abstains %d (%d distinct reasons)"
+      % (len(clipped), art["clip"]["no_trim"], len(art["clip"]["abstained_ids"]),
+         len(art["clip"]["abstained"])))
+for _s, _r in sorted(art["clip"]["abstained_ids"].items()):
+    print("   ABSTAIN %-10s %s" % (_s, _r))
 print("word runs DIFFER on %d span(s): %s"
       % (len(differ), [(d["span_id"], len(d["base"]), len(d["clip"])) for d in art["clip"]["word_runs_differ"]]))
 print("word runs REGRESSED (clip resolves fewer): %s" % (regressed or "none"))

@@ -165,11 +165,11 @@ H.append('<div class="note"><b>What is deliberately missing.</b> The extractor&r
          'the candidate, once affirmed verbatim. Write what the pixels show, or abstain.<br>'
          '<b>What is present and is NOT a hint:</b> resolved column runs, counted from the ink by gaps '
          'rather than by recognising letters.<br>'
-         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it.</div>')
+         '<b>Where a crop holds more than one span of Hebrew, sign every one you can see</b>, in the order they are printed (right to left within a line, top line first). Some of these boxes hold more than the span they were drawn for &mdash; that is a redraw question, and your reading of what is actually there is what settles it. <b>Do not sign a word that the crop edge cuts.</b> Measured on this set: the span&rsquo;s own ink never reaches a vertical edge, but in 19 crops a NEIGHBOURING word on the same line is sliced by the edge and sits in the pad. It is noise, not a span, and a fragment signed as a word is a wrong truth.</div>')
 H.append('<table class="sum">'
          '<tr><td>spans</td><td><b>%d</b> on %d pages, 0 refused by the crop gate &mdash; the 96 set minus 20 spans at measured box faults (14 on the printed rule, 6 at the three duplicate boxes)</td></tr>'
          '<tr><td>band-clips</td><td><b>%d</b> written, %d needed no trim (no foreign line in the pad), '
-         '0 abstained, 0 resolved FEWER runs than its parent</td></tr>'
+         '<b>%d abstained</b>, %d resolved FEWER runs than its parent</td></tr>'
          '<tr><td>recipe differs</td><td><b>%d</b> span(s)</td></tr>'
          '<tr><td>DUP-BOX</td><td><b>%d</b> pair(s): %s</td></tr>'
          '<tr><td>NO-TYPE</td><td><b>%d</b> crop(s) hold no line of type at all &mdash; the box is on '
@@ -177,10 +177,15 @@ H.append('<table class="sum">'
          '<tr><td>SHORT-BOX</td><td><b>%d</b>: %s</td></tr>'
          '</table>'
          % (SET_N, len({r["page"] for r in rows}), cut["clip"]["written"], cut["clip"]["no_trim"],
+            SET_N - cut["clip"]["written"] - cut["clip"]["no_trim"],
+            len(cut["clip"]["word_runs_regressed"]),
             len(cut["clip"]["word_runs_differ"]), len(flags["duplicate_box"]),
             html.escape("; ".join(" = ".join(v) for v in flags["duplicate_box"].values())),
             len(NOTYPE), html.escape(", ".join(sorted(NOTYPE))),
             len(SHORT), html.escape(", ".join(sorted(SHORT)))))
+
+assert not cut["clip"]["word_runs_regressed"], "a clip resolves fewer runs than its parent"
+assert SET_N == cut["clip"]["written"] + cut["clip"]["no_trim"] + len(cut["clip"]["abstained_ids"]),     "written + no-trim + abstained does not account for every span in the set"
 
 shown, nflag = {}, 0
 for r in rows:
