@@ -8,6 +8,13 @@ difference. Chris's ordering item (a): "No arm comparison is reportable as a dif
 that floor." This script is how the floor is measured (run it on two IDENTICAL arms) and how it
 is then applied (`--floor N` from that measurement).
 
+THIS SCRIPT IS NO LONGER THE GATE. Ruling (2026-10-04) replaced the flip count with a paired
+per-question test against the measured null plus a one-way ratchet, in `evals/gate_paired.py`.
+The flip count stays here because it is the right thing to LOOK at in a per-question diff -- and
+because a flip is still what the ratchet is built on -- but a scalar count of flips pooled over a
+question set is not what decides the flag. Two identical arms produced ten class changes and one
+6/6 -> 0/6 flip, so this number alone cannot tell the flag from the coin.
+
 The aggregate summary cannot answer this. `summary.json` reports one representative result per
 question plus class COUNTS, and two arms can have identical counts with a different set of
 questions in each class. So classes are recomputed here from each question's own `run_passes`,
@@ -19,7 +26,7 @@ What it refuses to do:
     saying so in the output -- temperature 0 is deterministic within an OpenRouter provider,
     not across two;
   - print a class-change count without the flip DIRECTION, since STABLE-PASS -> STABLE-FAIL is
-    the gate and FLAKY <-> anything is not.
+    what the ratchet watches and FLAKY <-> anything is not.
 """
 from __future__ import annotations
 
@@ -306,7 +313,8 @@ def main(argv=None) -> int:
     print(f"STABLE-PASS    : {res['passed'][la]} -> {res['passed'][lb]}")
     print(f"Class changes  : {res['class_changes_n']} of {res['questions']} "
           f"({res['class_unchanged_n']} unchanged)")
-    print(f"STABLE-PASS <-> STABLE-FAIL flips : {res['stable_flips_n']}  <- the gate")
+    print(f"STABLE-PASS <-> STABLE-FAIL flips : {res['stable_flips_n']}  "
+          f"(NOT the gate -- see evals/gate_paired.py)")
     print(f"Runs per question : {la}={res['runs_per_question'][la]} {lb}="
           f"{res['runs_per_question'][lb]}  (ruling 1 requires "
           f"{res['min_classification_runs']})")

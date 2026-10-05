@@ -444,9 +444,15 @@ def test_median_answer_length_per_arm():
         shutil.rmtree(root, ignore_errors=True)
 
 
+# A hand-rolled suite reports what it RAN, and a raise inside a test file ends the run silently.
+# Pin the count so a test lost to a rename or a bad merge is a failure rather than a smaller
+# number nobody reads. (This guard has caught my own miscount three times.)
+EXPECTED_TESTS = 28
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
+    assert len(tests) == EXPECTED_TESTS,         "collected %d tests, expected %d" % (len(tests), EXPECTED_TESTS)
     failed = 0
     for name, fn in tests:
         try:
