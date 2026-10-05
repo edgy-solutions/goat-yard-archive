@@ -132,7 +132,7 @@ def _shared_ids(arms: dict):
 
 
 def gate(off: dict, on: dict, nulls: list, history: list = None, alpha: float = DEFAULT_ALPHA,
-         labels: dict = None) -> dict:
+         labels: dict = None, sources: dict = None) -> dict:
     """The verdict, with every number it rests on.
 
     `nulls` is a list of (arm_a, arm_b) pairs. An empty list is a refusal, not a default.
@@ -201,6 +201,28 @@ def gate(off: dict, on: dict, nulls: list, history: list = None, alpha: float = 
                          "configurations (%s vs %s), so its spread includes what served them."
                          % (i, answer_lm_config_of(na) or "nothing recorded",
                             answer_lm_config_of(nb) or "nothing recorded"))
+
+    # A null pair that INCLUDES one of the arms under test is still a null measurement -- both
+    # of its members ran at the same configuration -- but it is not an INDEPENDENT one. The same
+    # rate(off, q) then enters the effect and that pair's own band, so a question where the
+    # baseline happened to land at an extreme inflates both together. That correlation widens the
+    # band exactly where the effect is widest, which biases this gate toward SILENCE, not toward
+    # firing; silence is the direction that hides a regression, so the sharing is named rather
+    # than refused. Measured on the two 2026-10-04 rerun pairs: adding the (rerun2/off,
+    # rerun3/off) pair moved rerun3's gating sign test from p=0.039 to p=0.4531 on its own.
+    if sources:
+        for i, _ in enumerate(nulls):
+            for suffix in ("a", "b"):
+                key = "null%d.%s" % (i, suffix)
+                for lbl in (l_off, l_on):
+                    if sources.get(key) and sources.get(key) == sources.get(lbl):
+                        notes.append(
+                            "NULL PAIR %d IS NOT INDEPENDENT: its %s arm is the same run "
+                            "directory as %s, so rate(%s) enters both the effect and this pair's "
+                            "band. The band is a real measurement of two like-configured arms, "
+                            "but a correlated one: it widens where the effect widens, biasing "
+                            "this gate toward silence. Read a non-firing verdict accordingly."
+                            % (i, suffix, lbl, lbl))
 
     rows, excluded = [], []
     for qid in sorted(common):
@@ -380,10 +402,17 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     nulls = [(load_arm(a), load_arm(b)) for a, b in (args.null or [])]
+    def _src(p):
+        return os.path.normcase(os.path.realpath(p))
+
+    l_off0 = os.path.basename(os.path.normpath(args.off))
+    l_on0 = os.path.basename(os.path.normpath(args.on))
+    sources = {l_off0: _src(args.off), l_on0: _src(args.on)}
+    for i, (a, b) in enumerate(args.null or []):
+        sources["null%d.a" % i], sources["null%d.b" % i] = _src(a), _src(b)
     res = gate(load_arm(args.off), load_arm(args.on), nulls,
                history=[load_arm(d) for d in args.history], alpha=args.alpha,
-               labels={"off": os.path.basename(os.path.normpath(args.off)),
-                       "on": os.path.basename(os.path.normpath(args.on))})
+               labels={"off": l_off0, "on": l_on0}, sources=sources)
 
     l_off, l_on = res["labels"]["off"], res["labels"]["on"]
     print("=" * 74)

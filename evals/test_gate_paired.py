@@ -589,7 +589,43 @@ def test_alpha_is_reported_next_to_the_p_value_it_judged():
 # A hand-rolled suite reports what it RAN, and a raise inside a test file ends the run silently.
 # Pin the count so a test lost to a rename or a bad merge is a failure rather than a smaller
 # number nobody reads.
-EXPECTED_TESTS = 31
+EXPECTED_TESTS = 33
+
+
+def test_a_null_pair_sharing_an_arm_with_the_effect_is_named_as_NOT_INDEPENDENT():
+    """A band computed from the effect pair's OWN off arm is correlated with the effect, and the
+    correlation runs toward silence: the band widens exactly where the effect widens. This is the
+    pair that moved rerun3's gating sign test from p=0.039 to p=0.4531 by itself, so a non-firing
+    verdict read off such a band has to carry the warning."""
+    root = _tmp()
+    try:
+        off = _arm(root, "off", {"q1": _k(5)})
+        on = _arm(root, "on", {"q1": _k(0)})
+        nb = _arm(root, "nb", {"q1": _k(2)})
+        sources = {"off": off, "on": on, "null0.a": off, "null0.b": nb}
+        r = G.gate(load_arm(off), load_arm(on), [(load_arm(off), load_arm(nb))],
+                   labels={"off": "off", "on": "on"}, sources=sources)
+        hits = [n for n in r["notes"] if "NOT INDEPENDENT" in n]
+        assert len(hits) == 1, r["notes"]
+        assert "its a arm is the same run directory as off" in hits[0], hits[0]
+        assert "toward silence" in hits[0], hits[0]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_independent_null_pairs_and_an_absent_source_map_say_nothing():
+    """The note must not fire on the ordinary case, and must not require the source map at all:
+    every other test in this file calls gate() with dicts and no paths."""
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=0, null_k=(5, 3))
+        indep = {"off": "/runs/a/off", "on": "/runs/a/on",
+                 "null0.a": "/runs/z/armA", "null0.b": "/runs/z/armB"}
+        for sources in (indep, None, {}):
+            r = G.gate(off, on, nulls, labels={"off": "off", "on": "on"}, sources=sources)
+            assert not [n for n in r["notes"] if "NOT INDEPENDENT" in n], (sources, r["notes"])
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
