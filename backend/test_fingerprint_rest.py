@@ -46,22 +46,25 @@ class _FakeHTTP:
         bodies = self.pages[_after_of(url)]
         return _Resp(bodies.pop(0) if len(bodies) > 1 else bodies[0])
 
-def _drive(pages, faults=None, verify_twice=True):
+def _drive(pages, faults=None, include_vector=True):
     """Run stream_chunks against a fake transport with sleeps neutered. Returns (yielded, fake).
 
-    `verify_twice` is threaded through because the double read adds one fetch per vector-bearing
-    page, which shifts every assertion about the fetch SEQUENCE. A test about cursor walking or
-    retry accounting turns it off so it measures the thing it names; the default-on behaviour is
-    pinned by its own tests below rather than being assumed by all of them."""
+    `include_vector` is passed EXPLICITLY and defaults to True here, the opposite of the module's
+    own default. Every assertion below is about the vector-bearing URL shape (`limit=20`,
+    `&include=vector`) and about vectors arriving in the 3-tuple, so a helper that inherited the
+    module default would silently turn all of them into tests of the text-only path. The module
+    default is pinned by its own test instead."""
     real_http, real_sleep = FR.httpx, time.sleep
     FR.httpx, time.sleep = _FakeHTTP(pages), lambda *_a, **_k: None
     try:
-        return (list(FR.stream_chunks("192.0.2.1", faults=faults, verify_twice=verify_twice)),
+        return (list(FR.stream_chunks("192.0.2.1", faults=faults,
+                                      include_vector=include_vector)),
                 FR.httpx)
     finally:
         FR.httpx, time.sleep = real_http, real_sleep
 
 PAGE_1_URL = "http://192.0.2.1/v1/objects?class=CommentaryChunk&limit=20&include=vector"
+NO_VECTOR_URL = "http://192.0.2.1/v1/objects?class=CommentaryChunk&limit=100"
 
 def _one_page():
     return {None: [_page([_obj("u1"), _obj("u2")])], "u2": [_page([])]}
@@ -78,7 +81,7 @@ def test_the_cursor_walks_pages_by_the_last_objects_id():
     pages = {None: [_page([_obj("u1"), _obj("u2")])],
              "u2": [_page([_obj("u3"), _obj("u4")])],
              "u4": [_page([])]}
-    got, fake = _drive(pages, verify_twice=False)      # this test is about the CURSOR
+    got, fake = _drive(pages)                          # this test is about the CURSOR
     ids = [m["id"] for _p, _v, m in got]
     assert ids == ["u1", "u2", "u3", "u4"], ids              # no skip, no double-count
     assert [u for _m, u in fake.calls] == [PAGE_1_URL, PAGE_1_URL + "&after=u2",
@@ -86,8 +89,7 @@ def test_the_cursor_walks_pages_by_the_last_objects_id():
 
 def test_an_empty_body_is_retried_not_read_as_the_end_of_the_stream():
     faults = []
-    got, fake = _drive({None: ["", _page([_obj("u1")])], "u1": [_page([])]}, faults,
-                       verify_twice=False)             # this test is about the RETRY count
+    got, fake = _drive({None: ["", _page([_obj("u1")])], "u1": [_page([])]}, faults)
     assert [m["id"] for _p, _v, m in got] == ["u1"], got     # an empty body is not an empty corpus
     assert [f["kind"] for f in faults] == ["json_decode_retry"], faults
     assert len(fake.calls) == 3, fake.calls                  # empty, retry, terminator
@@ -144,62 +146,76 @@ def test_an_object_with_no_vector_is_yielded_and_is_not_an_anomaly():
 
 def test_faults_is_optional_and_a_bad_page_still_streams():
     bad = _page([_obj("u1"), _obj("u2", dim=5)])
-    got, fake = _drive({None: [bad], "u2": [_page([])]}, verify_twice=False)
+    got, fake = _drive({None: [bad], "u2": [_page([])]})
     assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got
     assert len(fake.calls) == 5, fake.calls                  # 1 + 3 re-fetches + terminator
 
-# --- the double read at sampling time (ruling, 2026-10-04) ------------------------------------
+# --- the double read, RETIRED (ruling, 2026-10-04) --------------------------------------------
+# These three tests used to assert the guard. They now assert its ABSENCE, with the loss named,
+# because a retired guard whose tests were simply deleted leaves no record that the behaviour
+# ever existed or what went away with it. The fault itself is open: docs/defects/D-002.
 
-def test_every_vector_bearing_page_is_fetched_TWICE_by_default():
-    # Default-on is the whole point: a verification that has to be switched on is a verification
-    # that was off during the run that needed it. The terminator page is not re-fetched because
-    # the stream breaks on an empty page before the check.
+def test_every_vector_bearing_page_is_fetched_ONCE():
+    # The retirement, stated as a count. The guard's cost was not CPU: it was that a full-corpus
+    # vector sample refused about 99.5% of the time, so what it produced was the absence of a
+    # sample rather than a verified one.
     got, fake = _drive(_one_page())
     urls = [u for _m, u in fake.calls]
-    assert urls.count(PAGE_1_URL) == 2, urls
+    assert urls.count(PAGE_1_URL) == 1, urls
     assert urls[-1] == PAGE_1_URL + "&after=u2", urls
     assert len(got) == 2, got
 
-def test_a_vector_that_reads_back_DIFFERENTLY_is_faulted_with_its_uuid():
-    # The fault the dim check is blind to: same length, different contents. This is the signature
-    # measured on both attempt-5 arms, where it silently poisoned the start sample instead.
+def test_a_vector_that_reads_back_DIFFERENTLY_is_NO_LONGER_faulted():
+    # The loss, named. Same fixture as the test this replaces: same length, different contents,
+    # the signature measured on both attempt-5 arms. The sampler streams the first read and says
+    # NOTHING, because it never takes a second one. An unverified vector read is now exactly what
+    # it looks like -- unverified -- and the mid-run corpus check does not take one at all.
     faults = []
     first = _page([_obj("u1"), _obj("u2")])
     second = _page([_obj("u1"), _obj("u2")])
     second["objects"][1]["vector"] = [0.1, 0.1, 0.1, 0.9]      # same dim 4, one element moved
-    got, _fake = _drive({None: [first, second], "u2": [_page([])]}, faults)
+    got, fake = _drive({None: [first, second], "u2": [_page([])]}, faults)
     assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got  # the first read is what streams
-    assert [f["kind"] for f in faults] == ["vector_unstable"], faults
-    f = faults[0]
-    assert f["uuid"] == "u2", f
-    assert f["reason"] == "elements", f
-    assert (f["n_differing"], f["first_index"], f["n_total"]) == (1, 3, 4), f
-    assert f["first_pair"] == [0.1, 0.9], f                    # the evidence, not just a flag
+    assert faults == [], faults                                # no detector, so no fault
+    assert [u for _m, u in fake.calls].count(PAGE_1_URL) == 1, fake.calls
 
-def test_a_SUB_PRECISION_float_difference_is_not_faulted():
-    # LOAD-BEARING, and the reason the comparison is made on the digest rather than element-wise.
-    # The fingerprint rounds to 6 places, so a difference in the 9th does not move the
-    # measurement and must not refuse a run. A strict float comparison would fire here, make
-    # every sample unstable, and the real fault above would be lost in the noise.
-    faults = []
-    first = _page([_obj("u1")])
-    second = _page([_obj("u1")])
-    second["objects"][0]["vector"] = [0.1, 0.1, 0.1, 0.1 + 1e-9]
-    got, _fake = _drive({None: [first, second], "u1": [_page([])]}, faults)
-    assert len(got) == 1, got
-    assert faults == [], faults
+def test_vector_rounding_tolerates_float_noise():
+    # LOAD-BEARING and still true, which is why it survives the retirement as a unit test of the
+    # pure function instead of a test of the sampler. `vector_disagreement` decides on the
+    # 6-decimal digest, so a difference in the 9th place is not a disagreement. Any future
+    # consumer that re-reads vectors (the D-002 probe does) must compare this way: element-wise
+    # equality would call every read unstable and bury the real fault in noise.
+    assert FR.vector_disagreement([0.1, 0.1, 0.1, 0.1],
+                                  [0.1, 0.1, 0.1, 0.1 + 1e-9]) is None
+    d = FR.vector_disagreement([0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.9])
+    assert d and d["reason"] == "elements" and d["n_differing"] == 1, d
 
-def test_an_object_that_vanishes_from_the_second_read_is_faulted_not_ignored():
-    # A page whose membership changes between two reads is not a vector fault, but it is not
-    # nothing either, and silence would be the same class of defect: an absence treated as an
-    # agreement.
+def test_an_object_that_vanishes_from_a_second_read_is_not_noticed_by_the_sampler():
+    # The other half of the loss. A page whose membership changes between two reads was a fault;
+    # with one read there is no comparison to make, and the second page body is never fetched.
+    # `vector_disagreement` still names the shape for a caller that does take two reads.
     faults = []
     first = _page([_obj("u1"), _obj("u2")])
     second = _page([_obj("u1")])
     got, _fake = _drive({None: [first, second], "u2": [_page([])]}, faults)
     assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got
-    assert [f["kind"] for f in faults] == ["vector_unstable"], faults
-    assert faults[0]["reason"] == "absent-on-reread" and faults[0]["uuid"] == "u2", faults[0]
+    assert faults == [], faults
+    assert FR.vector_disagreement([0.1] * 4, FR._ABSENT) == {"reason": "absent-on-reread"}
+
+def test_include_vector_defaults_to_FALSE_and_pages_without_the_embedding():
+    # The default is what a new consumer inherits, so the ruling's "no vector reads" had to land
+    # on the default and not only on the eval's flag. A text-only page also carries 5x the rows.
+    pages = {None: [_page([_obj("u1"), _obj("u2")])], "u2": [_page([])]}
+    real_http, real_sleep = FR.httpx, time.sleep
+    FR.httpx, time.sleep = _FakeHTTP(pages), lambda *_a, **_k: None
+    try:
+        got = list(FR.stream_chunks("192.0.2.1"))
+        urls = [u for _m, u in FR.httpx.calls]
+    finally:
+        FR.httpx, time.sleep = real_http, real_sleep
+    assert urls[0] == NO_VECTOR_URL, urls
+    assert all("include=vector" not in u for u in urls), urls
+    assert [m["id"] for _p, _v, m in got] == ["u1", "u2"], got
 
 def test_vector_disagreement_is_silent_on_two_reads_that_agree():
     # The null. A detector that reported a disagreement for everything would satisfy every test
@@ -219,7 +235,7 @@ def test_the_module_issues_nothing_but_GET():
 # A hand-rolled suite reports what it happened to collect. Assert the COUNT so a test that is
 # renamed out of the prefix, deleted, or shadowed by a duplicate name fails loudly instead of
 # printing a healthy-looking tally.
-EXPECTED_TESTS = 16
+EXPECTED_TESTS = 17
 
 if __name__ == "__main__":
     import traceback

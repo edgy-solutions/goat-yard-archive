@@ -1564,8 +1564,8 @@ def main(argv: Optional[list] = None) -> int:
                              "its provider is unattributable. Recorded in run_header.json and "
                              "in summary.integrity.preflight.")
     parser.add_argument("--corpus-fingerprint", choices=("vectors", "text", "skip"),
-                        default="vectors",
-                        help="Fingerprint the Weaviate corpus at run start and end and record it in integrity.corpus (ruling 1). `vectors` hashes text AND embeddings (measured 80s per sample against 7294 chunks) and is the only setting that can see a re-vectorisation; `text` hashes text only (7s) and is blind to one; `skip` records nothing and makes the run PROVISIONAL, like --allow-dirty-tree.")
+                        default="text",
+                        help="Fingerprint the Weaviate corpus at run start and end and record it in integrity.corpus (ruling 1). DEFAULT `text` (ruling, 2026-10-04): text sha + chunk count + max last_update, NO vector reads, roughly 15s per sample. A write that leaves the text identical -- which a re-vectorisation is -- shows up as a max_last_update_ms move, so this is not blind to one; it cannot attribute one to named objects. `vectors` also hashes every embedding (measured 80s) and does attribute, but every embedding is then one unverified read through a path with a measured per-read corruption rate and no guard left on it (docs/defects/D-002-weaviate-vector-read-instability.md); it was the default until the reproduction showed a full-corpus vector sample refuses about 99.5%% of the time. `skip` records nothing and makes the run PROVISIONAL, like --allow-dirty-tree.")
     parser.add_argument("--auth-token", default=os.getenv("EVAL_AUTH_TOKEN"),
                         help="Optional Bearer token for authenticated endpoint testing.")
     args = parser.parse_args(argv)
@@ -1612,9 +1612,14 @@ def main(argv: Optional[list] = None) -> int:
         print(f"Corpus    : fingerprinting (vectors={_vec}) ...", end=" ", flush=True)
         corpus_at_start = corpus_state(include_vectors=_vec)
         if corpus_at_start["available"]:
+            # The third field is the one that is actually compared under this mode, so it is the
+            # one printed: "vec None" on every text-mode line read as a missing fingerprint when
+            # it was a deliberately unread channel.
+            _third = (f"vec {str(corpus_at_start['vector_sha256'])[:12]}" if _vec else
+                      f"last_update {corpus_at_start['max_last_update_ms']} "
+                      f"({corpus_at_start['n_last_update_known']} stamped)")
             print(f"{corpus_at_start['chunk_count']} chunks, text "
-                  f"{str(corpus_at_start['content_sha256'])[:12]}, vec "
-                  f"{str(corpus_at_start['vector_sha256'])[:12]} "
+                  f"{str(corpus_at_start['content_sha256'])[:12]}, {_third} "
                   f"({corpus_at_start['seconds']}s)")
         else:
             print(f"UNREAD: {corpus_at_start['unavailable_reason']}")

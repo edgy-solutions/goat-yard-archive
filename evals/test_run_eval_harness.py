@@ -937,13 +937,25 @@ class _SeqStub:
         return dict(self.responses[i])
 
 
-def _corpus(content="a" * 64, vector="b" * 64, chunks=7294):
+def _corpus(content="a" * 64, vector="b" * 64, chunks=7294, stamp=1748137658136,
+            n_stamped=7294, vectors=True):
     """A corpus_state record as corpus_state() returns one. Built here rather than imported so a
-    change to that shape shows up as a failure in this suite too."""
+    change to that shape shows up as a failure in this suite too -- and it did: when the mid-run
+    fields became text sha + chunk count + max last_update, this fixture could not produce a
+    stamp, so three tests failed on a KeyError from the start-print rather than on anything they
+    were written to check. A fixture that cannot produce the real producer's shape is its own
+    defect; the index in run_eval stays a hard index, because corpus_state() and
+    unavailable_state() both always carry these keys and a missing one is a real fault.
+
+    `vectors=False` is the shape a `--corpus-fingerprint text` run actually hands back: no vector
+    channel at all, which is the mode the stamp exists to serve.
+    """
     return {"available": True, "unavailable_reason": None, "weaviate_url": "10.0.0.1:80",
-            "include_vectors": True, "counts": {"CommentaryChunk": chunks}, "chunk_count": chunks,
-            "content_sha256": content, "vector_sha256": vector, "n_hashed": chunks,
-            "n_vectors_hashed": chunks, "seconds": 1.0}
+            "include_vectors": vectors, "counts": {"CommentaryChunk": chunks},
+            "chunk_count": chunks, "content_sha256": content,
+            "vector_sha256": vector if vectors else None, "n_hashed": chunks,
+            "n_vectors_hashed": chunks if vectors else 0, "seconds": 1.0,
+            "max_last_update_ms": stamp, "n_last_update_known": n_stamped}
 
 
 def _run_main(responses, ids, corpus=None, fingerprint="skip", reread=None):
@@ -1058,6 +1070,39 @@ def test_a_revectorisation_mid_run_is_caught_by_the_wiring_too():
     assert c["at_start"]["content_sha256"] == c["at_end"]["content_sha256"], "the premise"
     assert c["changed_during_run"] is True, c
     assert rc != 0
+
+
+def test_a_stamp_only_move_is_caught_END_TO_END_with_no_vector_read():
+    # Ruling (2026-10-04): the mid-run check is text sha + chunk count + max last_update, NO
+    # vector reads. This is that check wired through main(): both samples carry no vector channel
+    # at all (the real shape of a `--corpus-fingerprint text` run), identical text, and a stamp
+    # that moved. Nothing here claims the embeddings are what moved -- only that a write landed.
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"],
+                              corpus=[_corpus(vectors=False),
+                                      _corpus(vectors=False, stamp=1748137999999)],
+                              fingerprint="text")
+    s_ = _summary(out)
+    c = s_["integrity"]["corpus"]
+    assert c["at_start"]["content_sha256"] == c["at_end"]["content_sha256"], "the premise"
+    assert c["at_start"]["vector_sha256"] is None, "and no vector was read on either side"
+    assert c["changed_during_run"] is True, c
+    assert any("CORPUS CHANGED MID-RUN" in v for v in s_["integrity"]["violations"]), s_["integrity"]
+    assert rc != 0, "a run scored across a write must not exit 0"
+
+
+def test_a_mid_run_sample_with_no_stamp_channel_is_unknowable_END_TO_END():
+    # The companion: max() over an all-None channel is None, and None == None forever. With no
+    # vector read AND no readable stamp there is no witness at all, so the answer is None
+    # (unknowable) and the run is provisional -- never a clean False.
+    rc, out, stub = _run_main([dict(GOOD)], ["logos_001", "sheep_001"],
+                              corpus=[_corpus(vectors=False, stamp=None, n_stamped=0),
+                                      _corpus(vectors=False, stamp=None, n_stamped=0)],
+                              fingerprint="text")
+    s_ = _summary(out)
+    c = s_["integrity"]["corpus"]
+    assert c["changed_during_run"] is None, c
+    assert c["provisional"] is True, c
+    assert c["violations"] == [], c["violations"]
 
 
 def test_an_unreadable_corpus_is_provisional_but_does_NOT_fail_the_run():
@@ -1779,7 +1824,7 @@ def test_the_warmup_query_is_not_one_of_the_scored_questions():
     assert RE.WARMUP_QUERY.strip().lower() not in queries, RE.WARMUP_QUERY
 
 
-EXPECTED_TESTS = 158
+EXPECTED_TESTS = 160
 
 # --- the post-run re-read of read-faulted objects (ruling, 2026-10-04) --------------------
 

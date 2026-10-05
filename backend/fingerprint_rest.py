@@ -12,9 +12,24 @@ include=vector is about 1.1 MB).
 Until it is located, the fault is a property of the READ PATH and not of this module, so ANY
 Python path that reads vectors back from Weaviate inherits it -- the eval sampler here, the
 re-read in `fetch_objects`, the ingestion verifier, and any future consumer that compares
-embeddings it fetched. Guard every such path the way `stream_chunks` now does (read twice,
-compare on the rounded digest, refuse on a mismatch) or state explicitly that its numbers rest
-on a single unverified read.
+embeddings it fetched. Any such path rests on a single unverified read, which the reproduction
+measured as wrong about 1 time in 137.
+
+THE DOUBLE-READ GUARD IS RETIRED (ruling, 2026-10-04). `stream_chunks` used to fetch every
+vector-bearing page a second time and refuse the sample on a digest mismatch. It worked -- it
+converted a silent 0.11%-per-object poisoning of the start sample into a loud refusal -- and
+that is precisely why it is gone: the measured consequence is that a full-corpus vector sample
+refuses with probability ~99.5%, so the guard's output was not a check on the sample, it was
+the absence of a sample. The mid-run corpus check no longer reads vectors at all (text sha +
+chunk count + max last_update, see `evals/corpus_state.MID_RUN_FIELDS`), so there is nothing
+left for the guard to guard, and the thing it was standing in for is now an open, named defect:
+`docs/defects/D-002-weaviate-vector-read-instability.md`.
+
+Retiring a guard is not retiring the fault. `vector_disagreement` stays -- it is pure, it names
+the SHAPE of a disagreement rather than returning a boolean, and it is what the D-002
+experiments (`evals/probe_read_fault.py`) are built on. A consumer that genuinely needs a
+trustworthy vector read must read until two reads agree and SAY that it did; it must not take
+one read and call it a measurement.
 """
 import sys, json, httpx
 import corpus_fingerprint as CF
@@ -95,7 +110,7 @@ def _anomalous_uuids(objs, vecs, modal_dim):
         return []
     return [o.get("id") for o, v in zip(objs, vecs) if v and len(v) != modal_dim]
 
-def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None, verify_twice=True):
+def stream_chunks(ip, include_vector=False, gentle=0.0, faults=None):
     """Cursor-page CommentaryChunk objects, yielding (props, vector, meta) 3-tuples where meta
     carries the REST object's own 'id' and 'lastUpdateTimeUnix' (read, not synthesised).
     include=vector fetches the embedding so the fingerprint can hash vector-identity too
@@ -111,11 +126,11 @@ def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None, verify_twice
     re-fetch is counted on `faults` (`dim_anomaly_retry`), not only the giving-up: a retry nobody
     counts is how the visible half of this defect stayed invisible in the first place.
 
-    `verify_twice` (default True, vectors only) fetches each page a SECOND time and compares every
-    object's vector digest across the two reads, appending a `vector_unstable` fault per uuid that
-    disagrees. It catches what the dim check cannot: a vector that reads back differently at a
-    correct length. It doubles the page fetches of a vector-bearing sample, which is the price of
-    a start sample that can be reproduced at all."""
+    `include_vector` now defaults to FALSE. Under the ruling of 2026-10-04 the mid-run corpus
+    check does not read vectors, and the default is the thing a new consumer inherits, so it is
+    the default that had to move. Passing True still works and still hashes vector identity --
+    but it is one unverified read per object through a read path with a measured per-read
+    corruption rate (D-002), and the retired double-read guard is no longer there to catch it."""
     import time as _t
     after = None
     inc = "&include=vector" if include_vector else ""
@@ -152,24 +167,12 @@ def stream_chunks(ip, include_vector=True, gentle=0.0, faults=None, verify_twice
         if anomalies and faults is not None:
             faults.append({"kind": "dim_anomaly", "url": url, "uuids": list(anomalies)})
 
-        # Ruling (2026-10-04): read every vector TWICE at sampling time and refuse on mismatch.
-        # The dim check above is structurally blind to the fault this catches -- two reads of an
-        # unchanged object disagreeing at a CORRECT length of 4096. That fault silently poisoned
-        # the at_start sample of both attempt-5 arms, and no output-side check can recover from
-        # it: a digest taken over bytes that cannot be reproduced is not a measurement of
-        # anything, and the later comparison then reports a corpus change that never happened.
-        #
-        # A separate HTTP fetch of the SAME page URL, compared per uuid. No third-read repair:
-        # the ruling is to refuse, and a quiet repair would hide the rate at which this happens
-        # -- which is the only number that can tell us whether the read path is usable at all.
-        if verify_twice and include_vector:
-            rv = _fetch_page(url, faults)
-            second = {o.get("id"): _extract_vector(o) for o in rv.get("objects", [])}
-            for o, vec in zip(objs, vecs):
-                uid = o.get("id")
-                d = vector_disagreement(vec, second.get(uid, _ABSENT))
-                if d is not None and faults is not None:
-                    faults.append(dict(d, kind="vector_unstable", url=url, uuid=uid))
+        # The second read of each page used to happen HERE, comparing every vector digest across
+        # the two fetches and appending a `vector_unstable` fault on a mismatch. Retired by the
+        # ruling of 2026-10-04 -- see the module docstring for why a guard that worked is gone,
+        # and docs/defects/D-002 for the fault it was holding the line against. The dim-anomaly
+        # retry above is NOT part of that retirement and stays: it repairs a structurally
+        # detectable malformation, it is not a reproducibility check on a correct-length read.
 
         for v in vecs:                                          # keep the running dim current
             if v:

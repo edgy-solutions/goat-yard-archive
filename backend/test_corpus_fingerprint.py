@@ -226,10 +226,63 @@ def test_a_stamp_only_move_is_still_not_a_change_on_the_start_end_axis():
     assert cls["rewritten"] == [] and cls["read_fault"] == [], cls
 
 
+# --- the stamp channel (mid-run ruling, 2026-10-04) ---------------------------------------------
+
+def test_the_fold_carries_the_max_stamp_and_how_many_were_readable():
+    items = [(CHUNKS_A[0], [0.1, 0.2], {"id": "u1", "last_update_ms": 1000}),
+             (CHUNKS_A[1], [0.3, 0.4], {"id": "u2", "last_update_ms": 2000})]
+    fp = CF.fingerprint(iter(items), {"CommentaryChunk": 2})
+    assert fp["max_last_update_ms"] == 2000, fp["max_last_update_ms"]
+    assert fp["n_last_update_known"] == 2, fp["n_last_update_known"]
+
+def test_an_absent_stamp_channel_is_a_count_of_zero_and_not_a_max_of_zero():
+    # The one that makes the comparator able to refuse. A max over nothing is None, and None
+    # compares equal to None forever, so "the stamps agree" and "there are no stamps" have to be
+    # distinguishable from the fingerprint alone. 0 would be a readable stamp at the epoch.
+    a = [(CHUNKS_A[0], [0.1, 0.2]), (CHUNKS_A[1], [0.3, 0.4])]     # 2-tuples -> no meta at all
+    fp = CF.fingerprint(iter(a), {"CommentaryChunk": 2})
+    assert fp["max_last_update_ms"] is None, fp["max_last_update_ms"]
+    assert fp["n_last_update_known"] == 0, fp["n_last_update_known"]
+
+def test_a_stamp_is_counted_even_when_the_object_carries_no_id():
+    # Attribution and the stamp channel fail independently. An object with a stamp but no id
+    # never reaches per_object, and if the max were folded from per_object the whole channel
+    # would go dark on a sampler that stopped returning ids.
+    items = [(CHUNKS_A[0], [0.1, 0.2], {"last_update_ms": 4242})]
+    fp = CF.fingerprint(iter(items), {"CommentaryChunk": 1})
+    assert fp["per_object"] == {} and fp["per_object_complete"] is False, fp
+    assert (fp["max_last_update_ms"], fp["n_last_update_known"]) == (4242, 1), fp
+
+def test_a_digit_string_stamp_is_the_same_stamp_as_the_integer():
+    # Weaviate REST returns lastUpdateTimeUnix as a number on some engines and a digit string on
+    # others. Unnormalised, "1700" != 1700, and difference_kind would read a stamp move -- which
+    # with any digest difference it calls a WRITE -- across two reads of an untouched object.
+    i = CF.fingerprint(iter([(CHUNKS_A[0], None, {"id": "u1", "last_update_ms": 1700})]),
+                       {"CommentaryChunk": 1})
+    t = CF.fingerprint(iter([(CHUNKS_A[0], None, {"id": "u1", "last_update_ms": "1700"})]),
+                       {"CommentaryChunk": 1})
+    assert i["max_last_update_ms"] == t["max_last_update_ms"] == 1700, (i, t)
+    assert CF.difference_kind(i["per_object"]["u1"], t["per_object"]["u1"],
+                              fields=("text",)) == "same"
+
+def test_an_unparseable_stamp_is_no_stamp_and_never_a_zero():
+    # Narrow on purpose: a stamp that cannot be read is absent, and absent must not arrive as 0,
+    # which is a real stamp at the epoch and would make a blind channel look live.
+    assert CF._as_ms(None) is None
+    assert CF._as_ms("") is None
+    assert CF._as_ms("not-a-time") is None
+    assert CF._as_ms(True) is None           # a bool is an int in Python; it is not a timestamp
+    assert CF._as_ms(0) == 0
+    assert CF._as_ms(" 1700 ") == 1700
+    fp = CF.fingerprint(iter([(CHUNKS_A[0], None, {"id": "u1", "last_update_ms": "junk"})]),
+                        {"CommentaryChunk": 1})
+    assert (fp["max_last_update_ms"], fp["n_last_update_known"]) == (None, 0), fp
+
+
 # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
 # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
 # failed" and looks healthy. Assert the COUNT so a silently shrinking suite fails loudly.
-EXPECTED_TESTS = 27
+EXPECTED_TESTS = 32
 
 if __name__ == "__main__":
     import traceback

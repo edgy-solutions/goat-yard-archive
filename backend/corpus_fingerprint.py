@@ -63,20 +63,53 @@ def _split(item):
         return item[0], item[1], {}
     return item, (item.get("_vector") if isinstance(item, dict) else None), {}
 
+def _as_ms(raw):
+    """A last-update stamp as an int, or None if there isn't one. Weaviate's REST
+    `lastUpdateTimeUnix` arrives as a number on some engine versions and a digit STRING on
+    others, and `"1700" != 1700`, so an unnormalised compare reports a stamp move across two
+    reads of an object nobody touched -- which `difference_kind` would then call a write. The
+    coercion is deliberately narrow: anything that is not an int or a digit string is None (no
+    stamp), never 0, because 0 is a readable stamp at the epoch and "unknown" is not."""
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
     """Fingerprint from an iterator of CommentaryChunk objects + per-collection counts. READ-ONLY.
     Each item is a (props, vector) tuple, a (props, vector, meta) tuple, or a props dict. Hashes
     TEXT identity AND VECTOR identity separately (text-identity was proven; vector-identity was
     assumed — this closes it), and when `meta` carries an id, also builds a `per_object` map so a
-    later diff can be attributed to named objects instead of only a corpus-wide fold."""
+    later diff can be attributed to named objects instead of only a corpus-wide fold.
+
+    Also folds the corpus-wide `max_last_update_ms` and the COUNT of objects whose stamp was
+    readable. Those two go together on purpose. Ruling (2026-10-04): a mid-run check is text sha
+    + chunk count + max last_update, with NO vector reads -- so the stamp is promoted from a
+    per-object tiebreaker to a compared field, because it is then the ONLY witness of a write
+    that leaves the text identical (a re-vectorisation). A max over a channel where every stamp
+    is None is None, which compares equal to another None forever, so "the stamps agree" and
+    "there are no stamps" must be distinguishable: the count is what distinguishes them, and a
+    comparator that reads the max without reading the count is claiming a stability it never
+    checked."""
     text_digests, vec_digests = [], []
     per_object = {}
     per_object_complete = True
     dim_histogram = {}
+    stamps = []
     for item in iter_objects:
         props, vector, meta = _split(item)
         td = _obj_digest(props)
         text_digests.append(td)
+        # Collected BEFORE the per_object map, which an object carrying no id never reaches: the
+        # stamp channel must not go dark just because attribution did.
+        ms = _as_ms(meta.get("last_update_ms") if meta else None)
+        if ms is not None:
+            stamps.append(ms)
         vd = _vec_digest(vector)
         if vd is not None:
             vec_digests.append(vd)
@@ -87,8 +120,7 @@ def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
         if uuid is None:
             per_object_complete = False
             continue
-        per_object[uuid] = {"text": td, "vec": vd, "dim": dim,
-                             "last_update_ms": meta.get("last_update_ms")}
+        per_object[uuid] = {"text": td, "vec": vd, "dim": dim, "last_update_ms": ms}
     vector_dim = max(dim_histogram, key=dim_histogram.get) if dim_histogram else None
     dim_anomalies = sorted(uuid for uuid, o in per_object.items()
                            if o["dim"] is not None and o["dim"] != vector_dim)
@@ -99,6 +131,8 @@ def fingerprint(iter_objects, counts, ingestion_sha=UNKNOWN_SHA):
         "vector_sha256": content_hash(vec_digests) if vec_digests else None,
         "n_hashed": len(text_digests),
         "n_vectors_hashed": len(vec_digests),
+        "max_last_update_ms": max(stamps) if stamps else None,
+        "n_last_update_known": len(stamps),
         "ingestion_sha": ingestion_sha,
         "per_object": per_object,
         "per_object_complete": per_object_complete,

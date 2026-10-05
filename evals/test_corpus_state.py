@@ -25,7 +25,11 @@ import corpus_state as CS  # noqa: E402
 
 FP = {"counts": {"CommentaryChunk": 7294, "TheologicalEntity": 8433}, "chunk_count": 7294,
       "content_sha256": "6cbb3363" + "a" * 56, "vector_sha256": "dc7968e3" + "b" * 56,
-      "n_hashed": 7294, "n_vectors_hashed": 7294}
+      "n_hashed": 7294, "n_vectors_hashed": 7294,
+      # The stamp channel. A fixture that cannot produce the shape the real producer produces is
+      # its own defect: `corpus_fingerprint.fingerprint` has emitted these two since the mid-run
+      # ruling, and without them every test here would exercise the no-stamp branch by accident.
+      "max_last_update_ms": 1748137658136, "n_last_update_known": 7294}
 
 
 def _fp(**over):
@@ -139,7 +143,7 @@ def test_vectors_requested_but_absent_downgrades_the_claim_instead_of_lying():
     # and the comparison must then narrow its own claim rather than quietly comparing None to None
     changed, scope = CS.corpus_changed(st, st)
     assert changed is False
-    assert scope.startswith("text-only"), scope
+    assert scope.startswith("text+stamp (no vector read)"), scope
 
 
 # --- the comparison: three states -----------------------------------------------------
@@ -187,8 +191,81 @@ def test_mixed_vector_scope_compares_text_and_SAYS_it_did_only_that():
     a = _state()
     b = _state(vector_sha256=None, n_vectors_hashed=0)
     changed, scope = CS.corpus_changed(a, b)
-    assert changed is False, "the text is identical and that is all that was comparable"
-    assert "re-vectorisation during this run would NOT have been detected" in scope, scope
+    assert changed is False, "the text and the stamp are identical"
+    # It must still narrow its claim -- but the narrowed claim is no longer "blind to a
+    # re-vectorisation". It is "a write is detected, and not attributed".
+    assert scope.startswith("text+stamp (no vector read)"), scope
+    assert "not attributed" in scope, scope
+
+
+# --- the mid-run shape: text sha + chunk count + max last_update, no vector reads ------
+
+def test_a_write_that_leaves_the_text_identical_is_DETECTED_without_reading_vectors():
+    # THE load-bearing test of the mid-run ruling. Same text sha, same counts, stamp moved: this
+    # is what a re-vectorisation looks like to a reader that never fetched an embedding. The
+    # implementation it has to beat is the one that shipped before -- comparing text sha and
+    # chunk count only -- which passes every other test in this file and calls this UNCHANGED.
+    a = _state(vector_sha256=None, n_vectors_hashed=0)
+    b = _state(vector_sha256=None, n_vectors_hashed=0,
+               max_last_update_ms=FP["max_last_update_ms"] + 1)
+    changed, scope = CS.corpus_changed(a, b)
+    assert changed is True, (changed, scope)
+    assert scope.startswith("text+stamp (no vector read)"), scope
+
+
+def test_an_attributed_sample_still_reaches_the_stamp_fold():
+    # The defect the fall-through fixes. `classify_change` deliberately does not count a
+    # stamp-only move as a change, so when both samples carry a per_object map the attributed
+    # path used to return False before the fold that holds max_last_update_ms was ever reached --
+    # reporting "unchanged" for exactly the class the mid-run check now rests on.
+    po = {"u1": {"text": "t", "vec": None, "dim": None, "last_update_ms": 500}}
+    a = _state(vector_sha256=None, n_vectors_hashed=0,
+               per_object=po, per_object_complete=True)
+    b = _state(vector_sha256=None, n_vectors_hashed=0,
+               per_object={"u1": dict(po["u1"], last_update_ms=999)},
+               per_object_complete=True,
+               max_last_update_ms=FP["max_last_update_ms"] + 1)
+    changed, scope = CS.corpus_changed(a, b)
+    assert changed is True, (changed, scope)
+    assert "attributed: no add/remove/rewrite" in scope, scope
+
+
+def test_a_mid_run_sample_with_NO_stamp_channel_is_unknowable_not_unchanged():
+    # Never False on a guess. With no vector read the stamp is the only witness of a write that
+    # leaves the text identical; a max over an empty channel is None on both sides and compares
+    # equal forever, which is how a blind check reports a clean bill of health.
+    a = _state(vector_sha256=None, n_vectors_hashed=0,
+               max_last_update_ms=None, n_last_update_known=0)
+    b = _state(vector_sha256=None, n_vectors_hashed=0,
+               max_last_update_ms=None, n_last_update_known=0)
+    changed, scope = CS.corpus_changed(a, b)
+    assert changed is None, (changed, scope)
+    assert scope.startswith("not-compared:"), scope
+    assert "n_last_update_known=0" in scope, scope
+
+
+def test_one_side_missing_the_stamp_channel_is_enough_to_be_unknowable():
+    # The asymmetric case: the end sample read stamps, the start sample did not. A comparison is
+    # only as good as its worse side, and it is the START sample that the whole run is attributed
+    # to -- this is the shape that poisoned the attempt-5 arms.
+    a = _state(vector_sha256=None, n_vectors_hashed=0,
+               max_last_update_ms=None, n_last_update_known=0)
+    b = _state(vector_sha256=None, n_vectors_hashed=0)
+    assert CS.corpus_changed(a, b)[0] is None, CS.corpus_changed(a, b)
+    assert "at_start" in CS.corpus_changed(a, b)[1], CS.corpus_changed(a, b)[1]
+    assert CS.corpus_changed(b, a)[0] is None, CS.corpus_changed(b, a)
+    assert "at_end" in CS.corpus_changed(b, a)[1], CS.corpus_changed(b, a)[1]
+
+
+def test_the_stamp_does_not_override_a_vectors_in_force_comparison():
+    # The null for the new field: with vectors in force the fold is IDENTITY_FIELDS and the stamp
+    # is not in it, so a stamp that moved while every digest held still is NOT a change on that
+    # axis. One rule per shape, and the shapes must not leak into each other.
+    a = _state()
+    b = _state(max_last_update_ms=FP["max_last_update_ms"] + 1)
+    changed, scope = CS.corpus_changed(a, b)
+    assert changed is False, (changed, scope)
+    assert scope == "text+vectors", scope
 
 
 # --- the run block --------------------------------------------------------------------
@@ -698,7 +775,7 @@ if __name__ == "__main__":
     # A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
     # test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N passed, 0
     # failed" and looks healthy. Assert the COUNT so a dropped test is caught.
-    EXPECTED_TESTS = 53
+    EXPECTED_TESTS = 58
     if len(tests) != EXPECTED_TESTS:
         print("FAIL suite: collected " + str(len(tests)) + " tests, expected " +
               str(EXPECTED_TESTS) + " - a test was lost or added without updating EXPECTED_TESTS")

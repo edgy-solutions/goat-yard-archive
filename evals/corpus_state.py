@@ -45,10 +45,19 @@ UNAVAILABLE = "unavailable:"
 # The fields that decide corpus identity. `chunk_count` is redundant with `counts` and kept because
 # a human reads it first.
 IDENTITY_FIELDS = ("counts", "chunk_count", "content_sha256", "vector_sha256")
-TEXT_ONLY_FIELDS = ("counts", "chunk_count", "content_sha256")
+
+# The MID-RUN check (ruling, 2026-10-04): text sha + chunk count + max last_update, and NO vector
+# reads. It replaces the old TEXT_ONLY_FIELDS, which compared the first three and was therefore
+# blind to any write that left the text identical -- the whole class a vector hash existed to
+# catch. The stamp is not a cheaper vector hash and does not pretend to be one: it cannot say
+# WHICH objects moved or that the embeddings changed, only that SOMETHING was written. That is
+# the right trade here, because the read it replaces is not obtainable from this instance at all
+# (D-002: ~99.5% refusal on a full-corpus vector sample).
+MID_RUN_FIELDS = ("counts", "chunk_count", "content_sha256", "max_last_update_ms")
 
 KEYS = ("available", "unavailable_reason", "weaviate_url", "include_vectors", "counts",
         "chunk_count", "content_sha256", "vector_sha256", "n_hashed", "n_vectors_hashed",
+        "max_last_update_ms", "n_last_update_known",
         "seconds", "per_object", "per_object_complete", "dim_histogram", "vector_dim",
         "dim_anomalies", "read_faults")
 
@@ -92,7 +101,8 @@ def unavailable_state(reason: str, url: Optional[str] = None,
     return {"available": False, "unavailable_reason": reason, "weaviate_url": url,
             "include_vectors": include_vectors, "counts": None, "chunk_count": None,
             "content_sha256": None, "vector_sha256": None, "n_hashed": None,
-            "n_vectors_hashed": None, "seconds": None, "per_object": None,
+            "n_vectors_hashed": None, "max_last_update_ms": None, "n_last_update_known": None,
+            "seconds": None, "per_object": None,
             "per_object_complete": False, "dim_histogram": None, "vector_dim": None,
             "dim_anomalies": None, "read_faults": None}
 
@@ -119,7 +129,8 @@ def corpus_state(url: Optional[str] = None, include_vectors: bool = True,
     st = {"available": True, "unavailable_reason": None, "weaviate_url": url,
           "include_vectors": bool(include_vectors), "seconds": round(time.perf_counter() - t0, 1)}
     for k in ("counts", "chunk_count", "content_sha256", "vector_sha256", "n_hashed",
-              "n_vectors_hashed", "per_object", "per_object_complete", "dim_histogram",
+              "n_vectors_hashed", "max_last_update_ms", "n_last_update_known",
+              "per_object", "per_object_complete", "dim_histogram",
               "vector_dim", "dim_anomalies", "read_faults"):
         st[k] = fp.get(k)
     # Page-level re-fetching in fingerprint_rest already tried to repair a dim anomaly; if one is
@@ -128,11 +139,17 @@ def corpus_state(url: Optional[str] = None, include_vectors: bool = True,
     if st.get("dim_anomalies"):
         n = len(st["dim_anomalies"])
         return unavailable_state(f"read-fault:vector-dim-anomaly:{n}", url, include_vectors)
-    # Ruling (2026-10-04): the sampler reads every vector twice and this REFUSES on a mismatch.
     # An unstable read makes the sample unusable in a way no later check can repair -- the stored
     # digest is over bytes that do not reproduce, so every comparison against it is meaningless
     # and the arms that carried it reported a corpus change that never happened. Refusing here
     # costs a run; not refusing costs the measurement, silently.
+    #
+    # The PRODUCER of this fault was retired on 2026-10-04 (`stream_chunks` no longer reads each
+    # page twice), so no mid-run sample can raise it any more. This refusal stays, and the honest
+    # reason is not "defence in depth": `read_faults` is an open channel that any caller may fill,
+    # the D-002 probe emits exactly this kind, and a state carrying it must never be compared
+    # against anything. What it is NOT is a check on the mid-run path -- that path does not read
+    # vectors at all now, so it cannot produce the evidence this clause looks for.
     #
     # The faults are carried onto the refusal record. `read_faults` is already in KEYS, so the
     # shape every aggregator relies on is unchanged, and dropping the evidence to report only a
@@ -459,15 +476,33 @@ def corpus_changed(at_start: Dict[str, Any], at_end: Dict[str, Any]) -> Tuple[Op
     When both samples carry a complete `per_object` map, the verdict is attributed to named
     objects via `classify_change` instead of only a corpus-wide fold: a real add/remove/rewrite is
     True, a digest that moved while last_update_ms held still is a bad READ (None, not a change),
-    and otherwise it falls through to the fold comparison below."""
+    and otherwise it falls through to the fold comparison below.
+
+    Two shapes, one function. With vectors in force the fold is IDENTITY_FIELDS. Without them it
+    is MID_RUN_FIELDS -- text sha, chunk count, max last_update -- and a sample with no readable
+    stamp is unknowable, not unchanged, because the stamp is then the only witness of a write
+    that leaves the text identical."""
     if not (at_start.get("available") and at_end.get("available")):
         return None, "not-compared: at least one sample is unavailable"
     fields = IDENTITY_FIELDS
     scope = "text+vectors"
     if not (at_start.get("include_vectors") and at_end.get("include_vectors")):
-        fields = TEXT_ONLY_FIELDS
-        scope = ("text-only: vector hashing was not in force for both samples, so a "
-                 "re-vectorisation during this run would NOT have been detected")
+        # The mid-run shape (ruling, 2026-10-04): no vector read, and the stamp carries the
+        # class the vector hash used to carry. It is weaker and says so -- a write is DETECTED
+        # but not attributed, and nothing here says the embeddings are what moved.
+        fields = MID_RUN_FIELDS
+        scope = ("text+stamp (no vector read): a write that left the text identical, which a "
+                 "re-vectorisation is, shows up as a max_last_update_ms move -- detected, but "
+                 "not attributed to objects and not shown to be a re-vectorisation")
+        # Never False on a guess. Under this shape the stamp is the ONLY witness of that class,
+        # so a sample with no readable stamps is not a cheaper check, it is a BLIND one, and the
+        # verdict is unknowable rather than unchanged.
+        for label, st in (("at_start", at_start), ("at_end", at_end)):
+            if not st.get("n_last_update_known"):
+                return None, ("not-compared: no vector read was taken and %s carries no "
+                              "readable last_update stamp (n_last_update_known=%r), so the only "
+                              "witness of a write that leaves the text identical is absent"
+                              % (label, st.get("n_last_update_known")))
 
     cls = _attributable_classification(at_start, at_end)
     if cls is not None:
@@ -479,9 +514,19 @@ def corpus_changed(at_start: Dict[str, Any], at_end: Dict[str, Any]) -> Tuple[Op
                 f"not-compared: {n} objects differ only by digest while their "
                 f"last_update_ms is identical, which is a bad read, not a corpus change; "
                 + _named(cls["read_fault"]))
-        return False, scope
-    if at_start.get("per_object") is not None and at_end.get("per_object") is not None:
+        # NO early False here, and that is the ruling. `classify_change` deliberately does not
+        # count "stamp-only" -- a stamp that moved while every digest held still -- as a change,
+        # and under the mid-run shape that is exactly the class the comparison now rests on. If
+        # the attributed path returned False, a re-vectorisation would be reported as "unchanged"
+        # before the fold that holds max_last_update_ms was ever reached. So an attributed "no
+        # real change" falls THROUGH to the fold, which is where the stamp is compared. The
+        # per-object map still owns attribution; it no longer owns the clean bill of health.
+        scope = scope + " (attributed: no add/remove/rewrite; the fold below decides the rest)"
+    if (cls is None and at_start.get("per_object") is not None
+            and at_end.get("per_object") is not None):
         # either side's per_object was incomplete -- say so, and fall back to the fold below.
+        # Guarded on `cls is None`: the attributed path now falls through to the same fold, and
+        # without the guard every attributed run would be labelled "per_object incomplete".
         scope = scope + " (per_object incomplete on at least one side; not attributable, " \
                          "falling back to the fold comparison)"
 
