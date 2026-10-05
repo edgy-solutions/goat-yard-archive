@@ -75,8 +75,45 @@ own spans. Not attempted here, and not faked with a system font.
 RUN DISCIPLINE. `git_state()` taken at start and end, `provisional()` exactly as `truth_set_sheet.py`
 computes it, and the run prints the same clean/provisional verdict line via `clean_run.banner`. No
 network calls of any kind, ever. Nothing is written outside `audits/`.
+
+PASS 2 (`--pass2`, 2026-10-04, default off -- without it this file's output is byte-identical to
+`5a0a65b`'s). Pass 1 signed all 74 but held 26 for reasons about the CANDIDATE TEXT, not the box
+(`abstain_candidate_short`, `abstain_candidate_wrong`, `incomplete_unstated` -- see
+`PASS2_DISPOSITIONS` below). Pass 2 sheets exactly that derived population, a second time, with the
+full note crop beside each span crop so a human can see whether the BOX is what is actually wrong.
+
+PASS 2 JUDGMENT CALLS (flagged here, as the module's own convention requires):
+  - The spec's prose says to derive the per-row label from the ingest's "disposition and note_labels".
+    The ingest row schema has no `note_labels` key; the field that carries this is `note_classes`
+    (confirmed against `signing_pass1_ingest_0401b636ffa7bf1a.json`). `note_classes` is used.
+  - Note-crop pixels are LINKED (`file://`), never base64-embedded, mirroring this file's own existing
+    treatment of `note_context` (guard 4, pre-pass2) and reading Change 2's "no note crop may ever be
+    sent to a model" as a reason to keep pixels out of the document's own bytes entirely, not merely out
+    of any model's hands after the fact.
+  - The pass-2 console uses its own `localStorage` key (`SETID + "_pass2"`), not the pass-1 console's
+    bare `SETID` key. Both consoles embed the same `set_sha16`, and sharing one browser-storage key would
+    let a pass-2 draft silently intermix with (and overwrite) a pass-1 draft for the same 26 span_ids.
+  - The blank starter skeleton (`SKEL_NAME`/`SKEL`) gets its own pass-2 filename too, not just the HTML
+    and sidecar the spec names explicitly -- the skeleton is written to disk every run, and sharing the
+    pass-1 name would mean a pass-2 run silently narrows it to 26 rows, which is exactly the "loader that
+    silently narrows" failure this file's own comments warn against elsewhere.
+  - Auto-import (Change 3) runs once, on a browser that has no saved pass-2 progress yet (`restore()`
+    returns 0). On a later visit, the signer's own saved pass-2 state is restored instead and the
+    auto-import does not re-run -- re-running it on every load would silently overwrite any revision
+    made since the first import with the pass-1 baseline again.
+  - Change 3's auto-import needs pass 1's own verdict lines embedded in the page (no file prompt, no
+    network call), but at least one held row's pass-1 tile verdict (`p493:n3`, abstain_candidate_wrong)
+    carries a real Hebrew consonant in its `chose` field, so the embed text itself contains Hebrew --
+    the one thing guard 3's Hebrew-leak detector exists to catch. Resolved by extending that guard with
+    ONE more precisely-located, independently-asserted exemption (the exact `json.dumps(PASS1_EMBED_TEXT)`
+    substring, stripped before the leak check runs), mirroring its existing `data-cand`/palette
+    exemptions, plus a companion round-trip guard that the embed parses back to exactly the selected
+    span_ids with matching crop_sha16 -- additive (growing the accounted-for set), never a weakening of
+    what the guard forbids everywhere else.
 """
+import argparse
 import base64
+from collections import Counter
 import hashlib
 import html
 import io
@@ -92,10 +129,21 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "scripts"))
-from PIL import Image                                                      # noqa: E402
+from PIL import Image, ImageDraw                                          # noqa: E402
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 import nikud_gate                                                         # noqa: E402
 from clean_run import git_state, provisional, banner                      # noqa: E402
+import cv_footnote_presplit as ps                                        # noqa: E402  Lane A's, read-only
+import note_line_region as NLR                                           # noqa: E402  Lane A's, read-only
+import assembler as ASM                                                  # noqa: E402  Lane A's, read-only
+
+_ARGP = argparse.ArgumentParser()
+_ARGP.add_argument("--pass2", action="store_true",
+                    help="sheet only the ingest-held rows (abstain_candidate_short, "
+                         "abstain_candidate_wrong, incomplete_unstated) with the full note crop beside "
+                         "the span crop. Without it, output is byte-identical to 5a0a65b.")
+ARGS = _ARGP.parse_args()
+PASS2 = ARGS.pass2
 
 # The same frozen set the sheet signs against. An approval record is named by the pixels it describes,
 # and this file reads the SAME truth/cut artifacts the sheet does -- it is a different judgement surface
@@ -144,6 +192,27 @@ FAULT_TYPES = (("box-not-hebrew-or-blank", "box: not Hebrew / blank"),
                ("box-edge-cut", "box: edge cut"))
 LEGACY_FAULT_VALUE = "not-hebrew-or-blank"
 
+# ---- pass 2 (Change 1): the held-row population, derived from the ingest's own disposition, never a
+# literal list of span_ids. (disposition -> why pass 1 held it, for the module docstring / the page itself).
+PASS2_DISPOSITIONS = {
+    "abstain_candidate_short": "the signer wrote some form of \"a letter is missing\"",
+    "abstain_candidate_wrong": "the signer wrote some form of \"the hebrew is wrong\"",
+    "incomplete_unstated": "no verdict and no reason",
+}
+INGEST_NAME = "signing_pass1_ingest_%s.json" % SET
+INGEST_PATH = HAD.DATA / INGEST_NAME
+
+# Change 2's cut recipe needs the native page and the book profile -- the same two inputs
+# `wrong_line_trace.py` uses, which is known to reach all 74. Loaded/used only under --pass2.
+PAGE = "C:/Users/cnogr/git/dr-voluminous/commentary/volume1/page%d_image1.png"
+PROF_PATH = os.path.join(_HERE, "book_profile.gill.yaml")
+
+# The note-box overlay colour: used for NOTHING else on this page (guard asserts it against the
+# stylesheet text below), so a human can always tell the overlay from the page's own styling.
+NOTECROP_BOX_HEX = "#ff00ff"
+NOTECROP_BOX_RGB = (255, 0, 255)
+NOTECROP_DIR_NAME = "notecrops_%s_pass2" % SET
+
 # 22 base consonants + 5 final forms. A DERIVED list (guard 6 asserts the rendered palette against
 # len(CONSONANTS), never against the literal number 27).
 _BASE_LETTERS = u"אבגדהוזחטיכל" \
@@ -191,6 +260,162 @@ assert len(SPAN_IDS) == SET_N == 74, "the frozen set is not 74 spans"
 _sealed_hit = sorted(set(HAD.SEALED_TRUTH) & set(SPAN_IDS))
 assert not _sealed_hit, \
     "span(s) %s are in HAD.SEALED_TRUTH -- sealed pages are SPENT and must not be re-signed" % _sealed_hit
+
+# ---- pass 2 (Change 1): derive the held-row selection from the ingest's own disposition -----------------
+PASS2_SELECTED_IDS = SPAN_IDS            # the default-mode "selection" is the whole frozen set
+PASS2_DISPOSITION_OF = {}                # span_id -> (disposition, note_classes); empty outside --pass2
+if PASS2:
+    assert INGEST_PATH.exists(), \
+        "--pass2 needs the pass-1 ingest %s, which is not on disk at %s" % (INGEST_NAME, HAD.DATA)
+    _ingest_doc = _load_json(INGEST_PATH)
+    assert _ingest_doc.get("set_sha16") == SET and _ingest_doc.get("n") == SET_N, \
+        "the ingest is not over the frozen %d-span set: set_sha16=%r n=%r" \
+        % (SET_N, _ingest_doc.get("set_sha16"), _ingest_doc.get("n"))
+    _ingest_rows = _ingest_doc["rows"]
+    assert len(_ingest_rows) == SET_N, \
+        "the ingest carries %d of %d rows" % (len(_ingest_rows), SET_N)
+    _ingest_dispo_counts = Counter(r["disposition"] for r in _ingest_rows)
+    PASS2_DISPOSITION_OF = {r["span_id"]: (r["disposition"], r.get("note_classes") or [])
+                             for r in _ingest_rows}
+    PASS2_SELECTED_IDS = sorted(sid for sid, (dispo, _cls) in PASS2_DISPOSITION_OF.items()
+                                 if dispo in PASS2_DISPOSITIONS)
+    assert PASS2_SELECTED_IDS, \
+        "the derived pass-2 selection is empty -- %s matched nothing in the ingest" \
+        % sorted(PASS2_DISPOSITIONS)
+    _not_in_74 = sorted(set(PASS2_SELECTED_IDS) - set(SPAN_IDS))
+    assert not _not_in_74, "pass-2 selected span(s) %s are not in the frozen 74" % _not_in_74
+    _sealed_in_selection = sorted(set(HAD.SEALED_TRUTH) & set(PASS2_SELECTED_IDS))
+    assert not _sealed_in_selection, \
+        "pass-2 selected span(s) %s are in HAD.SEALED_TRUTH -- sealed pages are SPENT" \
+        % _sealed_in_selection
+    # Assert the count against the INGEST'S OWN per-disposition tally, not against a literal 26: if the
+    # ingest ever changes, this fails loudly instead of silently sheeting a different population.
+    _expect_n = sum(_ingest_dispo_counts.get(d, 0) for d in PASS2_DISPOSITIONS)
+    assert len(PASS2_SELECTED_IDS) == _expect_n, \
+        "the pass-2 selection has %d span(s) but the ingest's own disposition_counts for %s sum to %d" \
+        % (len(PASS2_SELECTED_IDS), sorted(PASS2_DISPOSITIONS), _expect_n)
+    # Guard list item: the two consoles' disk artifacts can never be confused with each other, including
+    # the blank starter skeleton (the spec names the HTML and the sidecar explicitly; the skeleton is a
+    # third disk artifact this file already writes every run, and sharing its name would silently narrow
+    # it to 26 rows -- see the module docstring's PASS 2 JUDGMENT CALLS).
+    SKEL_NAME = "glyphsign_%s_pass2_%dspan.jsonl" % (SET, len(PASS2_SELECTED_IDS))
+
+RUN_SPAN_IDS = PASS2_SELECTED_IDS
+RUN_N = len(RUN_SPAN_IDS)
+
+
+# ---- pass 2 (Change 4): "pass 1: <verb> -- <reason>", derived from the ingest's own disposition ---------
+def _pass1_label(sid):
+    """Derived from the ingest's own `disposition` (verb/reason split on the first '_') and corroborated
+    against `note_classes` where the ingest carries one -- never re-phrased. Confirmed by hand against
+    the actual ingest: the reason half of every held disposition equals note_classes[0] when present
+    (empty for incomplete_unstated, whose reason is itself 'unstated')."""
+    dispo, classes = PASS2_DISPOSITION_OF[sid]
+    verb, _sep, reason = dispo.partition("_")
+    if classes:
+        assert classes[0] == reason, \
+            "%s: disposition %r's reason half (%r) disagrees with its own note_classes %r" \
+            % (sid, dispo, reason, classes)
+    return u"pass 1: %s — %s" % (verb, reason)
+
+
+# ---- pass 2 (Change 3): carry pass 1's verdicts in, through the EXISTING import path -- never a second
+# importer. PASS1_ROWS is pass 1's own signed file (not the ingest), read-only, for the per-row "your
+# note, pass 1" / signed_from readout. PASS1_EMBED_TEXT is the exact on-disk LINES for the selected rows
+# only (byte-identical to what a human would get importing the real file by hand), embedded so the page
+# can auto-import on load without a network call or a file prompt.
+PASS1_ROWS = {}
+PASS1_EMBED_TEXT = ""
+if PASS2:
+    assert PASS1_PATH.exists(), \
+        "--pass2 needs pass 1's own signed file %s to carry its verdicts in" % PASS1_NAME
+    _p1_lines_kept = []
+    with io.open(str(PASS1_PATH), encoding="utf-8") as f:
+        for _line in f:
+            _stripped = _line.strip()
+            if not _stripped:
+                continue
+            _d = json.loads(_stripped)
+            PASS1_ROWS[_d["span_id"]] = _d
+            if _d["span_id"] in set(RUN_SPAN_IDS):
+                _p1_lines_kept.append(_stripped)
+    _missing_p1 = sorted(set(RUN_SPAN_IDS) - set(PASS1_ROWS))
+    assert not _missing_p1, \
+        "pass 1 (%s) has no row for %s, which pass 2 selected" % (PASS1_NAME, _missing_p1)
+    assert len(_p1_lines_kept) == RUN_N, \
+        "kept %d of pass 1's own lines for a %d-row selection" % (len(_p1_lines_kept), RUN_N)
+    PASS1_EMBED_TEXT = "\n".join(_p1_lines_kept) + "\n"
+
+# ---- pass 2 (Change 2): the full note crop, cut exactly the way wrong_line_trace.py does (Lane A's
+# substrate, read-only -- this file only CALLS ps.presplit / NLR.note_line_regions). Only loaded/used
+# under --pass2; a book-profile or native-page problem must never touch the default-mode run.
+NOTECROP_DIR = HAD.DATA / NOTECROP_DIR_NAME
+NOTECROP_WHY = ("These are NOTE-REGION crops, for local human review only. No note crop may ever be sent "
+                "to a model -- the span-box aperture (A2_spanbox) is the only aperture any arm reads.")
+_PAGE_BAND_CACHE = {}
+NOTE_CROP_INFO = {}   # span_id -> {note_crop_sha16, native_wh, box_in_note_crop, box_inside_note, path}
+
+if PASS2:
+    PROF = ASM.load_profile(PROF_PATH)
+    assert PROF, "no book profile at %s -- note_line_regions would take None and die on .get" % PROF_PATH
+
+    NOTECROP_DIR.mkdir(parents=True, exist_ok=True)
+    io.open(str(NOTECROP_DIR / "WHY.txt"), "w", encoding="utf-8").write(NOTECROP_WHY + "\n")
+
+    def _page_band(page):
+        if page not in _PAGE_BAND_CACHE:
+            _strip, _info = ps.presplit(PAGE % page, upscale=1)
+            assert _strip is not None, \
+                "presplit returned no strip for page %d -- --pass2 needs the native page PNG" % page
+            _PAGE_BAND_CACHE[page] = _strip.convert("L")
+        return _PAGE_BAND_CACHE[page]
+
+    for _sid2 in RUN_SPAN_IDS:
+        _tr2 = TRUTH_ROWS[_sid2]
+        _band2 = _page_band(_tr2["page"])
+        _regions2, _st2 = NLR.note_line_regions(_band2, _tr2["notes_on_page"], PROF)
+        assert _regions2 is not None, \
+            "%s: note_line_regions abstained (%s) -- the spec says this recipe is known to reach all 74" \
+            % (_sid2, _st2)
+        assert 0 <= _tr2["note_index"] - 1 < len(_regions2), \
+            "%s: note_index %d is out of range for %d region(s) found on page %d" \
+            % (_sid2, _tr2["note_index"], len(_regions2), _tr2["page"])
+        _reg2 = _regions2[_tr2["note_index"] - 1]
+        _segs2 = _reg2.get("segments") or [_reg2]
+        _x0 = min(s["ins"] for s in _segs2)
+        _x1 = max(s["x1"] for s in _segs2)
+        _y0 = min(l[0] for s in _segs2 for l in s["lines"])
+        _y1 = max(l[1] for s in _segs2 for l in s["lines"])
+        _note_crop = _band2.crop((_x0, _y0, _x1, _y1))
+        _nw, _nh = _note_crop.size
+        assert _nw > 0 and _nh > 0, "%s: note crop is zero-area (%d x %d)" % (_sid2, _nw, _nh)
+
+        _box_strip = list(TRUTH_ROWS[_sid2]["box"])
+        _rel_box = [_box_strip[0] - _x0, _box_strip[1] - _y0, _box_strip[2] - _x0, _box_strip[3] - _y0]
+        _box_inside = (_rel_box[0] >= 0 and _rel_box[1] >= 0
+                       and _rel_box[2] <= _nw and _rel_box[3] <= _nh
+                       and _rel_box[0] < _rel_box[2] and _rel_box[1] < _rel_box[3])
+
+        _overlay = _note_crop.convert("RGB")
+        _draw = ImageDraw.Draw(_overlay)
+        # The overlay is a RECORD for a human, never evidence -- drawn even when the box falls (partly)
+        # outside the crop, which PIL tolerates (it simply clips the line to the canvas).
+        _draw.rectangle([_rel_box[0], _rel_box[1], _rel_box[2] - 1, _rel_box[3] - 1],
+                         outline=NOTECROP_BOX_RGB, width=1)
+
+        _buf = io.BytesIO()
+        _overlay.save(_buf, format="PNG")
+        _data = _buf.getvalue()
+        _nc_sha16 = hashlib.sha256(_data).hexdigest()[:16]
+        _nc_path = NOTECROP_DIR / ("notecrop_%s.png" % _sid2.replace(":", "_"))
+        io.open(str(_nc_path), "wb").write(_data)
+
+        NOTE_CROP_INFO[_sid2] = {"note_crop_sha16": _nc_sha16, "native_wh": [_nw, _nh],
+                                  "box_in_note_crop": _rel_box, "box_inside_note": _box_inside,
+                                  "path": _nc_path}
+
+    assert set(NOTE_CROP_INFO) == set(RUN_SPAN_IDS), \
+        "note crops were built for %d of %d selected rows" % (len(NOTE_CROP_INFO), RUN_N)
 
 
 def _furl(p):
@@ -375,7 +600,7 @@ assert "p657:n0" in _raw_reads_in_set, \
     "p657:n0 is not among the span_ids the loader saw any read for -- the known population is missing"
 
 ALT_BY_SPAN, ALT_LENGTH_MISMATCH = {}, set()
-for _sid in SPAN_IDS:
+for _sid in RUN_SPAN_IDS:
     _usable = usable_reads_for(_sid, RAW_READS_BY_SPAN)
     _texts = [d.get("gated") or d.get("raw") or "" for d in _usable]
     _alts, _flag = aligned_alternatives(TRUTH_ROWS[_sid]["hebrew"], _texts)
@@ -384,12 +609,12 @@ for _sid in SPAN_IDS:
     if _flag == "length-mismatch":
         ALT_LENGTH_MISMATCH.add(_sid)
 
-SPANS_WITH_2PLUS_USABLE = sum(1 for sid in SPAN_IDS if len(usable_reads_for(sid, RAW_READS_BY_SPAN)) >= 2)
+SPANS_WITH_2PLUS_USABLE = sum(1 for sid in RUN_SPAN_IDS if len(usable_reads_for(sid, RAW_READS_BY_SPAN)) >= 2)
 TILES_OFFERING_ALTERNATIVE = sum(len(v) for v in ALT_BY_SPAN.values())
 assert SPANS_WITH_2PLUS_USABLE == 0, \
-    "expected 0 of 74 spans with >=2 usable (A2_spanbox) reads on this data; got %d -- the alternatives " \
+    "expected 0 of %d spans with >=2 usable (A2_spanbox) reads on this run; got %d -- the alternatives " \
     "path IS live now and the page's unconditional 'no second read' box is no longer true" \
-    % SPANS_WITH_2PLUS_USABLE
+    % (RUN_N, SPANS_WITH_2PLUS_USABLE)
 
 
 # ---- per-row pairing: letter rung > word rung > none ---------------------------------------------------
@@ -398,9 +623,9 @@ RUNG_COUNTS = {"letter": 0, "word": 0, "none": 0}
 GAP_MIN_SWEEP = {gm: 0 for gm in GAP_MIN_SWEEP_VALUES}
 WORD_COUNT_DISAGREES = []
 LETTER_WOULD_HAVE_FIRED = 0   # change 1: measured even though the rung is retired
-ROWS = []  # built records, one per span, in SPAN_IDS order
+ROWS = []  # built records, one per span, in RUN_SPAN_IDS order (== SPAN_IDS order outside --pass2)
 
-for sid in SPAN_IDS:
+for sid in RUN_SPAN_IDS:
     tr, cr = TRUTH_ROWS[sid], CUT_ROWS[sid]
     cand = tr["hebrew"]
     cons_chars, n_points = split_consonants_and_points(cand)
@@ -456,7 +681,7 @@ for sid in SPAN_IDS:
                  "letter_rung_would_have_fired": letter_rung_would_have_fired,
                  "gray_im": None})
 
-assert sum(RUNG_COUNTS.values()) == SET_N, "the three rungs do not account for every span"
+assert sum(RUNG_COUNTS.values()) == RUN_N, "the three rungs do not account for every span in the run"
 assert RUNG_COUNTS["letter"] == 0, \
     "the letter rung fired %d time(s) despite LETTER_RUNG_RETIRED -- it is retired because it was " \
     "contradicted 3 times and confirmed never; it must not be selected" % RUNG_COUNTS["letter"]
@@ -467,10 +692,14 @@ TOTAL_TILES = TOTAL_CONSONANT_TILES + TOTAL_GAP_TILES
 
 # ---- change 6: the import expectation, derived read-only from pass 1's own signed file ----------------
 
-def _derive_import_expectation(path):
-    """The counts a correct import of PASS1_PATH must produce, derived from the file itself -- never
+def _derive_import_expectation(path, allowed_ids=None):
+    """The counts a correct import of `path` must produce, derived from the file itself -- never
     hard-coded, so a change to the frozen pass-1 artifact would change these numbers too. Returns None
-    (never invents zeros) if the file is absent."""
+    (never invents zeros) if the file is absent.
+
+    `allowed_ids`, when not None, restricts the derivation to rows whose span_id is in that set --
+    pass 2 (Change 3) needs the expectation recomputed for the 26-row selection, not the 74-row figures,
+    while reusing this same derivation rather than writing a second one."""
     if not path.exists():
         return None
     rows = tiles = confirmed = corrected = disputed = 0
@@ -481,6 +710,8 @@ def _derive_import_expectation(path):
             if not line:
                 continue
             d = json.loads(line)
+            if allowed_ids is not None and d.get("span_id") not in allowed_ids:
+                continue
             rows += 1
             dtiles = d.get("tiles") or []
             tiles += len(dtiles)
@@ -504,7 +735,7 @@ def _derive_import_expectation(path):
             "legacy_faults": legacy_faults, "insertions": insertions}
 
 
-IMPORT_EXPECTATION = _derive_import_expectation(PASS1_PATH)
+IMPORT_EXPECTATION = _derive_import_expectation(PASS1_PATH, set(RUN_SPAN_IDS) if PASS2 else None)
 _EXP_ORDER = ("rows", "tiles", "confirmed", "corrected", "disputed", "notes", "abstains",
               "legacy_faults", "insertions")
 if IMPORT_EXPECTATION is not None:
@@ -581,9 +812,229 @@ input.nt{display:block;width:100%;max-width:520px;box-sizing:border-box;margin:4
 #impwarn{color:#fc9;font-size:11px}
 """
 
+# Pass 2 only (Change 2 rule 1): the note crop is NEVER scaled by CSS -- width:auto is its own natural
+# size, not a scale rule, and a guard below asserts the stylesheet carries no numeric width/height naming
+# .notecrop. The wrap is the horizontally-scrollable container the native-size image sits in. Kept as a
+# SEPARATE string, appended only under --pass2, so the default-mode document (and its byte-identity to
+# 5a0a65b) cannot be touched by a pass-2-only rule.
+CSS_PASS2 = """
+.notecrop-wrap{overflow-x:auto;max-width:100%;border:1px solid #2a2f37;background:#0d0f12;padding:6px}
+img.notecrop{width:auto;height:auto;display:block}
+.badge-outside{color:#fc9}
+"""
+if PASS2:
+    CSS += CSS_PASS2
+
 # The page's own script. Placeholders substituted via .replace(), never %-formatted -- a literal '%' in
 # prose crashed a run of the sheet once, and this file carries far more prose than that one did.
-JS = r"""
+#
+# Two FULL, SEPARATE scripts, never one script conditionally patched: guard 1 requires the default-mode
+# document to be byte-identical to 5a0a65b's, and the importText refactor + new globals (change 3) change
+# the TEXT of the script regardless of what values the new placeholders carry. JS_V1 below is verbatim
+# 5a0a65b -- untouched, never edited again. JS_PASS2 is the pass-2 console. JS is chosen by mode.
+JS_PASS2 = r"""
+var RM=__RM__, SETID=__SETID__, N=__N__, SKEL=__SKEL__, EXP=__EXP__, TYPED_FAULTS=__TYPED_FAULTS__,
+    LEGACY_FAULT=__LEGACY_FAULT__, STOREKEY=__STOREKEY__, AUTOIMPORT=__AUTOIMPORT__,
+    PASS1_EMBED=__PASS1_EMBED__, PASS1_NAME_JS=__PASS1_NAME_JS__,
+    ST={}, CUR_S=null, CUR_I=null, PAL_MODE="tile", CUR_SEQ=null, CUR_AFTER=null;
+function trow(s){if(!ST[s])ST[s]={tv:{},note:"",fault:"",fault_legacy:"",abst:0,ins:[],insSeq:0};
+ if(!ST[s].ins)ST[s].ins=[];if(ST[s].insSeq===undefined)ST[s].insSeq=0;
+ if(ST[s].fault_legacy===undefined)ST[s].fault_legacy="";
+ return ST[s];}
+function tileDiv(s,i){return document.getElementById("t_"+s+"_"+i);}
+function setVerdict(s,i,verdict,chose){
+ var r=trow(s);r.tv[i]={verdict:verdict,chose:chose||""};
+ var td=tileDiv(s,i);if(td)td.setAttribute("data-v",verdict);
+ closePalette();upd();}
+function tOk(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"confirmed","");}
+function tBad(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i"),k=b.getAttribute("data-k");
+ CUR_S=s;CUR_I=i;PAL_MODE="tile";
+ var pal=document.getElementById(k==="gap"?"gpal_gap":"gpal_cons");
+ pal.style.display="block";}
+function tDel(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"deleted","");}
+function tNic(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"not_in_crop","");}
+function closePalette(){var a=document.getElementById("gpal_cons"),b=document.getElementById("gpal_gap");
+ if(a)a.style.display="none";if(b)b.style.display="none";
+ CUR_S=null;CUR_I=null;PAL_MODE="tile";CUR_SEQ=null;CUR_AFTER=null;}
+function chooseLetterGlobal(b){
+ if(PAL_MODE==="ins"){insSetChoice(b.getAttribute("data-letter"),"consonant");return;}
+ if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-letter"));}
+function cantTellGlobal(){if(PAL_MODE==="ins")return;if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"disputed","");}
+function chooseGapGlobal(b){if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-choice"));}
+function insSpaceGlobal(){if(PAL_MODE==="ins")insSetChoice("space","gap");}
+function insKey(a){return a===null?"none":String(a);}
+function insSetChoice(chose,kind){if(CUR_S===null||CUR_SEQ===null)return;
+ var r=trow(CUR_S),i;for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===CUR_SEQ){
+  r.ins[i].kind=kind;r.ins[i].chose=chose;break;}}
+ var after=CUR_AFTER;closePalette();renderInsAt(CUR_S,after);upd();}
+function openIns(b){var s=b.getAttribute("data-s"),a=b.getAttribute("data-after");
+ var after=(a==="none")?null:parseInt(a,10);
+ var r=trow(s),seq=r.insSeq++;
+ r.ins.push({seq:seq,after_i:after,kind:null,chose:""});
+ renderInsAt(s,after);upd();
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function editIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){after=r.ins[i].after_i;break;}}
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function removeIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){after=r.ins[i].after_i;r.ins.splice(i,1);break;}}
+ renderInsAt(s,after);upd();}
+function renderInsAt(s,after){var el=document.querySelector('.insat[data-s="'+s+'"][data-after="'+insKey(after)+'"]');
+ if(!el)return;var r=trow(s),items=(r.ins||[]).filter(function(x){return x.after_i===after;}),h="",i;
+ for(i=0;i<items.length;i++){var it=items[i],shown=it.chose?(it.kind==="gap"?"↔":it.chose):"…";
+  h+='<span class="inschip">'+(it.chose?("<b>"+shown+"</b>"):"<i>pending</i>")+
+   ' <button class="tbtn edit" data-s="'+s+'" data-seq="'+it.seq+'" onclick="editIns(this)">edit</button>'+
+   ' <button class="tbtn rm" data-s="'+s+'" data-seq="'+it.seq+'" onclick="removeIns(this)">x</button></span>';}
+ el.innerHTML=h;}
+function setnote(inp){trow(inp.getAttribute("data-s")).note=inp.value;upd();}
+function markFault(b){var s=b.getAttribute("data-s"),t=b.getAttribute("data-ft"),r=trow(s),i;
+ r.fault=(r.fault===t)?"":t;
+ var btns=document.querySelectorAll('.fault[data-s="'+s+'"]');
+ for(i=0;i<btns.length;i++){btns[i].className=(btns[i].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ upd();}
+function absn(b){var s=b.getAttribute("data-s"),r=trow(s);
+ r.abst=r.abst?0:1;b.className=r.abst?"abst on":"abst";upd();}
+function rowComplete(s){var m=RM[s],r=trow(s),n=m.tiles.length,k=0,i;
+ for(i=0;i<n;i++){if(r.tv[m.tiles[i].i]&&r.tv[m.tiles[i].i].verdict)k++;}
+ var ins=r.ins||[],j;
+ for(j=0;j<ins.length;j++){n++;if(ins[j].chose)k++;}
+ return [k,n];}
+function hasNotInCrop(s){var m=RM[s],r=trow(s),i;
+ for(i=0;i<m.tiles.length;i++){var v=r.tv[m.tiles[i].i];if(v&&v.verdict==="not_in_crop")return true;}
+ return false;}
+function pointsText(s){var el=document.querySelector('.points[data-s="'+s+'"]');
+ return el?el.getAttribute("data-cand"):"";}
+function tileShown(s,i,kind){if(kind==="gap")return "space";
+ var el=tileDiv(s,i);return el?el.getAttribute("data-cand"):"";}
+function tileOut(s,td){var r=trow(s),v=r.tv[td.i]||{verdict:"",chose:""},shown=tileShown(s,td.i,td.kind);
+ if(v.verdict==="deleted")return "";
+ if(v.verdict==="not_in_crop")return td.kind==="gap"?"[ ]":("["+shown+"]");
+ if(v.verdict==="confirmed")return td.kind==="gap"?" ":shown;
+ if(v.verdict==="corrected"){if(td.kind==="gap")return v.chose==="space"?" ":"";return v.chose||"?";}
+ return "?";}
+function insOut(it){if(!it.chose)return "?";return it.kind==="gap"?" ":it.chose;}
+function derivedFor(s){var m=RM[s],r=trow(s),out=[],j,k;
+ var atNone=(r.ins||[]).filter(function(x){return x.after_i===null;}).sort(function(a,b){return a.seq-b.seq;});
+ for(j=0;j<atNone.length;j++)out.push(insOut(atNone[j]));
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j];out.push(tileOut(s,td));
+  var ats=(r.ins||[]).filter(function(x){return x.after_i===td.i;}).sort(function(a,b){return a.seq-b.seq;});
+  for(k=0;k<ats.length;k++)out.push(insOut(ats[k]));}
+ return out.join("");}
+function lines(){
+ /* EVERY span, every time -- empty rows included. A partial download dropped over a full one is how
+    an approval record dies with every byte in it valid. */
+ var K=Object.keys(RM).sort(),L=[],si;
+ for(si=0;si<K.length;si++){var s=K[si],m=RM[s],r=trow(s),tiles=[],j;
+  for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=r.tv[td.i]||{verdict:"",chose:""};
+   tiles.push({i:td.i,kind:td.kind,shown:tileShown(s,td.i,td.kind),verdict:v.verdict||"",
+    chose:v.chose||"",paired_to:td.paired_to});}
+  var kn=rowComplete(s);
+  var ins=(r.ins||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,chose:x.chose};});
+  L.push(JSON.stringify({span_id:s,crop_sha16:m.crop16,candidate_sha16:m.cand16,tiles:tiles,
+   insertions:ins,complete:kn[0]===kn[1],abstain:!!r.abst,fault:r.fault||"",
+   fault_legacy:r.fault_legacy||"",note:r.note,
+   points_shown_not_adjudicated:{text:pointsText(s),n_points:m.n_points,nikud_flag:m.nikud},
+   paired_at:m.paired_at,letter_rung_would_have_fired:!!m.letter_fired,
+   full_span_pixel_signature:!hasNotInCrop(s),
+   derived_consonants:derivedFor(s),derived_from_verdicts:true,
+   signed_from:"pixels, candidate shown as consonant tiles, per-tile verdicts",
+   signed_in:"glyph signer, in the browser",set_sha16:SETID,sheet:SKEL}));}
+ return L.join("\n")+"\n";}
+function upd(){var K=Object.keys(RM).sort(),nc=0,ntouch=0,i;
+ for(i=0;i<K.length;i++){var s=K[i],kn=rowComplete(s),r=trow(s);
+  var rowEl=document.getElementById("row_"+s);
+  if(rowEl){var lab=document.getElementById("kn_"+s);
+   if(lab)lab.textContent=kn[0]+"/"+kn[1]+" tiles"+
+    (hasNotInCrop(s)?" · NOT a full-span pixel signature (not_in_crop present)":"");
+   rowEl.className="row"+(kn[0]===kn[1]?" complete":"");}
+  var dtxt=document.getElementById("der_txt_"+s);if(dtxt)dtxt.textContent=derivedFor(s);
+  if(kn[0]===kn[1])nc++;
+  if(kn[0]>0||r.fault||r.abst||r.note||(r.ins&&r.ins.length))ntouch++;}
+ document.getElementById("ncomplete").textContent=nc;
+ document.getElementById("nleft").textContent=(N-ntouch);
+ var a=document.getElementById("dl");
+ a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(lines());
+ try{localStorage.setItem("gs_"+STOREKEY,JSON.stringify(ST));}catch(e){}}
+function applyState(s){var r=ST[s],m=RM[s];if(!r||!m)return;var j;
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=(r.tv||{})[td.i];
+  var el=tileDiv(s,td.i);if(el&&v&&v.verdict)el.setAttribute("data-v",v.verdict);}
+ var fbtns=document.querySelectorAll('.fault[data-s="'+s+'"]'),fi;
+ for(fi=0;fi<fbtns.length;fi++){
+  fbtns[fi].className=(fbtns[fi].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ var lg=document.querySelector('.legfault[data-s="'+s+'"]');
+ if(lg)lg.style.display=r.fault_legacy?"block":"none";
+ var ab=document.querySelector('.abst[data-s="'+s+'"]');if(ab&&r.abst)ab.className="abst on";
+ var nt=document.querySelector('.nt[data-s="'+s+'"]');if(nt)nt.value=r.note||"";
+ var seen={},ij;
+ for(ij=0;ij<(r.ins||[]).length;ij++){var ak=insKey(r.ins[ij].after_i);
+  if(!seen[ak]){seen[ak]=1;renderInsAt(s,r.ins[ij].after_i);}}}
+function restore(){
+ /* BEST EFFORT ONLY -- the download is the record, not this. */
+ var raw=null;try{raw=localStorage.getItem("gs_"+STOREKEY);}catch(e){raw=null;}
+ if(!raw)return 0;var S=null;try{S=JSON.parse(raw);}catch(e){return 0;}
+ var K=Object.keys(S),i,k=0;
+ for(i=0;i<K.length;i++){var s=K[i];if(!RM[s])continue;ST[s]=S[s];k++;applyState(s);}
+ return k;}
+function renderImportCheck(rc){var el=document.getElementById("impcheck");if(!el)return;
+ if(!EXP){el.textContent="no import expectation available (pass-1 file not found at generation time)";
+  return;}
+ var keys=["rows","tiles","confirmed","corrected","disputed","notes","abstains","legacy_faults",
+  "insertions"],h="",i;
+ for(i=0;i<keys.length;i++){var k=keys[i],r=rc[k]||0,e=EXP[k];
+  h+=k+": restored "+r+" vs expected "+e+" -- "+(r===e?"PASS":"MISMATCH")+"<br>";}
+ el.innerHTML=h;}
+function importText(txt,fname){
+ /* The whole of the former doImport body, now shared by the file-input path AND pass 2's auto-import
+    (Change 3) -- ONE importer, same span_id+crop_sha16 matching, same refusal list, same
+    renderImportCheck, whichever path called it. */
+ var ln=(txt||"").split("\n"),i,bad=[],k=0;
+ var rc={rows:0,tiles:0,confirmed:0,corrected:0,disputed:0,notes:0,abstains:0,legacy_faults:0,
+  insertions:0};
+ for(i=0;i<ln.length;i++){var s=ln[i].replace(/^\s+|\s+$/g,"");if(!s)continue;
+  var d=null;try{d=JSON.parse(s);}catch(e){continue;}
+  if(!d.span_id||!RM[d.span_id])continue;
+  if(d.crop_sha16!==RM[d.span_id].crop16){bad.push(d.span_id);continue;}
+  var rr=trow(d.span_id);rr.tv={};var tj,dtiles=d.tiles||[];
+  rc.rows++;rc.tiles+=dtiles.length;
+  for(tj=0;tj<dtiles.length;tj++){var tt=dtiles[tj];
+   if(tt.verdict){rr.tv[tt.i]={verdict:tt.verdict,chose:tt.chose||""};
+    if(tt.verdict==="confirmed")rc.confirmed++;
+    else if(tt.verdict==="corrected")rc.corrected++;
+    else if(tt.verdict==="disputed")rc.disputed++;}}
+  rr.note=d.note||"";if(rr.note)rc.notes++;
+  rr.abst=d.abstain?1:0;if(d.abstain)rc.abstains++;
+  rr.fault=(TYPED_FAULTS.indexOf(d.fault)>=0)?d.fault:"";
+  rr.fault_legacy=d.fault_legacy?d.fault_legacy:((d.fault===LEGACY_FAULT)?LEGACY_FAULT:"");
+  if(rr.fault_legacy)rc.legacy_faults++;
+  rr.ins=(d.insertions||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,
+   chose:x.chose||""};});
+  rr.insSeq=rr.ins.length?(Math.max.apply(null,rr.ins.map(function(x){return x.seq;}))+1):0;
+  rc.insertions+=rr.ins.length;
+  applyState(d.span_id);k++;}
+ var w=document.getElementById("impwarn");
+ w.textContent=bad.length?("NOT restored (crop_sha16 differs -- a re-cut span must not inherit a "+
+  "verdict): "+bad.join(", ")):"";
+ document.getElementById("impmsg").textContent="imported "+k+" row(s) from "+fname;
+ renderImportCheck(rc);
+ upd();}
+function doImport(inp){
+ var f=inp.files&&inp.files[0];if(!f)return;
+ var rd=new FileReader();
+ rd.onload=function(){importText(rd.result||"",f.name);};
+ rd.readAsText(f,"utf-8");}
+window.addEventListener("load",function(){var k=restore();
+ document.getElementById("rst").textContent=k?("restored "+k+" row(s) from this browser"):
+  "nothing restored from this browser";
+ if(AUTOIMPORT&&k===0){importText(PASS1_EMBED,PASS1_NAME_JS);}
+ upd();});
+"""
+
+# JS_V1 -- verbatim 5a0a65b, byte for byte. Do not edit this block; edit JS_PASS2 above instead.
+JS_V1 = r"""
 var RM=__RM__, SETID=__SETID__, N=__N__, SKEL=__SKEL__, EXP=__EXP__, TYPED_FAULTS=__TYPED_FAULTS__,
     LEGACY_FAULT=__LEGACY_FAULT__,
     ST={}, CUR_S=null, CUR_I=null, PAL_MODE="tile", CUR_SEQ=null, CUR_AFTER=null;
@@ -777,13 +1228,29 @@ window.addEventListener("load",function(){var k=restore();
   "nothing restored from this browser";upd();});
 """
 
-H = ['<!doctype html><meta charset="utf-8"><title>glyph signer %s - %d spans, per-glyph verdicts</title>'
-     % (SET, SET_N), "<style>%s</style>" % CSS]
-H.append("<h1>Glyph signer <code>%s</code> &mdash; %d spans, per-glyph verdicts</h1>" % (SET, SET_N))
+JS = JS_PASS2 if PASS2 else JS_V1
+
+_TITLE_SUFFIX = " (pass 2)" if PASS2 else ""
+H = ['<!doctype html><meta charset="utf-8"><title>glyph signer %s%s - %d spans, per-glyph verdicts</title>'
+     % (SET, _TITLE_SUFFIX, RUN_N), "<style>%s</style>" % CSS]
+H.append("<h1>Glyph signer <code>%s</code>%s &mdash; %d spans, per-glyph verdicts</h1>"
+         % (SET, " &mdash; PASS 2" if PASS2 else "", RUN_N))
 H.append('<div class="sub">FILE pages throughout; printed = file &minus; %d. A2 span box, PAD=%d native '
          'px, over a clean tree. The candidate is SHOWN here (it was withheld on the signing sheet); '
          'every property of it -- each consonant, each word gap, the pointing -- gets its own verdict. '
          'Nothing is accepted by default.</div>' % (PRINTED_OFFSET, HAD.PAD))
+
+# Change 1's last bullet: state near the top which dispositions were selected and how many of each --
+# derived from the ingest's own recomputed tally (the same one the module-level assertion checked), printed.
+if PASS2:
+    _dispo_lines = "".join(
+        '<li><code>%s</code> &mdash; <b>%d</b> row(s): %s</li>'
+        % (html.escape(d), _ingest_dispo_counts.get(d, 0), html.escape(why))
+        for d, why in sorted(PASS2_DISPOSITIONS.items()))
+    H.append('<div class="note loud"><b>Pass 2 selection.</b> Pass 1 signed all 74 and held %d for '
+             'reasons about the CANDIDATE TEXT, not the box. This page sheets exactly those %d rows, '
+             'derived from <code>%s</code>, a second time, with the full note crop beside each span '
+             'crop:<ul>%s</ul></div>' % (RUN_N, RUN_N, html.escape(INGEST_NAME), _dispo_lines))
 
 H.append('<div class="note loud"><b>No second read exists for this set.</b> Of the four stored-reads '
          'files this page loads, %d read(s) across this set&rsquo;s %d spans were found (liveness: the '
@@ -793,8 +1260,8 @@ H.append('<div class="note loud"><b>No second read exists for this set.</b> Of t
          'different pixels, not evidence about this crop). Usable reads: <b>%d</b>. Spans with two or '
          'more usable reads: <b>%d of %d</b>. So every &#10003; here confirms a SINGLE extraction; '
          'agreement between arms is not available as evidence on this set.</div>'
-         % (READS_SEEN, SET_N, _ALT_FILES_SEEN, READS_USABLE, READS_SEEN, SET_APERTURE, READS_REJECTED,
-            READS_USABLE, SPANS_WITH_2PLUS_USABLE, SET_N))
+         % (READS_SEEN, RUN_N, _ALT_FILES_SEEN, READS_USABLE, READS_SEEN, SET_APERTURE, READS_REJECTED,
+            READS_USABLE, SPANS_WITH_2PLUS_USABLE, RUN_N))
 
 H.append('<div class="note">The candidate is CONSONANTAL here: points (nikud/cantillation) are shown '
          'verbatim on each row&rsquo;s points line but are never tiled and never adjudicated -- a '
@@ -813,10 +1280,10 @@ H.append('<table class="sum">'
          '<tr><td>word-count disagreement</td><td><b>%d</b> row(s): %s</td></tr>'
          '<tr><td>alternatives</td><td>reads seen <b>%d</b>, usable (this aperture) <b>%d</b>, spans '
          'with &ge;2 usable <b>%d</b> of %d, tiles offering an alternative <b>%d</b></td></tr>'
-         '</table>' % (SET_N, TOTAL_TILES, TOTAL_CONSONANT_TILES, TOTAL_GAP_TILES,
+         '</table>' % (RUN_N, TOTAL_TILES, TOTAL_CONSONANT_TILES, TOTAL_GAP_TILES,
                        RUNG_COUNTS["word"], RUNG_COUNTS["none"], LETTER_WOULD_HAVE_FIRED,
                        len(WORD_COUNT_DISAGREES), html.escape(", ".join(WORD_COUNT_DISAGREES)) or "none",
-                       READS_SEEN, READS_USABLE, SPANS_WITH_2PLUS_USABLE, SET_N,
+                       READS_SEEN, READS_USABLE, SPANS_WITH_2PLUS_USABLE, RUN_N,
                        TILES_OFFERING_ALTERNATIVE))
 
 # Change 6: the import expectation, derived read-only from pass 1's own signed file, never hard-coded.
@@ -894,6 +1361,32 @@ for r in ROWS:
     H.append('<figure><img src="%s" width="%d" height="%d"><figcaption>native crop, unmagnified, for '
               'reference</figcaption></figure>'
              % (_uri_bytes(crop_path), cr["crop"]["size"][0], cr["crop"]["size"][1]))
+
+    if PASS2:
+        # Change 4: what pass 1 concluded about THIS row, in the ingest's own words -- never re-phrased.
+        H.append('<div class="note loud">%s</div>' % html.escape(_pass1_label(sid)))
+
+        # Change 3: pass 1's own verdicts are already open on this page (auto-imported, Change 3); this
+        # is additionally the signer's own note and signed_from VERBATIM, read-only, so a row whose crop
+        # was re-cut is obvious.
+        p1row = PASS1_ROWS[sid]
+        H.append('<div class="sub">your note, pass 1: <code>%s</code> &nbsp;&middot;&nbsp; signed_from, '
+                 'pass 1: <code>%s</code></div>'
+                 % (html.escape(p1row.get("note") or "(none)"), html.escape(p1row.get("signed_from") or "")))
+
+        # Change 2: the whole footnote this span sits in, at NATIVE size, in a horizontally scrollable
+        # container (rule 1) -- never CSS-scaled (guard asserts this over the stylesheet text). The span
+        # box is drawn on it (rule 2) as a record for a human, never evidence; linked, never embedded
+        # (rule 3) -- no note-crop pixel may ever reach a model.
+        nci = NOTE_CROP_INFO[sid]
+        _badge = "" if nci["box_inside_note"] else \
+            ' <b class="badge-outside">box-outside-note</b>'
+        H.append('<figure class="notecrop-wrap"><div style="overflow-x:auto">'
+                 '<img class="notecrop" src="%s" width="%d" height="%d"></div>'
+                 '<figcaption>whole footnote, native %d&times;%d, span box drawn in <code>%s</code>%s'
+                 '</figcaption></figure>'
+                 % (_furl(nci["path"]), nci["native_wh"][0], nci["native_wh"][1],
+                    nci["native_wh"][0], nci["native_wh"][1], NOTECROP_BOX_HEX, _badge))
 
     tiles_meta = []
     if r["paired_at"] == "none":
@@ -985,16 +1478,24 @@ H.append('<div id="bar">complete <b id="ncomplete">0</b> of %d &nbsp;&middot;&nb
          '<span id="impmsg" style="color:#8aa"></span><div id="impwarn"></div>'
          '&nbsp;&middot;&nbsp; <span id="rst" style="color:#8aa"></span>'
          '<div class="sub">The downloaded file is the record; the browser is not.</div></div>'
-         % (SET_N, SET_N, SKEL_NAME, SET_N))
+         % (RUN_N, RUN_N, SKEL_NAME, RUN_N))
+
+# Pass 2 (judgment call, see module docstring): its own localStorage key, so a pass-2 draft can never
+# silently intermix with a pass-1 draft for the same span_ids.
+STOREKEY = SET + "_pass2" if PASS2 else SET
 
 H.append("<script>"
          + JS.replace("__RM__", json.dumps(RM, sort_keys=True))
              .replace("__SETID__", json.dumps(SET))
-             .replace("__N__", str(SET_N))
+             .replace("__N__", str(RUN_N))
              .replace("__SKEL__", json.dumps(SKEL_NAME))
              .replace("__EXP__", json.dumps(IMPORT_EXPECTATION))
              .replace("__TYPED_FAULTS__", json.dumps([ft for ft, _ in FAULT_TYPES]))
              .replace("__LEGACY_FAULT__", json.dumps(LEGACY_FAULT_VALUE))
+             .replace("__STOREKEY__", json.dumps(STOREKEY))
+             .replace("__AUTOIMPORT__", json.dumps(bool(PASS2)))
+             .replace("__PASS1_EMBED__", json.dumps(PASS1_EMBED_TEXT))
+             .replace("__PASS1_NAME_JS__", json.dumps(PASS1_NAME))
          + "</script>")
 
 doc = "\n".join(H)
@@ -1009,7 +1510,7 @@ assert READABLE.search(_PROBE), "the Hebrew detector cannot match Hebrew at all 
 
 # 1. Every tile carries all four per-tile controls (check, cross, delete, not-in-crop); the insert
 # control appears once before the first tile and once after every tile in every row, i.e.
-# TOTAL_TILES + SET_N times (rows adjacent-pairs + 1 slot each).
+# TOTAL_TILES + RUN_N times (rows adjacent-pairs + 1 slot each). RUN_N == SET_N outside --pass2.
 _n_ok = doc.count('onclick="tOk(this)"')
 _n_no = doc.count('onclick="tBad(this)"')
 _n_del = doc.count('onclick="tDel(this)"')
@@ -1019,10 +1520,10 @@ assert _n_ok == TOTAL_TILES and _n_no == TOTAL_TILES and _n_del == TOTAL_TILES a
     "a tile missing any one of the four controls cannot record that verdict" \
     % (_n_ok, _n_no, _n_del, _n_nic, TOTAL_TILES)
 _n_ins = doc.count('onclick="openIns(this)"')
-assert _n_ins == TOTAL_TILES + SET_N, \
-    "the insert (+) control appears %d times, not %d (TOTAL_TILES %d + SET_N %d, one slot before the " \
+assert _n_ins == TOTAL_TILES + RUN_N, \
+    "the insert (+) control appears %d times, not %d (TOTAL_TILES %d + RUN_N %d, one slot before the " \
     "first tile and one after every tile, per row) -- an insertion position is missing" \
-    % (_n_ins, TOTAL_TILES + SET_N, TOTAL_TILES, SET_N)
+    % (_n_ins, TOTAL_TILES + RUN_N, TOTAL_TILES, RUN_N)
 
 # 2. No tile ships with a verdict.
 assert 'class="tile ok"' not in doc and 'class="tile bad"' not in doc and 'verdict="' not in doc, \
@@ -1041,17 +1542,47 @@ assert not _pre, "%d tile(s) ship a data-v (verdict) attribute before any signer
 _cand_attrs = HB_CAND_ATTR.findall(doc)
 assert all(READABLE.search(a) for a in _cand_attrs if a), \
     "a data-cand attribute carries no Hebrew at all -- the probe pattern is not finding what it should"
-assert len(_cand_attrs) == TOTAL_CONSONANT_TILES + SET_N, \
+assert len(_cand_attrs) == TOTAL_CONSONANT_TILES + RUN_N, \
     "%d data-cand attribute(s) in the document, expected %d (%d consonant tiles + %d points lines) -- " \
     "the candidate is appearing somewhere other than a tile or a points line" \
-    % (len(_cand_attrs), TOTAL_CONSONANT_TILES + SET_N, TOTAL_CONSONANT_TILES, SET_N)
+    % (len(_cand_attrs), TOTAL_CONSONANT_TILES + RUN_N, TOTAL_CONSONANT_TILES, RUN_N)
 _doc_wo_palette = re.sub(r'<div id="gpal_cons".*?</div>', '', doc, count=1, flags=re.S)
 _doc_wo_cand = HB_CAND_ATTR.sub('data-cand=""', _doc_wo_palette)
-_leak = READABLE.search(_doc_wo_cand)
+# Pass 2 deliberately embeds pass 1's own signed verdicts verbatim (change 3) so the browser can
+# auto-import them with no file prompt and no network call; at least one held row's pass-1 tile
+# verdict carries a real consonant (p493:n3, disposition abstain_candidate_wrong), so the embed text
+# itself contains Hebrew. That is a SECOND, precisely-located exemption (judgment call 6, see module
+# docstring) -- never a loosened comparison: strip the EXACT json.dumps(PASS1_EMBED_TEXT) substring,
+# and only that substring, before testing for a leak.
+_doc_wo_cand_p1 = _doc_wo_cand
+if PASS2:
+    _p1_embed_js = json.dumps(PASS1_EMBED_TEXT)
+    assert _p1_embed_js in _doc_wo_cand_p1, \
+        "the pass-1 embed text is not present verbatim in the document -- change 3's auto-import " \
+        "has nothing to import"
+    _doc_wo_cand_p1 = _doc_wo_cand_p1.replace(_p1_embed_js, "", 1)
+_leak = READABLE.search(_doc_wo_cand_p1)
 assert not _leak, \
-    "Hebrew/Greek leaks outside a data-cand attribute or the fixed letter palette at offset %d (%r)" \
+    "Hebrew/Greek leaks outside a data-cand attribute, the fixed letter palette, or the pass-1 embed " \
+    "at offset %d (%r)" \
     % (_leak.start() if _leak else -1,
-       _doc_wo_cand[max(0, _leak.start() - 40):_leak.start() + 10] if _leak else "")
+       _doc_wo_cand_p1[max(0, _leak.start() - 40):_leak.start() + 10] if _leak else "")
+
+# 3b (change 3). The pass-1 embed is a round trip, not a hope: it must parse back to exactly RUN_N
+# lines, one per selected span, each a crop_sha16 that matches what this run cut.
+if PASS2:
+    _p1_back = [json.loads(_l) for _l in PASS1_EMBED_TEXT.splitlines() if _l.strip()]
+    assert len(_p1_back) == RUN_N, \
+        "the embedded pass-1 text parses back to %d lines, not RUN_N (%d) -- the embed does not " \
+        "describe this run's selection" % (len(_p1_back), RUN_N)
+    _p1_back_ids = sorted(d.get("span_id") for d in _p1_back)
+    assert _p1_back_ids == sorted(RUN_SPAN_IDS), \
+        "the embedded pass-1 span_ids do not match this run's selection: %s" % _p1_back_ids
+    _p1_back_mismatch = [d["span_id"] for d in _p1_back
+                          if d.get("crop_sha16") != RM[d["span_id"]]["crop16"]]
+    assert not _p1_back_mismatch, \
+        "the embedded pass-1 crop_sha16 disagrees with this run's own cut for %s -- the auto-import " \
+        "would silently match the wrong pixels" % _p1_back_mismatch
 
 # 4. Note-context and page links by file:// path; no note-crop pixels embedded; the span crops ARE
 # embedded (liveness for the byte test, carried over from the sheet).
@@ -1060,23 +1591,55 @@ def _mid64(p):
     return b[len(b) // 2:len(b) // 2 + 64]
 
 
-assert all(_mid64(CUT_ROWS[sid]["crop"]["path"]) in doc for sid in SPAN_IDS), \
+assert all(_mid64(CUT_ROWS[sid]["crop"]["path"]) in doc for sid in RUN_SPAN_IDS), \
     "the embed detector cannot find the span crops, which ARE embedded in this document (the native " \
     "reference image) -- it would pass on a note crop too"
-_emb = [sid for sid in SPAN_IDS
+_emb = [sid for sid in RUN_SPAN_IDS
         if CUT_ROWS[sid].get("note_context") and _mid64(CUT_ROWS[sid]["note_context"]["path"]) in doc]
 assert not _emb, "note pixels are EMBEDDED in the page, not linked, for %s" % _emb
-_nolink = [sid for sid in SPAN_IDS
+_nolink = [sid for sid in RUN_SPAN_IDS
            if CUT_ROWS[sid].get("note_context") and _furl(CUT_ROWS[sid]["note_context"]["path"]) not in doc]
 assert not _nolink, "a note crop was derived at cut time and the page does not link it: %s" % _nolink
-assert all(_furl(CUT_ROWS[sid]["page_png"]) in doc for sid in SPAN_IDS), \
+assert all(_furl(CUT_ROWS[sid]["page_png"]) in doc for sid in RUN_SPAN_IDS), \
     "a row does not link its native page PNG"
 
-# 5. Row count == 74; every span in the frozen set is present.
-assert doc.count('<div class="row" id="row_') == SET_N, \
-    "the page renders %d rows, not %d" % (doc.count('<div class="row" id="row_'), SET_N)
-assert all(('id="row_%s"' % html.escape(sid)) in doc for sid in SPAN_IDS), \
-    "a span in the frozen set has no row -- a page that silently narrows is how the 19-span approval " \
+# 4b (change 2, pass 2 only). Exactly one whole-note crop per row, each <img class="notecrop"> carrying
+# its native width and height; no CSS rule or inline style scales it -- width:auto/height:auto is the
+# only sizing a .notecrop may ever have.
+_notecrop_imgs = re.findall(r'<img class="notecrop"[^>]*>', doc)
+if PASS2:
+    assert len(_notecrop_imgs) == RUN_N, \
+        "the page renders %d note crops, not RUN_N (%d) -- change 2 requires exactly one per row" \
+        % (len(_notecrop_imgs), RUN_N)
+    for _sid3 in RUN_SPAN_IDS:
+        _w3, _h3 = NOTE_CROP_INFO[_sid3]["native_wh"]
+        assert ('width="%d" height="%d"' % (_w3, _h3)) in doc, \
+            "row %s's note crop does not carry its native size %dx%d in the <img> tag" % (_sid3, _w3, _h3)
+else:
+    assert not _notecrop_imgs, "a note crop is rendered outside --pass2 -- the pass-1 console must not change"
+_scale_rule = re.search(r'\.notecrop\s*\{[^}]*\b(?:width|height)\s*:\s*(?!auto\b)[^;}]+', CSS)
+assert not _scale_rule, \
+    "a CSS rule scales .notecrop numerically (%r) -- native pixels must render at native size" \
+    % (_scale_rule.group(0) if _scale_rule else "")
+_notecrop_inline_scale = [t for t in _notecrop_imgs
+                           if re.search(r'style="[^"]*\b(?:width|height)\s*:\s*(?!auto\b)', t)]
+assert not _notecrop_inline_scale, \
+    "an inline style scales a .notecrop numerically: %s" % _notecrop_inline_scale[:1]
+
+# 4c (change 2 rule 3, pass 2 only). The note-crop directory's WHY.txt exists and states the no-send rule.
+if PASS2:
+    assert NOTECROP_DIR.joinpath("WHY.txt").exists(), \
+        "the note-crop directory has no WHY.txt -- the no-send-to-a-model rule is not recorded beside " \
+        "the pixels it governs"
+    _why_text = io.open(str(NOTECROP_DIR / "WHY.txt"), encoding="utf-8").read()
+    assert "no note crop" in _why_text.lower() and "model" in _why_text.lower(), \
+        "WHY.txt exists but does not state the no-send-to-a-model rule in words a reader would find"
+
+# 5. Row count == the derived selection; every selected span present.
+assert doc.count('<div class="row" id="row_') == RUN_N, \
+    "the page renders %d rows, not %d" % (doc.count('<div class="row" id="row_'), RUN_N)
+assert all(('id="row_%s"' % html.escape(sid)) in doc for sid in RUN_SPAN_IDS), \
+    "a span in the selection has no row -- a page that silently narrows is how the 19-span approval " \
     "was lost"
 
 # 6. The palette offers exactly len(CONSONANTS) letters -- asserted against the derived list, not a
@@ -1094,11 +1657,11 @@ assert doc.count('data-choice="space"') == 1 and doc.count('data-choice="no-spac
 assert "rung <b>letter</b>" not in doc, \
     "a row renders rung=letter -- the letter rung is retired by directive and must not be selected"
 
-# 6c (change 4). Exactly three typed fault buttons per row, 3 * SET_N total; the legacy fault value is
+# 6c (change 4). Exactly three typed fault buttons per row, 3 * RUN_N total; the legacy fault value is
 # shown (as text, when imported) but never offered as a selectable button.
-assert doc.count('onclick="markFault(this)"') == 3 * SET_N, \
-    "the typed fault buttons appear %d times, not %d (3 * SET_N) -- a row is missing one of the three " \
-    "mutually-exclusive fault types" % (doc.count('onclick="markFault(this)"'), 3 * SET_N)
+assert doc.count('onclick="markFault(this)"') == 3 * RUN_N, \
+    "the typed fault buttons appear %d times, not %d (3 * RUN_N) -- a row is missing one of the three " \
+    "mutually-exclusive fault types" % (doc.count('onclick="markFault(this)"'), 3 * RUN_N)
 assert ('data-ft="%s"' % LEGACY_FAULT_VALUE) not in doc, \
     "the legacy fault value %r is offered as a selectable button -- it must only ever be shown as text " \
     "needing re-typing" % LEGACY_FAULT_VALUE
@@ -1109,10 +1672,14 @@ if IMPORT_EXPECTATION is not None:
         "the import expectation line derived from %s does not appear in the document -- a number " \
         "computed but not shown cannot be checked by the person doing the import" % PASS1_NAME
 
-# 7. Every JS function the HTML calls is defined in the document.
-for _fn in ("tOk", "tBad", "tDel", "tNic", "chooseLetterGlobal", "cantTellGlobal", "chooseGapGlobal",
-            "setnote", "markFault", "absn", "upd", "lines", "restore", "doImport", "applyState",
-            "closePalette", "openIns", "editIns", "removeIns", "insSpaceGlobal"):
+# 7. Every JS function the HTML calls is defined in the document. importText exists only in the
+# pass-2 script (JS_PASS2) -- JS_V1 is 5a0a65b verbatim and must not be asked to define it.
+_fns = ["tOk", "tBad", "tDel", "tNic", "chooseLetterGlobal", "cantTellGlobal", "chooseGapGlobal",
+        "setnote", "markFault", "absn", "upd", "lines", "restore", "doImport",
+        "applyState", "closePalette", "openIns", "editIns", "removeIns", "insSpaceGlobal"]
+if PASS2:
+    _fns.append("importText")
+for _fn in _fns:
     assert ("function %s(" % _fn) in doc, "the page calls %s and does not define it" % _fn
 
 # extra, cheap: no "accept all" control of any kind.
@@ -1120,25 +1687,41 @@ assert "accept all" not in doc.lower() and "acceptall" not in doc.lower() and "a
     "an accept-all control exists -- the spec forbids one, not even per row"
 
 PROSE = re.sub(r"data:image/png;base64,[A-Za-z0-9+/=]+", "<payload>", doc)
-assert doc.count("data:image/png;base64,") >= SET_N, \
+assert doc.count("data:image/png;base64,") >= RUN_N, \
     "the payload pattern matches %d things in a document with %d rows -- it does not describe this file" \
-    % (doc.count("data:image/png;base64,"), SET_N)
+    % (doc.count("data:image/png;base64,"), RUN_N)
 assert PROSE.count("<payload>") == doc.count("data:image/png;base64,"), \
     "the payload strip hit %d of %d payloads" % (PROSE.count("<payload>"), doc.count("data:image/png;base64,"))
 assert "base64," not in PROSE, "a payload survived the strip and is inside the prose digest"
 PDIG = hashlib.sha256(PROSE.encode("utf-8")).hexdigest()[:8]
 
-sig = ";".join("%s:%s:%s" % (sid, RM[sid]["crop16"], RM[sid]["paired_at"]) for sid in SPAN_IDS) \
+# Guard list item 1. Without --pass2 the rendered document must be BYTE-IDENTICAL to 5a0a65b's: pass 2
+# must never alter the pass-1 console. Checked against the two numbers the spec itself names, not a
+# locally-recomputed baseline (which could drift with this very file and stop meaning anything).
+if not PASS2:
+    assert PDIG == "0188f491", \
+        "prose digest is %s, not 5a0a65b's 0188f491 -- pass 2's own code has changed the pass-1 console" \
+        % PDIG
+    assert len(doc.encode("utf-8")) == 926197, \
+        "document is %d bytes, not 5a0a65b's 926197 -- pass 2's own code has changed the pass-1 console" \
+        % len(doc.encode("utf-8"))
+
+sig = ";".join("%s:%s:%s" % (sid, RM[sid]["crop16"], RM[sid]["paired_at"]) for sid in RUN_SPAN_IDS) \
     + "|prose:" + PDIG
 DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
-OUT = HAD.DATA / ("glyphsign_%s_%dspan_%s.html" % (SET, SET_N, DIG))
+# Output filename and sidecar carry "pass2" and the row count under --pass2, so the two consoles can
+# never be confused; the pass-1 console's own name (this else-branch) must not change.
+if PASS2:
+    OUT = HAD.DATA / ("glyphsign_%s_pass2_%dspan_%s.html" % (SET, RUN_N, DIG))
+else:
+    OUT = HAD.DATA / ("glyphsign_%s_%dspan_%s.html" % (SET, SET_N, DIG))
 SIDE = OUT.with_suffix(".json")
 SKEL = HAD.DATA / SKEL_NAME
 
 if SIDE.exists():
     _prev = _load_json(SIDE)
     _was = (_prev or {}).get("crop_sha16") or {}
-    assert not _was or _was == {sid: RM[sid]["crop16"] for sid in SPAN_IDS}, \
+    assert not _was or _was == {sid: RM[sid]["crop16"] for sid in RUN_SPAN_IDS}, \
         "%s already records a look at DIFFERENT pixels. Overwriting it would destroy the record of " \
         "what was approved." % SIDE.name
 
@@ -1148,7 +1731,12 @@ GIT_END = git_state(_HERE)
 json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "git_start": GIT_START, "git_end": GIT_END,
            "provisional": provisional(GIT_START, GIT_END),
-           "set_sha16": SET, "n": SET_N, "source": {"truth": TRUTH_PATH.name, "cut": CUT.name},
+           "set_sha16": SET, "n": RUN_N, "pass2": PASS2,
+           "pass2_selection": ({"dispositions": sorted(PASS2_DISPOSITIONS),
+                                 "counts": {d: _ingest_dispo_counts.get(d, 0)
+                                            for d in sorted(PASS2_DISPOSITIONS)}}
+                                if PASS2 else None),
+           "source": {"truth": TRUTH_PATH.name, "cut": CUT.name},
            "page_numbering": "FILE pages (printed = file - %d)" % PRINTED_OFFSET,
            "shown": "the candidate, as per-glyph consonant tiles with per-tile verdicts; points shown "
                     "verbatim and not adjudicated",
@@ -1172,7 +1760,13 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                             "length_mismatch_rows": sorted(ALT_LENGTH_MISMATCH),
                             "liveness": "reads_seen_in_set >= 6 and p657:n0 present, asserted live"},
            "prose_digest": PDIG,
-           "crop_sha16": {sid: RM[sid]["crop16"] for sid in SPAN_IDS}},
+           "crop_sha16": {sid: RM[sid]["crop16"] for sid in RUN_SPAN_IDS},
+           "note_crops": ({sid: {"note_crop_sha16": NOTE_CROP_INFO[sid]["note_crop_sha16"],
+                                  "native_wh": NOTE_CROP_INFO[sid]["native_wh"],
+                                  "box_in_note_crop": NOTE_CROP_INFO[sid]["box_in_note_crop"],
+                                  "box_inside_note": NOTE_CROP_INFO[sid]["box_inside_note"]}
+                           for sid in RUN_SPAN_IDS}
+                          if PASS2 else None)},
           io.open(str(SIDE), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 skel = [{"span_id": sid, "crop_sha16": RM[sid]["crop16"], "candidate_sha16": RM[sid]["cand16"],
@@ -1186,12 +1780,12 @@ skel = [{"span_id": sid, "crop_sha16": RM[sid]["crop16"], "candidate_sha16": RM[
          "paired_at": RM[sid]["paired_at"], "letter_rung_would_have_fired": RM[sid]["letter_fired"],
          "signed_from": "pixels, candidate shown as consonant tiles, per-tile verdicts",
          "signed_in": "glyph signer, in the browser", "set_sha16": SET, "sheet": OUT.name}
-        for sid in SPAN_IDS]
+        for sid in RUN_SPAN_IDS]
 sk = "\n".join(json.dumps(x, ensure_ascii=False) for x in skel) + "\n"
 io.open(str(SKEL), "w", encoding="utf-8").write(sk)
 
 print("glyph signer %s" % OUT.name)
-print("  rows %d   tiles %d (consonant %d, gap %d)" % (SET_N, TOTAL_TILES, TOTAL_CONSONANT_TILES, TOTAL_GAP_TILES))
+print("  rows %d   tiles %d (consonant %d, gap %d)" % (RUN_N, TOTAL_TILES, TOTAL_CONSONANT_TILES, TOTAL_GAP_TILES))
 print("  rungs: word %d, none %d" % (RUNG_COUNTS["word"], RUNG_COUNTS["none"]))
 print("  letter rung would have fired on %d row(s) (retired)" % LETTER_WOULD_HAVE_FIRED)
 print("  tile controls: confirm %d, dispute-open %d, delete %d, not-in-crop %d, insert %d"
@@ -1203,8 +1797,16 @@ else:
 print("  word-count disagreement: %d row(s): %s" % (len(WORD_COUNT_DISAGREES), ", ".join(WORD_COUNT_DISAGREES)))
 print("  alternatives: reads seen %d, rejected (aperture != %s) %d, usable %d; spans with >=2 usable %d of %d; "
       "tiles offering an alternative %d"
-      % (READS_SEEN, SET_APERTURE, READS_REJECTED, READS_USABLE, SPANS_WITH_2PLUS_USABLE, SET_N,
+      % (READS_SEEN, SET_APERTURE, READS_REJECTED, READS_USABLE, SPANS_WITH_2PLUS_USABLE, RUN_N,
          TILES_OFFERING_ALTERNATIVE))
 print("  prose digest %s   document bytes %d" % (PDIG, len(doc.encode("utf-8"))))
+if PASS2:
+    print("  pass 2 selection: %s"
+          % ", ".join("%s %d" % (d, _ingest_dispo_counts.get(d, 0)) for d in sorted(PASS2_DISPOSITIONS)))
+    _box_outside_n = sum(1 for sid in RUN_SPAN_IDS if not NOTE_CROP_INFO[sid]["box_inside_note"])
+    _ws = [NOTE_CROP_INFO[sid]["native_wh"][0] for sid in RUN_SPAN_IDS]
+    _hs = [NOTE_CROP_INFO[sid]["native_wh"][1] for sid in RUN_SPAN_IDS]
+    print("  note crops: box_inside_note false on %d row(s); native size w[%d,%d] h[%d,%d]"
+          % (_box_outside_n, min(_ws), max(_ws), min(_hs), max(_hs)))
 print("  sidecar %s   skeleton %s" % (SIDE.name, SKEL.name))
 print(banner(GIT_START, GIT_END))
