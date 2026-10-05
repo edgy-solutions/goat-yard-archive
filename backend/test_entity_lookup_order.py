@@ -102,6 +102,11 @@ def test_candidate_order_is_identical_across_processes_with_different_hash_seeds
     assert "scapegoat" in seen.pop()
 
 
+# A hand-rolled suite reports what it happened to collect. If a test is renamed out of the
+# test_ prefix, deleted, or shadowed by a duplicate name, the run still prints "N/N passed"
+# and looks healthy. Assert the COUNT so a silently shrinking suite fails loudly.
+EXPECTED_TESTS = 10
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
@@ -115,4 +120,8 @@ if __name__ == "__main__":
             traceback.print_exc()
     print("")
     print("%d/%d passed" % (len(tests) - failed, len(tests)))
+    if len(tests) != EXPECTED_TESTS:
+        print("FAIL suite: collected %d tests, expected %d - a test was lost or added "
+              "without updating EXPECTED_TESTS" % (len(tests), EXPECTED_TESTS))
+        failed += 1
     sys.exit(1 if failed else 0)
