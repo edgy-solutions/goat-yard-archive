@@ -114,6 +114,13 @@ WORD_GAP_MIN, WORD_RUN_MIN = 10, 8
 INK_THR = 128
 GAP_MIN_SWEEP_VALUES = (1, 2, 3, 4, 5)   # diagnostic only; LETTER_GAP_MIN above is what ships
 
+# Retired 2026-10-04 by Chris's directive, after pass 1: the letter rung was contradicted on three rows and
+# confirmed on none, and `p921:n4` shows the mechanism -- a mixed Latin/Hebrew crop supplies roman ink runs
+# that make the count agree with the consonant count by accident. This is the shape where a printed rule
+# satisfies "is there an inked band": the gate's input cannot tell the kind of thing it is counting. The
+# precondition for un-retiring it is a crop KNOWN to be Hebrew-only; there is no such test today.
+LETTER_RUNG_RETIRED = True
+
 MAG = 6              # tile/whole-crop magnification, nearest-neighbour
 LETTER_CONTEXT_PX = 3
 
@@ -123,6 +130,19 @@ LETTER_CONTEXT_PX = 3
 SET_APERTURE = "A2_spanbox"
 ALT_FILES = ("hebrew_aperture_reads_20260920.jsonl", "hebrew_local_arms_reads_20260920.jsonl",
              "hebrew_frontier_or_reads_20260927.jsonl", "hebrew_context_axes_reads_20261004.jsonl")
+
+# Pass 1's own signed record (read-only). Change 6 derives the import expectation from THIS file's own
+# bytes, never from a literal count -- if the frozen pass-1 artifact ever changed, the expectation would
+# change with it rather than silently going stale.
+PASS1_NAME = "glyphsign_signed_%s_20261004_pass1.jsonl" % SET
+PASS1_PATH = HAD.DATA / PASS1_NAME
+
+# Change 4: pass 1 proved the single `not-hebrew-or-blank` toggle conflated three different-owner faults.
+# (value, button label) pairs, in display order.
+FAULT_TYPES = (("box-not-hebrew-or-blank", "box: not Hebrew / blank"),
+               ("box-wrong-location", "box: wrong location"),
+               ("box-edge-cut", "box: edge cut"))
+LEGACY_FAULT_VALUE = "not-hebrew-or-blank"
 
 # 22 base consonants + 5 final forms. A DERIVED list (guard 6 asserts the rendered palette against
 # len(CONSONANTS), never against the literal number 27).
@@ -377,6 +397,7 @@ assert SPANS_WITH_2PLUS_USABLE == 0, \
 RUNG_COUNTS = {"letter": 0, "word": 0, "none": 0}
 GAP_MIN_SWEEP = {gm: 0 for gm in GAP_MIN_SWEEP_VALUES}
 WORD_COUNT_DISAGREES = []
+LETTER_WOULD_HAVE_FIRED = 0   # change 1: measured even though the rung is retired
 ROWS = []  # built records, one per span, in SPAN_IDS order
 
 for sid in SPAN_IDS:
@@ -405,10 +426,17 @@ for sid in SPAN_IDS:
     letter_runs = column_runs(gray, LETTER_GAP_MIN, LETTER_RUN_MIN, INK_THR)
     word_runs_native = column_runs(gray, WORD_GAP_MIN, WORD_RUN_MIN, INK_THR)
 
+    # Change 1: the letter rung is measured but no longer SELECTED. A count agreement is computed exactly
+    # as before and recorded per row (`letter_rung_would_have_fired`), so the retirement stays measurable
+    # and reversible, but `paired_at` can only land on "word" or "none" while LETTER_RUNG_RETIRED is True.
+    letter_rung_would_have_fired = bool(cons_chars) and len(letter_runs) == len(cons_chars)
+    if letter_rung_would_have_fired:
+        LETTER_WOULD_HAVE_FIRED += 1
+
     paired_at = "none"
-    letter_assign = {}   # tile i -> (x0, x1)
+    letter_assign = {}   # tile i -> (x0, x1); stays empty while the rung is retired
     word_assign = {}     # word index -> (x0, x1)
-    if len(letter_runs) == len(cons_chars) and cons_chars:
+    if (not LETTER_RUNG_RETIRED) and letter_rung_would_have_fired:
         paired_at = "letter"
         rtl = sorted(letter_runs, key=lambda r: -r[0])
         for k, t in enumerate(consonant_tiles):
@@ -425,12 +453,65 @@ for sid in SPAN_IDS:
                  "n_points": n_points, "tiles": tiles, "words": words,
                  "consonant_tiles": consonant_tiles, "gap_tiles": gap_tiles,
                  "paired_at": paired_at, "letter_assign": letter_assign, "word_assign": word_assign,
+                 "letter_rung_would_have_fired": letter_rung_would_have_fired,
                  "gray_im": None})
 
 assert sum(RUNG_COUNTS.values()) == SET_N, "the three rungs do not account for every span"
+assert RUNG_COUNTS["letter"] == 0, \
+    "the letter rung fired %d time(s) despite LETTER_RUNG_RETIRED -- it is retired because it was " \
+    "contradicted 3 times and confirmed never; it must not be selected" % RUNG_COUNTS["letter"]
 TOTAL_CONSONANT_TILES = sum(len(r["consonant_tiles"]) for r in ROWS)
 TOTAL_GAP_TILES = sum(len(r["gap_tiles"]) for r in ROWS)
 TOTAL_TILES = TOTAL_CONSONANT_TILES + TOTAL_GAP_TILES
+
+
+# ---- change 6: the import expectation, derived read-only from pass 1's own signed file ----------------
+
+def _derive_import_expectation(path):
+    """The counts a correct import of PASS1_PATH must produce, derived from the file itself -- never
+    hard-coded, so a change to the frozen pass-1 artifact would change these numbers too. Returns None
+    (never invents zeros) if the file is absent."""
+    if not path.exists():
+        return None
+    rows = tiles = confirmed = corrected = disputed = 0
+    notes = abstains = legacy_faults = insertions = 0
+    with io.open(str(path), encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)
+            rows += 1
+            dtiles = d.get("tiles") or []
+            tiles += len(dtiles)
+            for t in dtiles:
+                v = t.get("verdict")
+                if v == "confirmed":
+                    confirmed += 1
+                elif v == "corrected":
+                    corrected += 1
+                elif v == "disputed":
+                    disputed += 1
+            if d.get("note"):
+                notes += 1
+            if d.get("abstain"):
+                abstains += 1
+            if d.get("fault") == LEGACY_FAULT_VALUE or d.get("fault_legacy") == LEGACY_FAULT_VALUE:
+                legacy_faults += 1
+            insertions += len(d.get("insertions") or [])
+    return {"rows": rows, "tiles": tiles, "confirmed": confirmed, "corrected": corrected,
+            "disputed": disputed, "notes": notes, "abstains": abstains,
+            "legacy_faults": legacy_faults, "insertions": insertions}
+
+
+IMPORT_EXPECTATION = _derive_import_expectation(PASS1_PATH)
+_EXP_ORDER = ("rows", "tiles", "confirmed", "corrected", "disputed", "notes", "abstains",
+              "legacy_faults", "insertions")
+if IMPORT_EXPECTATION is not None:
+    EXP_LINE = ", ".join(
+        "%s %d" % (k.replace("_", " "), IMPORT_EXPECTATION[k]) for k in _EXP_ORDER)
+else:
+    EXP_LINE = None
 
 
 # ---- HTML assembly --------------------------------------------------------------------------------------
@@ -464,6 +545,19 @@ img{image-rendering:pixelated;background:#fff;display:block;margin-bottom:4px}
 .tile[data-v="confirmed"]{border-color:#4a8;box-shadow:0 0 0 1px #4a8 inset}
 .tile[data-v="corrected"]{border-color:#c86;box-shadow:0 0 0 1px #c86 inset}
 .tile[data-v="disputed"]{border-color:#a44;box-shadow:0 0 0 1px #a44 inset}
+.tile[data-v="deleted"]{border-color:#666;box-shadow:0 0 0 1px #666 inset;opacity:.55}
+.tile[data-v="not_in_crop"]{border-color:#c6a;box-shadow:0 0 0 1px #c6a inset}
+.tbtn.del{border-color:#876}
+.tbtn.nic{border-color:#767;font-size:10px}
+.insslot{display:inline-block;vertical-align:top;margin:3px 0}
+.insslot .tbtn.ins{background:#14241a;border-color:#4a8;color:#9e9}
+.inschip{display:inline-block;background:#1a1612;border:1px solid #654;border-radius:3px;
+ padding:2px 5px;margin:2px;font-size:11px;color:#dcb}
+.inschip b{font:16px "Times New Roman",serif;color:#eef;margin:0 3px}
+.derived{margin:6px 0;padding:6px 8px;background:#121418;border:1px dashed #445;border-radius:4px;
+ color:#9bd;font-size:12px}
+.derived code{font:18px "Times New Roman",serif;color:#eef;direction:rtl;unicode-bidi:bidi-override}
+.legfault{color:#fc9;font-size:11px;margin:2px 0}
 .points{margin:6px 0;padding:6px 8px;background:#141a1f;border:1px solid #2c3a46;border-radius:4px}
 .points::before{content:attr(data-cand);display:block;direction:rtl;font:22px/1.3 "Times New Roman",serif;
  color:#cda}
@@ -490,8 +584,13 @@ input.nt{display:block;width:100%;max-width:520px;box-sizing:border-box;margin:4
 # The page's own script. Placeholders substituted via .replace(), never %-formatted -- a literal '%' in
 # prose crashed a run of the sheet once, and this file carries far more prose than that one did.
 JS = r"""
-var RM=__RM__, SETID=__SETID__, N=__N__, SKEL=__SKEL__, ST={}, CUR_S=null, CUR_I=null;
-function trow(s){if(!ST[s])ST[s]={tv:{},note:"",fault:0,abst:0};return ST[s];}
+var RM=__RM__, SETID=__SETID__, N=__N__, SKEL=__SKEL__, EXP=__EXP__, TYPED_FAULTS=__TYPED_FAULTS__,
+    LEGACY_FAULT=__LEGACY_FAULT__,
+    ST={}, CUR_S=null, CUR_I=null, PAL_MODE="tile", CUR_SEQ=null, CUR_AFTER=null;
+function trow(s){if(!ST[s])ST[s]={tv:{},note:"",fault:"",fault_legacy:"",abst:0,ins:[],insSeq:0};
+ if(!ST[s].ins)ST[s].ins=[];if(ST[s].insSeq===undefined)ST[s].insSeq=0;
+ if(ST[s].fault_legacy===undefined)ST[s].fault_legacy="";
+ return ST[s];}
 function tileDiv(s,i){return document.getElementById("t_"+s+"_"+i);}
 function setVerdict(s,i,verdict,chose){
  var r=trow(s);r.tv[i]={verdict:verdict,chose:chose||""};
@@ -499,26 +598,82 @@ function setVerdict(s,i,verdict,chose){
  closePalette();upd();}
 function tOk(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"confirmed","");}
 function tBad(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i"),k=b.getAttribute("data-k");
- CUR_S=s;CUR_I=i;
+ CUR_S=s;CUR_I=i;PAL_MODE="tile";
  var pal=document.getElementById(k==="gap"?"gpal_gap":"gpal_cons");
  pal.style.display="block";}
+function tDel(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"deleted","");}
+function tNic(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"not_in_crop","");}
 function closePalette(){var a=document.getElementById("gpal_cons"),b=document.getElementById("gpal_gap");
- if(a)a.style.display="none";if(b)b.style.display="none";CUR_S=null;CUR_I=null;}
-function chooseLetterGlobal(b){if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-letter"));}
-function cantTellGlobal(){if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"disputed","");}
+ if(a)a.style.display="none";if(b)b.style.display="none";
+ CUR_S=null;CUR_I=null;PAL_MODE="tile";CUR_SEQ=null;CUR_AFTER=null;}
+function chooseLetterGlobal(b){
+ if(PAL_MODE==="ins"){insSetChoice(b.getAttribute("data-letter"),"consonant");return;}
+ if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-letter"));}
+function cantTellGlobal(){if(PAL_MODE==="ins")return;if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"disputed","");}
 function chooseGapGlobal(b){if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-choice"));}
+function insSpaceGlobal(){if(PAL_MODE==="ins")insSetChoice("space","gap");}
+function insKey(a){return a===null?"none":String(a);}
+function insSetChoice(chose,kind){if(CUR_S===null||CUR_SEQ===null)return;
+ var r=trow(CUR_S),i;for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===CUR_SEQ){
+  r.ins[i].kind=kind;r.ins[i].chose=chose;break;}}
+ var after=CUR_AFTER;closePalette();renderInsAt(CUR_S,after);upd();}
+function openIns(b){var s=b.getAttribute("data-s"),a=b.getAttribute("data-after");
+ var after=(a==="none")?null:parseInt(a,10);
+ var r=trow(s),seq=r.insSeq++;
+ r.ins.push({seq:seq,after_i:after,kind:null,chose:""});
+ renderInsAt(s,after);upd();
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function editIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){after=r.ins[i].after_i;break;}}
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function removeIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){after=r.ins[i].after_i;r.ins.splice(i,1);break;}}
+ renderInsAt(s,after);upd();}
+function renderInsAt(s,after){var el=document.querySelector('.insat[data-s="'+s+'"][data-after="'+insKey(after)+'"]');
+ if(!el)return;var r=trow(s),items=(r.ins||[]).filter(function(x){return x.after_i===after;}),h="",i;
+ for(i=0;i<items.length;i++){var it=items[i],shown=it.chose?(it.kind==="gap"?"↔":it.chose):"…";
+  h+='<span class="inschip">'+(it.chose?("<b>"+shown+"</b>"):"<i>pending</i>")+
+   ' <button class="tbtn edit" data-s="'+s+'" data-seq="'+it.seq+'" onclick="editIns(this)">edit</button>'+
+   ' <button class="tbtn rm" data-s="'+s+'" data-seq="'+it.seq+'" onclick="removeIns(this)">x</button></span>';}
+ el.innerHTML=h;}
 function setnote(inp){trow(inp.getAttribute("data-s")).note=inp.value;upd();}
-function markFault(b){var s=b.getAttribute("data-s"),r=trow(s);
- r.fault=r.fault?0:1;b.className=r.fault?"fault on":"fault";upd();}
+function markFault(b){var s=b.getAttribute("data-s"),t=b.getAttribute("data-ft"),r=trow(s),i;
+ r.fault=(r.fault===t)?"":t;
+ var btns=document.querySelectorAll('.fault[data-s="'+s+'"]');
+ for(i=0;i<btns.length;i++){btns[i].className=(btns[i].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ upd();}
 function absn(b){var s=b.getAttribute("data-s"),r=trow(s);
  r.abst=r.abst?0:1;b.className=r.abst?"abst on":"abst";upd();}
 function rowComplete(s){var m=RM[s],r=trow(s),n=m.tiles.length,k=0,i;
  for(i=0;i<n;i++){if(r.tv[m.tiles[i].i]&&r.tv[m.tiles[i].i].verdict)k++;}
+ var ins=r.ins||[],j;
+ for(j=0;j<ins.length;j++){n++;if(ins[j].chose)k++;}
  return [k,n];}
+function hasNotInCrop(s){var m=RM[s],r=trow(s),i;
+ for(i=0;i<m.tiles.length;i++){var v=r.tv[m.tiles[i].i];if(v&&v.verdict==="not_in_crop")return true;}
+ return false;}
 function pointsText(s){var el=document.querySelector('.points[data-s="'+s+'"]');
  return el?el.getAttribute("data-cand"):"";}
 function tileShown(s,i,kind){if(kind==="gap")return "space";
  var el=tileDiv(s,i);return el?el.getAttribute("data-cand"):"";}
+function tileOut(s,td){var r=trow(s),v=r.tv[td.i]||{verdict:"",chose:""},shown=tileShown(s,td.i,td.kind);
+ if(v.verdict==="deleted")return "";
+ if(v.verdict==="not_in_crop")return td.kind==="gap"?"[ ]":("["+shown+"]");
+ if(v.verdict==="confirmed")return td.kind==="gap"?" ":shown;
+ if(v.verdict==="corrected"){if(td.kind==="gap")return v.chose==="space"?" ":"";return v.chose||"?";}
+ return "?";}
+function insOut(it){if(!it.chose)return "?";return it.kind==="gap"?" ":it.chose;}
+function derivedFor(s){var m=RM[s],r=trow(s),out=[],j,k;
+ var atNone=(r.ins||[]).filter(function(x){return x.after_i===null;}).sort(function(a,b){return a.seq-b.seq;});
+ for(j=0;j<atNone.length;j++)out.push(insOut(atNone[j]));
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j];out.push(tileOut(s,td));
+  var ats=(r.ins||[]).filter(function(x){return x.after_i===td.i;}).sort(function(a,b){return a.seq-b.seq;});
+  for(k=0;k<ats.length;k++)out.push(insOut(ats[k]));}
+ return out.join("");}
 function lines(){
  /* EVERY span, every time -- empty rows included. A partial download dropped over a full one is how
     an approval record dies with every byte in it valid. */
@@ -528,20 +683,27 @@ function lines(){
    tiles.push({i:td.i,kind:td.kind,shown:tileShown(s,td.i,td.kind),verdict:v.verdict||"",
     chose:v.chose||"",paired_to:td.paired_to});}
   var kn=rowComplete(s);
+  var ins=(r.ins||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,chose:x.chose};});
   L.push(JSON.stringify({span_id:s,crop_sha16:m.crop16,candidate_sha16:m.cand16,tiles:tiles,
-   complete:kn[0]===kn[1],abstain:!!r.abst,fault:r.fault?"not-hebrew-or-blank":"",note:r.note,
+   insertions:ins,complete:kn[0]===kn[1],abstain:!!r.abst,fault:r.fault||"",
+   fault_legacy:r.fault_legacy||"",note:r.note,
    points_shown_not_adjudicated:{text:pointsText(s),n_points:m.n_points,nikud_flag:m.nikud},
-   paired_at:m.paired_at,signed_from:"pixels, candidate shown as consonant tiles, per-tile verdicts",
+   paired_at:m.paired_at,letter_rung_would_have_fired:!!m.letter_fired,
+   full_span_pixel_signature:!hasNotInCrop(s),
+   derived_consonants:derivedFor(s),derived_from_verdicts:true,
+   signed_from:"pixels, candidate shown as consonant tiles, per-tile verdicts",
    signed_in:"glyph signer, in the browser",set_sha16:SETID,sheet:SKEL}));}
  return L.join("\n")+"\n";}
 function upd(){var K=Object.keys(RM).sort(),nc=0,ntouch=0,i;
  for(i=0;i<K.length;i++){var s=K[i],kn=rowComplete(s),r=trow(s);
   var rowEl=document.getElementById("row_"+s);
   if(rowEl){var lab=document.getElementById("kn_"+s);
-   if(lab)lab.textContent=kn[0]+"/"+kn[1]+" tiles";
+   if(lab)lab.textContent=kn[0]+"/"+kn[1]+" tiles"+
+    (hasNotInCrop(s)?" · NOT a full-span pixel signature (not_in_crop present)":"");
    rowEl.className="row"+(kn[0]===kn[1]?" complete":"");}
+  var dtxt=document.getElementById("der_txt_"+s);if(dtxt)dtxt.textContent=derivedFor(s);
   if(kn[0]===kn[1])nc++;
-  if(kn[0]>0||r.fault||r.abst||r.note)ntouch++;}
+  if(kn[0]>0||r.fault||r.abst||r.note||(r.ins&&r.ins.length))ntouch++;}
  document.getElementById("ncomplete").textContent=nc;
  document.getElementById("nleft").textContent=(N-ntouch);
  var a=document.getElementById("dl");
@@ -550,9 +712,16 @@ function upd(){var K=Object.keys(RM).sort(),nc=0,ntouch=0,i;
 function applyState(s){var r=ST[s],m=RM[s];if(!r||!m)return;var j;
  for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=(r.tv||{})[td.i];
   var el=tileDiv(s,td.i);if(el&&v&&v.verdict)el.setAttribute("data-v",v.verdict);}
- var fb=document.querySelector('.fault[data-s="'+s+'"]');if(fb&&r.fault)fb.className="fault on";
+ var fbtns=document.querySelectorAll('.fault[data-s="'+s+'"]'),fi;
+ for(fi=0;fi<fbtns.length;fi++){
+  fbtns[fi].className=(fbtns[fi].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ var lg=document.querySelector('.legfault[data-s="'+s+'"]');
+ if(lg)lg.style.display=r.fault_legacy?"block":"none";
  var ab=document.querySelector('.abst[data-s="'+s+'"]');if(ab&&r.abst)ab.className="abst on";
- var nt=document.querySelector('.nt[data-s="'+s+'"]');if(nt)nt.value=r.note||"";}
+ var nt=document.querySelector('.nt[data-s="'+s+'"]');if(nt)nt.value=r.note||"";
+ var seen={},ij;
+ for(ij=0;ij<(r.ins||[]).length;ij++){var ak=insKey(r.ins[ij].after_i);
+  if(!seen[ak]){seen[ak]=1;renderInsAt(s,r.ins[ij].after_i);}}}
 function restore(){
  /* BEST EFFORT ONLY -- the download is the record, not this. */
  var raw=null;try{raw=localStorage.getItem("gs_"+SETID);}catch(e){raw=null;}
@@ -560,24 +729,47 @@ function restore(){
  var K=Object.keys(S),i,k=0;
  for(i=0;i<K.length;i++){var s=K[i];if(!RM[s])continue;ST[s]=S[s];k++;applyState(s);}
  return k;}
+function renderImportCheck(rc){var el=document.getElementById("impcheck");if(!el)return;
+ if(!EXP){el.textContent="no import expectation available (pass-1 file not found at generation time)";
+  return;}
+ var keys=["rows","tiles","confirmed","corrected","disputed","notes","abstains","legacy_faults",
+  "insertions"],h="",i;
+ for(i=0;i<keys.length;i++){var k=keys[i],r=rc[k]||0,e=EXP[k];
+  h+=k+": restored "+r+" vs expected "+e+" -- "+(r===e?"PASS":"MISMATCH")+"<br>";}
+ el.innerHTML=h;}
 function doImport(inp){
  var f=inp.files&&inp.files[0];if(!f)return;
  var rd=new FileReader();
  rd.onload=function(){
   var txt=rd.result||"",ln=txt.split("\n"),i,bad=[],k=0;
+  var rc={rows:0,tiles:0,confirmed:0,corrected:0,disputed:0,notes:0,abstains:0,legacy_faults:0,
+   insertions:0};
   for(i=0;i<ln.length;i++){var s=ln[i].replace(/^\s+|\s+$/g,"");if(!s)continue;
    var d=null;try{d=JSON.parse(s);}catch(e){continue;}
    if(!d.span_id||!RM[d.span_id])continue;
    if(d.crop_sha16!==RM[d.span_id].crop16){bad.push(d.span_id);continue;}
-   var rr=trow(d.span_id);rr.tv={};var tj;
-   for(tj=0;tj<(d.tiles||[]).length;tj++){var tt=d.tiles[tj];
-    if(tt.verdict)rr.tv[tt.i]={verdict:tt.verdict,chose:tt.chose||""};}
-   rr.note=d.note||"";rr.fault=d.fault?1:0;rr.abst=d.abstain?1:0;
+   var rr=trow(d.span_id);rr.tv={};var tj,dtiles=d.tiles||[];
+   rc.rows++;rc.tiles+=dtiles.length;
+   for(tj=0;tj<dtiles.length;tj++){var tt=dtiles[tj];
+    if(tt.verdict){rr.tv[tt.i]={verdict:tt.verdict,chose:tt.chose||""};
+     if(tt.verdict==="confirmed")rc.confirmed++;
+     else if(tt.verdict==="corrected")rc.corrected++;
+     else if(tt.verdict==="disputed")rc.disputed++;}}
+   rr.note=d.note||"";if(rr.note)rc.notes++;
+   rr.abst=d.abstain?1:0;if(d.abstain)rc.abstains++;
+   rr.fault=(TYPED_FAULTS.indexOf(d.fault)>=0)?d.fault:"";
+   rr.fault_legacy=d.fault_legacy?d.fault_legacy:((d.fault===LEGACY_FAULT)?LEGACY_FAULT:"");
+   if(rr.fault_legacy)rc.legacy_faults++;
+   rr.ins=(d.insertions||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,
+    chose:x.chose||""};});
+   rr.insSeq=rr.ins.length?(Math.max.apply(null,rr.ins.map(function(x){return x.seq;}))+1):0;
+   rc.insertions+=rr.ins.length;
    applyState(d.span_id);k++;}
   var w=document.getElementById("impwarn");
   w.textContent=bad.length?("NOT restored (crop_sha16 differs -- a re-cut span must not inherit a "+
    "verdict): "+bad.join(", ")):"";
   document.getElementById("impmsg").textContent="imported "+k+" row(s) from "+f.name;
+  renderImportCheck(rc);
   upd();};
  rd.readAsText(f,"utf-8");}
 window.addEventListener("load",function(){var k=restore();
@@ -616,15 +808,27 @@ H.append('<div class="note">The candidate is CONSONANTAL here: points (nikud/can
 H.append('<table class="sum">'
          '<tr><td>spans</td><td><b>%d</b></td></tr>'
          '<tr><td>tiles</td><td><b>%d</b> total &mdash; <b>%d</b> consonant, <b>%d</b> gap</td></tr>'
-         '<tr><td>pairing rungs</td><td>letter <b>%d</b> &middot; word <b>%d</b> &middot; none <b>%d</b></td></tr>'
+         '<tr><td>pairing rungs</td><td>word <b>%d</b> &middot; none <b>%d</b> &mdash; letter rung '
+         '<b>RETIRED</b> (would have fired on <b>%d</b> row(s))</td></tr>'
          '<tr><td>word-count disagreement</td><td><b>%d</b> row(s): %s</td></tr>'
          '<tr><td>alternatives</td><td>reads seen <b>%d</b>, usable (this aperture) <b>%d</b>, spans '
          'with &ge;2 usable <b>%d</b> of %d, tiles offering an alternative <b>%d</b></td></tr>'
          '</table>' % (SET_N, TOTAL_TILES, TOTAL_CONSONANT_TILES, TOTAL_GAP_TILES,
-                       RUNG_COUNTS["letter"], RUNG_COUNTS["word"], RUNG_COUNTS["none"],
+                       RUNG_COUNTS["word"], RUNG_COUNTS["none"], LETTER_WOULD_HAVE_FIRED,
                        len(WORD_COUNT_DISAGREES), html.escape(", ".join(WORD_COUNT_DISAGREES)) or "none",
                        READS_SEEN, READS_USABLE, SPANS_WITH_2PLUS_USABLE, SET_N,
                        TILES_OFFERING_ALTERNATIVE))
+
+# Change 6: the import expectation, derived read-only from pass 1's own signed file, never hard-coded.
+if IMPORT_EXPECTATION is not None:
+    H.append('<div class="note">import expectation, derived read-only from <code>%s</code>: %s. After '
+              'an import the page prints what was restored beside these and says PASS or MISMATCH per '
+              'line.</div><div id="impcheck" class="sub"></div>'
+             % (html.escape(PASS1_NAME), html.escape(EXP_LINE)))
+else:
+    H.append('<div class="note loud"><code>%s</code> was not found at generation time -- the import '
+              'expectation is SKIPPED here rather than invented.</div><div id="impcheck" '
+              'class="sub"></div>' % html.escape(PASS1_NAME))
 
 # The two GLOBAL palettes -- one copy each in the whole document, shown/hidden by the JS and retargeted
 # per click via CUR_S/CUR_I, rather than one copy per tile. Keeps the fixed alphabet's Hebrew glyphs out
@@ -633,12 +837,26 @@ _letter_buttons = "".join(
     '<button class="pbtn" data-letter="%s" onclick="chooseLetterGlobal(this)">%s</button>' % (c, c)
     for c in CONSONANTS)
 H.append('<div id="gpal_cons" class="palette" style="display:none">%s'
-         '<button class="pbtn canttell" onclick="cantTellGlobal()">can&rsquo;t tell</button></div>'
+         '<button class="pbtn canttell" onclick="cantTellGlobal()">can&rsquo;t tell</button>'
+         '<button class="pbtn gapchoice" onclick="insSpaceGlobal()">space (gap insertion)</button>'
+         '</div>'
          % _letter_buttons)
 H.append('<div id="gpal_gap" class="palette" style="display:none">'
          '<button class="pbtn gapchoice" data-choice="space" onclick="chooseGapGlobal(this)">space here</button>'
          '<button class="pbtn gapchoice" data-choice="no-space" onclick="chooseGapGlobal(this)">no space here</button>'
          '</div>')
+
+def _insert_slot_html(sid, after_i):
+    """Change 3: a thin '+' between every pair of adjacent tiles, before the first and after the last.
+    `after_i=None` means before tile 0. The letter/space actually chosen lives client-side in `.insat`,
+    rendered by the JS -- the tile array itself is never mutated."""
+    esid = html.escape(sid)
+    after_attr = "none" if after_i is None else str(after_i)
+    return ('<span class="insslot"><button class="tbtn ins" data-s="%s" data-after="%s" '
+            'onclick="openIns(this)">+</button>'
+            '<span class="insat" data-s="%s" data-after="%s"></span></span>'
+            % (esid, after_attr, esid, after_attr))
+
 
 RM = {}   # embedded per-span metadata for the JS: NEVER candidate-derived Hebrew text (see guard 3)
 
@@ -694,6 +912,7 @@ for r in ROWS:
             if run:
                 H.append('<figure><img src="%s"><figcaption>word run %s, &times;%d</figcaption></figure>'
                          % (_crop_slice_uri(im, run[0], run[1], context=0, mag=MAG), run, MAG))
+    H.append(_insert_slot_html(sid, None))
     for t in r["tiles"]:
         if t["kind"] == "consonant":
             run = (r["letter_assign"].get(t["i"]) if r["paired_at"] == "letter"
@@ -705,18 +924,30 @@ for r in ROWS:
             H.append('<div class="tile cons" id="t_%s_%d" data-s="%s" data-i="%d" data-cand="%s">%s'
                       '<button class="tbtn ok" data-s="%s" data-i="%d" onclick="tOk(this)">&#10003;</button>'
                       '<button class="tbtn no" data-s="%s" data-i="%d" data-k="cons" '
-                      'onclick="tBad(this)">&#10007;</button></div>'
+                      'onclick="tBad(this)">&#10007;</button>'
+                      '<button class="tbtn del" data-s="%s" data-i="%d" onclick="tDel(this)">del</button>'
+                      '<button class="tbtn nic" data-s="%s" data-i="%d" onclick="tNic(this)">not in '
+                      'crop</button></div>'
                      % (html.escape(sid), t["i"], html.escape(sid), t["i"], html.escape(t["cand"]),
-                        img_html, html.escape(sid), t["i"], html.escape(sid), t["i"]))
+                        img_html, html.escape(sid), t["i"], html.escape(sid), t["i"],
+                        html.escape(sid), t["i"], html.escape(sid), t["i"]))
             tiles_meta.append({"i": t["i"], "kind": "consonant", "paired_to": list(run) if run else None})
         else:
             H.append('<div class="tile gap" id="t_%s_%d" data-s="%s" data-i="%d">'
                       '<button class="tbtn ok" data-s="%s" data-i="%d" onclick="tOk(this)">&#10003;</button>'
                       '<button class="tbtn no" data-s="%s" data-i="%d" data-k="gap" '
-                      'onclick="tBad(this)">&#10007;</button></div>'
+                      'onclick="tBad(this)">&#10007;</button>'
+                      '<button class="tbtn del" data-s="%s" data-i="%d" onclick="tDel(this)">del</button>'
+                      '<button class="tbtn nic" data-s="%s" data-i="%d" onclick="tNic(this)">not in '
+                      'crop</button></div>'
                      % (html.escape(sid), t["i"], html.escape(sid), t["i"],
+                        html.escape(sid), t["i"], html.escape(sid), t["i"],
                         html.escape(sid), t["i"], html.escape(sid), t["i"]))
             tiles_meta.append({"i": t["i"], "kind": "gap", "paired_to": None})
+        H.append(_insert_slot_html(sid, t["i"]))
+
+    H.append('<div class="derived">derived from your verdicts &mdash; not a candidate, not signable: '
+             '<code id="der_txt_%s"></code></div>' % html.escape(sid))
 
     H.append('<div class="points" data-s="%s" data-cand="%s"></div>'
              '<div class="sub">points shown, not adjudicated: n_points=%d, nikud_flag=%s '
@@ -731,16 +962,22 @@ for r in ROWS:
                   'stripping -- shown as none rather than misaligned</div>')
 
     _e = html.escape(sid)
-    H.append('<div><button class="fault" data-s="%s" onclick="markFault(this)">not Hebrew / blank '
-             '&mdash; record a fault</button> '
-             '<button class="abst" data-s="%s" onclick="absn(this)">abstain</button></div>'
+    # Change 4: three mutually-exclusive typed fault buttons, replacing the single conflated toggle --
+    # pass 1 showed these have different owners (box-not-hebrew-or-blank / box-wrong-location /
+    # box-edge-cut). A `fault_legacy` value imported from pass 1 is shown but never a selectable button.
+    _fault_btns = "".join(
+        '<button class="fault" data-s="%s" data-ft="%s" onclick="markFault(this)">%s</button> '
+        % (_e, html.escape(ft), html.escape(label)) for ft, label in FAULT_TYPES)
+    H.append('<div>%s<button class="abst" data-s="%s" onclick="absn(this)">abstain</button></div>'
+             '<div class="legfault" data-s="%s" style="display:none">legacy fault &mdash; needs '
+             're-typing</div>'
              '<input class="nt" data-s="%s" oninput="setnote(this)" placeholder="note (optional)">'
-             % (_e, _e, _e))
+             % (_fault_btns, _e, _e, _e))
     H.append("</div></div>")
 
     RM[sid] = {"crop16": cr["crop"]["sha16"], "cand16": hashlib.sha256(r["cand"].encode("utf-8")).hexdigest()[:16],
                "paired_at": r["paired_at"], "n_points": r["n_points"], "nikud": bool(tr["nikud"]),
-               "tiles": tiles_meta}
+               "letter_fired": bool(r["letter_rung_would_have_fired"]), "tiles": tiles_meta}
 
 H.append('<div id="bar">complete <b id="ncomplete">0</b> of %d &nbsp;&middot;&nbsp; untouched '
          '<b id="nleft">%d</b><br><a id="dl" download="%s" href="#">download all %d rows</a> '
@@ -755,6 +992,9 @@ H.append("<script>"
              .replace("__SETID__", json.dumps(SET))
              .replace("__N__", str(SET_N))
              .replace("__SKEL__", json.dumps(SKEL_NAME))
+             .replace("__EXP__", json.dumps(IMPORT_EXPECTATION))
+             .replace("__TYPED_FAULTS__", json.dumps([ft for ft, _ in FAULT_TYPES]))
+             .replace("__LEGACY_FAULT__", json.dumps(LEGACY_FAULT_VALUE))
          + "</script>")
 
 doc = "\n".join(H)
@@ -767,12 +1007,22 @@ doc = "\n".join(H)
 assert READABLE.search(_PROBE), "the Hebrew detector cannot match Hebrew at all -- a probe that misses " \
                                 "passes on anything"
 
-# 1. Every tile carries both a check and a cross control.
+# 1. Every tile carries all four per-tile controls (check, cross, delete, not-in-crop); the insert
+# control appears once before the first tile and once after every tile in every row, i.e.
+# TOTAL_TILES + SET_N times (rows adjacent-pairs + 1 slot each).
 _n_ok = doc.count('onclick="tOk(this)"')
 _n_no = doc.count('onclick="tBad(this)"')
-assert _n_ok == TOTAL_TILES and _n_no == TOTAL_TILES, \
-    "the check control is on %d tiles and the cross control on %d, not %d each -- a tile missing " \
-    "either control cannot record a verdict" % (_n_ok, _n_no, TOTAL_TILES)
+_n_del = doc.count('onclick="tDel(this)"')
+_n_nic = doc.count('onclick="tNic(this)"')
+assert _n_ok == TOTAL_TILES and _n_no == TOTAL_TILES and _n_del == TOTAL_TILES and _n_nic == TOTAL_TILES, \
+    "the check control is on %d tiles, cross on %d, delete on %d, not-in-crop on %d -- not %d each -- " \
+    "a tile missing any one of the four controls cannot record that verdict" \
+    % (_n_ok, _n_no, _n_del, _n_nic, TOTAL_TILES)
+_n_ins = doc.count('onclick="openIns(this)"')
+assert _n_ins == TOTAL_TILES + SET_N, \
+    "the insert (+) control appears %d times, not %d (TOTAL_TILES %d + SET_N %d, one slot before the " \
+    "first tile and one after every tile, per row) -- an insertion position is missing" \
+    % (_n_ins, TOTAL_TILES + SET_N, TOTAL_TILES, SET_N)
 
 # 2. No tile ships with a verdict.
 assert 'class="tile ok"' not in doc and 'class="tile bad"' not in doc and 'verdict="' not in doc, \
@@ -838,9 +1088,31 @@ assert doc.count('onclick="cantTellGlobal()"') == 1, "the can't-tell control is 
 assert doc.count('data-choice="space"') == 1 and doc.count('data-choice="no-space"') == 1, \
     "the gap palette does not offer exactly its two choices"
 
+# 6b (change 1). No rendered row's rung is "letter": retired 2026-10-04 after pass 1 showed the letter
+# rung contradicted 3 times and confirmed never, with p921:n4 showing the mechanism (a mixed Latin/Hebrew
+# crop supplies roman ink runs that agree with the consonant count by accident).
+assert "rung <b>letter</b>" not in doc, \
+    "a row renders rung=letter -- the letter rung is retired by directive and must not be selected"
+
+# 6c (change 4). Exactly three typed fault buttons per row, 3 * SET_N total; the legacy fault value is
+# shown (as text, when imported) but never offered as a selectable button.
+assert doc.count('onclick="markFault(this)"') == 3 * SET_N, \
+    "the typed fault buttons appear %d times, not %d (3 * SET_N) -- a row is missing one of the three " \
+    "mutually-exclusive fault types" % (doc.count('onclick="markFault(this)"'), 3 * SET_N)
+assert ('data-ft="%s"' % LEGACY_FAULT_VALUE) not in doc, \
+    "the legacy fault value %r is offered as a selectable button -- it must only ever be shown as text " \
+    "needing re-typing" % LEGACY_FAULT_VALUE
+
+# 6d (change 6). The import-expectation numbers, derived from pass 1, appear in the rendered document.
+if IMPORT_EXPECTATION is not None:
+    assert EXP_LINE in doc, \
+        "the import expectation line derived from %s does not appear in the document -- a number " \
+        "computed but not shown cannot be checked by the person doing the import" % PASS1_NAME
+
 # 7. Every JS function the HTML calls is defined in the document.
-for _fn in ("tOk", "tBad", "chooseLetterGlobal", "cantTellGlobal", "chooseGapGlobal", "setnote",
-            "markFault", "absn", "upd", "lines", "restore", "doImport", "applyState", "closePalette"):
+for _fn in ("tOk", "tBad", "tDel", "tNic", "chooseLetterGlobal", "cantTellGlobal", "chooseGapGlobal",
+            "setnote", "markFault", "absn", "upd", "lines", "restore", "doImport", "applyState",
+            "closePalette", "openIns", "editIns", "removeIns", "insSpaceGlobal"):
     assert ("function %s(" % _fn) in doc, "the page calls %s and does not define it" % _fn
 
 # extra, cheap: no "accept all" control of any kind.
@@ -882,6 +1154,11 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "verbatim and not adjudicated",
            "tiles": {"total": TOTAL_TILES, "consonant": TOTAL_CONSONANT_TILES, "gap": TOTAL_GAP_TILES},
            "rungs": RUNG_COUNTS,
+           "letter_rung_would_have_fired": LETTER_WOULD_HAVE_FIRED,
+           "letter_rung_retired": LETTER_RUNG_RETIRED,
+           "tile_controls": {"confirm": _n_ok, "dispute_open": _n_no, "delete": _n_del,
+                              "not_in_crop": _n_nic, "insert": _n_ins},
+           "import_expectation": IMPORT_EXPECTATION,
            "gap_min_sweep": {"shipped": LETTER_GAP_MIN, "run_min_held_at": LETTER_RUN_MIN,
                              "counts_by_gap_min": GAP_MIN_SWEEP,
                              "note": "diagnostic only -- the shipped value is LETTER_GAP_MIN above, "
@@ -901,10 +1178,12 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
 skel = [{"span_id": sid, "crop_sha16": RM[sid]["crop16"], "candidate_sha16": RM[sid]["cand16"],
          "tiles": [{"i": t["i"], "kind": t["kind"], "shown": "", "verdict": "", "chose": "",
                     "paired_to": t["paired_to"]} for t in RM[sid]["tiles"]],
-         "complete": False, "abstain": False, "fault": "", "note": "",
+         "insertions": [], "complete": False, "abstain": False, "fault": "", "fault_legacy": "", "note": "",
          "points_shown_not_adjudicated": {"text": "", "n_points": RM[sid]["n_points"],
                                            "nikud_flag": RM[sid]["nikud"]},
-         "paired_at": RM[sid]["paired_at"],
+         "derived_consonants": "", "derived_from_verdicts": True,
+         "full_span_pixel_signature": True,
+         "paired_at": RM[sid]["paired_at"], "letter_rung_would_have_fired": RM[sid]["letter_fired"],
          "signed_from": "pixels, candidate shown as consonant tiles, per-tile verdicts",
          "signed_in": "glyph signer, in the browser", "set_sha16": SET, "sheet": OUT.name}
         for sid in SPAN_IDS]
@@ -913,7 +1192,14 @@ io.open(str(SKEL), "w", encoding="utf-8").write(sk)
 
 print("glyph signer %s" % OUT.name)
 print("  rows %d   tiles %d (consonant %d, gap %d)" % (SET_N, TOTAL_TILES, TOTAL_CONSONANT_TILES, TOTAL_GAP_TILES))
-print("  rungs: letter %d, word %d, none %d" % (RUNG_COUNTS["letter"], RUNG_COUNTS["word"], RUNG_COUNTS["none"]))
+print("  rungs: word %d, none %d" % (RUNG_COUNTS["word"], RUNG_COUNTS["none"]))
+print("  letter rung would have fired on %d row(s) (retired)" % LETTER_WOULD_HAVE_FIRED)
+print("  tile controls: confirm %d, dispute-open %d, delete %d, not-in-crop %d, insert %d"
+      % (_n_ok, _n_no, _n_del, _n_nic, _n_ins))
+if IMPORT_EXPECTATION is not None:
+    print("  import expectation (from %s): %s" % (PASS1_NAME, EXP_LINE))
+else:
+    print("  import expectation SKIPPED -- %s not found at generation time" % PASS1_NAME)
 print("  word-count disagreement: %d row(s): %s" % (len(WORD_COUNT_DISAGREES), ", ".join(WORD_COUNT_DISAGREES)))
 print("  alternatives: reads seen %d, rejected (aperture != %s) %d, usable %d; spans with >=2 usable %d of %d; "
       "tiles offering an alternative %d"
