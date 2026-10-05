@@ -29,7 +29,11 @@ nothing changed. Taking the largest movement any null pair showed on that questi
 noise band harder to beat, which is the direction an honest gate errs in.
 
 Then a two-sided exact binomial SIGN TEST over the questions where |effect(q)| and noise(q)
-differ: wins = |effect| > noise, losses = |effect| < noise, ties dropped and counted. Exact,
+differ: wins = |effect| > noise, losses = |effect| < noise, ties dropped and counted. It is run
+TWICE -- over every tested question, which is a measurement of the arm pair, and over the
+ruling-1 gating subset, which is what decides. The regression list is split the same way, and it
+has to be: with `scapegoat_001` in, the recorded 6/6 -> 0/6 fall at fixed configuration supplies
+a regression row that could fire the gate, which is what pulling it from the gate was for. Exact,
 closed form (`math.comb`), no sampling and no seed -- a permutation test here would freeze a coin
 and call it determinism. The p-value answers one question only: *is this pair of arms a different
 measurement from two identical arms?* It does not say the flag is better or worse, and it is not
@@ -242,16 +246,46 @@ def gate(off: dict, on: dict, nulls: list, history: list = None, alpha: float = 
         notes.append("NO TESTABLE QUESTION: every shared question was excluded above, so the "
                      "paired test is not a result and the verdict rests on the ratchet alone.")
 
-    wins = sum(1 for r in rows if r["beats_noise"])
-    losses = sum(1 for r in rows if r["within_noise"])
-    ties = len(rows) - wins - losses
-    p = sign_test_two_sided(wins, losses)
+    def _sign(rs):
+        w = sum(1 for r in rs if r["beats_noise"])
+        l = sum(1 for r in rs if r["within_noise"])
+        return {"wins_effect_beats_noise": w, "losses_effect_within_noise": l,
+                "ties": len(rs) - w - l, "p_two_sided": sign_test_two_sided(w, l),
+                "questions": len(rs)}
+
+    # Ruling 1's NON_GATING questions are MEASURED but do not decide. That applies to the sign
+    # test and to the regression list as much as to the ratchet, and getting this wrong was a
+    # real defect in the first draft of this file: with all questions in, `scapegoat_001` -- the
+    # recorded 6/6 -> 0/6 fall at fixed configuration -- supplied a regression row that could
+    # fire the gate, which is precisely what ruling 1 pulled it from the gate to prevent.
+    #
+    # So there are two of each: the ALL version, reported because an exclusion nobody sees is
+    # indistinguishable from a gate that failed to fire, and the GATING version, which decides.
+    gating_rows = [r for r in rows if r["id"] not in NON_GATING]
+    st_all, st_gating = _sign(rows), _sign(gating_rows)
+    p = st_all["p_two_sided"]
 
     # The directional lists. The sign test says "a different measurement"; it does not say which
-    # way, and a flag is not gated on moving things. `regressions` are the only rows that can
-    # carry a regression claim: ON lost MORE than the null band allows.
+    # way, and a flag is not gated on moving things. These are the only rows that can carry a
+    # regression claim: ON lost MORE than the null band allows.
     regressions = [r for r in rows if r["lost_beyond_noise"]]
     improvements = [r for r in rows if r["gained_beyond_noise"]]
+    regressions_gating = [r for r in regressions if r["id"] not in NON_GATING]
+    if len(regressions) != len(regressions_gating):
+        notes.append("REGRESSION ROW(S) EXCLUDED FROM THE DECISION: %s. Real movement past the "
+                     "null band, on question(s) ruling 1 pulled from the gate. Reported, not "
+                     "decisive."
+                     % ", ".join(r["id"] for r in regressions if r["id"] in NON_GATING))
+    if (st_all["p_two_sided"] is not None and st_all["p_two_sided"] <= alpha) != \
+            (st_gating["p_two_sided"] is not None and st_gating["p_two_sided"] <= alpha):
+        notes.append("THE EXCLUSIONS CHANGE THE SIGN TEST: over all %d tested questions p=%s, "
+                     "over the %d gating ones p=%s (alpha=%g). The DECISION uses the gating "
+                     "set; the other number is a measurement of the whole arm pair."
+                     % (st_all["questions"],
+                        "n/a" if st_all["p_two_sided"] is None else "%.4g" % st_all["p_two_sided"],
+                        st_gating["questions"],
+                        "n/a" if st_gating["p_two_sided"] is None
+                        else "%.4g" % st_gating["p_two_sided"], alpha))
 
     # Clause (b), the ratchet. "Ever stable-passed" is read over every arm supplied, including
     # the ones that exist only as history.
@@ -278,19 +312,24 @@ def gate(off: dict, on: dict, nulls: list, history: list = None, alpha: float = 
                      + ". These are real STABLE-FAIL-under-ON events on questions ruling 1 pulled "
                        "from the gate pending a deterministic scorer. They do NOT fire the gate.")
 
-    significant = bool(p is not None and p <= alpha)
-    fires = bool(tripped) or bool(significant and regressions)
-    if significant and not regressions:
-        notes.append("DIFFERENT, BUT NOT WORSE: the pair is distinguishable from the null "
-                     "(p=%.4g <= alpha=%g) and no question lost more than its noise band. The "
-                     "gate does not fire on movement." % (p, alpha))
-    if regressions and not significant:
+    # The decision rests on the GATING sign test and the GATING regression list.
+    significant = bool(st_gating["p_two_sided"] is not None
+                       and st_gating["p_two_sided"] <= alpha)
+    fires = bool(tripped) or bool(significant and regressions_gating)
+    pg = st_gating["p_two_sided"]
+    if significant and not regressions_gating:
+        notes.append("DIFFERENT, BUT NOT WORSE: the gating set is distinguishable from the null "
+                     "(p=%.4g <= alpha=%g) and no gating question lost more than its noise band. "
+                     "The gate does not fire on movement." % (pg, alpha))
+    if regressions_gating and not significant:
         notes.append("REGRESSION CANDIDATE(S) WITHOUT A DISTINGUISHABLE PAIR: %s lost more than "
-                     "its noise band, but the pair as a whole is not distinguishable from two "
-                     "identical arms (p=%s). One question past one null band is what a null pair "
-                     "also produces, which is why this does not fire on its own."
-                     % (", ".join(r["id"] for r in regressions),
-                        "n/a (no discordant pair)" if p is None else "%.4g" % p))
+                     "its noise band, but the gating set as a whole is not distinguishable from "
+                     "two identical arms (p=%s). One question past one null band is what a null "
+                     "pair also produces, which is why this does not fire on its own. The "
+                     "RATCHET is the clause that catches a single question, and it is reported "
+                     "separately below."
+                     % (", ".join(r["id"] for r in regressions_gating),
+                        "n/a (no discordant pair)" if pg is None else "%.4g" % pg))
     reasons = ([] + (["ratchet"] if tripped else [])
                + (["paired test + regression"] if significant and regressions else []))
     return {
@@ -299,10 +338,15 @@ def gate(off: dict, on: dict, nulls: list, history: list = None, alpha: float = 
         "questions_shared": len(common),
         "questions_tested": len(rows),
         "excluded_ids": excluded,
-        "sign_test": {"wins_effect_beats_noise": wins, "losses_effect_within_noise": losses,
-                      "ties": ties, "p_two_sided": p, "significant": significant},
+        # Two sign tests: `sign_test` over every tested question (a measurement of the arm
+        # pair) and `sign_test_gating` over the ruling-1 gating subset (what decides).
+        "sign_test": dict(st_all, significant=bool(st_all["p_two_sided"] is not None
+                                                   and st_all["p_two_sided"] <= alpha)),
+        "sign_test_gating": dict(st_gating, significant=significant),
         "regressions_beyond_noise": regressions,
         "regressions_beyond_noise_n": len(regressions),
+        "regressions_gating": regressions_gating,
+        "regressions_gating_n": len(regressions_gating),
         "improvements_beyond_noise": improvements,
         "improvements_beyond_noise_n": len(improvements),
         "ratchet_tripped": tripped,
@@ -348,15 +392,20 @@ def main(argv=None) -> int:
     print("=" * 74)
     for n in res["notes"]:
         print("  !! %s" % n)
-    st = res["sign_test"]
-    print("Sign test  : %d beat the noise band, %d within it, %d tied -> p=%s (alpha=%g) %s"
-          % (st["wins_effect_beats_noise"], st["losses_effect_within_noise"], st["ties"],
-             "n/a" if st["p_two_sided"] is None else "%.4g" % st["p_two_sided"],
-             res["alpha"], "DISTINGUISHABLE" if st["significant"] else "not distinguishable"))
-    print("Regressions beyond the noise band  : %d" % res["regressions_beyond_noise_n"])
+    for key, what in (("sign_test", "all tested  "), ("sign_test_gating", "gating only ")):
+        st = res[key]
+        print("Sign test %s: %d/%d beat the noise band, %d within it, %d tied -> p=%s %s%s"
+              % (what, st["wins_effect_beats_noise"], st["questions"],
+                 st["losses_effect_within_noise"], st["ties"],
+                 "n/a" if st["p_two_sided"] is None else "%.4g" % st["p_two_sided"],
+                 "DISTINGUISHABLE" if st["significant"] else "not distinguishable",
+                 "  <- decides" if key == "sign_test_gating" else ""))
+    print("Regressions beyond the noise band  : %d (%d gating)"
+          % (res["regressions_beyond_noise_n"], res["regressions_gating_n"]))
     for r in res["regressions_beyond_noise"]:
-        print("    %-44s %.2f -> %.2f  (band %.2f)"
-              % (r["id"][:44], r["rate_off"], r["rate_on"], r["noise_band"]))
+        print("    %-44s %.2f -> %.2f  (band %.2f)%s"
+              % (r["id"][:44], r["rate_off"], r["rate_on"], r["noise_band"],
+                 "" if r in res["regressions_gating"] else "   NOT GATING"))
     print("Improvements beyond the noise band : %d" % res["improvements_beyond_noise_n"])
     for r in res["improvements_beyond_noise"]:
         print("    %-44s %.2f -> %.2f  (band %.2f)"

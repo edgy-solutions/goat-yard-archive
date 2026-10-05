@@ -390,6 +390,52 @@ def test_one_regression_against_a_wide_null_is_reported_but_not_fired():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_a_regression_on_a_NON_GATING_question_cannot_fire_the_gate():
+    # The defect this test exists for: with scapegoat_001 counted, the recorded 6/6 -> 0/6 fall
+    # at FIXED configuration supplies a regression row, and a distinguishable pair plus that row
+    # fires the gate -- which is exactly what ruling 1 pulled it from the gate to prevent.
+    root = _tmp()
+    try:
+        qs_off = dict({("q%d" % i): _k(1) for i in range(6)}, scapegoat_001=_k(5))
+        qs_on = dict({("q%d" % i): _k(5) for i in range(6)}, scapegoat_001=_k(0))
+        off = _arm(root, "off", qs_off)
+        on = _arm(root, "on", qs_on)
+        na = _arm(root, "na", dict({("q%d" % i): _k(5) for i in range(6)}, scapegoat_001=_k(5)))
+        nb = _arm(root, "nb", dict({("q%d" % i): _k(5) for i in range(6)}, scapegoat_001=_k(5)))
+        r = G.gate(load_arm(off), load_arm(on), [(load_arm(na), load_arm(nb))])
+        assert r["sign_test_gating"]["significant"] is True, r["sign_test_gating"]
+        assert r["regressions_beyond_noise_n"] == 1, r["regressions_beyond_noise"]
+        assert r["regressions_gating_n"] == 0, r["regressions_gating"]
+        assert r["ratchet_tripped_n"] == 0 and r["ratchet_tripped_excluded_n"] == 1, r
+        assert r["gate_fires"] is False, r["verdict"]
+        assert any("EXCLUDED FROM THE DECISION" in n and "scapegoat_001" in n
+                   for n in r["notes"]), r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_when_the_exclusions_change_the_sign_test_BOTH_numbers_are_reported():
+    # Five gating wins is p=0.0625 (not significant); the three ruling-1 questions bring it to
+    # eight, p=0.0078. A gate that printed only the second would be deciding on the coin.
+    root = _tmp()
+    try:
+        ids = ["q%d" % i for i in range(5)] + list(G.NON_GATING)
+        off = _arm(root, "off", {q: _k(1) for q in ids})
+        on = _arm(root, "on", {q: _k(5) for q in ids})
+        na = _arm(root, "na", {q: _k(5) for q in ids})
+        nb = _arm(root, "nb", {q: _k(5) for q in ids})
+        r = G.gate(load_arm(off), load_arm(on), [(load_arm(na), load_arm(nb))])
+        assert r["sign_test"]["questions"] == 8 and r["sign_test_gating"]["questions"] == 5, r
+        assert abs(r["sign_test"]["p_two_sided"] - 2 / 256.0) < 1e-12, r["sign_test"]
+        assert r["sign_test_gating"]["p_two_sided"] == 0.0625, r["sign_test_gating"]
+        assert r["sign_test"]["significant"] is True
+        assert r["sign_test_gating"]["significant"] is False, "the decision uses the gating set"
+        assert any("THE EXCLUSIONS CHANGE THE SIGN TEST" in n for n in r["notes"]), r["notes"]
+        assert r["gate_fires"] is False, r["verdict"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 # --- the ratchet (clause b) ---------------------------------------------------------
 
 def test_the_ratchet_fires_on_a_stable_fail_that_once_stable_passed():
@@ -543,7 +589,7 @@ def test_alpha_is_reported_next_to_the_p_value_it_judged():
 # A hand-rolled suite reports what it RAN, and a raise inside a test file ends the run silently.
 # Pin the count so a test lost to a rename or a bad merge is a failure rather than a smaller
 # number nobody reads.
-EXPECTED_TESTS = 29
+EXPECTED_TESTS = 31
 
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
