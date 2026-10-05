@@ -1,5 +1,12 @@
 # CORPUS CHANGED MID-RUN was a false positive. The read path corrupts; the corpus did not move.
 
+> **FOLLOWED UP (2026-10-04):** the mechanism hunt ruling 1c asked for is reported in
+> [READFAULT_mechanism_reproduction_laneA_20261004.md](READFAULT_mechanism_reproduction_laneA_20261004.md).
+> It reproduces at **0.73% of reads** carrying a corrupted vector and **1.74%** failing to
+> parse at all, and it **eliminates truncation**: every read of every affected page came back
+> at the identical body length, including the unparseable ones. Same size, wrong contents, in
+> one contiguous block.
+
 2026-10-04, Lane A. Subject: the violation that voided
 `evals/output/off_vs_on_20261004/off`, recorded there as
 

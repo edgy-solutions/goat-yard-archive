@@ -1,0 +1,192 @@
+{
+ "note": "The 8 REAL vector read faults from the ruling-1c reproduction, 2026-10-04. The probe's own headline count of 380 conflated these with 372 records from pages where one of three reads failed to PARSE while the two surviving reads agreed; those are not disagreements and are excluded here. See READFAULT_mechanism_reproduction_laneA_20261004.md.",
+ "endpoint": "192.168.1.54:80",
+ "reads_per_page": 3,
+ "pages": 365,
+ "objects": 7294,
+ "reads": 1095,
+ "unparseable_reads": 19,
+ "real_disagreements": 8,
+ "faults": [
+  {
+   "uuid": "306f76a4-08b7-5d50-a856-d8576b9343d4",
+   "page": 72,
+   "after": "303aa4ed-7add-55d9-961c-bdbbad3327b0",
+   "reads_seen": 3,
+   "distinct_digests": 2,
+   "majority": 2,
+   "outlier_reads": [
+    1
+   ],
+   "shape": {
+    "reason": "length",
+    "len_first": 4096,
+    "len_second": 4095
+   },
+   "page_bytes": [
+    1125444,
+    1125444,
+    1125444
+   ]
+  },
+  {
+   "uuid": "3a353d98-dcac-54de-b500-88046f40f284",
+   "page": 86,
+   "after": "3a1bdafa-ab9a-5edb-8f43-4a15c941f315",
+   "reads_seen": 3,
+   "distinct_digests": 2,
+   "majority": 2,
+   "outlier_reads": [
+    0
+   ],
+   "shape": {
+    "reason": "elements",
+    "n_differing": 274,
+    "n_total": 4096,
+    "first_index": 607,
+    "last_index": 880,
+    "max_abs_delta": 0.07808198,
+    "at_max_index": 733,
+    "at_max_pair": [
+     0.017661653,
+     -0.060420327
+    ],
+    "first_pair": [
+     -0.02034279,
+     -0.02034256525
+    ]
+   },
+   "page_bytes": [
+    1142274,
+    1142274,
+    1142274
+   ]
+  },
+  {
+   "uuid": "4c4f6c76-a98e-563d-a3c9-65b9d98a080e",
+   "page": 112,
+   "after": "4bfc94e0-7c83-560f-8315-726d19478f06",
+   "reads_seen": 3,
+   "distinct_digests": 2,
+   "majority": 2,
+   "outlier_reads": [
+    0
+   ],
+   "shape": {
+    "reason": "length",
+    "len_first": 4096,
+    "len_second": 4097
+   },
+   "page_bytes": [
+    1130593,
+    1130593,
+    1130593
+   ]
+  },
+  {
+   "uuid": "4d9c48d7-1f61-5f34-8c67-15656ed0ad6c",
+   "page": 114,
+   "after": "4d6d9bab-3d3a-5ebb-94ef-5f6e7d556b34",
+   "reads_seen": 3,
+   "distinct_digests": 2,
+   "majority": 2,
+   "outlier_reads": [
+    0
+   ],
+   "shape": {
+    "reason": "length",
+    "len_first": 4096,
+    "len_second": 4097
+   },
+   "page_bytes": [
+    1144482,
+    1144482,
+    1144482
+   ]
+  },
+  {
+   "uuid": "78ddea0b-0a68-5713-a1ce-c4013630f572",
+   "page": 173,
+   "after": "7800145a-e20a-5ba9-9f65-c1764b4394ba",
+   "reads_seen": 2,
+   "distinct_digests": 2,
+   "majority": 1,
+   "outlier_reads": [],
+   "shape": null,
+   "page_bytes": [
+    1142642,
+    1142642,
+    1142642
+   ]
+  },
+  {
+   "uuid": "84a8b1d7-9773-58a5-9c1f-a8b4798f041f",
+   "page": 190,
+   "after": "8458eaf1-2ce5-5f2c-a963-4234b22dcf4c",
+   "reads_seen": 2,
+   "distinct_digests": 2,
+   "majority": 1,
+   "outlier_reads": [],
+   "shape": null,
+   "page_bytes": [
+    1153759,
+    1153759,
+    1153759
+   ]
+  },
+  {
+   "uuid": "9a95e3d8-5318-57fc-9d58-904cd9fe3079",
+   "page": 221,
+   "after": "9a05b748-0eda-5c76-a5ec-170c72a8a10b",
+   "reads_seen": 3,
+   "distinct_digests": 2,
+   "majority": 2,
+   "outlier_reads": [
+    0
+   ],
+   "shape": {
+    "reason": "elements",
+    "n_differing": 6,
+    "n_total": 4096,
+    "first_index": 1907,
+    "last_index": 1912,
+    "max_abs_delta": 0.06086268899999999,
+    "at_max_index": 1907,
+    "at_max_pair": [
+     -0.009637311,
+     -0.0705
+    ],
+    "first_pair": [
+     -0.009637311,
+     -0.0705
+    ]
+   },
+   "page_bytes": [
+    1145634,
+    1145634,
+    1145634
+   ]
+  },
+  {
+   "uuid": "fae25a39-9b06-5ab4-93f9-90e5c7c400ff",
+   "page": 357,
+   "after": "fa9f7607-81d7-500a-8e75-f322cce78ca0",
+   "reads_seen": 3,
+   "distinct_digests": 2,
+   "majority": 2,
+   "outlier_reads": [
+    1
+   ],
+   "shape": {
+    "reason": "length",
+    "len_first": 4096,
+    "len_second": 4098
+   },
+   "page_bytes": [
+    1141625,
+    1141625,
+    1141625
+   ]
+  }
+ ]
+}
