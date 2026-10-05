@@ -45,8 +45,30 @@ except ImportError:
 # than 80 chars away*, we'd revisit the limit. For now this catches the
 # legitimate-quote-with-inline-explanation pattern without inviting
 # silent mis-pairing.
+#
+# The closing delimiter is a RUN of quote marks, not a single one. Gill's prose is
+# full of nested quotation -- he quotes the Targum, Jarchi, the Jews -- so a span
+# quoted far enough ends with the SOURCE's closing mark immediately followed by
+# the answer's own: `... in the dust, &c.""  [SID]`. With a single-mark closer the
+# first mark closed the quote and the second landed in the intervening gap, which
+# excludes quote chars, so the pair failed to match and the citation read as BARE.
+# That produced a false `no_gill_quote_for_citation` -- the MORE faithful answer,
+# the one that quoted far enough to reach the nesting, scored worse. Measured: 9
+# instances across 108 recorded eval answers, all 9 of this exact shape (a run of
+# two marks one space before the SID), and they account for a large part of the
+# ADR-0009 off/on pass-rate gap. docs/audits/FLIP_PROPOSAL_adr0009_laneA_20261004.md
+#
+# This cannot mis-pair ACROSS two separate quotes, and that is a property of the
+# CAPTURE GROUP rather than of the closer: group 1 is `[^"ANY-MARK]+`, which cannot
+# contain a quote mark at all, so `"A" and "B" [SID]` can only ever capture `B`.
+# Widening the closer does not widen the capture.
+#
+# NOT handled, deliberately, because no instance of it was measured: a nested
+# quotation in the MIDDLE of the span. There the capture stops at the inner mark
+# and the pair still forms on the tail fragment, so the citation is not lost --
+# the quote is just shorter than the model wrote it.
 QUOTE_WITH_CITE_RE = re.compile(
-    r'["“”]([^"“”]+)["“”][^"“”\n\[\]]{0,80}\[([A-Z0-9_]+_S\d+)\]'
+    r'["“”]([^"“”]+)["“”]+[^"“”\n\[\]]{0,80}\[([A-Z0-9_]+_S\d+)\]'
 )
 
 # Tokens we strip during normalization.
