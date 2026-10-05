@@ -73,12 +73,22 @@ say("P6", "0 NO-DATA both arms", not nd, f"{nd or 'none'}")
 pa = sum(1 for i in ids if a["q"][i]["class"] == SP)
 pb = sum(1 for i in ids if b["q"][i]["class"] == SP)
 # P7 as worded ("each arm passes 14-19 of 28") is AMBIGUOUS between two counts the harness keeps:
-# summary["passed"], the representative-run pass count, and the STABLE-PASS class count. Both are
-# scored, because I wrote the prediction and cannot pick the flattering reading after the fact.
-sa, sb = a["s"].get("passed"), b["s"].get("passed")
+# the representative-run pass count and the STABLE-PASS class count. Both are scored, because I
+# wrote the prediction and cannot pick the flattering reading after the fact.
+# Ruling 2, 2026-10-04: summary["passed"] is now over RUNS (28 questions x N runs), which is NOT
+# the count P7 was written against and would be scored against a band of 14-19 that cannot apply
+# to it. Read the representative count by name; in a summary written before the ruling that count
+# is what `passed` held, and `pass_basis` is how the two are told apart.
+def rep_passed(s):
+    if "representative_passed" in s:
+        return s["representative_passed"]
+    assert s.get("pass_basis") is None, "post-ruling summary with no representative_passed"
+    return s.get("passed")
+
+sa, sb = rep_passed(a["s"]), rep_passed(b["s"])
 say("P7", "each arm passes 14-19 of 28 [BOTH readings]",
     14 <= pa <= 19 and 14 <= pb <= 19 and 14 <= (sa or 0) <= 19 and 14 <= (sb or 0) <= 19,
-    f"summary.passed A={sa} B={sb} | STABLE-PASS A={pa} B={pb}  (band 14-19 under either reading)")
+    f"representative A={sa} B={sb} | STABLE-PASS A={pa} B={pb}  (band 14-19 under either reading)")
 say("P8", "|delta passes| <= 3", abs(pa - pb) <= 3, f"|{pa}-{pb}|={abs(pa-pb)}")
 fa = sum(1 for i in ids if a["q"][i]["class"] == FLAKY)
 fb = sum(1 for i in ids if b["q"][i]["class"] == FLAKY)

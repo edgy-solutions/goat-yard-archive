@@ -1,5 +1,28 @@
 # RESULT — OFF vs ON pair (attempt 5), Lane A, 2026-10-04
 
+> **MARKED (ruling 2, 2026-10-04): the pass figures quoted in this document are in the
+> retired unit.** `summary.passed` counted ONE run per question -- the question's last
+> scored run -- so a figure like 9/13 described 9 of the arm's 65 runs. The headline is
+> now over scored RUNS. Nothing in this document is rewritten and no verdict in it is
+> revised: the verdicts rest on the stability block and the integrity gates, which are
+> untouched. Corrected figures for every arm, and what the same-config pairs say about
+> the instrument, are in [RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md](RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md).
+>
+> The line numbers cited below are as of `56466e8`, i.e. BEFORE this marker was
+> inserted and shifted them; every site is quoted as well, so it can be found either
+> way.
+>
+> Affected here: lines 165-167 and 260. The run-level table at lines 173-175 is
+> **correct and is reproduced to the run** by the restatement (49/65, 42/65, 38/65), so
+> this document had already done the arithmetic the harness now publishes.
+>
+> ONE CORRECTION: line 165 says `summary.passed` counts the questions whose **first**
+> run passed. It counts the **last scored** run (`last_r = scored_runs[-1]`). The
+> section's substance -- one run per question, on a suite that is majority flaky -- is
+> unaffected; the identification of which run was wrong. The sentence is left standing
+> as the record of the claim.
+
+
 Prediction: [`PREDICTION_off_vs_on_rerun3_laneA_20261004.md`](PREDICTION_off_vs_on_rerun3_laneA_20261004.md),
 committed in `f06b250` **before** launch.
 

@@ -1,5 +1,24 @@
 # PREDICTION — OFF vs ON pair (attempt 5), Lane A, 2026-10-04
 
+> **MARKED (ruling 2, 2026-10-04): the pass figures quoted in this document are in the
+> retired unit.** `summary.passed` counted ONE run per question -- the question's last
+> scored run -- so a figure like 9/13 described 9 of the arm's 65 runs. The headline is
+> now over scored RUNS. Nothing in this document is rewritten and no verdict in it is
+> revised: the verdicts rest on the stability block and the integrity gates, which are
+> untouched. Corrected figures for every arm, and what the same-config pairs say about
+> the instrument, are in [RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md](RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md).
+>
+> The line numbers cited below are as of `56466e8`, i.e. BEFORE this marker was
+> inserted and shifted them; every site is quoted as well, so it can be found either
+> way.
+>
+> Affected here: lines 12, 20, 60 -- the priors 12/13 and 9/13 and the P6 band 11-13.
+> **The prediction stands exactly as locked and was scored as written.** A locked
+> prediction is not re-expressed after the fact; this marker only records that its
+> priors are in the retired unit. Run-level for those priors: attempt-4 OFF **49/65 =
+> 75.4%** (not 12/13), attempt-5 OFF **42/65 = 64.6%**, attempt-5 ON **38/65 = 58.5%**.
+
+
 Written and committed **before** launch. Both arms run at one commit, `4702459`
 (`fix(bot): the answer path is an input to the record, not an inference`), tree clean, HEAD
 asserted identical at both ends of both arms.

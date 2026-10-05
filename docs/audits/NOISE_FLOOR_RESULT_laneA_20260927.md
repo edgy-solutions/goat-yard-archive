@@ -1,5 +1,27 @@
 # Result — item (a): the noise floor, OFF vs OFF
 
+> **MARKED (ruling 2, 2026-10-04): the pass figures quoted in this document are in the
+> retired unit.** `summary.passed` counted ONE run per question -- the question's last
+> scored run -- so a figure like 9/13 described 9 of the arm's 65 runs. The headline is
+> now over scored RUNS. Nothing in this document is rewritten and no verdict in it is
+> revised: the verdicts rest on the stability block and the integrity gates, which are
+> untouched. Corrected figures for every arm, and what the same-config pairs say about
+> the instrument, are in [RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md](RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md).
+>
+> The line numbers cited below are as of `56466e8`, i.e. BEFORE this marker was
+> inserted and shifted them; every site is quoted as well, so it can be found either
+> way.
+>
+> Affected here: lines 12, 66, 77, 89, 96. Run-level: nf1 **49/84 = 58.3%** (not 42.9%),
+> nf2 **42/84 = 50.0%**, pf1 **55/84 = 65.5%** (not 75.0%).
+>
+> Two of this document's readings invert. (a) The opening comparison, pf1's 21/28
+> against nf1's 12/28, is a 32.1 pp gap in the retired unit and **7.2 pp** over every
+> run -- at or near the 4-8 pp the floor pairs put the instrument at. (b) The nf1 -> nf2
+> move that this document reads as going **up** (12 -> 14) is **58.3% -> 50.0%**, i.e.
+> DOWN, at run level. The pair stays RETIRED either way and neither number is a floor.
+
+
 > **VOID (2026-10-04)** -- every arm cited in this document ran with the query-expansion
 > stage dead: `LITELLM_PROXY_URL` was unset at eval launch. It **is** set in the production API
 > pod, so production runs that stage live and none of these arms measures production behavior.

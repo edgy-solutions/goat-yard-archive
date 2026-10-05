@@ -114,14 +114,21 @@ def test_good_response_still_scores():
 
 # --- errors out of the denominator ------------------------------------------------
 
+def _one_run_each(rs):
+    """A ledger of one run per question, for the tests whose subject is the DENOMINATOR."""
+    return {r.id: [r] for r in rs}
+
+
 def test_errors_excluded_from_denominators():
     rs = [RE.score(Q_ANSWER, GOOD, 1.0),
           RE.score(dict(Q_ANSWER, id="t_fail"), {"answer": "no citation here"}, 1.0),
           RE.score(dict(Q_ANSWER, id="t_deg"), {"answer": TIMEOUT_FALLBACK_ANSWER}, 90.0)]
-    s = RE.summarize(rs, "http://x/api/search")
+    s = RE.summarize(rs, "http://x/api/search", _one_run_each(rs))
     assert s["attempted"] == 3, s["attempted"]
     assert s["total"] == 2, s["total"]
     assert s["passed"] == 1 and s["pass_pct"] == 50.0, (s["passed"], s["pass_pct"])
+    # The degraded RUN is out of the run denominator too, not only out of the question one.
+    assert s["pass_denominator"] == 2, s["pass_denominator"]
     assert s["errors"] == 1 and s["degraded"] == 1
     assert [e["id"] for e in s["error_detail"]] == ["t_deg"]
     assert s["by_category"]["doctrine"]["total"] == 2, "degraded row in a category total"
@@ -130,9 +137,108 @@ def test_errors_excluded_from_denominators():
 def test_all_degraded_reports_zero_over_zero_not_zero_percent_of_n():
     rs = [RE.score(dict(Q_ANSWER, id="t%d" % i), {"answer": TIMEOUT_FALLBACK_ANSWER}, 90.0)
           for i in range(3)]
-    s = RE.summarize(rs, "http://x/api/search")
+    s = RE.summarize(rs, "http://x/api/search", _one_run_each(rs))
     assert s["total"] == 0 and s["passed"] == 0 and s["pass_pct"] == 0
+    assert s["pass_denominator"] == 0, s["pass_denominator"]
     assert s["attempted"] == 3 and s["errors"] == 3
+
+
+# --- the headline rate is over RUNS (ruling 2, 2026-10-04) ---------------------------------------
+
+def _multi_run_ledger():
+    """One question, three runs, two of which pass. The representative row is the LAST scored run.
+
+    This is the shape that discriminates: at one run per question the two bases coincide and a
+    test built on that shape would pass against the defect it is supposed to catch.
+    """
+    r_pass_a = RE.score(Q_ANSWER, GOOD, 1.0)
+    r_fail = RE.score(Q_ANSWER, {"answer": "no citation here"}, 1.0)
+    r_pass_b = RE.score(Q_ANSWER, GOOD, 1.0)
+    return [r_pass_b], {"t_answer": [r_pass_a, r_fail, r_pass_b]}
+
+
+def test_the_headline_pass_rate_counts_RUNS_not_one_run_per_question():
+    # The defect: `results` carries ONE row per question, so at 5 questions x 13 runs the
+    # published rate described 5 of 65 measurements. Here 2 of 3 runs passed while the single
+    # representative row passed, so a question-level count would report 1 of 1 -- 100%.
+    results, ledger = _multi_run_ledger()
+    s = RE.summarize(results, "http://x/api/search", ledger)
+    assert s["pass_basis"] == "runs", s.get("pass_basis")
+    assert (s["passed"], s["pass_denominator"]) == (2, 3), (s["passed"], s["pass_denominator"])
+    assert round(s["pass_pct"], 1) == 66.7, s["pass_pct"]
+    assert s["total"] == 1, s["total"]                      # questions, unchanged meaning
+
+
+def test_the_question_level_count_survives_under_a_name_that_says_what_it_counts():
+    # Not deleted: it is the number every arm before 2026-10-04 published, so the old artifacts
+    # stay readable. It just may no longer be called the pass rate.
+    results, ledger = _multi_run_ledger()
+    s = RE.summarize(results, "http://x/api/search", ledger)
+    assert s["representative_passed"] == 1, s["representative_passed"]
+    assert "ONE run per question" in s["representative_note"], s["representative_note"]
+    assert "RUNS" in s["denominator"] and "QUESTIONS" in s["denominator"], s["denominator"]
+
+
+def test_the_categories_sum_to_the_headline_and_not_to_a_different_unit():
+    # Two halves of one summary in two units is how a reader gets a contradiction out of a single
+    # file. Summing the category rows must land on `passed`/`pass_denominator`.
+    results, ledger = _multi_run_ledger()
+    s = RE.summarize(results, "http://x/api/search", ledger)
+    assert sum(v["pass"] for v in s["by_category"].values()) == s["passed"]
+    assert sum(v["total"] for v in s["by_category"].values()) == s["pass_denominator"]
+
+
+def test_a_baseline_in_the_OLD_unit_is_refused_instead_of_subtracted():
+    # Born test: before the ruling this printed a delta between a share of QUESTIONS and a share
+    # of RUNS and called the difference a regression (or hid one).
+    results, ledger = _multi_run_ledger()
+    s = RE.summarize(results, "http://x/api/search", ledger)
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "baseline.json"
+        p.write_text(json.dumps({"pass_pct": 100.0, "passed": 1, "total": 1}), encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = RE.compare_to_baseline(s, p)
+        out = buf.getvalue()
+    assert rc == 1, out
+    assert "REFUSED" in out and "pass_basis" in out, out
+    assert "Delta" not in out, "a delta between two units was printed anyway:\n" + out
+
+
+def test_a_baseline_in_the_SAME_unit_still_compares():
+    # The null for the refusal above. A guard that refused every baseline would satisfy the test
+    # above and silently end regression gating.
+    results, ledger = _multi_run_ledger()
+    s = RE.summarize(results, "http://x/api/search", ledger)
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "baseline.json"
+        p.write_text(json.dumps({"pass_pct": 66.7, "pass_basis": "runs"}), encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = RE.compare_to_baseline(s, p)
+        out = buf.getvalue()
+    assert rc == 0, out
+    assert "Delta" in out and "REFUSED" not in out, out
+    # and the regression threshold still bites
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "baseline.json"
+        p.write_text(json.dumps({"pass_pct": 100.0, "pass_basis": "runs"}), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert RE.compare_to_baseline(s, p) == 1, "a 33-point drop did not fail"
+
+
+def test_a_baseline_comparison_cannot_launder_an_integrity_violation():
+    # Until 2026-10-04 `return rc` sat ABOVE the integrity check in main(), so an arm whose
+    # samples were cache replays exited 0 whenever --baseline was passed. 4 outranks everything.
+    s = {"must_not_cite_violations": 0}
+    assert RE.exit_code(s, ["lm_cache_enabled on 3 run(s)"], 0) == 4
+    assert RE.exit_code(s, ["lm_cache_enabled on 3 run(s)"], None) == 4
+    assert RE.exit_code(s, [], 0) == 0
+    assert RE.exit_code(s, [], 1) == 1
+    assert RE.exit_code({"must_not_cite_violations": 2}, [], None) == 1
+    # A baseline verdict of 0 does not clear a must_not_cite violation either; the baseline path
+    # applies that check itself, so reaching 0 there means it was already clean.
+    assert RE.exit_code({"must_not_cite_violations": 0}, [], 0) == 0
 
 
 # --- stability over scored runs only ----------------------------------------------
@@ -436,7 +542,14 @@ def test_clean_ledger_tallies_zero_degraded():
 
 
 def test_summary_prints_runs_as_well_as_questions():
-    assert "summary[\"runs\"] = run_level_tally(run_ledger)" in SRC,         "the run tally must reach the summary dict, not just exist as a helper"
+    # Asserted through the output rather than by grepping SRC for an assignment: the tally moved
+    # inside summarize() under ruling 2, and a test pinned to the old line would have failed
+    # while the property it names still held.
+    results, ledger = _multi_run_ledger()
+    runs = RE.summarize(results, "http://x/api/search", ledger)["runs"]
+    assert runs["total"] == 3 and runs["scored"] == 3, runs
+    assert runs["passed"] == 2 and round(runs["pass_pct"], 1) == 66.7, runs
+    assert "runs, not questions" in runs["counts"], runs
     assert "Runs                     :" in SRC, "the run tally must be printed"
     assert "Questions with no score  :" in SRC,         "the question-scoped line must say it is question-scoped"
 
@@ -1666,7 +1779,7 @@ def test_the_warmup_query_is_not_one_of_the_scored_questions():
     assert RE.WARMUP_QUERY.strip().lower() not in queries, RE.WARMUP_QUERY
 
 
-EXPECTED_TESTS = 152
+EXPECTED_TESTS = 158
 
 # --- the post-run re-read of read-faulted objects (ruling, 2026-10-04) --------------------
 

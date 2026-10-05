@@ -1,5 +1,22 @@
 # Prediction — OFF vs ON, with query expansion LIVE and the answer provider PINNED
 
+> **MARKED (ruling 2, 2026-10-04): the pass figures quoted in this document are in the
+> retired unit.** `summary.passed` counted ONE run per question -- the question's last
+> scored run -- so a figure like 9/13 described 9 of the arm's 65 runs. The headline is
+> now over scored RUNS. Nothing in this document is rewritten and no verdict in it is
+> revised: the verdicts rest on the stability block and the integrity gates, which are
+> untouched. Corrected figures for every arm, and what the same-config pairs say about
+> the instrument, are in [RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md](RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md).
+>
+> The line numbers cited below are as of `56466e8`, i.e. BEFORE this marker was
+> inserted and shifted them; every site is quoted as well, so it can be found either
+> way.
+>
+> Affected here: line 331, `11/13 pass, 9 stable-pass`, already listed there as NOT
+> citable. It stays not citable; the run-level figure for that arm is **57/65 = 87.7%**,
+> which is also not citable and is recorded only so the two units are not confused.
+
+
 **Locked 2026-10-04, before the first scored request.** Answers the standing instruction: *"Pin the
 answer-LM provider on OpenRouter and record it per call; it's the remaining churn source. Then OFF
 vs ON at t=0, N=5, flip gate, predict first."*

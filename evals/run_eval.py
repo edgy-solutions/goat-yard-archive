@@ -564,16 +564,31 @@ def write_markdown_report(results: List[QuestionResult], out_path: Path, summary
     out_path.write_text("".join(lines), encoding="utf-8")
 
 
-def summarize(results: List[QuestionResult], endpoint: str) -> dict:
-    # Every rate below is over SCORED questions only. A question whose run errored or
-    # degraded was never asked-and-answered, so counting it as a denominator member reports
-    # a pass rate for a measurement that did not happen. Errors are reported separately and
-    # `attempted` keeps the total visible so nothing is quietly dropped.
+def summarize(results: List[QuestionResult], endpoint: str,
+              run_ledger: Dict[str, List[QuestionResult]]) -> dict:
+    """Summarise an arm. `passed`/`pass_pct` are over scored RUNS (ruling 2, 2026-10-04).
+
+    `results` holds ONE representative row per question -- the last scored run -- so the figure
+    this summary used to publish as `passed` discarded every other run of every question: at 5
+    questions x 13 runs it reported 5 measurements out of 65 and called the result a pass rate.
+    Two arms could differ by a third of that headline with no run-level difference at all.
+
+    `run_ledger` is a REQUIRED argument and not an optional one. An optional ledger would let a
+    call site silently fall back to the one-run-per-question number under the same key `passed`,
+    which is the defect this ruling removes; a caller that cannot supply the ledger should not be
+    publishing a rate. The question-level count is still reported, under
+    `representative_passed`, which says what it counts.
+    """
+    # Every QUESTION-scoped rate below is over scored questions only. A question whose run
+    # errored or degraded was never asked-and-answered, so counting it as a denominator member
+    # reports a pass rate for a measurement that did not happen. Errors are reported separately
+    # and `attempted` keeps the total visible so nothing is quietly dropped.
     attempted = len(results)
     errored = [r for r in results if r.error]
     scored = [r for r in results if not r.error]
     total = len(scored)
-    passed = sum(1 for r in scored if r.overall_pass)
+    runs = run_level_tally(run_ledger)
+    representative_passed = sum(1 for r in scored if r.overall_pass)
     refusal_correct = sum(1 for r in scored if r.refusal_correct)
     must_not_cite_violations = sum(1 for r in scored if r.must_not_cite_violated)
     errors = len(errored)
@@ -584,8 +599,11 @@ def summarize(results: List[QuestionResult], endpoint: str) -> dict:
         for r in errored
     ]
 
+    # Over RUNS, like the headline. When this was built from `scored` the category totals
+    # summed to the representative count while `passed` counted runs, so the two halves of one
+    # summary were in different units and the categories silently contradicted the total.
     by_category = defaultdict(lambda: {"pass": 0, "total": 0})
-    for r in scored:
+    for r in (x for rs in run_ledger.values() for x in rs if not x.error):
         by_category[r.category]["total"] += 1
         if r.overall_pass:
             by_category[r.category]["pass"] += 1
@@ -599,16 +617,44 @@ def summarize(results: List[QuestionResult], endpoint: str) -> dict:
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "attempted": attempted,
         "total": total,
-        "denominator": "scored questions (errors and degraded runs excluded)",
-        "passed": passed,
-        "pass_pct": (100.0 * passed / total) if total else 0,
+        "denominator": "passed/pass_pct/by_category are over scored RUNS (pass_denominator); "
+                       "attempted/total/errors/degraded/refusal_correct/must_not_cite_violations "
+                       "are over QUESTIONS, counting the representative run of each",
+        # A reader -- or a script -- that finds no `pass_basis` is holding a summary written
+        # before 2026-10-04, whose `passed` counts one run per question. The key exists so that
+        # difference is detectable instead of being inferred from a date.
+        "pass_basis": "runs",
+        "passed": runs["passed"],
+        "pass_pct": runs["pass_pct"],
+        "pass_denominator": runs["scored"],
+        "representative_passed": representative_passed,
+        "representative_note": "questions whose representative (last scored) run passed; this is "
+                               "what `passed` meant before 2026-10-04. It is ONE run per "
+                               "question and is not a pass rate -- use passed/pass_denominator.",
         "refusal_correct": refusal_correct,
         "must_not_cite_violations": must_not_cite_violations,
         "errors": errors,
         "degraded": degraded,
         "error_detail": error_detail,
         "by_category": by_category_out,
+        "runs": runs,
     }
+
+
+def exit_code(summary: dict, integrity_violations: list, baseline_rc: Optional[int]) -> int:
+    """The arm's exit code, in precedence order, as a function rather than as control flow.
+
+    A pure function because the precedence is the thing that was wrong: a baseline comparison
+    used to be able to return 0 over an arm with integrity violations, which is the strongest
+    fault the harness can detect and the one that means the samples were never generated. 4
+    outranks everything; a baseline verdict outranks the must_not_cite check only because
+    compare_to_baseline already applies that check itself.
+    """
+    if integrity_violations:
+        return 4
+    if baseline_rc is not None:
+        return baseline_rc
+    return 1 if summary["must_not_cite_violations"] > 0 else 0
 
 
 def compare_to_baseline(current: dict, baseline_path: Path, regression_threshold: float = 5.0) -> int:
@@ -618,17 +664,32 @@ def compare_to_baseline(current: dict, baseline_path: Path, regression_threshold
         return 0
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     print(f"\n=== Comparison vs baseline ({baseline_path.name}) ===")
-    print(f"Baseline pass rate : {baseline.get('pass_pct', 0):.1f}%")
-    print(f"Current pass rate  : {current['pass_pct']:.1f}%")
-    delta = current["pass_pct"] - baseline.get("pass_pct", 0)
-    print(f"Delta              : {delta:+.1f}%")
-
     fail = False
+    # Ruling 2, 2026-10-04: `pass_pct` changed unit. Before that date it was the share of
+    # questions whose representative run passed; now it is the share of scored RUNS. Subtracting
+    # one from the other is a unit error that reads as a regression or hides one, so this
+    # refuses to print a delta rather than printing a meaningless one. A missing baseline is
+    # nothing to compare and exits 0 above; a baseline that exists and states a rate in another
+    # unit is a trap, so it fails loud. Re-baseline against an arm written after the ruling.
+    if baseline.get("pass_basis") != "runs":
+        print(f"REFUSED: baseline pass_basis={baseline.get('pass_basis')!r}, current='runs'. "
+              "This baseline's pass_pct counts ONE run per question; the current figure counts "
+              "every scored run. No delta is computed and no regression verdict is available "
+              "from this pair -- re-baseline, or compare the baseline against "
+              "current['representative_passed'] by hand, knowing that number is not a rate.")
+        print(f"Current pass rate  : {current['pass_pct']:.1f}% "
+              f"({current['passed']}/{current['pass_denominator']} runs)")
+        fail = True
+    else:
+        print(f"Baseline pass rate : {baseline.get('pass_pct', 0):.1f}%")
+        print(f"Current pass rate  : {current['pass_pct']:.1f}%")
+        delta = current["pass_pct"] - baseline.get("pass_pct", 0)
+        print(f"Delta              : {delta:+.1f}%")
+        if delta < -regression_threshold:
+            print(f"HARD FAIL: pass rate regressed by more than {regression_threshold}%.")
+            fail = True
     if current["must_not_cite_violations"] > 0:
         print(f"HARD FAIL: {current['must_not_cite_violations']} must_not_cite violation(s) in current run.")
-        fail = True
-    if delta < -regression_threshold:
-        print(f"HARD FAIL: pass rate regressed by more than {regression_threshold}%.")
         fail = True
     return 1 if fail else 0
 
@@ -1088,13 +1149,21 @@ def run_level_tally(run_ledger: Dict[str, List["QuestionResult"]]) -> dict:
     a partial failure contributes nothing to its error/degraded counters. Predictions about
     the harness ("<= 6 degraded runs across 168") are written in runs, and a summary that
     cannot answer them sends you to the raw log to score your own prediction.
+
+    This is also the ONE place the run-level pass count is computed (ruling 2, 2026-10-04), so
+    the headline rate in summarize() and the run tally here cannot drift into two numbers that
+    disagree about the same arm.
     """
     runs = [r for rs in run_ledger.values() for r in rs]
     degraded = sum(1 for r in runs if r.degraded)
     errored = sum(1 for r in runs if r.error and not r.degraded)
+    scored = [r for r in runs if not r.error]
+    passed = sum(1 for r in scored if r.overall_pass)
     return {
         "total": len(runs),
-        "scored": sum(1 for r in runs if not r.error),
+        "scored": len(scored),
+        "passed": passed,
+        "pass_pct": (100.0 * passed / len(scored)) if scored else 0,
         "degraded": degraded,
         "errored": errored,
         "counts": "runs, not questions; degraded and errored are disjoint",
@@ -1701,17 +1770,15 @@ def main(argv: Optional[list] = None) -> int:
                     + (f"  must_not_cite_HIT={last_r.must_not_cite_hits}" if last_r.must_not_cite_violated else "")
                 )
 
-    summary = summarize(results, args.endpoint)
+    summary = summarize(results, args.endpoint, run_ledger)
     # ADR-0014 stability block: classify each question across the N runs so
     # a code change is gated on STABLE flips (the path touched), not on the
     # noisy total. FLAKY questions are the run-to-run noise band and must
     # not be counted as regressions.
     summary["warmup"] = warmup_info
-    # `errors`/`degraded` in summarize() are QUESTION-scoped: they count questions whose
-    # scored result died. A question that still classified (one timeout out of three runs)
-    # never reaches them, so run-level degradation was invisible - and predictions about
-    # this harness are written in RUNS. Count runs here, where the ledger exists.
-    summary["runs"] = run_level_tally(run_ledger)
+    # summary["runs"] is set inside summarize() now that it takes the ledger; `errors` and
+    # `degraded` up top stay QUESTION-scoped (a question that still classified after one
+    # timeout never reaches them), which is why the run tally is reported beside them.
     integrity_violations = check_run_integrity(run_ledger, args.allow_lm_cache,
                                                args.allow_unset_temperature)
     summary["integrity"] = {
@@ -1900,15 +1967,13 @@ def main(argv: Optional[list] = None) -> int:
     write_markdown_report(results, out_dir / "report.md", summary)
     print(f"\nWritten:\n  {out_dir / 'summary.json'}\n  {out_dir / 'report.md'}\n  {out_dir}/<id>.json (per-question raw)")
 
-    # Optional baseline comparison
+    # Optional baseline comparison. Its return code does NOT decide the exit on its own:
+    # until 2026-10-04 `return rc` sat above the integrity check, so any arm invoked with
+    # --baseline could exit 0 while its samples were cache replays.
+    baseline_rc = None
     if args.baseline:
-        rc = compare_to_baseline(summary, Path(args.baseline), args.regression_threshold)
-        return rc
-    # Hard-fail on must_not_cite violations, and on any run-integrity violation: a run whose
-    # samples were cache replays must not exit 0 and be cited as a measurement.
-    if integrity_violations:
-        return 4
-    return 1 if summary["must_not_cite_violations"] > 0 else 0
+        baseline_rc = compare_to_baseline(summary, Path(args.baseline), args.regression_threshold)
+    return exit_code(summary, integrity_violations, baseline_rc)
 
 
 if __name__ == "__main__":
