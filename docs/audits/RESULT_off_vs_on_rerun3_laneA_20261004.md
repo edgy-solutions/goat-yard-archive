@@ -307,3 +307,37 @@ kept; two more are labelled regression-only because they pass in both columns. S
 **Still not explained:** why the vector read corrupts at correct `dim`. Three live reads agree with
 each other and disagree with the stored sample, so it is not random per-read noise. That is a
 separate investigation and this commit does not touch it.
+
+## Addendum, 2026-10-04: the three open decisions are ruled on, and one claim above is corrected
+
+Standoff, as everywhere in this lane: nothing above is rewritten, including the sentence this
+section corrects. The record of what was claimed survives beside its correction.
+
+**The rulings, and where each landed.**
+
+| open decision | ruling | commit |
+|---|---|---|
+| 1 — the provisional rule for digest-only differences | **Not provisional.** Status is `differs-digest-only`, the uuids are recorded, and the fingerprint now reads every vector twice at sampling time and refuses on mismatch. | `d4fddc0`, `56466e8` |
+| 2 — the headline metric | **Replaced with the run-level rate.** `summary.passed` is now over scored RUNS; the one-run-per-question number survives as `representative_passed`, a `pass_basis` key makes a pre-ruling summary detectable, and a baseline in the old unit is **refused** rather than subtracted. Every doc quoting the old figure is marked, and the corrected table for all 20 arms is in `RUNLEVEL_RATE_RESTATEMENT_laneA_20261004.md`. | `ec8fb48` |
+| 3 — experiment design | **No sixth attempt at 5×13.** The flip proposal is in `FLIP_PROPOSAL_adr0009_laneA_20261004.md`: two of the three legs it was to rest on do not hold, and the measured gap is in substantial part a quote-pairing regex at `backend/bot.py:61`, not the flag. | `a8f9f11` |
+
+**On decision 2, for this document specifically:** the run-level table at lines 173–175 was already
+correct and is reproduced to the run by the restatement (49/65, 42/65, 38/65). Line 165's
+`summary.passed` description is wrong in one detail — it counts each question's **last scored** run,
+not its first — and is marked, not rewritten.
+
+**The correction.** The last paragraph above ends: *"Three live reads agree with each other and
+disagree with the stored sample, so it is not random per-read noise."* **That inference does not
+survive the full-corpus reproduction.** Measured over 365 pages, 7294 objects and 1095 reads
+(`READFAULT_mechanism_reproduction_laneA_20261004.md`, commit `190e1f6`): 1.74% of reads do not
+parse at all and 0.73% parse but carry a corrupted vector, and the damage **is** per-read — all 19
+parse failures were 1-of-3 and never 2-of-3, and all 6 shaped disagreements had a clean 2-1
+majority. Three reads agreeing was a 5-object sample of a 0.73%-per-read process, which is the
+likely outcome, not evidence of a stable corruption localised to one path.
+
+What the reproduction did establish is narrower and firmer than the guess it replaces:
+**truncation is ruled out** — 0 of 380 records showed any byte-length difference between reads,
+including the unparseable ones — and the corrupted elements fall in perfectly contiguous blocks.
+Same length, wrong contents, one contiguous block is a buffer or chunk reassembly signature. The
+mechanism is still not named, and the candidates are now the client and the hop rather than the
+database.
