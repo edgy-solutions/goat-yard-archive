@@ -14,6 +14,11 @@ api:
     # (Previous comment said gya-minio — that was incorrect and the wrong DNS
     # name was returning 404 from the backend.)
     MINIO_HTTP_ENDPOINT: "http://gya-frontend-minio.gya-test.svc.cluster.local:9000"
+    # Per-stage debug captures ON here: evals/determinism_harness.py needs them,
+    # and this is the namespace it is pointed at. Production stays "0" in
+    # values.yaml. Anyone who can reach this backend can read the bot's unshown
+    # work for their own query -- that is the trade this namespace accepts.
+    GYA_DEBUG_STAGES: "1"
   
   image:
     tag: "latest"

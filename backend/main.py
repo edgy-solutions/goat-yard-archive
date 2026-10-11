@@ -35,6 +35,7 @@ from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
 from . import stage_health
+from . import debug_gate
 
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -402,9 +403,22 @@ async def search(request: Request, req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
 
-    # Per-stage capture for the determinism harness — only populated when
-    # req.debug=True so production traffic is unaffected.
-    stages_capture: Optional[dict] = {} if req.debug else None
+    # A debug response carries the bot's raw pre-sweep answer, the embedding
+    # hash and the retrieved SIDs, so `debug: true` is a data-exposure channel
+    # and not a feature flag. REFUSED LOUDLY where it is not enabled: returning
+    # 200 with stages: null would read to the caller as "this build has no
+    # stage captures", which is a different and false statement.
+    if req.debug and not debug_gate.stage_debug_allowed():
+        raise HTTPException(
+            status_code=403,
+            detail=("stage debug captures are disabled in this deployment; set "
+                    "%s=1 on the backend to enable them" % debug_gate.ENV_VAR))
+
+    # Per-stage capture for the determinism harness. Gated a second time on
+    # purpose: if the 403 above is ever relaxed or moved, the capture itself
+    # must still not populate. The expensive direction has to stay expensive.
+    stages_capture: Optional[dict] = (
+        {} if (req.debug and debug_gate.stage_debug_allowed()) else None)
     if stages_capture is not None:
         stages_capture["question"] = req.query
 
