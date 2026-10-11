@@ -1260,6 +1260,20 @@ def disputed(seq):
     return set(idx) - keep
 
 
+def _new_unanchored(fp, leading_events, config):
+    """A continuation_unanchored region from a page's (col, band) events before its first head."""
+    unanchored = {
+        "kind": "continuation_unanchored", "file_page_first": fp,
+        "head": None, "flags": [], "rects": [], "_rect_index": {},
+        "number_sources": {"count": None, "read": None, "witness": None},
+        "tier": "best_effort", "config": config,
+    }
+    for col, band in leading_events:
+        _extend_region_rect(unanchored, fp, col, band,
+                            band.get("full_basis", "gutter_ink") if col == "full" else None)
+    return unanchored
+
+
 def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected_by_page,
                       witness_by_page, config, abstained=False):
     """Walk confirmed heads in reading order across `page_records` (ordered list of dicts with
@@ -1365,11 +1379,6 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
         chained = (prev_fp is not None and fp == prev_fp + 1 and open_region is not None)
         leading_events = []
         seen_head_on_page = False
-        # Reading order: where this page's FIRST head region lands in `regions` (set when it opens,
-        # after the previous page's open region is appended). An unanchored continuation is this
-        # page's text BEFORE that head, so it is inserted there -- not appended after the regions
-        # the page already closed (which put 90's continuation after its chapter_intro).
-        first_head_idx = None
         column_order_suspect = False
         seen_left_in_section = False
 
@@ -1396,6 +1405,7 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
             key = (col, band["y0"])
             head = heads_by_key.get(key)
             if head is not None:
+                first_on_page = not seen_head_on_page
                 seen_head_on_page = True
                 kind = head["kind"]
                 if kind == "verse":
@@ -1426,10 +1436,24 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
                 # head line itself so region rects start there, not at the next body band.
                 full_basis = band.get("full_basis", "gutter_ink") if col == "full" else None
                 _extend_region_rect(region, fp, col, band, full_basis)
-                if open_region is not None:
+                if first_on_page and leading_events:
+                    # The page's text BEFORE its first head is settled HERE, while open_region is still
+                    # the previous page's region: chained -> it continues that region; otherwise it is an
+                    # unanchored continuation listed before this head's region. (Settling it after the
+                    # band loop gave it to the page's LAST region: 91's whole left column and 6 right
+                    # lines went to Ver. 2 instead of Ver. 1; 92's Ver. 4 overlapped Ver. 3.)
+                    if chained:
+                        for lcol, lband in leading_events:
+                            _extend_region_rect(open_region, fp, lcol, lband,
+                                                lband.get("full_basis", "gutter_ink") if lcol == "full" else None)
+                        regions.append(_finalize_region(open_region))
+                    else:
+                        if open_region is not None:
+                            regions.append(_finalize_region(open_region))
+                        regions.append(_finalize_region(_new_unanchored(fp, leading_events, config)))
+                    leading_events = []
+                elif open_region is not None:
                     regions.append(_finalize_region(open_region))
-                if first_head_idx is None:
-                    first_head_idx = len(regions)
                 open_region = region
             else:
                 if not seen_head_on_page:
@@ -1441,24 +1465,15 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
                     _extend_region_rect(open_region, fp, col, band, full_basis)
 
         if leading_events:
+            # Only a page with NO head reaches here (a head settles them above); open_region is still
+            # the previous page's region.
+            assert not seen_head_on_page
             if chained:
                 for col, band in leading_events:
                     full_basis = band.get("full_basis", "gutter_ink") if col == "full" else None
                     _extend_region_rect(open_region, fp, col, band, full_basis)
             else:
-                unanchored = {
-                    "kind": "continuation_unanchored", "file_page_first": fp,
-                    "head": None, "flags": [], "rects": [], "_rect_index": {},
-                    "number_sources": {"count": None, "read": None, "witness": None},
-                    "tier": "best_effort", "config": config,
-                }
-                for col, band in leading_events:
-                    _extend_region_rect(unanchored, fp, col, band,
-                                        band.get("full_basis", "gutter_ink") if col == "full" else None)
-                if first_head_idx is None:
-                    regions.append(_finalize_region(unanchored))
-                else:
-                    regions.insert(first_head_idx, _finalize_region(unanchored))
+                regions.append(_finalize_region(_new_unanchored(fp, leading_events, config)))
 
         page_summaries[fp] = {
             "file_page": fp,

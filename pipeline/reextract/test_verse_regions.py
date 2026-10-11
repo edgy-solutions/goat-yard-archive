@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 50
+EXPECTED_TESTS = 51
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -768,6 +768,43 @@ def test_unanchored_continuation_listed_first_on_its_page_90_layout():
                                      {89: ca, 90: cb}, {89: [], 90: []}, {89: None, 90: None}, config={})
     got = [(r["kind"], r["file_page_first"]) for r in regions]
     assert got == [("continuation_unanchored", 89), ("verse", 89), ("chapter_intro", 90), ("verse", 90)], got
+
+
+def test_leading_text_continues_previous_page_region_91_layout():
+    # Page 91 (Chris, console 2026-10-11): Ver. 1 opens on 90; on 91 the whole LEFT column and the
+    # top of the RIGHT column continue Ver. 1, and "Ver. 2" is a head lower in the right column.
+    # The leading text was settled after the band loop and went to the page's LAST open region:
+    # Ver. 2 got rects from the top of both columns and Ver. 1 had nothing on 91.
+    def vcand(fp, col, y, n):
+        hc = {"text": f"Ver. {n}. x", "ver": True, "numbers": [n], "raw_head": f"Ver. {n}",
+              "status": "ok", "raw": f"Ver. {n}. x", "ver_case": "upper"}
+        x0, x1 = (0, 400) if col == "left" else (400, 800)
+        return {"file_page": fp, "col": col, "y0": y, "y1": y + 10, "box": [x0, y, x1, y + 10],
+                "kind": "verse", "signature": {}, "head_confirm": hc, "flags": []}
+    L = lambda y: _band("left", y, y + 10, 0, 400, 20, 380)
+    R = lambda y: _band("right", y, y + 10, 400, 800, 420, 780)
+    s90 = {"file_page": 90, "H": 200, "W": 800, "xdiv": 400, "left": [L(30), L(50)], "right": [R(10), R(30)], "full": []}
+    s91 = {"file_page": 91, "H": 200, "W": 800, "xdiv": 400, "left": [L(10), L(30), L(50)],
+           "right": [R(10), R(30), R(50), R(70)], "full": []}
+    regions, _ = VR.assemble_regions(
+        [{"file_page": 90}, {"file_page": 91}], {90: s90, 91: s91},
+        {90: [vcand(90, "left", 30, 1)], 91: [vcand(91, "right", 50, 2)]},
+        {90: [], 91: []}, {90: None, 91: None}, config={})
+    v = {r["number_sources"]["read"][0]: r for r in regions if r["kind"] == "verse"}
+    r1 = {(x["file_page"], x["col"]): x["box"] for x in v[1]["rects"]}
+    r2 = {(x["file_page"], x["col"]): x["box"] for x in v[2]["rects"]}
+    assert r1.get((91, "left")) is not None and r1[(91, "left")][1] == 10 and r1[(91, "left")][3] == 60, r1
+    assert r1.get((91, "right")) is not None and r1[(91, "right")][1] == 10 and r1[(91, "right")][3] == 40, r1
+    assert set(r2) == {(91, "right")} and r2[(91, "right")][1] == 50 and r2[(91, "right")][3] == 80, r2
+    # unchained (89 -> 91 gap) same page: the leading text is its own continuation, listed before Ver. 2
+    regions, _ = VR.assemble_regions(
+        [{"file_page": 89}, {"file_page": 91}], {89: dict(s90, file_page=89), 91: s91},
+        {89: [vcand(89, "left", 30, 1)], 91: [vcand(91, "right", 50, 2)]},
+        {89: [], 91: []}, {89: None, 91: None}, config={})
+    got = [(r["kind"], r["file_page_first"]) for r in regions]
+    assert got[-2:] == [("continuation_unanchored", 91), ("verse", 91)], got
+    cont = regions[-2]
+    assert {(x["col"], x["box"][1], x["box"][3]) for x in cont["rects"]} == {("left", 10, 60), ("right", 10, 40)}, cont["rects"]
 
 # 9. region_empty / head_only, derived from bands not a counter (FIX5) --------------------------------
 
