@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 12
+EXPECTED_TESTS = 16
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -144,6 +144,9 @@ def _write_synthetic_page(path, W=200, H=200, fill=230):
     Image.fromarray(arr, mode="L").save(path)
 
 
+_BODY_REGIONS = [{"col": "left", "box": [0, 0, 100, 200]}, {"col": "right", "box": [100, 0, 200, 200]}]
+
+
 def _make_synthetic_inputs(tmp_dir):
     tmp_dir = Path(tmp_dir)
     volume_dir = tmp_dir / "volume1"
@@ -188,8 +191,8 @@ def _make_synthetic_inputs(tmp_dir):
     misses_path.write_text(json.dumps(misses_doc), encoding="utf-8")
 
     geometry_records = [
-        {"file_page": 101, "xdiv": 100},
-        {"file_page": 102, "xdiv": 100},
+        {"file_page": 101, "xdiv": 100, "body_regions": _BODY_REGIONS},
+        {"file_page": 102, "xdiv": 100, "body_regions": _BODY_REGIONS},
     ]
     geometry_path = tmp_dir / "geometry.jsonl"
     with open(geometry_path, "w", encoding="utf-8", newline="\n") as f:
@@ -293,6 +296,111 @@ def test_build_items_page_item_lists_its_own_regions_and_misses():
     page_item = next(i for i in items if i["item_kind"] == "page")
     assert page_item["region_item_ids"] == ["r:101:left:10"]
     assert page_item["miss_item_ids"] == ["m:101:50"]
+
+
+# 11. --html-only (UI 2) ------------------------------------------------------------------------------
+
+def _crop_shas(out_dir):
+    return {p.name: RVT._sha16_bytes(p.read_bytes()) for p in sorted((out_dir / "crops").glob("*.png"))}
+
+
+def _built_console(tmp_dir):
+    run_path, misses_path, geometry_path, volume_dir = _make_synthetic_inputs(tmp_dir)
+    out_root = Path(tmp_dir) / "out"
+    result = RVT.build(run_path, misses_path, geometry_path, volume_dir, out_root)
+    return (run_path, misses_path, geometry_path, volume_dir, out_root), result
+
+
+def test_html_only_keeps_set_sha_and_crops_renames_old_index_and_appends_manifest_line():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        out_dir = result["out_dir"]
+        before = _crop_shas(out_dir)
+        old_html = (out_dir / "index.html").read_bytes()
+        r = RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+        assert r["set_sha16"] == result["set_sha16"] == out_dir.name
+        assert _crop_shas(out_dir) == before, "crops must be byte-identical"
+        assert (out_dir / "index_ui1.html").read_bytes() == old_html
+        assert (out_dir / "index.html").read_bytes() != old_html
+        last = json.loads((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert last["kind"] == "html_rebuild" and last["ui_version"] == 2, last
+        assert last["prior_index_renamed_to"] == "index_ui1.html"
+        assert last["set_sha16"] == result["set_sha16"]
+        assert last["snap_edge_coincidence"]["tops"][1] == 2
+        # a second rebuild with an identical config is refused unless forced; forcing never overwrites ui1
+        try:
+            RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+            assert False, "expected RefuseOverwrite"
+        except RVT.RefuseOverwrite:
+            pass
+        r2 = RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root, force=True)
+        assert r2["renamed_to"] == "index_ui2.html"
+        assert (out_dir / "index_ui1.html").read_bytes() == old_html
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_html_only_tampered_crop_raises_and_writes_nothing():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        out_dir = result["out_dir"]
+        crop = sorted((out_dir / "crops").glob("*.png"))[0]
+        b = bytearray(crop.read_bytes())
+        b[-5] ^= 0xFF
+        crop.write_bytes(bytes(b))
+        html_before = (out_dir / "index.html").read_bytes()
+        n_lines = len((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines())
+        try:
+            RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+            assert False, "expected ValueError on a tampered crop"
+        except ValueError:
+            pass
+        assert (out_dir / "index.html").read_bytes() == html_before
+        assert len((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()) == n_lines
+        assert not (out_dir / "index_ui1.html").exists()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_html_only_snap_targets_contain_every_detected_rect_edge():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        r = RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+        snap = r["snap"]
+        n = 0
+        for item in result["items"]:
+            if item["item_kind"] not in RVT.REGION_KINDS:
+                continue
+            for rect in item["rects"]:
+                per = snap[str(rect["file_page"])][rect["col"]]
+                assert rect["box"][1] in per["tops"], (rect, per)
+                assert rect["box"][3] in per["bottoms"], (rect, per)
+                n += 1
+        assert n == 2
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_html_only_html_carries_ui2_keys_export_name_and_inlined_js_functions():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+        html_text = (result["out_dir"] / "index.html").read_text(encoding="utf-8")
+        set_sha = result["set_sha16"]
+        assert f'"versetruth_{set_sha}_ui2"' in html_text
+        assert f'"versetruth_{set_sha}"' in html_text, "ui1 migration key"
+        assert f"verse_box_verdicts_{set_sha}_ui2.jsonl" in html_text
+        assert f"verse_box_verdicts_{set_sha}_ui1.jsonl" in html_text
+        for fn in ("function snap(", "function clampEdge(", "function linesMoved(", "function applyDrag(",
+                   "function verdictCoupling(", "function buildExportRow("):
+            assert fn in html_text, fn
+        assert "page101_image1.png" in html_text and "pagewin" in html_text
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
