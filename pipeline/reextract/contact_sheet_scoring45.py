@@ -102,15 +102,34 @@ C2_MAP_RULE = ("Span id pP:nN -> the vol1_apparatus.jsonl line whose `page` == P
                "its `notes` list; the string is that item's `text`, passed through hebrew_frontier_or._ctx "
                "(Hebrew runs -> U+2022).")
 C2_NORM_RULE = ("Witness comparisons: (Hebrew) NFC, keep only U+05D0-U+05EA, so nikud, cantillation, spaces and "
-                "Latin drop out; the truth set's printed Hebrew must be a substring of the note's Hebrew "
-                "consonants. (Latin, where an older Latin string exists) remove U+0590-U+05FF, lower-case, keep "
+                "Latin drop out; the truth set's `hebrew` field (the extractor's candidate, not the signed reading) must be a "
+                "substring of the note's Hebrew consonants. (Latin, where an older Latin string exists) remove U+0590-U+05FF, lower-case, keep "
                 "word tokens [a-z0-9&]; the older token sequence must be a contiguous run of the apparatus "
                 "tokens. Tokenising folds whitespace and punctuation.")
 C2_WITNESSES = ("(1) index: the truth set's note_index (1-based, from the page image's note regions) minus 1 == N; "
                 "(2) count: the truth set's notes_on_page (image-derived) == len(notes) on that page; "
-                "(3) hebrew: the printed Hebrew occurs in note N; "
+                "(3) hebrew: the truth set's `hebrew` field, which is the extractor's candidate from the whole-note read (same lineage as the note text), occurs in note N; this is NOT the printed or signed reading, and what it establishes is index bookkeeping within that lineage, not a pixel correspondence; "
                 "(4) marker: note N's marker == [^N+1] (same record, so a consistency check, not independent); "
                 "(5) older Latin: where the 2026-09-06 sitting records hold a Latin string for the span.")
+
+REV3_TEXT = ("REV 3. What changed from rev 2: (a) witness (3) is relabelled. Rev 2 described the truth set's `hebrew` "
+             "field as the text printed on the page; it is the extractor's candidate from the whole-note read, the same lineage "
+             "as the note text, so it establishes index bookkeeping within that lineage and not a pixel "
+             "correspondence. (b) The divergence between that candidate and the signed signature is now measured "
+             "and shown per row (candidate_vs_signed). The 45 rows, crop hashes, set digest and channel-2 source "
+             "are unchanged. This is a proposal, not an approval record. Rev 1 remains "
+             "CONTACT_SHEET_scoring45_adb9a26835533dbc; rev 2 survives in git history.")
+CAND_RULE = ("candidate_vs_signed: both strings NFC, `[` and `]` stripped, only U+05D0-U+05EA kept, the five final "
+             "forms folded to their base letters, Levenshtein distance d on the result. Classes: identical = the two "
+             "strings are equal after NFC and bracket stripping alone; nikud_or_final_only = not identical but "
+             "d == 0; close = 0 < d <= 2 and not substantially different; substantially_different = d > 2 or "
+             "d > half the shorter string.")
+CAND_CLASSES = ("identical", "nikud_or_final_only", "close", "substantially_different")
+SUB_MARK = "data-cand-marker=\"substantially_different\""
+SUB_NOTE = {
+    "p493:n3": "the divergence is the signer's 3 corrected letters of 4 in the crop, not a mapping doubt.",
+    "p245:n1": "this is a different word entirely; this span's note identity is already a carried open debt on this lane.",
+}
 
 POLICY = ("Before any outbound call, produce a contact sheet: every crop to be sent, native size, beside its "
           "signed text, before/after where changed; Chris approves it, then spend. Record the hash of every crop "
@@ -294,6 +313,38 @@ def _heb_cons(s):
     return _HEB_CONS.sub("", unicodedata.normalize("NFC", s or ""))
 
 
+_FINAL = str.maketrans(u"ךםןףץ", u"כמנפצ")
+
+
+def _cand_norm(s, fold):
+    t = unicodedata.normalize("NFC", s or "").replace("[", "").replace("]", "")
+    if not fold:
+        return t.strip()
+    return _heb_cons(t).translate(_FINAL)
+
+
+def lev(a, b):
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def cand_class(cand, signed):
+    a, b = _cand_norm(cand, True), _cand_norm(signed, True)
+    d = lev(a, b)
+    if _cand_norm(cand, False) == _cand_norm(signed, False):
+        return "identical", d
+    if d == 0:
+        return "nikud_or_final_only", d
+    if d > 2 or d > min(len(a), len(b)) / 2.0:
+        return "substantially_different", d
+    return "close", d
+
+
 def _lat_tokens(s):
     return _LAT_TOK.findall(re.sub(u"[֐-׿]+", " ", unicodedata.normalize("NFC", s or "")).lower())
 
@@ -357,6 +408,9 @@ for sid in ALL_IDS:
           "%s: signed text empty or carries an unresolved '?': %r" % (sid, r["signature"]))
     W = c2_witness(sid)
     r["ch2_witness"] = W
+    check(sid in T74, "%s: not in the truth set, so no candidate to compare" % sid)
+    r["cand_hebrew"] = T74[sid]["hebrew"]
+    r["cand_class"], r["cand_dist"] = cand_class(r["cand_hebrew"], r["signature"])
     _pn = (int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:]))
     _contra = sorted(k for k in ("index", "count", "hebrew", "marker", "older_latin") if W[k] is False)
     _indep = [k for k in ("index", "count", "hebrew") if W[k] is True]
@@ -388,6 +442,12 @@ C2_WIT["all_comparable_witnesses_agree"] = {
     "n_matched": sum(1 for r in _all_cmp if not any(r["ch2_witness"][k] is False for k in
                                                     ("index", "count", "hebrew", "marker", "older_latin"))),
     "n_comparable": len(_all_cmp)}
+CAND_N = {k: sum(1 for r in rows if r["cand_class"] == k) for k in CAND_CLASSES}
+SUB_IDS = [r["span_id"] for r in rows if r["cand_class"] == "substantially_different"]
+CAND_VS_SIGNED = {"rule": CAND_RULE, "counts": CAND_N, "n": len(rows), "substantially_different_ids": SUB_IDS,
+                  "distances_of_substantially_different": {s_: BY[s_]["cand_dist"] for s_ in SUB_IDS},
+                  "note": "the candidate is the extractor's whole-note read, not what the signer read off the pixels"}
+CAND_TXT = ", ".join("%s %d" % (k, CAND_N[k]) for k in CAND_CLASSES)
 C2_SRC_SHA = sha16(open(str(F_APP), "rb").read())
 C2_WIT_TXT = "; ".join("%s %d/%d" % (k, v["n_matched"], v["n_comparable"]) for k, v in C2_WIT.items())
 
@@ -478,6 +538,7 @@ section.row{border:1px solid var(--line);background:var(--card);margin:14px 0;pa
 .chip[data-register=not_in_crop]{opacity:.55}
 .callout{border-left:4px solid var(--warn);padding:4px 10px;margin:6px 0}
 .mut{color:var(--mut)}.warn{color:var(--warn)}
+.cand-sub{border-left:4px solid var(--warn);background:var(--chip);padding:2px 8px;font-weight:700;color:var(--warn)}
 table.hdr td{padding:1px 10px 1px 0;vertical-align:top}
 """
 
@@ -523,6 +584,13 @@ def row_html(r):
         L.append("<tr><td>signed_partial_in_crop</td><td>truth holds over the IN-CROP SUBSTRING ONLY; the signed "
                  "text above is that substring%s</td></tr>" %
                  ("; <code>in_crop_trimmed: %s</code>" % esc(r["in_crop_trimmed"]) if r["in_crop_trimmed"] else ""))
+    L.append('<tr><td>extractor candidate</td><td><span class="heb" dir="rtl">%s</span> &nbsp; class <code>%s</code>, '
+             "base-consonant edit distance %d <span class='mut'>(the whole-note read, not the signed reading)</span>"
+             "</td></tr>" % (esc(r["cand_hebrew"]), r["cand_class"], r["cand_dist"]))
+    if r["cand_class"] == "substantially_different":
+        L.append('<tr><td class="warn">candidate differs</td><td><div class="cand-sub" %s>SUBSTANTIALLY DIFFERENT: the '
+                 "note text for this span was selected by a candidate that is not what this crop was signed as%s</div>"
+                 "</td></tr>" % (SUB_MARK, (" -- " + esc(SUB_NOTE[r["span_id"]])) if r["span_id"] in SUB_NOTE else ""))
     if r["ch2_state"] == "absent":
         L.append("<tr><td>channel 2 string</td><td><b class='warn'>ABSENT</b> <span class='mut'>(not empty: %s)"
                  "</span><pre class=\"ch2\" data-state=\"absent\"></pre></td></tr>" % esc(r["ch2_why"]))
@@ -599,6 +667,7 @@ def header_html():
     def kv(k, v):
         tb.append("<tr><td class='mut'>%s</td><td>%s</td></tr>" % (esc(k), v))
     kv("page convention", "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - %d). Every span id here is a file page." % PRINTED_OFFSET)
+    kv("revision", esc(REV3_TEXT))
     kv("status", "NOTHING IS SENT. No network call of any kind was made to produce this sheet.")
     kv("policy", esc(POLICY))
     kv("approval is for", "the PIXELS in each row, not the text beside them. The signed text is shown because "
@@ -628,6 +697,11 @@ def header_html():
        "(n_matched/n_comparable): %s. Witness source <code>%s</code> sha16 <code>%s</code>."
        % (C2_WIT["all_comparable_witnesses_agree"]["n_matched"], C2_WIT["all_comparable_witnesses_agree"]["n_comparable"],
           esc(C2_WIT_TXT), esc(F_TRUTH74.name), SRC_SHA[F_TRUTH74.name]))
+    kv("candidate_vs_signed", "<span id='cand-table'>%s</span> (n=%d). %s Substantially different: %s. The truth set's "
+       "`hebrew` field is the extractor's candidate from the whole-note read; it is not the signed reading. The "
+       "neighbour-note control gives witness (3) discriminating power on 44 of 45 rows (carried from rev 2), within "
+       "one lineage: the witnesses share the note text's own extraction, so they are not independent of it."
+       % (esc(CAND_TXT), len(rows), esc(CAND_RULE), esc(", ".join(SUB_IDS))))
     kv("supersedes", "<code>%s</code>: %s" % (SUPERSEDES, esc(SUPERSEDES_WHY)))
     kv("standing rules", "<ul>" + "".join("<li>%s</li>" % esc(x) for x in RULES) + "</ul>")
     kv("scoring", "per channel: <code>exact</code> / <code>nikud</code> / <code>wrong</code> / "
@@ -672,7 +746,7 @@ DOC = "\n".join(parts) + "\n"
 
 # ---------------------------------------------------------------- born-checks over the emitted bytes
 sidecar = {
-    "kind": "contact_sheet_scoring45", "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
+    "kind": "contact_sheet_scoring45", "revision": 3, "revision_note": REV3_TEXT, "candidate_vs_signed": CAND_VS_SIGNED, "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
     "nothing_sent": True, "set_digest": SET_DIGEST, "channel2_source_sha16": C2_SRC_SHA, "digest_rule": DIGEST_RULE, "digest_lines": DIGEST_LINES,
     "derivation": DERIVATION, "policy": POLICY, "standing_rules": list(RULES), "models": list(MODELS),
     "channels": {"bare": "A2 span crop alone", "text": "A2 span crop plus Latin note text, Hebrew runs masked to U+2022"},
@@ -774,6 +848,28 @@ check(n_ba == 3 and n_unchanged == N_EXPECT - 3, "before/after elements %d, unch
 check(all(row_el(s).count('data-before-after="%s"' % s) == 1 for s in ROUND2), "a round-2 row lacks its own before/after block")
 check(DOC.count("FILE PAGES") >= 1 and "FILE PAGES" in SIDE, "the file-page convention is missing from an output")
 
+# 6. candidate_vs_signed: partition, liveness, own-element markers, relabelled witness text
+check(lev(u"אבג", u"אדג") == 1 and lev(u"", u"אב") == 2 and cand_class(u"נפש", u"נפשות")[0] == "substantially_different"
+      and cand_class(u"ך", u"כ")[0] == "nikud_or_final_only", "liveness: the Levenshtein/class probes do not behave")
+check(sum(CAND_N.values()) == N_EXPECT and set(CAND_N) == set(CAND_CLASSES),
+      "the four classes do not partition the %d rows: %r" % (N_EXPECT, CAND_N))
+check(CAND_N["substantially_different"] > 0, "liveness: no substantially_different row, so the probe saw nothing")
+_in_own = [s_ for s_ in SUB_IDS if row_el(s_).count(SUB_MARK) == 1]
+check(_in_own == SUB_IDS, "a substantially_different row lacks its marker in its OWN element: %r" % sorted(set(SUB_IDS) - set(_in_own)))
+check(all(SUB_MARK not in row_el(r["span_id"]) for r in rows if r["cand_class"] != "substantially_different"),
+      "a row that is not substantially_different carries the marker")
+check(DOC.count(SUB_MARK) == len(SUB_IDS), "the marker count in the document %d != %d substantially_different rows"
+      % (DOC.count(SUB_MARK), len(SUB_IDS)))
+check("p493:n3" in SUB_IDS and "3 corrected letters" in row_el("p493:n3") and "p245:n1" in SUB_IDS
+      and "open debt" in row_el("p245:n1"), "the p493:n3 corrected-letters note or the p245:n1 open-debt note is missing from its own row")
+_w3 = re.search(r"\(3\) hebrew:.*?(?=; \(4\))", C2_WITNESSES, flags=re.S)
+check(_w3 is not None and "printed Hebrew" not in _w3.group(0) and "NOT the printed or signed reading" in _w3.group(0)
+      and "extractor's candidate" in _w3.group(0) and "printed Hebrew" not in C2_NORM_RULE
+      and "printed Hebrew" not in DOC and "printed Hebrew" not in SIDE,
+      "the relabelled witness (3) text is missing, or a 'printed Hebrew' claim survives")
+check(json.loads(SIDE)["candidate_vs_signed"]["counts"] == CAND_N and CAND_TXT in DOC and "REV 3" in DOC,
+      "candidate_vs_signed or the rev-3 statement is missing from an output")
+
 # the .md summary (a class (a) record)
 OUT_STEM = "CONTACT_SHEET_scoring45_%s_c2%s" % (SET_DIGEST, C2_SRC_SHA)
 MD = "\n".join([
@@ -797,6 +893,8 @@ MD = "\n".join([
     "- Channel 2 witnesses: %s" % C2_WITNESSES,
     "- Channel 2 normalisation: %s" % C2_NORM_RULE,
     "- Channel 2 witness result (n_matched/n_comparable): %s" % C2_WIT_TXT,
+    "- %s" % REV3_TEXT,
+    "- candidate_vs_signed (n=%d): %s. Substantially different: %s. %s" % (len(rows), CAND_TXT, ", ".join(SUB_IDS), CAND_RULE),
     "- **Supersedes** `%s`: %s" % (SUPERSEDES, SUPERSEDES_WHY),
     "- Called-out registers: p493:n3 (1 confirmed + 3 corrected; editorial reading; tile 4 restored resh) and p594:n0 "
     "(4 confirmed + 1 sic; printed he in the signature, expected chet beside it; `expected_match` separate from `exact`).",
@@ -807,8 +905,9 @@ MD = "\n".join([
     "## What this does NOT solve", "",
     "It does not say any crop is legible; Chris reading the pixels does. It does not supply a note text for the "
     "%d ABSENT rows. The index mapping is licensed by witnesses that share the page's note count and the truth "
-    "set's printed Hebrew; it is not a read of the pixels, and the signing exports named for this check carry no "
-    "note text. It does not fix the scoring rule for the two editorial-register rows." % N_CH2["absent"], "",
+    "set's extractor candidate (not the signed reading; it differs from the signed signature on %d of %d rows); it "
+    "is not a read of the pixels, and the signing exports named for this check carry no "
+    "note text. It does not fix the scoring rule for the two editorial-register rows." % (N_CH2["absent"], len(rows) - CAND_N["identical"], len(rows)), "",
     "## Rows", "", "| span (file page) | printed | pass | px | crop sha16 | signed text | disposition | ch2 |",
     "|---|---|---|---|---|---|---|---|"] +
     ["| %s | %d | %d | %dx%d | `%s` | %s | %s | %s |" % (r["span_id"], r["page_printed"], r["pass"], r["crop_w"],
@@ -817,7 +916,7 @@ MD = "\n".join([
 
 # EXPECTED_CHECKS is pinned to the count observed on the first full run (3 per row in the build loop, plus the
 # file-level and born-checks above); a check added or removed changes it and this line then refuses to pass.
-EXPECTED_CHECKS = 227   # was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
+EXPECTED_CHECKS = 281   # was 227 before rev 3 (54 new: 1 candidate-in-truth-set per row x45, plus 9 candidate_vs_signed born-checks); was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
 if CHECKS != EXPECTED_CHECKS:
     raise AssertionError("ran %d checks, expected %d" % (CHECKS, EXPECTED_CHECKS))
 
