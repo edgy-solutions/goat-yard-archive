@@ -64,3 +64,91 @@ def check_page(boxes, geom, flag_ratio=0.30):
     page_flag = len(boxes) > 3 and bad / len(boxes) > flag_ratio
     return {"dispositions": out, "n": len(boxes), "bad": bad,
             "page_flag": page_flag, "reason": "geometry-suspect" if page_flag else None}
+
+
+# ---------------------------------------------------------------------------------------------
+# Region layout invariants
+# Deterministic properties of an assembled region list (build_verse_regions output); a violation
+# is an assembler fault, never a data quirk. Pure functions over dicts, no I/O.
+# ---------------------------------------------------------------------------------------------
+_ORD = {"left": 0, "right": 1}
+
+
+def _regions_with_rects(regions):
+    return [(i, r) for i, r in enumerate(regions) if isinstance(r, dict) and "rects" in r]
+
+
+def layout_tiers(regions):
+    """{file_page: sorted y0 of every col=="full" rect, over ALL regions}."""
+    t = {}
+    for _, r in _regions_with_rects(regions):
+        for x in r["rects"]:
+            if x["col"] == "full":
+                t.setdefault(x["file_page"], []).append(x["box"][1])
+    return {fp: sorted(v) for fp, v in t.items()}
+
+
+def _tier(tiers, fp, y):
+    return sum(1 for f in tiers.get(fp, []) if f <= y)
+
+
+def head_first_violations(regions):
+    out = []
+    for i, r in _regions_with_rects(regions):
+        h = r.get("head")
+        if not h:
+            continue
+        fp, col, hy = r["file_page_first"], h.get("col"), h["box"][1]
+        rc = [x for x in r["rects"] if x["file_page"] == fp and x["col"] == col]
+        if not any(x["box"][1] == hy for x in rc):
+            out.append({"region_idx": i, "kind": r.get("kind"), "file_page": fp, "head_col": col,
+                        "head_y0": hy, "rect_y0s_on_head_col": [x["box"][1] for x in rc]})
+    return out
+
+
+def overlap_pairs(regions):
+    out = []
+    rr = _regions_with_rects(regions)
+    for a in range(len(rr)):
+        i, ri = rr[a]
+        for b in range(a + 1, len(rr)):
+            j, rj = rr[b]
+            for x in ri["rects"]:
+                for y in rj["rects"]:
+                    if x["file_page"] != y["file_page"]:
+                        continue
+                    if not (x["col"] == y["col"] or x["col"] == "full" or y["col"] == "full"):
+                        continue
+                    if x["box"][1] < y["box"][3] and y["box"][1] < x["box"][3]:
+                        out.append({"file_page": x["file_page"], "a_idx": i, "b_idx": j,
+                                    "a_col": x["col"], "b_col": y["col"],
+                                    "a_y": [x["box"][1], x["box"][3]], "b_y": [y["box"][1], y["box"][3]]})
+    return out
+
+
+def rect_before_head(regions):
+    tiers = layout_tiers(regions)
+    out = []
+    for i, r in _regions_with_rects(regions):
+        h = r.get("head")
+        if not h or h.get("col") not in _ORD:
+            continue
+        fp, hc, hy = r["file_page_first"], h["col"], h["box"][1]
+        hpos = (_tier(tiers, fp, hy), _ORD[hc], hy)
+        for x in r["rects"]:
+            if x["file_page"] != fp or x["col"] not in _ORD:
+                continue
+            if (_tier(tiers, fp, x["box"][1]), _ORD[x["col"]], x["box"][1]) < hpos:
+                out.append({"region_idx": i, "kind": r.get("kind"), "file_page": fp, "head_col": hc,
+                            "head_y0": hy, "rect_col": x["col"], "rect_y": [x["box"][1], x["box"][3]]})
+    return out
+
+
+def check_layout(regions):
+    hf, ov, rb = head_first_violations(regions), overlap_pairs(regions), rect_before_head(regions)
+    bad = {v["region_idx"] for v in hf} | {v["region_idx"] for v in rb}
+    for v in ov:
+        bad.add(v["a_idx"]); bad.add(v["b_idx"])
+    return {"head_first": hf, "overlap": ov, "rect_before_head": rb,
+            "counts": {"head_first": len(hf), "overlap": len(ov), "rect_before_head": len(rb),
+                       "regions_violating": len(bad)}}

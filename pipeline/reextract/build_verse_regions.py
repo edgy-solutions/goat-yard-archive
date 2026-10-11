@@ -63,6 +63,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verse_regions as VR  # noqa: E402  (bare-name import convention of this tree)
 import verse_head_read as VHR  # noqa: E402
 import endpoint_guard  # noqa: E402
+import box_sanity  # noqa: E402
 
 DEFAULT_VOLUME_DIR = "C:/Users/cnogr/git/dr-voluminous/commentary/volume1"
 DEFAULT_GEOMETRY = "C:/Users/cnogr/git/dr-voluminous/body_shadow_vol1/geometry/volume1_page_geometry.jsonl"
@@ -141,6 +142,7 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "align_sim_mid": VR.ALIGN_SIM_MID,
         "align_key_chars": VR.ALIGN_KEY_CHARS,
         "module_sha256": module_sha256,
+        "box_sanity_sha256": compute_module_sha256(box_sanity.__file__),
         "git_head": git_head,
         "git_dirty": git_dirty,
     }
@@ -495,6 +497,15 @@ def main(argv=None):
     VR.assert_numbering_invariant(regions)
     VR.check_region_rects(regions, geom_by_page)
 
+    layout = box_sanity.check_layout(regions)
+    for v in layout["head_first"]:
+        regions[v["region_idx"]].setdefault("flags", []).append("layout_head_first")
+    for idx in sorted({v[k] for v in layout["overlap"] for k in ("a_idx", "b_idx")}):
+        regions[idx].setdefault("flags", []).append("layout_overlap")
+    for idx in sorted({v["region_idx"] for v in layout["rect_before_head"]}):
+        regions[idx].setdefault("flags", []).append("layout_rect_before_head")
+    records[0]["layout_counts"] = layout["counts"]
+
     for fp in usable_pages:
         ps = page_summaries[fp]
         records.append({"kind": "page", "file_page": fp, **{k: v for k, v in ps.items() if k != "file_page"},
@@ -522,6 +533,7 @@ def main(argv=None):
         "pages_head_abstained": len(usable_pages) if head_abstained else 0,
         "regions": len(regions),
         "flags": dict(sorted(flag_counts.items())),
+        "layout": layout["counts"],
         "thresholds": records[0]["thresholds"],
         "config_hash": config["hash"],
         "read": args.read,
@@ -531,6 +543,9 @@ def main(argv=None):
     with open(out_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(summary) + "\n")
 
+    if any(layout["counts"][k] for k in ("head_first", "overlap", "rect_before_head")):
+        print(f"ERROR: layout invariants violated: {layout['counts']}", file=sys.stderr)
+        return 4
     return 0
 
 
