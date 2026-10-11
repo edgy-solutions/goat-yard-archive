@@ -2699,7 +2699,7 @@ skel = [{"span_id": sid, "crop_sha16": RM[sid]["crop16"], "candidate_sha16": RM[
          "signed_in": "glyph signer, in the browser", "set_sha16": SET, "sheet": OUT.name}
         for sid in RUN_SPAN_IDS]
 sk = "\n".join(json.dumps(x, ensure_ascii=False) for x in skel) + "\n"
-if not PASS3:     # pass 3 imports the signed pass-2 rows; a blank skeleton would be a second, unsigned file
+if not PASS3:     # pass 3 imports a signed export; a blank skeleton would be a second, unsigned file
     io.open(str(SKEL), "w", encoding="utf-8").write(sk)
 
 assert (CHECKS == EXPECTED_CHECKS or EXPECTED_CHECKS < 0), (
@@ -2735,5 +2735,5 @@ if PASS2:
     _hs = [NOTE_CROP_INFO[sid]["native_wh"][1] for sid in RUN_SPAN_IDS]
     print("  note crops: box_inside_note false on %d row(s); native size w[%d,%d] h[%d,%d]"
           % (_box_outside_n, min(_ws), max(_ws), min(_hs), max(_hs)))
-print("  sidecar %s   skeleton %s" % (SIDE.name, "(none -- pass 3 imports the signed pass-2 rows)" if PASS3 else SKEL.name))
+print("  sidecar %s   skeleton %s" % (SIDE.name, ("(none -- pass 3 imports %s)" % PASS2_EXPORT_NAME) if PASS3 else SKEL.name))
 print(banner(GIT_START, GIT_END))
