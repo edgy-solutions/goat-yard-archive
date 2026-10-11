@@ -41,6 +41,8 @@ from typing import List, Optional
 
 import httpx
 
+from evals import debug_capture
+
 from evals.zone3_judge_prod_sampler import (
     AnswerSample,
     DailyReport,
@@ -86,6 +88,10 @@ def _run_query(endpoint: str, question: str, timeout: float = 180.0) -> dict:
     stages so we can pick up commit_sha and excision counts."""
     with httpx.Client(timeout=timeout) as client:
         r = client.post(endpoint, json={"query": question, "debug": True})
+        # Before raise_for_status: this is a DAILY monitor, and a bare
+        # `403 Forbidden` from httpx reads as ingress or auth, which sends the
+        # reader to the wrong place entirely.
+        debug_capture.refuse_if_debug_disabled(r, endpoint, __file__)
         r.raise_for_status()
         return r.json()
 
@@ -145,6 +151,13 @@ def build_eval_replay_report(
     # For eval replay the "window" is just the run-time snapshot, but
     # keep the same field names so 5b and 5c reports render identically.
     window_start = now.isoformat(timespec="minutes")
+
+    # One probe before the day's cases. This monitor reads
+    # stages["zone3_excisions"], so without the capture channel every case would
+    # report zero excisions -- a clean report that measured nothing, on a job whose
+    # whole output is a count. Aborting is the honest result; a monitor that cannot
+    # see must not file a report saying all is well.
+    debug_capture.preflight_debug_capture(endpoint, __file__, timeout=180.0)
 
     samples: List[AnswerSample] = []
     for i, case in enumerate(cases):

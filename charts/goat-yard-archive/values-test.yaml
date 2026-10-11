@@ -20,6 +20,14 @@ api:
     # release after 0.3.2, and only if the paired gate holds -- with one replicate
     # pair the gate's EFFECT clause abstains, so the RATCHET decides that flip.
     GILL_STRUCTURED_ANSWER: "1"
+    # Per-stage debug captures ON here (ruling, Chris 2026-10-11). The scored
+    # eval arm in evals/run_eval.py posts debug=True because the structured
+    # fields it scores live in `stages`, and evals/determinism_harness.py and
+    # the zone3 daily monitor need them too -- this is the namespace they are
+    # pointed at. Production stays "0" in values.yaml. Anyone who can reach
+    # this backend can read the bot's unshown work for their own query; that is
+    # the trade this namespace accepts.
+    GYA_DEBUG_STAGES: "1"
 
   image:
     tag: "latest"

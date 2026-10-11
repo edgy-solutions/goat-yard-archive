@@ -43,6 +43,9 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+# sys.path[0] is evals/ when this is run as `python evals/determinism_harness.py`.
+import debug_capture
+
 
 STAGES_IN_PIPELINE_ORDER = [
     "available_entities",
@@ -78,6 +81,7 @@ def call_endpoint(endpoint: str, question: str, timeout: float, auth: Optional[s
         headers["Authorization"] = f"Bearer {auth}"
     with httpx.Client(timeout=timeout) as client:
         r = client.post(endpoint, headers=headers, json={"query": question, "debug": True})
+        debug_capture.refuse_if_debug_disabled(r, endpoint, __file__)
         r.raise_for_status()
         return r.json()
 
@@ -128,6 +132,15 @@ def main():
     total_calls = len(questions) * args.runs
     print(f"Endpoint  : {args.endpoint}")
     print(f"Questions : {len(questions)} (runs={args.runs})  -> {total_calls} total requests")
+    print()
+
+    # One probe before N*runs requests. This harness compares STAGE outputs across
+    # runs, so a target without the capture channel produces a comparison of empty
+    # dicts -- which would read as perfect determinism rather than as no measurement.
+    headers = {"Authorization": f"Bearer {args.auth_token}"} if args.auth_token else {}
+    stage_keys = debug_capture.preflight_debug_capture(
+        args.endpoint, __file__, headers=headers, timeout=args.timeout)
+    print(f"Captures  : {len(stage_keys)} stage keys present on the target")
     print()
 
     # runs_data[q_id] = list of {stages, error?, elapsed_s} per run, run-major order

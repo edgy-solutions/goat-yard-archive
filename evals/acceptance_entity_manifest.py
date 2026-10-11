@@ -30,6 +30,9 @@ import sys
 
 import httpx
 
+# sys.path[0] is evals/ when this is run as `python evals/acceptance_entity_manifest.py`.
+import debug_capture
+
 DEFAULT_QUERY = "What is the spiritual meaning of the scapegoat?"
 
 
@@ -48,11 +51,20 @@ def main(argv=None):
         return 2
 
     url = base + "/api/search"
+    # Before args.runs requests. This script asserts on
+    # stages["available_entities"], and the check below ("not a dict, or the key is
+    # missing") cannot tell a CLOSED CHANNEL from a manifest that came back empty --
+    # one is a misconfigured target, the other is the finding.
+    debug_capture.preflight_debug_capture(url, __file__, timeout=args.timeout)
     manifests, modes, second = [], [], []
     for i in range(args.runs):
         try:
             r = httpx.post(url, json={"query": args.query, "debug": True},
                            timeout=args.timeout)
+            # Before raise_for_status, and before the `except Exception` below
+            # can turn the remedy into "REQUEST FAILED HTTPStatusError":
+            # SystemExit is not an Exception, so the refusal gets out.
+            debug_capture.refuse_if_debug_disabled(r, url, __file__)
             r.raise_for_status()
             body = r.json()
         except Exception as e:

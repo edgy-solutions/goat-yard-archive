@@ -44,6 +44,14 @@ data:
   {{- if .Values.api.env.GILL_STRUCTURED_ANSWER }}
   GILL_STRUCTURED_ANSWER: {{ .Values.api.env.GILL_STRUCTURED_ANSWER | quote }}
   {{- end }}
+  # Per-stage debug captures on POST /api/search (backend/debug_gate.py). A
+  # debug response carries the bot's raw pre-sweep answer, the embedding hash
+  # and the retrieved SIDs, so this is a data-exposure channel: OFF in
+  # values.yaml, ON only where a harness needs it. Same envFrom caveat as
+  # above -- a change needs a rollout restart.
+  {{- if .Values.api.env.GYA_DEBUG_STAGES }}
+  GYA_DEBUG_STAGES: {{ .Values.api.env.GYA_DEBUG_STAGES | quote }}
+  {{- end }}
   {{- if .Values.api.env.LITELLM_PROXY_URL }}
   LITELLM_PROXY_URL: {{ .Values.api.env.LITELLM_PROXY_URL | quote }}
   {{- end }}

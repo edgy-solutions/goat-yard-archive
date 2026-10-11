@@ -90,6 +90,10 @@ api:
     # turns it on for gya-test. Set explicitly rather than omitted: an absent key
     # and an OFF key look the same in the pod otherwise.
     GILL_STRUCTURED_ANSWER: "0"
+    # Per-stage debug captures: OFF in production. With this unset or "0", a
+    # request with debug: true gets a 403 rather than a 200 carrying the bot's
+    # unshown work. Set explicitly so the pod says which way it is configured.
+    GYA_DEBUG_STAGES: "0"
   auth:
     clerkIssuer: "https://<your-app>.clerk.accounts.dev"
     clerkWebhookSecret: ""

@@ -38,6 +38,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
+
+# sys.path[0] is evals/ when this is run as `python evals/run_eval.py`.
+import debug_capture
 from dotenv import load_dotenv
 
 from run_dir import question_files
@@ -177,6 +180,12 @@ class QuestionResult:
     # violation rather than a blank column.
     answer_lm: Optional[dict] = None
     generation_seconds: Optional[float] = None
+    # TRI-STATE, and read as `is False` by run_level_fault. True/False is the observation
+    # on a response that arrived; None means score() returned before it could look, which
+    # happens only on the _error path -- already its own item error or abort. Treating
+    # None as the fault would relabel every connection refusal as a debug-flag problem,
+    # which is the thing refuse_if_debug_disabled exists not to do.
+    stages_present: Optional[bool] = None
 
     # BAML pipeline stage health for THIS run (query expansion, entity lookup, verifier).
     # `stages` on the wire is only populated when the backend honors debug=True and even then
@@ -270,6 +279,14 @@ def run_level_fault(result: "QuestionResult") -> Optional[str]:
         return f"HTTP {result.api_status}: {RUN_LEVEL_ABORT_HINT}"
     if result.degraded in RUN_LEVEL_DEGRADATIONS:
         return f"DEGRADED ({result.degraded}): {RUN_LEVEL_DEGRADATION_HINT}"
+    # A 200 with no `stages` is a RUN-level fault, not an item error: every question
+    # in the arm is scored against fields that live there, so the second question
+    # cannot go better than the first. It is checked here rather than in a preflight
+    # because here it also covers the --no-warmup path (where a pure refusal has no
+    # response to read) and a pod rolled mid-run (which a preflight has already
+    # passed). `is False` and not falsiness: see the field.
+    if result.stages_present is False:
+        return "NO STAGE CAPTURES: " + debug_capture.NO_STAGES_REASON
     return None
 
 
@@ -315,6 +332,15 @@ def score(q: dict, response: dict, elapsed: float) -> QuestionResult:
         result.degraded = degraded
         result.error = f"DEGRADED ({degraded}): pipeline returned a placeholder, not an answer"
         return result
+
+    # BELOW the degraded return, and that position is the whole correctness of the
+    # clause in run_level_fault. A placeholder response is evidence about the pipeline,
+    # not about the capture channel: read above this line it made a backend timeout and
+    # our own assertion label into "set GYA_DEBUG_STAGES=1", i.e. an invented abort on a
+    # healthy arm, which is what three tests here already said in words. So the
+    # observation is recorded only for a response that actually produced an answer, and
+    # stays None -- not False -- for every other shape.
+    result.stages_present = isinstance(stages, dict) and bool(stages)
     # Sentence IDs are inline in the answer text, not in the API's `citations`
     # field (which holds page-level [Vol N, p. M] citations).
     result.cited_ids = extract_sentence_ids(result.answer)
@@ -422,6 +448,10 @@ def call_endpoint(endpoint: str, question: str, auth: Optional[str], timeout: fl
             # generated and thrown away, and a prediction written against them cannot be
             # scored at all - which is what happened on 2026-09-20.
             r = client.post(endpoint, headers=headers, json={"query": question, "debug": True})
+            # A 403 here is a RUN-level fault, not an item error: the arm cannot be
+            # scored without `stages`, so it aborts rather than banking 64 more
+            # requests against a target that will not answer the question asked of it.
+            debug_capture.refuse_if_debug_disabled(r, endpoint, __file__)
         try:
             data = r.json()
         except Exception:
@@ -741,6 +771,14 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
     info = {"warmup_ran": do_warmup, "keep_alive_pin": KEEP_ALIVE_PIN_NOTE}
     if not do_warmup:
         print("Warmup    : SKIPPED (--no-warmup); first scored latency includes cold start.\n")
+        # No probe request here, on purpose. scored_run_refusals is PURE, and a refusal
+        # that cost a request would make learning "you are refused" more expensive than
+        # it has to be; worse, the probe is a real generation, so on the one path
+        # --no-warmup exists to serve (cold-start latency on the first scored question,
+        # reachable only with BOTH overrides) it would warm the very thing being
+        # measured. The stages check lives in run_level_fault instead, where EVERY
+        # response passes through it -- so it fires on question 1 of a --no-warmup run,
+        # and also catches a pod rolled mid-run, which no preflight can see.
         refusals = scored_run_refusals(info, allow_expansion_errors, allow_unpinned_provider)
         if refusals:
             print("")
@@ -777,6 +815,8 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
         print("            Expansion: healthy on the warmup (no BAML error, no fallback).")
     else:
         print("            Expansion: UNOBSERVED - the response carried no `stages` block.")
+        print("            This arm will be REFUSED: check %s on the target."
+              % DEBUG_STAGES_ENV_VAR)
     print(f"            {info['warmup_seconds']}s"
           + (f"  ERROR: {info['warmup_error']}" if info["warmup_error"] else "")
           + (f"  DEGRADED: {info['warmup_degraded']}" if info["warmup_degraded"] else ""))
@@ -905,6 +945,9 @@ def preflight(endpoint: str, auth: Optional[str], timeout: float, n_runs: int,
 # and into summary.integrity.preflight. An escape hatch nobody can see in the artifact is the
 # same hole in a new place, so the hatches are recorded, not merely available.
 
+# Not a literal: backend/debug_gate.py owns the name, and a refusal that named a
+# stale variable would send the reader to set something the backend never reads.
+DEBUG_STAGES_ENV_VAR = debug_capture.ENV_VAR
 EXPANSION_OVERRIDE_FLAG = "--allow-expansion-errors"
 PIN_OVERRIDE_FLAG = "--allow-unpinned-provider"
 
@@ -967,16 +1010,29 @@ def scored_run_refusals(warmup_info: Dict[str, Any], allow_expansion_errors: boo
         return refusals
 
     exp = warmup_info.get("warmup_expansion")
-    if not allow_expansion_errors:
-        if not isinstance(exp, dict) or not exp.get("observed"):
-            refusals.append(
-                "REFUSED (expansion_healthy): the warmup response carried no `stages` block, so "
-                "the harness cannot say whether query expansion ran or fell back. Unobservable "
-                "is not healthy. The eval sends debug:true and any current endpoint answers "
-                "with `stages`; a response without one usually means the server is an older "
-                "build than this harness. Pass %s to record this arm as expansion-unverified."
-                % EXPANSION_OVERRIDE_FLAG)
-        elif exp.get("baml_error"):
+
+    # NOT under --allow-expansion-errors, and on purpose. A response with no `stages`
+    # does not mean "expansion unverified", it means THIS ARM CANNOT BE SCORED: the
+    # structured BAML fields the predictions are written against live in `stages`, and
+    # on 2026-09-20 an arm ran to completion and could not be scored at all because
+    # they were absent. An override that let the run proceed would bank 65 requests
+    # against a target that cannot answer the question being asked of it. Since
+    # 2026-10-11 the leading cause is also no longer "an older build": the capture is
+    # GATED (backend/debug_gate.py), so the first thing to check is the flag.
+    if not isinstance(exp, dict) or not exp.get("observed"):
+        refusals.append(
+            "REFUSED (stages_present): the warmup response carried no `stages` block, so "
+            "this arm has nothing to score -- the structured fields the predictions are "
+            "written against live there, and an arm scored without them reads as a run of "
+            "zeros rather than a run that could not be read. Per-stage captures are GATED "
+            "on the backend: set %s=1 in the target's environment and roll the pod out "
+            "(envFrom is read at container start, so a configmap edit alone does nothing). "
+            "If the flag IS set, the server is an older build than this harness. There is "
+            "no override for this one: %s records an arm as expansion-unverified, which is "
+            "a different and weaker claim than 'unscoreable'."
+            % (DEBUG_STAGES_ENV_VAR, EXPANSION_OVERRIDE_FLAG))
+    elif not allow_expansion_errors:
+        if exp.get("baml_error"):
             refusals.append(
                 "REFUSED (expansion_healthy): the warmup shows a query-expansion error, %r "
                 "(fallback=%r). On the fallback path the second-pass lookup is fed the RAW "

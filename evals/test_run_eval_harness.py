@@ -1495,6 +1495,89 @@ def test_preflight_refuses_a_warmup_with_no_stages_block():
     assert rc == 3, rc
 
 
+def test_the_no_stages_refusal_NAMES_the_env_var_and_the_rollout():
+    """rc == 3 is also what a cache abort and a pin abort return, so the test above
+    ("refuses a warmup with no stages block") could not tell which refusal it got.
+    The operator-facing content is the part that has to hold: the variable, and the
+    fact that setting it in a configmap is not enough."""
+    r = _refusals(warmup_expansion=None)
+    assert len(r) == 1, r
+    assert RE.DEBUG_STAGES_ENV_VAR in r[0], r[0]
+    assert "roll the pod out" in r[0], r[0]
+    assert "envFrom" in r[0], r[0]
+
+
+def test_the_no_stages_refusal_is_NOT_silenced_by_EITHER_override():
+    """The other direction, and the one that matters: --allow-expansion-errors records
+    an arm as expansion-unverified, which is a weaker claim than UNSCOREABLE. An
+    override that silenced this would bank a whole run against a target that cannot
+    answer the question being asked of it -- 2026-09-20 exactly."""
+    info = {"warmup_ran": True, "answer_lm": dict(LM_REC), "warmup_expansion": None}
+    for exp_ok, pin_ok in ((True, False), (False, True), (True, True)):
+        r = RE.scored_run_refusals(dict(info), allow_expansion_errors=exp_ok,
+                                   allow_unpinned_provider=pin_ok)
+        kept = [x for x in r if "stages_present" in x]
+        assert len(kept) == 1, (exp_ok, pin_ok, r)
+        assert RE.DEBUG_STAGES_ENV_VAR in kept[0], kept[0]
+
+
+# --- the stages check on the RUN path (every response, not just the warmup) --------
+
+def _scored(resp):
+    """score() over a raw response. Named for what it returns, and NOT _res: that name is
+    already a run-ledger fixture in this file, and the collision put ten unrelated tests in
+    TypeError on the first run."""
+    return RE.score({"id": "q", "question": "q?", "expected_behavior": "answer"}, resp, 1.0)
+
+
+def test_a_scored_200_WITH_stage_captures_is_not_a_run_level_fault():
+    # Negative control. Every assertion below is worthless without it: this is the
+    # shape every healthy question in every run has.
+    assert RE.run_level_fault(_scored(dict(GOOD))) is None
+
+
+def test_a_scored_200_with_NO_stage_captures_ABORTS_THE_RUN_and_names_the_flag():
+    """Not an item error. Every question in the arm is scored against fields that live
+    in `stages`, so question 2 cannot go better than question 1 -- and the arm that
+    taught this ran all 65 and could not be scored at all. The reason text is
+    debug_capture's, so the preflight and this say the same thing."""
+    for stages in (None, {}, [], "yes"):
+        payload = dict(GOOD)
+        if stages is None:
+            payload.pop("stages")
+        else:
+            payload["stages"] = stages
+        reason = RE.run_level_fault(_scored(payload))
+        assert reason, stages
+        assert RE.DEBUG_STAGES_ENV_VAR in reason, (stages, reason)
+
+
+def test_a_response_that_never_ARRIVED_is_not_blamed_on_the_flag():
+    """The tri-state. score() returns before it can look at `stages` on the _error
+    path, which leaves stages_present None, and run_level_fault reads `is False`, not
+    falsiness. Read as falsy, a connection refusal would come back as "set
+    GYA_DEBUG_STAGES=1" -- a refusal naming a flag it has no evidence about, which is
+    the one thing refuse_if_debug_disabled is built not to do."""
+    r = _scored({"_error": "ConnectError: getaddrinfo failed", "_status": 0})
+    assert r.stages_present is None, r.stages_present
+    reason = RE.run_level_fault(r)
+    assert reason is None or RE.DEBUG_STAGES_ENV_VAR not in reason, reason
+
+
+def test_a_run_whose_FIRST_response_has_no_stages_aborts_after_ONE_question():
+    """End to end, and the reason the check sits on the run path rather than in a
+    preflight: this run passes --no-warmup with both overrides, so nothing pure had a
+    response to read. One question is spent, not sixty-five, and the marker says why."""
+    blind = dict(GOOD)
+    blind.pop("stages")
+    rc, out, stub = _run_main([blind], ["logos_001", "sheep_001"])
+    assert rc == 5, rc
+    assert stub.calls == 1, ("the run kept asking after the fault", stub.calls)
+    marker = json.loads((out / "ABORTED.json").read_text(encoding="utf-8"))
+    assert RE.DEBUG_STAGES_ENV_VAR in marker["reason"], marker["reason"]
+    assert not (out / "summary.json").exists(), sorted(p.name for p in out.iterdir())
+
+
 def test_expansion_override_scores_anyway_and_names_itself():
     exp = {"observed": True, "baml_error": "missing env var", "baml_fallback": "dedup_only"}
     _, rc, _ = _preflight(dict(GOOD, stages=exp), allow_expansion_errors=True)
@@ -1841,7 +1924,7 @@ def test_the_warmup_query_is_not_one_of_the_scored_questions():
     assert RE.WARMUP_QUERY.strip().lower() not in queries, RE.WARMUP_QUERY
 
 
-EXPECTED_TESTS = 165
+EXPECTED_TESTS = 171
 
 # --- the post-run re-read of read-faulted objects (ruling, 2026-10-04) --------------------
 
