@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const U = require("./verse_truth_ui.js");
 
-const EXPECTED_TESTS = 20;
+const EXPECTED_TESTS = 25;
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
@@ -140,6 +140,60 @@ test("export row: page answered / unrated / invalid", () => {
   assert.equal(U.buildExportRow(p, { heads_not_shown: "2" }, consts).heads_not_shown, 2);
   assert.equal(U.buildExportRow(p, { heads_not_shown: "x" }, consts).heads_not_shown, "invalid");
   assert.equal(U.buildExportRow(p, {}, consts).verdict, "unrated");
+});
+
+const CARRY = { from_set_sha16: "OLDSET", from_ui_key: "versetruth_OLDSET_ui2", fields: ["cause_verdict", "note"],
+  map: { "m:5:900": { old_item_id: "m:5:800", old_item_sha16: "osha", identity: {} },
+         "m:6:10": { old_item_id: "m:6:10", old_item_sha16: "o2", identity: {} },
+         "m:7:1": { old_item_id: "m:7:1", old_item_sha16: "o3", identity: {} } } };
+const OLD = {
+  "m:5:800": { cause_verdict: "cause_confirmed", note: "gutter", verdict: "region_drawn", ratified: [{ col: "left" }] },
+  "m:6:10": { verdict: "not_a_verse" },
+  "m:7:1": { cause_verdict: "x", note: "n7" },
+  "m:99:1": { cause_verdict: "unmapped", note: "never copied" },
+};
+test("carryForward: copies cause_verdict + note + carried_from, nothing else; ignores unmapped old items", () => {
+  const r = U.carryForward({}, OLD, CARRY);
+  assert.deepEqual(r.items["m:5:900"], { cause_verdict: "cause_confirmed", note: "gutter",
+    carried_from: { set_sha16: "OLDSET", item_id: "m:5:800", item_sha16: "osha", ui_version: 2 } });
+  assert.equal("verdict" in r.items["m:5:900"], false);
+  assert.equal("ratified" in r.items["m:5:900"], false);
+  assert.equal(r.items["m:99:1"], undefined);
+  assert.deepEqual(r.carried.sort(), ["m:5:900", "m:7:1"]);
+});
+test("carryForward: skips old items with no diagnosis (no_old_state), including absent ones", () => {
+  const r = U.carryForward({}, OLD, CARRY);
+  assert.deepEqual(r.skipped, [{ id: "m:6:10", reason: "no_old_state" }]);
+  const r2 = U.carryForward({}, {}, CARRY);
+  assert.equal(r2.carried.length, 0);
+  assert.equal(r2.skipped.length, 3);
+});
+test("carryForward: never overwrites a new item that already has cause or note; pure on its inputs", () => {
+  const cur = { "m:5:900": { cause_verdict: "mine" }, "m:7:1": { note: "typed", verdict: "not_a_verse" } };
+  const before = JSON.stringify(cur);
+  const r = U.carryForward(cur, OLD, CARRY);
+  assert.equal(JSON.stringify(cur), before);
+  assert.equal(r.items["m:5:900"].cause_verdict, "mine");
+  assert.equal(r.items["m:7:1"].note, "typed");
+  assert.equal(r.items["m:7:1"].verdict, "not_a_verse");
+  assert.deepEqual(r.skipped.filter(s => s.reason === "new_already_set").map(s => s.id).sort(), ["m:5:900", "m:7:1"]);
+  const again = U.carryForward(U.carryForward({}, OLD, CARRY).items, OLD, CARRY);
+  assert.equal(again.carried.length, 0, "a second load carries nothing (idempotent)");
+});
+test("rowsToOldItems: refuses rows from another set, converts the rest", () => {
+  const c = U.rowsToOldItems([{ item_id: "a", set_sha16: "OLDSET", cause_verdict: "c", note: "n" },
+                              { item_id: "b", set_sha16: "OTHER", cause_verdict: "c", note: "n" }], "OLDSET");
+  assert.equal(c.refused, 1);
+  assert.deepEqual(Object.keys(c.items), ["a"]);
+});
+test("export row: carried_from and edited_after_carry for miss and non-miss items", () => {
+  const cf = { set_sha16: "OLDSET", item_id: "m:5:800", item_sha16: "osha", ui_version: 2 };
+  const row = U.buildExportRow(missItem, { cause_verdict: "c", note: "n", carried_from: cf, edited_after_carry: true }, consts);
+  assert.deepEqual(row.carried_from, cf);
+  assert.equal(row.edited_after_carry, true);
+  const plain = U.buildExportRow(regionItem, undefined, consts);
+  assert.equal(plain.carried_from, null);
+  assert.equal(plain.edited_after_carry, false);
 });
 
 let pass = 0, fail = 0;

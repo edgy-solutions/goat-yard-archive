@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 17
+EXPECTED_TESTS = 23
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -173,7 +173,7 @@ def _make_synthetic_inputs(tmp_dir):
             "verse": None, "disputed": None, "disputed_by": None, "flags": [],
             "witness_pairing": None, "witness_sim": None, "numbers_link_status": None,
         },
-        {"kind": "run_summary"},
+        {"kind": "run_summary", "layout": {"head_first": 0, "overlap": 0, "rect_before_head": 0}},
     ]
     run_path = tmp_dir / "run.jsonl"
     with open(run_path, "w", encoding="utf-8", newline="\n") as f:
@@ -416,6 +416,166 @@ def test_continuation_card_first_on_its_page():
         pass
     else:
         raise AssertionError("second continuation on one page must raise")
+
+
+# 12. layout refusal / stale misses / carry-forward ---------------------------------------------------
+
+def _rewrite_summary(run_path, summary):
+    recs = [json.loads(l) for l in Path(run_path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    recs = [r for r in recs if r.get("kind") != "run_summary"]
+    if summary is not None:
+        recs.append(summary)
+    Path(run_path).write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+
+
+def test_build_layout_refusal_writes_nothing_and_all_zero_builds():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        run_path, misses_path, geometry_path, volume_dir = _make_synthetic_inputs(tmp_dir)
+        out_root = tmp_dir / "out"
+        for summary, needle in (
+            (None, "no run_summary"),
+            ({"kind": "run_summary"}, "layout"),
+            ({"kind": "run_summary", "layout": {"head_first": 0, "overlap": 2, "rect_before_head": 0}}, "overlap"),
+            ({"kind": "run_summary", "layout": {"head_first": 1, "overlap": 0, "rect_before_head": 3}}, "head_first"),
+        ):
+            _rewrite_summary(run_path, summary)
+            try:
+                RVT.build(run_path, misses_path, geometry_path, volume_dir, out_root)
+                assert False, f"expected ValueError for {summary}"
+            except ValueError as e:
+                assert needle in str(e), (needle, str(e))
+            assert not out_root.exists(), "nothing may be written on refusal"
+        _rewrite_summary(run_path, {"kind": "run_summary", "layout": {"head_first": 0, "overlap": 0, "rect_before_head": 0}})
+        assert RVT.build(run_path, misses_path, geometry_path, volume_dir, out_root)["n_items"] == 5
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_stale_miss_raises_in_build_and_html_only_and_writes_nothing():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        recs = [json.loads(l) for l in run_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        for r in recs:
+            if r.get("kind") == "verse":
+                r["head"]["box"] = [95, 98, 135, 112]      # now covers the miss word [100,100,130,115]
+        stale_run = tmp_dir / "stale_run.jsonl"
+        stale_run.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+        out_root_b = tmp_dir / "out_b"
+        try:
+            RVT.build(stale_run, misses_path, geometry_path, volume_dir, out_root_b)
+            assert False, "expected stale ValueError"
+        except ValueError as e:
+            assert "miss trace stale: m:101:100" in str(e), str(e)
+        assert not out_root_b.exists()
+        try:
+            RVT.html_only(stale_run, misses_path, geometry_path, volume_dir, out_root)
+            assert False, "expected stale ValueError in html_only"
+        except ValueError as e:
+            assert "miss trace stale" in str(e)
+        assert not (result["out_dir"] / "index_ui1.html").exists()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _synthetic_old_console(root, set_sha, items):
+    """items: [(item_id, item_sha16, file_page, band)] -> a minimal old console dir named set_sha."""
+    d = Path(root) / set_sha
+    d.mkdir(parents=True)
+    lines = [{"kind": "console_header", "set_sha16": set_sha}]
+    for iid, sha, fp, band in items:
+        lines.append({"kind": "item", "item_id": iid, "item_kind": "miss", "item_sha16": sha, "file_page": fp,
+                      "crops": [{"rect": band}]})
+    lines.append({"kind": "item", "item_id": "r:1:left:10", "item_kind": "verse", "item_sha16": "zz", "file_page": 1,
+                  "crops": [{"rect": [0, 0, 1, 1]}]})
+    (d / "manifest.jsonl").write_text("\n".join(json.dumps(l) for l in lines) + "\n", encoding="utf-8")
+    return d
+
+
+def _new_entry(iid, fp, y0, band):
+    return {"item_id": iid, "item_sha16": "n" + iid[-3:], "file_page": fp, "band": band, "word_y0": y0}
+
+
+def test_carry_map_classifies_matched_conflict_old_and_new_unmatched():
+    root = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        d = _synthetic_old_console(root, "aaaaaaaaaaaaaaaa", [
+            ("m:130:3986", "o1", 130, [1931, 3986, 3584, 4045]),
+            ("m:131:500", "o2", 131, [0, 500, 900, 560]),
+            ("m:132:700", "o3", 132, [0, 700, 900, 760]),
+            ("m:133:100", "o4", 133, [0, 100, 900, 160]),
+        ])
+        old_set, old = RVT.read_old_console(d)
+        assert old_set == "aaaaaaaaaaaaaaaa" and len(old) == 4, "only miss items are read"
+        new = [
+            _new_entry("m:130:3986", 130, 3986, [1931, 3986, 3584, 4045]),     # matched
+            _new_entry("m:131:500", 131, 500, [0, 500, 950, 560]),             # same fp+y0, different band
+            _new_entry("m:140:9", 140, 9, [0, 9, 10, 19]),                     # new only
+        ]
+        carry, counts, lists = RVT.compute_carry(old_set, old, new)
+        assert counts == {"matched": 1, "identity_conflict": 1, "old_unmatched": 2, "new_unmatched": 1}, counts
+        assert lists["identity_conflict"] == ["m:131:500"] and lists["new_unmatched"] == ["m:140:9"]
+        assert lists["old_unmatched"] == ["m:132:700", "m:133:100"]
+        assert carry["map"]["m:130:3986"]["old_item_id"] == "m:130:3986"
+        assert carry["from_ui_key"] == "versetruth_aaaaaaaaaaaaaaaa_ui2" and carry["fields"] == ["cause_verdict", "note"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_carry_old_dir_set_mismatch_raises():
+    root = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        d = _synthetic_old_console(root, "bbbbbbbbbbbbbbbb", [("m:1:1", "o", 1, [0, 1, 2, 3])])
+        d2 = d.rename(root / "cccccccccccccccc")
+        try:
+            RVT.read_old_console(d2)
+            assert False, "expected ValueError"
+        except ValueError:
+            pass
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_html_only_carry_embeds_map_manifest_fields_and_null_without_flag():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        out_dir = result["out_dir"]
+        RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+        html0 = (out_dir / "index.html").read_text(encoding="utf-8")
+        assert "const CARRY = null;" in html0
+        last0 = json.loads((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert last0["carry_map_sha16"] is None and last0["carry_counts"] is None
+        old = _synthetic_old_console(tmp_dir / "old", "dddddddddddddddd", [
+            ("m:101:100", "oldsha", 101, [90, 95, 160, 120]), ("m:150:1", "x", 150, [0, 1, 2, 3])])
+        r = RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root, carry_from=old, force=True)
+        html1 = (out_dir / "index.html").read_text(encoding="utf-8")
+        assert '"from_ui_key": "versetruth_dddddddddddddddd_ui2"' in html1
+        assert '"m:101:100"' in html1 and '"old_item_sha16": "oldsha"' in html1
+        assert "function carryForward(" in html1 and "const CARRY_REPORT" in html1
+        rec = json.loads((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert rec["carry_counts"] == {"matched": 1, "identity_conflict": 0, "old_unmatched": 1, "new_unmatched": 0}, rec["carry_counts"]
+        assert rec["carry_old_unmatched"] == ["m:150:1"] and rec["carry_from_set_sha16"] == "dddddddddddddddd"
+        assert rec["carry_map_sha16"] == RVT._sha16_json(r["carry"]) and rec["carry_from"] == str(old)
+        assert rec["config_hash"] != last0["config_hash"], "carry_map_sha16 enters the ui config hash"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_build_with_carry_from_raises():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        run_path, misses_path, geometry_path, volume_dir = _make_synthetic_inputs(tmp_dir)
+        try:
+            RVT.build(run_path, misses_path, geometry_path, volume_dir, tmp_dir / "out", carry_from=tmp_dir)
+            assert False, "expected ValueError"
+        except ValueError as e:
+            assert "--carry-from" in str(e)
+        assert not (tmp_dir / "out").exists()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     import traceback

@@ -169,6 +169,42 @@ function isRated(item, st) {
   return !!st.verdict;
 }
 
+function _hasDiagnosis(st) {
+  return !!st && (!!st.cause_verdict || (typeof st.note === "string" && st.note.trim() !== ""));
+}
+
+function carryForward(newItems, oldItems, carry) {
+  // Pure. Copies cause_verdict + note from oldItems[old_item_id] into newItems[new_item_id] for each
+  // mapped pair. Never overwrites a new item that already has a cause_verdict / non-empty note (or
+  // already carries). Never touches any other field. Returns {items, carried:[ids], skipped:[{id, reason}]}.
+  var items = _copy(newItems || {});
+  var olds = oldItems || {};
+  var carried = [], skipped = [];
+  Object.keys(carry.map).forEach(function (nid) {
+    var ent = carry.map[nid];
+    var old = olds[ent.old_item_id];
+    if (!_hasDiagnosis(old)) { skipped.push({ id: nid, reason: "no_old_state" }); return; }
+    var cur = items[nid];
+    if (_hasDiagnosis(cur) || (cur && cur.carried_from)) { skipped.push({ id: nid, reason: "new_already_set" }); return; }
+    var st = cur || (items[nid] = {});
+    if (old.cause_verdict) st.cause_verdict = old.cause_verdict;
+    if (typeof old.note === "string") st.note = old.note;
+    st.carried_from = { set_sha16: carry.from_set_sha16, item_id: ent.old_item_id, item_sha16: ent.old_item_sha16, ui_version: 2 };
+    carried.push(nid);
+  });
+  return { items: items, carried: carried, skipped: skipped };
+}
+
+function rowsToOldItems(rows, fromSet) {
+  // Import path: export rows -> {item_id: {cause_verdict, note}}; rows from another set are refused.
+  var items = {}, refused = 0;
+  (rows || []).forEach(function (r) {
+    if (!r || r.set_sha16 !== fromSet) { refused++; return; }
+    items[r.item_id] = { cause_verdict: r.cause_verdict || undefined, note: r.note || "" };
+  });
+  return { items: items, refused: refused };
+}
+
 function _intBox(b) { return b.map(function (v) { return Math.round(v); }); }
 
 function _snapList(consts, fp, col, which) {
@@ -188,6 +224,7 @@ function buildExportRow(item, state, consts) {
     item_sha16: item.item_sha16, set_sha16: consts.set_sha16, ui_config_hash: consts.ui_config_hash,
     run_config_hash: consts.run_config_hash, ui_version: 2, door: "human-verse-box-truth",
     session_freshness: "in-context-WARN", exported_utc: consts.exported_utc,
+    carried_from: st.carried_from || null, edited_after_carry: !!st.edited_after_carry,
   };
   if (kind === "page") {
     var raw = st.heads_not_shown;
@@ -255,6 +292,6 @@ if (typeof module !== "undefined") {
   module.exports = {
     snap: snap, clampEdge: clampEdge, linesMoved: linesMoved, applyDrag: applyDrag, newRect: newRect,
     initialRatified: initialRatified, verdictCoupling: verdictCoupling, isRated: isRated,
-    buildExportRow: buildExportRow,
+    buildExportRow: buildExportRow, carryForward: carryForward, rowsToOldItems: rowsToOldItems,
   };
 }

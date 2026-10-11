@@ -705,6 +705,119 @@ def load_geometry_by_fp(path):
     return out
 
 
+# ==================================================================================================
+# layout refusal, stale-miss check, carry-forward map (miss-card diagnoses by heading identity)
+# ==================================================================================================
+
+LAYOUT_KEYS = ("head_first", "overlap", "rect_before_head")
+
+
+def check_layout(run_records):
+    """Refuse (ValueError) a run whose run_summary is missing, lacks "layout", or has any
+    layout count > 0. Old runs predate the layout invariants and are refused by design."""
+    summ = next((r for r in run_records if r.get("kind") == "run_summary"), None)
+    if summ is None:
+        raise ValueError("run has no run_summary line: refusing (an unfinished run has no layout verdict)")
+    layout = summ.get("layout")
+    if not isinstance(layout, dict):
+        raise ValueError('run_summary has no "layout" field: the run predates the layout invariants; refusing')
+    counts = {k: layout.get(k) for k in LAYOUT_KEYS}
+    bad = {k: v for k, v in counts.items() if v is None or v > 0}
+    if bad:
+        raise ValueError(f"run layout violations (head_first/overlap/rect_before_head must all be 0): {counts}")
+    return counts
+
+
+def _boxes_intersect(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def check_misses_not_stale(run_records, misses):
+    """Raise if any miss's Tesseract word box is now covered by a region head on the same file page."""
+    miss_list = misses["misses"] if isinstance(misses, dict) else misses
+    for rec in run_records:
+        if rec.get("kind") not in REGION_KINDS:
+            continue
+        head = rec.get("head")
+        if not head or not head.get("box"):
+            continue
+        hfp = head.get("file_page", rec.get("file_page_first"))
+        for m in miss_list:
+            if m["fp"] == hfp and _boxes_intersect(head["box"], m["word"]):
+                raise ValueError(
+                    f"miss trace stale: m:{m['fp']}:{m['word'][1]} now detected by region "
+                    f"{rec.get('kind')} on file page {hfp} (head box {head['box']})")
+
+
+def _int4(b):
+    return [int(round(v)) for v in b]
+
+
+def read_old_console(old_dir):
+    """Returns (set_sha16, [ {item_id,item_sha16,file_page,band,word_y0} ]) for the miss items of an
+    old console. Raises if the manifest header's set_sha16 differs from the directory name."""
+    old_dir = Path(old_dir)
+    mlines = _read_manifest(old_dir / "manifest.jsonl")
+    old_set = mlines[0].get("set_sha16")
+    if old_set != old_dir.name:
+        raise ValueError(f"old console set_sha16 {old_set!r} != directory name {old_dir.name!r}")
+    out = []
+    for l in mlines:
+        if l.get("kind") == "item" and l.get("item_kind") == "miss":
+            out.append({"item_id": l["item_id"], "item_sha16": l["item_sha16"], "file_page": l["file_page"],
+                        "band": _int4(l["crops"][0]["rect"]), "word_y0": int(l["item_id"].rsplit(":", 1)[1])})
+    return old_set, out
+
+
+def new_miss_entries(items, item_shas=None):
+    item_shas = item_shas or {}
+    return [{"item_id": it["item_id"], "item_sha16": item_shas.get(it["item_id"]), "file_page": it["file_page"],
+             "band": _int4(it["miss"]["band"]), "word_y0": int(it["miss"]["word"][1])}
+            for it in items if it["item_kind"] == "miss"]
+
+
+def compute_carry(old_set, old_entries, new_entries):
+    """Classify by heading identity (file_page, word_y0, band rect). Returns (CARRY, counts, lists).
+    identity_conflict list = NEW item ids whose fp+word_y0 matches an old item with a different band
+    (the old side of such a pair is not also counted as old_unmatched)."""
+    old_by_id = {}
+    for o in old_entries:
+        old_by_id.setdefault((o["file_page"], o["word_y0"], tuple(o["band"])), []).append(o)
+    old_by_fy = {}
+    for o in old_entries:
+        old_by_fy.setdefault((o["file_page"], o["word_y0"]), []).append(o)
+    cmap, conflicts, new_unmatched, used_old = {}, [], [], set()
+    for n in new_entries:
+        key = (n["file_page"], n["word_y0"], tuple(n["band"]))
+        hits = [o for o in old_by_id.get(key, []) if o["item_id"] not in used_old]
+        if hits:
+            o = hits[0]
+            used_old.add(o["item_id"])
+            cmap[n["item_id"]] = {"old_item_id": o["item_id"], "old_item_sha16": o["item_sha16"],
+                                  "identity": {"file_page": n["file_page"], "word_y0": n["word_y0"], "band": list(n["band"])}}
+        elif old_by_fy.get((n["file_page"], n["word_y0"])):
+            conflicts.append(n["item_id"])
+            for o in old_by_fy[(n["file_page"], n["word_y0"])]:
+                used_old.add(o["item_id"])
+        else:
+            new_unmatched.append(n["item_id"])
+    old_unmatched = sorted(o["item_id"] for o in old_entries if o["item_id"] not in used_old)
+    carry = {"from_set_sha16": old_set, "from_ui_key": "versetruth_" + old_set + "_ui2",
+             "fields": ["cause_verdict", "note"], "map": cmap}
+    counts = {"matched": len(cmap), "identity_conflict": len(conflicts),
+              "old_unmatched": len(old_unmatched), "new_unmatched": len(new_unmatched)}
+    lists = {"identity_conflict": sorted(conflicts), "old_unmatched": old_unmatched,
+             "new_unmatched": sorted(new_unmatched)}
+    return carry, counts, lists
+
+
+def carry_from_console(old_dir, items, item_shas=None):
+    old_set, old_entries = read_old_console(old_dir)
+    carry, counts, lists = compute_carry(old_set, old_entries, new_miss_entries(items, item_shas))
+    return carry, _sha16_json(carry), counts, lists
+
+
+
 def _utc_now_iso():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -713,7 +826,11 @@ def _utc_now_iso():
 # build (the orchestrator -- the only thing that touches images/disk, besides the loaders above)
 # ==================================================================================================
 
-def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=False, module_path=None):
+def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=False, module_path=None,
+          carry_from=None):
+    if carry_from:
+        raise ValueError("--carry-from is not valid for a fresh build (it emits UI1): build first, then run "
+                         "--html-only --carry-from <old console dir>")
     run_path = Path(run_path)
     misses_path = Path(misses_path)
     geometry_path = Path(geometry_path)
@@ -723,6 +840,8 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
 
     run_records = load_run_records(run_path)
     misses_doc = load_misses(misses_path)
+    check_layout(run_records)
+    check_misses_not_stale(run_records, misses_doc)
     geometry_by_fp = load_geometry_by_fp(geometry_path)
 
     run_header = next((r for r in run_records if r.get("kind") == "run_header"), None)
@@ -809,6 +928,8 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
         "git_head": git_head, "git_dirty": git_dirty, "started_utc": _utc_now_iso(),
         "run_file": str(run_path), "run_file_sha256": run_file_sha256,
         "run_config_hash": run_config_hash, "set_sha16": set_sha, "n_items": n_items_by_kind,
+        "carry_from": None, "carry_from_set_sha16": None, "carry_map_sha16": None, "carry_counts": None,
+        "carry_identity_conflict": None, "carry_old_unmatched": None, "carry_new_unmatched": None,
     }
     lines = [json.dumps(header, sort_keys=True)]
 
@@ -965,6 +1086,10 @@ header #export{margin-left:0}
 .drawbar button{margin-right:8px}
 .pwmsg{padding:2px 12px;font-size:12px;color:#9a2b2b}
 .verdict .lbl{font-size:12px;font-weight:600}
+.carrybanner{padding:8px 16px;font-size:13px;color:#fff;background:#1f7a3a}
+.carrybanner.red{background:#9a2b2b}
+.carrybanner input,.carrybanner button{margin-left:8px}
+.carrybadge{background:#1f7a3a;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;margin-left:8px}
 """
 
 _JS_UI2_GLUE = r"""
@@ -976,6 +1101,57 @@ try {
 } catch (e) { state = {}; }
 var ITEM_BY_ID = {};
 ITEMS.forEach(function (it) { ITEM_BY_ID[it.item_id] = it; });
+function carriedCount() {
+  var n = 0;
+  ITEMS.forEach(function (it) { var s = state[it.item_id]; if (s && s.carried_from && CARRY && s.carried_from.set_sha16 === CARRY.from_set_sha16) n++; });
+  return n;
+}
+function renderCarryBanner(extra) {
+  if (!CARRY) return;
+  var b = document.getElementById("carrybanner"); b.hidden = false; b.textContent = "";
+  var n = carriedCount();
+  var span = document.createElement("span");
+  if (n > 0) {
+    b.className = "carrybanner";
+    span.textContent = "Carried " + n + " miss-card diagnoses from console " + CARRY.from_set_sha16 +
+      " by heading identity (cause verdict + note). Region verdicts and drawn rects are NOT carried \u2014 the geometry is re-sat in full.";
+  } else {
+    b.className = "carrybanner red";
+    span.textContent = "No diagnoses found under " + CARRY.from_ui_key + " in this browser. If they were made in another browser, export them there and use Import.";
+  }
+  b.appendChild(span);
+  if (extra) { var e = document.createElement("div"); e.textContent = extra; b.appendChild(e); }
+  var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".jsonl,.json,.txt";
+  inp.title = "verse_box_verdicts_" + CARRY.from_set_sha16 + "_ui2.jsonl";
+  inp.addEventListener("change", function () {
+    var f = inp.files && inp.files[0]; if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      var rows = [];
+      String(rd.result).split("\n").forEach(function (ln) { ln = ln.trim(); if (!ln) return; try { rows.push(JSON.parse(ln)); } catch (e) {} });
+      var conv = rowsToOldItems(rows, CARRY.from_set_sha16);
+      if (conv.refused) window.alert(conv.refused + " row(s) refused: set_sha16 is not " + CARRY.from_set_sha16);
+      applyCarry(conv.items);
+    };
+    rd.readAsText(f);
+  });
+  var lab = document.createElement("label"); lab.textContent = "Import old verdicts JSONL:"; lab.style.marginLeft = "12px"; lab.appendChild(inp);
+  b.appendChild(lab);
+}
+function carryNotes() {
+  var parts = [];
+  if (typeof CARRY_REPORT !== "undefined" && CARRY_REPORT) {
+    ["identity_conflict", "new_unmatched"].forEach(function (k) { if (CARRY_REPORT[k] && CARRY_REPORT[k].length) parts.push(k + ": " + CARRY_REPORT[k].join(", ")); });
+  }
+  return parts.join("  |  ");
+}
+function applyCarry(oldItems) {
+  var res = carryForward(state, oldItems, CARRY);
+  state = res.items;
+  save();
+  ITEMS.forEach(function (it) { restoreFields(it); renderItem(it); });
+  renderCarryBanner(carryNotes());
+}
 function save() {
   try { localStorage.setItem(LS_KEY, JSON.stringify({ ui_version: 2, items: state, snap_on: snapOn })); } catch (e) {}
   renderStat();
@@ -1026,6 +1202,14 @@ function renderRegion(it, st) {
 }
 function renderMiss(it, st) {
   var card = cardOf(it); if (!card) return;
+  var hd = card.querySelector(".cardhead"), oldb = card.querySelector(".carrybadge");
+  if (oldb) oldb.parentNode.removeChild(oldb);
+  if (hd && st.carried_from) {
+    var bd = document.createElement("span"); bd.className = "carrybadge";
+    bd.textContent = "carried from " + st.carried_from.set_sha16 + ":" + st.carried_from.item_id +
+      (st.edited_after_carry ? " (edited)" : "");
+    hd.appendChild(bd);
+  }
   var layer = card.querySelector(".pedit"); layer.innerHTML = "";
   var m = it.miss;
   var bx = m.band, wd = m.word;
@@ -1083,7 +1267,9 @@ document.addEventListener("change", function (e) {
   if (!card || t.type !== "radio") return;
   var it = ITEM_BY_ID[card.dataset.itemId];
   if (t.classList.contains("causeradio")) {
-    var s = state[it.item_id] || (state[it.item_id] = {}); s.cause_verdict = t.value; save(); return;
+    var s = state[it.item_id] || (state[it.item_id] = {}); s.cause_verdict = t.value;
+    if (s.carried_from) s.edited_after_carry = true;
+    save(); renderItem(it); return;
   }
   commit(it, { type: "choose", value: t.value, item: it });
 });
@@ -1091,7 +1277,7 @@ document.addEventListener("input", function (e) {
   var t = e.target, card = t.closest ? t.closest(".card") : null;
   if (!card) return;
   var s = state[card.dataset.itemId] || (state[card.dataset.itemId] = {});
-  if (t.classList.contains("note")) s.note = t.value;
+  if (t.classList.contains("note")) { s.note = t.value; if (s.carried_from) s.edited_after_carry = true; }
   else if (t.classList.contains("pnumber")) s.printed_number_as_seen = t.value;
   else if (t.classList.contains("headsnotshown")) s.heads_not_shown = t.value;
   save();
@@ -1167,6 +1353,16 @@ document.addEventListener("mouseup", function (e) {
   }
 });
 // ---- init ----
+if (CARRY) {
+  var oldItems = {};
+  try {
+    var oraw = localStorage.getItem(CARRY.from_ui_key);   // read-only: this key is NEVER written or deleted
+    if (oraw) { var oo2 = JSON.parse(oraw); if (oo2 && oo2.items) oldItems = oo2.items; }
+  } catch (e) { oldItems = {}; }
+  var cres = carryForward(state, oldItems, CARRY);
+  state = cres.items;
+  if (cres.carried.length) save();
+}
 ITEMS.forEach(function (it) {
   restoreFields(it);
   renderItem(it);
@@ -1180,6 +1376,7 @@ ITEMS.forEach(function (it) {
     win.scrollLeft = (it.miss.col === "right" && cbx) ? Math.max(0, cbx[0] - 20) : 0;
   }
 });
+renderCarryBanner(carryNotes());
 var snapBox = document.getElementById("snap");
 snapBox.checked = snapOn;
 snapBox.addEventListener("change", function () { snapOn = snapBox.checked; save(); });
@@ -1211,7 +1408,8 @@ try {
 """
 
 
-def _render_html_ui2(set_sha, items_for_js, run_config_hash, ui_config_hash, snap, cards_html_list, ui_js_text):
+def _render_html_ui2(set_sha, items_for_js, run_config_hash, ui_config_hash, snap, cards_html_list, ui_js_text,
+                     carry=None, carry_lists=None):
     ls_key = "versetruth_" + set_sha + "_ui2"
     ls1_key = "versetruth_" + set_sha
     export_filename = f"verse_box_verdicts_{set_sha}_ui2.jsonl"
@@ -1223,6 +1421,7 @@ def _render_html_ui2(set_sha, items_for_js, run_config_hash, ui_config_hash, sna
 <header><h1>Verse-box truth console (place boxes)</h1>
 <span id="stat"></span><label class="snap"><input type="checkbox" id="snap" checked> Snap</label>
 <button id="export" type="button">Export verdicts JSONL</button></header>
+<div class="carrybanner" id="carrybanner" hidden></div>
 <div class="migbanner" id="mig" hidden><span></span><button type="button">download them as ui1 JSONL</button></div>
 <main id="cards">
 {cards}
@@ -1236,6 +1435,8 @@ const EXPORT1_FILENAME = {json.dumps(export1_filename)};
 const RUN_CONFIG_HASH = {json.dumps(run_config_hash)};
 const UI_CONFIG_HASH = {json.dumps(ui_config_hash)};
 const SNAP = {json.dumps(snap)};
+const CARRY = {json.dumps(carry, ensure_ascii=False, sort_keys=True)};
+const CARRY_REPORT = {json.dumps(carry_lists, ensure_ascii=False, sort_keys=True)};
 const ITEMS = {json.dumps(items_for_js, ensure_ascii=False)};
 {ui_js_text}
 {_JS_UI2_GLUE}
@@ -1316,7 +1517,7 @@ def compute_snap_targets(items, geometry_by_fp, volume_dir, image_cache=None):
 
 
 def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, console_dir=None, force=False,
-              module_path=None):
+              module_path=None, carry_from=None):
     """Rebuild ONLY index.html (UI 2) for an existing console. Verifies the crops against the
     manifest first; raises (writing nothing) on any mismatch."""
     run_path, misses_path, geometry_path = Path(run_path), Path(misses_path), Path(geometry_path)
@@ -1335,6 +1536,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
     geometry_by_fp = load_geometry_by_fp(geometry_path)
     run_header = next((r for r in run_records if r.get("kind") == "run_header"), None)
     run_config_hash = (run_header.get("config") or {}).get("hash") if run_header else None
+    check_misses_not_stale(run_records, misses_doc)
     items = build_items(run_records, misses_doc)
 
     if {it["item_id"] for it in items} != set(man_items):
@@ -1361,6 +1563,9 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         raise ValueError(f"set_sha16 mismatch: recomputed {set_sha}, manifest {header.get('set_sha16')}, dir {out_dir.name}")
 
     image_cache = {}
+    carry, carry_sha, carry_counts, carry_lists = None, None, None, None
+    if carry_from:
+        carry, carry_sha, carry_counts, carry_lists = carry_from_console(carry_from, items, item_shas)
     snap, coincidence, dims = compute_snap_targets(items, geometry_by_fp, volume_dir, image_cache)
     snap_sha = _sha16_json(snap)
 
@@ -1368,7 +1573,8 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
     module_sha256 = BVR.compute_module_sha256(module_path)
     ui_js_sha256 = BVR.compute_module_sha256(ui_js_path)
     config_hash = _sha16_json({"ui_version": UI_VERSION, "module_sha256": module_sha256,
-                               "ui_js_sha256": ui_js_sha256, "snap_targets_sha16": snap_sha, "set_sha16": set_sha})
+                               "ui_js_sha256": ui_js_sha256, "snap_targets_sha16": snap_sha, "set_sha16": set_sha,
+                               "carry_map_sha16": carry_sha})
 
     index_path = out_dir / "index.html"
     last = mlines[-1]
@@ -1432,7 +1638,8 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         all_cards.extend(grp["region"]); all_cards.extend(grp["miss"])
         if grp["page"]:
             all_cards.append(grp["page"])
-    html_text = _render_html_ui2(set_sha, items_for_js, run_config_hash, config_hash, snap, all_cards, ui_js_text)
+    html_text = _render_html_ui2(set_sha, items_for_js, run_config_hash, config_hash, snap, all_cards, ui_js_text,
+                                 carry=carry, carry_lists=carry_lists)
 
     miss_fps = sorted({it["file_page"] for it in items if it["item_kind"] == "miss"})
     page_png_sha256 = {str(fp): _sha256_file(volume_dir / f"page{fp}_image1.png") for fp in miss_fps}
@@ -1443,6 +1650,12 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         "git_head": BVR.get_git_head(repo_root), "git_dirty": BVR.get_git_dirty(repo_root),
         "started_utc": _utc_now_iso(), "snap_targets_sha16": snap_sha, "snap_edge_coincidence": coincidence,
         "page_png_sha256": page_png_sha256, "prior_index_renamed_to": renamed_to, "set_sha16": set_sha,
+        "carry_from": str(carry_from) if carry_from else None,
+        "carry_from_set_sha16": carry["from_set_sha16"] if carry else None,
+        "carry_map_sha16": carry_sha, "carry_counts": carry_counts,
+        "carry_identity_conflict": carry_lists["identity_conflict"] if carry_lists else None,
+        "carry_old_unmatched": carry_lists["old_unmatched"] if carry_lists else None,
+        "carry_new_unmatched": carry_lists["new_unmatched"] if carry_lists else None,
     }
     # ---- write order: manifest line FIRST, then rename, then the new index.html ----
     text = manifest_path.read_text(encoding="utf-8")
@@ -1456,7 +1669,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         f.write(html_text)
     return {"out_dir": out_dir, "set_sha16": set_sha, "config_hash": config_hash, "snap": snap,
             "snap_edge_coincidence": coincidence, "html_bytes": len(html_text.encode("utf-8")),
-            "renamed_to": renamed_to, "manifest_record": rec}
+            "renamed_to": renamed_to, "manifest_record": rec, "carry": carry}
 
 
 # ==================================================================================================
@@ -1473,16 +1686,38 @@ def build_arg_parser():
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--html-only", action="store_true",
                     help="rebuild only index.html (UI 2: box placement) for an existing console; crops are verified, never rewritten")
+    ap.add_argument("--carry-from", default=None,
+                    help="OLD console dir: carry its miss-card diagnoses (cause verdict + note) by heading identity "
+                         "(valid with --html-only or --carry-dry-run; refused for a fresh build)")
+    ap.add_argument("--carry-dry-run", action="store_true",
+                    help="with --carry-from: print the carry classification for (old dir, --misses) and write nothing")
     ap.add_argument("--console-dir", default=None, help="existing console dir (default: the only one under --out-root)")
     return ap
 
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    if args.carry_dry_run:
+        if not args.carry_from:
+            print("--carry-dry-run needs --carry-from", file=sys.stderr)
+            return 2
+        old_set, old_entries = read_old_console(args.carry_from)
+        mdoc = load_misses(args.misses)
+        items = [{"item_id": f"m:{m['fp']}:{m['word'][1]}", "item_kind": "miss", "file_page": m["fp"], "miss": m}
+                 for m in mdoc["misses"]]
+        carry, counts, lists = compute_carry(old_set, old_entries, new_miss_entries(items))
+        print(f"from_set_sha16: {old_set}  carry_map_sha16: {_sha16_json(carry)}")
+        print(f"carry_counts: {counts}")
+        print(f"lists: {lists}")
+        return 0
+    if args.carry_from and not args.html_only:
+        print("--carry-from is not valid for a fresh build: build first, then --html-only --carry-from <old dir>",
+              file=sys.stderr)
+        return 2
     if args.html_only:
         try:
             r = html_only(args.run, args.misses, args.geometry, args.volume_dir, args.out_root,
-                          console_dir=args.console_dir, force=args.force)
+                          console_dir=args.console_dir, force=args.force, carry_from=args.carry_from)
         except RefuseOverwrite as e:
             print(str(e), file=sys.stderr)
             return 2
