@@ -498,6 +498,21 @@ def _page_card(item, volume_dir):
 </section>'''
 
 
+def _add_region_card(grp, kind, card):
+    """Region cards of one FILE page, in reading order. Run order is used except that the page's
+    continuation_unanchored region goes FIRST: by the assembler's definition it is the page's text
+    before its first head. The step-2 runs appended it after the regions the page had already closed
+    (page 90 showed chapter_intro before the top-of-page text; assembler fixed after rerun 3), so
+    the console must not trust that record order. At most one per page; a second one raises."""
+    if kind == "continuation_unanchored":
+        if grp.get("has_continuation"):
+            raise ValueError("two continuation_unanchored regions on one page")
+        grp["has_continuation"] = True
+        grp["region"].insert(0, card)
+    else:
+        grp["region"].append(card)
+
+
 def _render_card(item, crops, overlays, crop_rel_paths, volume_dir):
     kind = item["item_kind"]
     if kind in REGION_KINDS:
@@ -831,7 +846,7 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
         card_html = _render_card(item, r["crops"], r["overlays"], crop_rel_paths, volume_dir)
         grp = cards_by_fp.setdefault(item["file_page"], {"region": [], "miss": [], "page": None})
         if item["item_kind"] in REGION_KINDS:
-            grp["region"].append(card_html)
+            _add_region_card(grp, item["item_kind"], card_html)
         elif item["item_kind"] == "miss":
             grp["miss"].append(card_html)
         else:
@@ -1406,7 +1421,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         items_for_js.append(entry)
         grp = cards_by_fp.setdefault(it["file_page"], {"region": [], "miss": [], "page": None})
         if kind in REGION_KINDS:
-            grp["region"].append(card)
+            _add_region_card(grp, kind, card)
         elif kind == "miss":
             grp["miss"].append(card)
         else:

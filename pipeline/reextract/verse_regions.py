@@ -1365,6 +1365,11 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
         chained = (prev_fp is not None and fp == prev_fp + 1 and open_region is not None)
         leading_events = []
         seen_head_on_page = False
+        # Reading order: where this page's FIRST head region lands in `regions` (set when it opens,
+        # after the previous page's open region is appended). An unanchored continuation is this
+        # page's text BEFORE that head, so it is inserted there -- not appended after the regions
+        # the page already closed (which put 90's continuation after its chapter_intro).
+        first_head_idx = None
         column_order_suspect = False
         seen_left_in_section = False
 
@@ -1423,6 +1428,8 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
                 _extend_region_rect(region, fp, col, band, full_basis)
                 if open_region is not None:
                     regions.append(_finalize_region(open_region))
+                if first_head_idx is None:
+                    first_head_idx = len(regions)
                 open_region = region
             else:
                 if not seen_head_on_page:
@@ -1448,7 +1455,10 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
                 for col, band in leading_events:
                     _extend_region_rect(unanchored, fp, col, band,
                                         band.get("full_basis", "gutter_ink") if col == "full" else None)
-                regions.append(_finalize_region(unanchored))
+                if first_head_idx is None:
+                    regions.append(_finalize_region(unanchored))
+                else:
+                    regions.insert(first_head_idx, _finalize_region(unanchored))
 
         page_summaries[fp] = {
             "file_page": fp,

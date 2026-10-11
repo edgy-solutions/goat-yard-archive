@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 16
+EXPECTED_TESTS = 17
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -402,6 +402,20 @@ def test_html_only_html_carries_ui2_keys_export_name_and_inlined_js_functions():
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+
+
+def test_continuation_card_first_on_its_page():
+    # page 90 (Chris 2026-10-11): run order chapter_intro, continuation_unanchored, verse
+    grp = {"region": [], "miss": [], "page": None}
+    for kind, card in (("chapter_intro", "C"), ("continuation_unanchored", "U"), ("verse", "V")):
+        RVT._add_region_card(grp, kind, card)
+    assert grp["region"] == ["U", "C", "V"], grp["region"]
+    try:
+        RVT._add_region_card(grp, "continuation_unanchored", "U2")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("second continuation on one page must raise")
 
 if __name__ == "__main__":
     import traceback

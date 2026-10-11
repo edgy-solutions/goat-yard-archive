@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 49
+EXPECTED_TESTS = 50
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -730,6 +730,44 @@ def test_chapter_count_resets_at_page_gap_404_to_745():
         assert ("chapter_count_dropped_at_page_gap" in summaries[404]["flags"]) is want_flag, nxt
         assert "chapter_count_dropped_at_page_gap" not in summaries[nxt]["flags"]
 
+
+def test_unanchored_continuation_listed_first_on_its_page_90_layout():
+    # Page 90's order bug (Chris, console 2026-10-11): an unchained page with text before its first
+    # head, a chapter head, then a verse head. The continuation was appended AFTER the chapter_intro
+    # the page had already closed. Reading order: continuation, chapter_intro, verse. With a prior
+    # page (89, verse head left open, then a GAP to 91) the previous page's region stays first.
+    def cand(fp, y, kind):
+        hc = None
+        if kind == "verse":
+            hc = {"text": "Ver. 1. x", "ver": True, "numbers": [1], "raw_head": "Ver. 1",
+                  "status": "ok", "raw": "Ver. 1. x", "ver_case": "upper"}
+        return {"file_page": fp, "col": "left", "y0": y, "y1": y + 10, "box": [0, y, 400, y + 10],
+                "kind": kind, "signature": {}, "head_confirm": hc, "flags": []}
+
+    def page(fp, heads):
+        ys = [10] + [y for y, _ in heads]
+        bands = [_band("left", y, y + 10, 0, 400, 20, 380) for y in ys]
+        s1 = {"file_page": fp, "H": 200, "W": 800, "xdiv": 400, "left": bands, "right": [], "full": []}
+        return s1, [cand(fp, y, k) for y, k in heads]
+
+    s1, c = page(90, [(30, "chapter"), (50, "verse")])
+    regions, _ = VR.assemble_regions([{"file_page": 90}], {90: s1}, {90: c}, {90: []}, {90: None}, config={})
+    assert [r["kind"] for r in regions] == ["continuation_unanchored", "chapter_intro", "verse"],         [r["kind"] for r in regions]
+    assert regions[0]["rects"][0]["box"][1] == 10
+
+    s1a, ca = page(89, [(30, "verse")])
+    s1b, cb = page(91, [(30, "chapter"), (50, "verse")])
+    regions, _ = VR.assemble_regions([{"file_page": 89}, {"file_page": 91}], {89: s1a, 91: s1b},
+                                     {89: ca, 91: cb}, {89: [], 91: []}, {89: None, 91: None}, config={})
+    got = [(r["kind"], r["file_page_first"]) for r in regions]
+    assert got == [("continuation_unanchored", 89), ("verse", 89), ("continuation_unanchored", 91),
+                   ("chapter_intro", 91), ("verse", 91)], got
+    # chained control (89 -> 90): leading text extends 89's open verse, no continuation record
+    s1b, cb = page(90, [(30, "chapter"), (50, "verse")])
+    regions, _ = VR.assemble_regions([{"file_page": 89}, {"file_page": 90}], {89: s1a, 90: s1b},
+                                     {89: ca, 90: cb}, {89: [], 90: []}, {89: None, 90: None}, config={})
+    got = [(r["kind"], r["file_page_first"]) for r in regions]
+    assert got == [("continuation_unanchored", 89), ("verse", 89), ("chapter_intro", 90), ("verse", 90)], got
 
 # 9. region_empty / head_only, derived from bands not a counter (FIX5) --------------------------------
 
