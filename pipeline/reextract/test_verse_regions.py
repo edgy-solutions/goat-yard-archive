@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 51
+EXPECTED_TESTS = 58
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -242,6 +242,103 @@ def test_running_head_detection_and_disagrees_3pct_flag():
     assert s1["running_head"]["y1"] == 150
     # TITLE_FRAC_FOSSIL * H = 60; |150-60|=90 > median line height (10) -> flag fires
     assert "head_band_disagrees_3pct" in s1["flags"]
+
+
+# 3c. head rule under the running head is furniture ----------------------------------------------
+
+def _hr_page(rule=None, head=True, text_h=50, n_lines=5, text_y0=200, extra=None, H=1000):
+    """Two-column synthetic page. Head 20..100 (y0 < 0.119*H=119.0). Text lines of uniform height
+    text_h with 20px gaps, low fill (4px strokes on / 8 off) in the left column. rule = (y0, y1, kind)
+    with kind 'rule' (middle 3 rows inked across the column), 'word' (low-fill short word),
+    'solid' (fully inked)."""
+    W, xdiv = 800, 400
+    ink = np.zeros((H, W), dtype=bool)
+    if head:
+        ink[20:100, 160:640] = True
+
+    def strokes(y0, y1, x0=20, x1=380):
+        for x in range(x0, x1, 12):
+            ink[y0:y1, x:x + 4] = True
+
+    for i in range(n_lines):
+        y = text_y0 + i * (text_h + 20)
+        strokes(y, y + text_h)
+    if extra:
+        extra(ink, strokes)
+    if rule is not None:
+        y0, y1, kind = rule
+        if kind == "rule":
+            # a bare 3-row line is dropped by text_lines (too little ink to open a band), so the
+            # rule band carries low-fill dust across its full height around the solid middle rows
+            strokes(y0, y1)
+            mid = (y0 + y1) // 2
+            ink[mid - 1:mid + 2, 20:380] = True
+        elif kind == "word":
+            strokes(y0, y1, 20, 80)
+        elif kind == "solid":
+            ink[y0:y1, 20:380] = True
+    geom = {"file_page": 1, "xdiv": xdiv,
+            "body_regions": [{"col": "left", "box": [0, 0, 400, H]},
+                              {"col": "right", "box": [400, 0, 800, H]}]}
+    return VR.analyze_page_s1(ink, geom)
+
+
+def _hr_has_band(s1, y0, y1):
+    return any(b["y0"] == y0 and b["y1"] == y1 for col in ("left", "right", "full") for b in s1[col])
+
+
+def test_head_rule_removed_under_running_head():
+    s1 = _hr_page(rule=(125, 150, "rule"))
+    assert s1["running_head"] is not None
+    assert len(s1["head_rules"]) == 1, s1["head_rules"]
+    hr = s1["head_rules"][0]
+    assert hr["col"] == "left" and hr["y0"] == 125 and hr["y1"] == 150, hr
+    assert not _hr_has_band(s1, 125, 150)
+    assert "head_rule_removed:left" in s1["flags"]
+    assert len(s1["left"]) == 5, len(s1["left"])
+
+
+def test_head_rule_thin_low_fill_word_kept():
+    s1 = _hr_page(rule=(125, 150, "word"))
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert _hr_has_band(s1, 125, 150)
+
+
+def test_head_rule_no_running_head_kept():
+    s1 = _hr_page(rule=(125, 150, "rule"), head=False)
+    assert s1["running_head"] is None
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert _hr_has_band(s1, 125, 150)
+
+
+def test_head_rule_thick_high_fill_band_kept():
+    s1 = _hr_page(rule=(125, 175, "solid"))
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert _hr_has_band(s1, 125, 175)
+
+
+def test_head_rule_non_topmost_thin_high_fill_band_kept():
+    # a text line first (125..175), then a thin inked rule below it -> not topmost
+    def extra(ink, strokes):
+        strokes(125, 175)
+    s1 = _hr_page(rule=(195, 220, "rule"), text_y0=240, n_lines=4, extra=extra)
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert _hr_has_band(s1, 195, 220)
+
+
+def test_head_rule_not_adjacent_kept():
+    # median line h = 50; rule starts 150 -> 150-100 = 50 >= median_line_h -> not adjacent
+    s1 = _hr_page(rule=(150, 175, "rule"), text_y0=230, n_lines=4)
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert _hr_has_band(s1, 150, 175)
+
+
+def test_head_rule_multi_line_median_abstains_flagged():
+    s1 = _hr_page(rule=(125, 150, "rule"), text_h=120, text_y0=200, n_lines=4)
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert "head_rule_abstained:line_h_multi" in s1["flags"], s1["flags"]
+    assert s1["flags"].count("head_rule_abstained:line_h_multi") == 1
+    assert _hr_has_band(s1, 125, 150)
 
 
 # 3b. full-width classification: two measured edges, abstain zone (FIX3) --------------------------

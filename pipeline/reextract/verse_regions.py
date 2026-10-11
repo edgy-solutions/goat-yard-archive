@@ -83,6 +83,12 @@ DOUBLE_RULE_NEAR_PX = 60          # cluster centre must be within this many px o
 # 46-64px (MEASURE_step2_gutter_inset_20261004.md). A band shorter than SLIVER_MAX_H_PX is a
 # sliver (noise), never a line: it is held out before full-width pairing and head detection.
 SLIVER_MAX_H_PX = 20
+# Head rule (printed rule under the running head) = furniture, not a body band. Thresholds measured
+# on vol.1 only (207 pages) -- MEASURE_head_rule_20261011.md (dr-voluminous/body_shadow_vol1/verse_regions/).
+HEAD_RULE_MAX_H_FRAC = 0.75       # band h / median_line_h; mode midpoint (rule 0.475 vs text 1.025)
+HEAD_RULE_MIN_FILL = 0.275        # peak row ink fill over the band's x0:x1; mode midpoint (0.075 vs 0.475)
+HEAD_RULE_LINE_H_MAX_PX = 85      # median_line_h above this = multi-line median -> abstain (single-line
+                                  # 49-70 px on 203 pages, multi-line 100-256 on 4; envelope, not a mode midpoint)
 
 # text_lines' default valley-split picks the n-1 globally deepest candidate rows with no
 # separation constraint, so two minima of ONE inter-line valley can both be picked and starve a
@@ -552,10 +558,43 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     if running_head is not None and abs(running_head["y1"] - TITLE_FRAC_FOSSIL * H) > median_line_h:
         flags.append("head_band_disagrees_3pct")
 
+    head_rules = []
+    if running_head is not None:
+        body = [("full", b) for b in other_full] + [("left", b) for b in left_rest] + \
+               [("right", b) for b in right_rest]
+        shares = {"full": ("full", "left", "right"), "left": ("left", "full"), "right": ("right", "full")}
+
+        def _topmost(col, b):
+            return not any(b2 is not b and c2 in shares[col] and b2["y0"] < b["y0"] for c2, b2 in body)
+
+        matched = []
+        for col, b in body:
+            if not _topmost(col, b):
+                continue
+            h = b["y1"] - b["y0"]
+            if not (h < HEAD_RULE_MAX_H_FRAC * median_line_h
+                    and b["y0"] - running_head["y1"] < median_line_h):
+                continue
+            fill_max = float(ink[b["y0"]:b["y1"], b["x0"]:b["x1"]].mean(axis=1).max())
+            if fill_max >= HEAD_RULE_MIN_FILL:
+                matched.append((col, b, h, fill_max))
+        if median_line_h > HEAD_RULE_LINE_H_MAX_PX:
+            if matched:
+                flags.append("head_rule_abstained:line_h_multi")
+        else:
+            for col, b, h, fill_max in matched:
+                head_rules.append({"col": col, "y0": b["y0"], "y1": b["y1"], "x0": b["x0"], "x1": b["x1"],
+                                   "h": h, "h_frac": h / median_line_h, "fill_max": fill_max})
+                flags.append(f"head_rule_removed:{col}")
+            rm = {id(b) for _, b, _, _ in matched}
+            other_full = [b for b in other_full if id(b) not in rm]
+            left_rest = [b for b in left_rest if id(b) not in rm]
+            right_rest = [b for b in right_rest if id(b) not in rm]
+
     return {
         "file_page": geom_record.get("file_page"), "W": int(W), "H": int(H), "xdiv": xdiv,
         "left": left_rest, "right": right_rest, "full": other_full, "slivers": slivers,
-        "running_head": running_head, "flags": flags, "col_boxes": col_boxes, "line_h": line_h,
+        "running_head": running_head, "flags": flags, "col_boxes": col_boxes, "line_h": line_h, "head_rules": head_rules,
     }
 
 

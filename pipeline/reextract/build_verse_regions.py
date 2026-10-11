@@ -510,7 +510,8 @@ def main(argv=None):
         ps = page_summaries[fp]
         records.append({"kind": "page", "file_page": fp, **{k: v for k, v in ps.items() if k != "file_page"},
                          "s1_flags": s1_by_page[fp]["flags"],
-                         "running_head_present": s1_by_page[fp]["running_head"] is not None})
+                         "running_head_present": s1_by_page[fp]["running_head"] is not None,
+                         "n_head_rules": len(s1_by_page[fp]["head_rules"])})
         if head_abstained:
             records.append({"kind": "page_abstained", "file_page": fp,
                              "reason": "head_detection_abstained:inset_not_bimodal"})
