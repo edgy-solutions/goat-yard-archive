@@ -112,13 +112,25 @@ C2_WITNESSES = ("(1) index: the truth set's note_index (1-based, from the page i
                 "(4) marker: note N's marker == [^N+1] (same record, so a consistency check, not independent); "
                 "(5) older Latin: where the 2026-09-06 sitting records hold a Latin string for the span.")
 
-REV3_TEXT = ("REV 3. What changed from rev 2: (a) witness (3) is relabelled. Rev 2 described the truth set's `hebrew` "
+REV3_TEXT_OLD = ("REV 3. What changed from rev 2: (a) witness (3) is relabelled. Rev 2 described the truth set's `hebrew` "
              "field as the text printed on the page; it is the extractor's candidate from the whole-note read, the same lineage "
              "as the note text, so it establishes index bookkeeping within that lineage and not a pixel "
              "correspondence. (b) The divergence between that candidate and the signed signature is now measured "
              "and shown per row (candidate_vs_signed). The 45 rows, crop hashes, set digest and channel-2 source "
              "are unchanged. This is a proposal, not an approval record. Rev 1 remains "
              "CONTACT_SHEET_scoring45_adb9a26835533dbc; rev 2 survives in git history.")
+REV4_TEXT = ("REV 4 (rev field = 4). What changed from rev 3: the candidate_vs_signed table compared the candidate "
+             "with each row's in-crop `signature`, so for the 4 signed_partial_in_crop rows the out-of-crop letters "
+             "(bracketed in `signature_full`) read as disagreement. Rev 4 compares on the WHOLE-SPAN basis "
+             "(`signature_full`, bracketed letters kept as signed-span letters, brackets stripped; `signature` for "
+             "rows that carry no signature_full), because the candidate is a whole-span read and that is the "
+             "like-for-like comparison. The in-crop distance is kept beside it for the partial rows, labelled. "
+             "`partial_in_crop` is an orthogonal flag, not a class; each substantially_different row now carries a "
+             "`cause`. The 45 rows, crop hashes, set digest and channel-2 source are unchanged. This is a proposal, "
+             "not an approval record. Rev 3 survives in git (9cf9a85); rev 1 is "
+             "CONTACT_SHEET_scoring45_adb9a26835533dbc.")
+BASIS_LINE = ("BASIS: every class and distance below is on the WHOLE-SPAN basis (signature_full, falling back to "
+              "signature where a row has none); the 4 partial rows also show the in-crop basis, labelled.")
 CAND_RULE = ("candidate_vs_signed: both strings NFC, `[` and `]` stripped, only U+05D0-U+05EA kept, the five final "
              "forms folded to their base letters, Levenshtein distance d on the result. Classes: identical = the two "
              "strings are equal after NFC and bracket stripping alone; nikud_or_final_only = not identical but "
@@ -126,10 +138,8 @@ CAND_RULE = ("candidate_vs_signed: both strings NFC, `[` and `]` stripped, only 
              "d > half the shorter string.")
 CAND_CLASSES = ("identical", "nikud_or_final_only", "close", "substantially_different")
 SUB_MARK = "data-cand-marker=\"substantially_different\""
-SUB_NOTE = {
-    "p493:n3": "the divergence is the signer's 3 corrected letters of 4 in the crop, not a mapping doubt.",
-    "p245:n1": "this is a different word entirely; this span's note identity is already a carried open debt on this lane.",
-}
+CAUSE_P245 = "a different word entirely; note identity is an open debt on this lane"
+UNEXPLAINED = "unexplained"
 
 POLICY = ("Before any outbound call, produce a contact sheet: every crop to be sent, native size, beside its "
           "signed text, before/after where changed; Chris approves it, then spend. Record the hash of every crop "
@@ -410,7 +420,21 @@ for sid in ALL_IDS:
     r["ch2_witness"] = W
     check(sid in T74, "%s: not in the truth set, so no candidate to compare" % sid)
     r["cand_hebrew"] = T74[sid]["hebrew"]
-    r["cand_class"], r["cand_dist"] = cand_class(r["cand_hebrew"], r["signature"])
+    r["basis_full_text"] = r["signature_full"] or r["signature"]
+    r["cand_class"], r["cand_dist"] = cand_class(r["cand_hebrew"], r["basis_full_text"])
+    r["partial_in_crop"] = bool(r["signed_partial_in_crop"])
+    r["cand_class_incrop"], r["cand_dist_incrop"] = (cand_class(r["cand_hebrew"], r["signature"])
+                                                     if r["partial_in_crop"] else (None, None))
+    r["cause"] = None
+    if r["cand_class"] == "substantially_different":
+        _nin = len(_heb_cons(r["signature"]))
+        if r["span_id"] == "p245:n1":
+            r["cause"] = CAUSE_P245
+        elif r["n_corrected"] is not None and r["n_corrected"] > 0 and r["n_corrected"] >= _nin / 2.0 and r["span_id"] == "p493:n3":
+            r["cause"] = ("the signer corrected %d of %d in-crop letters; corrections, not a mapping doubt"
+                          % (r["n_corrected"], _nin))
+        else:
+            r["cause"] = UNEXPLAINED
     _pn = (int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:]))
     _contra = sorted(k for k in ("index", "count", "hebrew", "marker", "older_latin") if W[k] is False)
     _indep = [k for k in ("index", "count", "hebrew") if W[k] is True]
@@ -444,8 +468,19 @@ C2_WIT["all_comparable_witnesses_agree"] = {
     "n_comparable": len(_all_cmp)}
 CAND_N = {k: sum(1 for r in rows if r["cand_class"] == k) for k in CAND_CLASSES}
 SUB_IDS = [r["span_id"] for r in rows if r["cand_class"] == "substantially_different"]
-CAND_VS_SIGNED = {"rule": CAND_RULE, "counts": CAND_N, "n": len(rows), "substantially_different_ids": SUB_IDS,
+PARTIAL_IDS = [r["span_id"] for r in rows if r["partial_in_crop"]]
+UNEXPLAINED_IDS = [s_ for s_ in SUB_IDS if BY[s_]["cause"] == UNEXPLAINED]
+CAND_VS_SIGNED = {"basis": "whole_span (signature_full, else signature)", "basis_line": BASIS_LINE,
+                  "rule": CAND_RULE, "counts": CAND_N, "n": len(rows), "substantially_different_ids": SUB_IDS,
                   "distances_of_substantially_different": {s_: BY[s_]["cand_dist"] for s_ in SUB_IDS},
+                  "causes_of_substantially_different": {s_: BY[s_]["cause"] for s_ in SUB_IDS},
+                  "unexplained_ids": UNEXPLAINED_IDS,
+                  "partial_in_crop_ids": PARTIAL_IDS,
+                  "partial_in_crop": {s_: {"whole_span_basis": {"text": BY[s_]["basis_full_text"], "class": BY[s_]["cand_class"],
+                                                                "distance": BY[s_]["cand_dist"]},
+                                           "in_crop_basis": {"text": BY[s_]["signature"], "class": BY[s_]["cand_class_incrop"],
+                                                             "distance": BY[s_]["cand_dist_incrop"]},
+                                           "candidate": BY[s_]["cand_hebrew"]} for s_ in PARTIAL_IDS},
                   "note": "the candidate is the extractor's whole-note read, not what the signer read off the pixels"}
 CAND_TXT = ", ".join("%s %d" % (k, CAND_N[k]) for k in CAND_CLASSES)
 C2_SRC_SHA = sha16(open(str(F_APP), "rb").read())
@@ -585,12 +620,20 @@ def row_html(r):
                  "text above is that substring%s</td></tr>" %
                  ("; <code>in_crop_trimmed: %s</code>" % esc(r["in_crop_trimmed"]) if r["in_crop_trimmed"] else ""))
     L.append('<tr><td>extractor candidate</td><td><span class="heb" dir="rtl">%s</span> &nbsp; class <code>%s</code>, '
-             "base-consonant edit distance %d <span class='mut'>(the whole-note read, not the signed reading)</span>"
+             "base-consonant edit distance %d <span class='mut'>(WHOLE-SPAN basis; the whole-note read, not the signed reading)</span>"
              "</td></tr>" % (esc(r["cand_hebrew"]), r["cand_class"], r["cand_dist"]))
+    if r["partial_in_crop"]:
+        L.append('<tr><td>partial_in_crop</td><td data-partial="1"><b>PARTIAL IN CROP</b> (orthogonal flag, not a class). '
+                 "whole-span basis <span class='heb' dir='rtl'>%s</span>: class <code>%s</code>, d=%d; "
+                 "in-crop basis <span class='heb' dir='rtl'>%s</span>: class <code>%s</code>, d=%d "
+                 "<span class='mut'>(the in-crop figure counts the out-of-crop letters as disagreement)</span></td></tr>"
+                 % (esc(r["basis_full_text"]), r["cand_class"], r["cand_dist"], esc(r["signature"]),
+                    r["cand_class_incrop"], r["cand_dist_incrop"]))
     if r["cand_class"] == "substantially_different":
-        L.append('<tr><td class="warn">candidate differs</td><td><div class="cand-sub" %s>SUBSTANTIALLY DIFFERENT: the '
-                 "note text for this span was selected by a candidate that is not what this crop was signed as%s</div>"
-                 "</td></tr>" % (SUB_MARK, (" -- " + esc(SUB_NOTE[r["span_id"]])) if r["span_id"] in SUB_NOTE else ""))
+        L.append('<tr><td class="warn">candidate differs</td><td><div class="cand-sub" %s>SUBSTANTIALLY DIFFERENT '
+                 "(whole-span basis): the note text for this span was selected by a candidate that is not what this "
+                 'crop was signed as. cause: <span class="cause" data-cause="%s">%s</span></div>'
+                 "</td></tr>" % (SUB_MARK, "unexplained" if r["cause"] == UNEXPLAINED else "stated", esc(r["cause"])))
     if r["ch2_state"] == "absent":
         L.append("<tr><td>channel 2 string</td><td><b class='warn'>ABSENT</b> <span class='mut'>(not empty: %s)"
                  "</span><pre class=\"ch2\" data-state=\"absent\"></pre></td></tr>" % esc(r["ch2_why"]))
@@ -667,7 +710,8 @@ def header_html():
     def kv(k, v):
         tb.append("<tr><td class='mut'>%s</td><td>%s</td></tr>" % (esc(k), v))
     kv("page convention", "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - %d). Every span id here is a file page." % PRINTED_OFFSET)
-    kv("revision", esc(REV3_TEXT))
+    kv("rev", "<b id='rev-field'>4</b>")
+    kv("revision", esc(REV4_TEXT))
     kv("status", "NOTHING IS SENT. No network call of any kind was made to produce this sheet.")
     kv("policy", esc(POLICY))
     kv("approval is for", "the PIXELS in each row, not the text beside them. The signed text is shown because "
@@ -697,11 +741,16 @@ def header_html():
        "(n_matched/n_comparable): %s. Witness source <code>%s</code> sha16 <code>%s</code>."
        % (C2_WIT["all_comparable_witnesses_agree"]["n_matched"], C2_WIT["all_comparable_witnesses_agree"]["n_comparable"],
           esc(C2_WIT_TXT), esc(F_TRUTH74.name), SRC_SHA[F_TRUTH74.name]))
-    kv("candidate_vs_signed", "<span id='cand-table'>%s</span> (n=%d). %s Substantially different: %s. The truth set's "
+    kv("candidate_vs_signed", "<b>%s</b> <span id='cand-table'>%s</span> (n=%d). %s Substantially different: %s. The truth set's "
        "`hebrew` field is the extractor's candidate from the whole-note read; it is not the signed reading. The "
        "neighbour-note control gives witness (3) discriminating power on 44 of 45 rows (carried from rev 2), within "
        "one lineage: the witnesses share the note text's own extraction, so they are not independent of it."
-       % (esc(CAND_TXT), len(rows), esc(CAND_RULE), esc(", ".join(SUB_IDS))))
+       % (esc(BASIS_LINE), esc(CAND_TXT), len(rows), esc(CAND_RULE), esc(", ".join(SUB_IDS))))
+    kv("partial_in_crop (4, orthogonal flag)", esc("; ".join("%s whole-span d=%d (%s) / in-crop d=%d (%s)" % (
+        s_, BY[s_]["cand_dist"], BY[s_]["cand_class"], BY[s_]["cand_dist_incrop"], BY[s_]["cand_class_incrop"])
+        for s_ in PARTIAL_IDS)))
+    kv("causes", esc("; ".join("%s: %s" % (s_, BY[s_]["cause"]) for s_ in SUB_IDS)) +
+       " Unexplained: " + esc(", ".join(UNEXPLAINED_IDS) or "none") + ".")
     kv("supersedes", "<code>%s</code>: %s" % (SUPERSEDES, esc(SUPERSEDES_WHY)))
     kv("standing rules", "<ul>" + "".join("<li>%s</li>" % esc(x) for x in RULES) + "</ul>")
     kv("scoring", "per channel: <code>exact</code> / <code>nikud</code> / <code>wrong</code> / "
@@ -746,7 +795,7 @@ DOC = "\n".join(parts) + "\n"
 
 # ---------------------------------------------------------------- born-checks over the emitted bytes
 sidecar = {
-    "kind": "contact_sheet_scoring45", "revision": 3, "revision_note": REV3_TEXT, "candidate_vs_signed": CAND_VS_SIGNED, "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
+    "kind": "contact_sheet_scoring45", "rev": 4, "revision": 4, "revision_note": REV4_TEXT, "candidate_vs_signed": CAND_VS_SIGNED, "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
     "nothing_sent": True, "set_digest": SET_DIGEST, "channel2_source_sha16": C2_SRC_SHA, "digest_rule": DIGEST_RULE, "digest_lines": DIGEST_LINES,
     "derivation": DERIVATION, "policy": POLICY, "standing_rules": list(RULES), "models": list(MODELS),
     "channels": {"bare": "A2 span crop alone", "text": "A2 span crop plus Latin note text, Hebrew runs masked to U+2022"},
@@ -860,15 +909,46 @@ check(all(SUB_MARK not in row_el(r["span_id"]) for r in rows if r["cand_class"] 
       "a row that is not substantially_different carries the marker")
 check(DOC.count(SUB_MARK) == len(SUB_IDS), "the marker count in the document %d != %d substantially_different rows"
       % (DOC.count(SUB_MARK), len(SUB_IDS)))
-check("p493:n3" in SUB_IDS and "3 corrected letters" in row_el("p493:n3") and "p245:n1" in SUB_IDS
-      and "open debt" in row_el("p245:n1"), "the p493:n3 corrected-letters note or the p245:n1 open-debt note is missing from its own row")
+check("p493:n3" in SUB_IDS and "p245:n1" in SUB_IDS, "p493:n3 or p245:n1 is not substantially_different on the whole-span basis")
 _w3 = re.search(r"\(3\) hebrew:.*?(?=; \(4\))", C2_WITNESSES, flags=re.S)
 check(_w3 is not None and "printed Hebrew" not in _w3.group(0) and "NOT the printed or signed reading" in _w3.group(0)
       and "extractor's candidate" in _w3.group(0) and "printed Hebrew" not in C2_NORM_RULE
       and "printed Hebrew" not in DOC and "printed Hebrew" not in SIDE,
       "the relabelled witness (3) text is missing, or a 'printed Hebrew' claim survives")
-check(json.loads(SIDE)["candidate_vs_signed"]["counts"] == CAND_N and CAND_TXT in DOC and "REV 3" in DOC,
-      "candidate_vs_signed or the rev-3 statement is missing from an output")
+check(json.loads(SIDE)["candidate_vs_signed"]["counts"] == CAND_N and CAND_TXT in DOC and "REV 4" in DOC,
+      "candidate_vs_signed or the rev-4 statement is missing from an output")
+
+# 7. rev 4: basis, partial flag, bracket assertion, cause in own element, rev field
+_NI = [r for r in rows if r["cand_class"] == "nikud_or_final_only"]
+check(all("[" not in (r["signature_full"] or "") and "]" not in (r["signature_full"] or "") for r in _NI),
+      "a nikud_or_final_only row has a bracket in signature_full: %r" % [r["span_id"] for r in _NI if "[" in (r["signature_full"] or "")])
+check(len(_NI) > 0 and CAND_N["nikud_or_final_only"] == len(_NI),
+      "liveness: the nikud_or_final_only bracket assertion saw %d rows" % len(_NI))
+check(len(PARTIAL_IDS) == 4 and all(r["signed_partial_in_crop"] == r["partial_in_crop"] for r in rows),
+      "partial_in_crop is not exactly 4 / does not follow signed_partial_in_crop: %r" % PARTIAL_IDS)
+check(all(BY[s_]["cand_dist"] is not None and BY[s_]["cand_dist_incrop"] is not None and BY[s_]["cand_class_incrop"]
+          for s_ in PARTIAL_IDS) and all(BY[r["span_id"]]["cand_dist_incrop"] is None for r in rows if not r["partial_in_crop"]),
+      "a partial row lacks a distance, or a non-partial row carries an in-crop one")
+_sc = json.loads(SIDE)["candidate_vs_signed"]["partial_in_crop"]
+check(set(_sc) == set(PARTIAL_IDS) and all(v["whole_span_basis"]["distance"] is not None and v["in_crop_basis"]["distance"] is not None
+                                          for v in _sc.values()), "the sidecar's partial rows do not each carry both labelled distances")
+check(all(row_el(s_).count("data-partial=\"1\"") == 1 for s_ in PARTIAL_IDS)
+      and sum(row_el(r["span_id"]).count("data-partial=\"1\"") for r in rows) == 4, "partial flag not in exactly the 4 rows' own elements")
+_close_sub = [r["span_id"] for r in rows if r["cand_dist"] <= 1 and r["cand_class"] == "substantially_different"]
+check(not _close_sub, "a row whose whole-span distance is <= 1 is classed substantially_different: %r" % _close_sub)
+_le1 = [r["span_id"] for r in rows if r["cand_dist"] <= 1]
+check(len(_le1) > 0 and all(r["cand_class"] != "substantially_different" for r in rows if r["span_id"] in _le1),
+      "liveness: no row has whole-span distance <= 1 (%d)" % len(_le1))
+_boundary = [s_ for s_ in PARTIAL_IDS if BY[s_]["cand_dist_incrop"] > BY[s_]["cand_dist"]]
+check(len(_boundary) > 0, "liveness: no partial row's in-crop distance exceeds its whole-span distance, so basis changed nothing")
+check(all(BY[s_]["cause"] for s_ in SUB_IDS) and all(BY[r["span_id"]]["cause"] is None for r in rows if r["cand_class"] != "substantially_different"),
+      "a substantially_different row lacks a cause, or another row carries one")
+check(all(row_el(s_).count('class="cause"') == 1 and ('>%s</span>' % esc(BY[s_]["cause"])) in row_el(s_) for s_ in SUB_IDS)
+      and sum(row_el(r["span_id"]).count('class="cause"') for r in rows) == len(SUB_IDS),
+      "a substantially_different row does not render its cause in its OWN element")
+check(json.loads(SIDE)["rev"] == 4 and json.loads(SIDE)["rev"] is not True and "id='rev-field'>4<" in DOC,
+      "the sidecar rev field is missing or not 4, or rev is not visible on the HTML")
+check(BASIS_LINE in DOC and "whole_span" in SIDE, "the basis statement is missing from an output")
 
 # the .md summary (a class (a) record)
 OUT_STEM = "CONTACT_SHEET_scoring45_%s_c2%s" % (SET_DIGEST, C2_SRC_SHA)
@@ -893,8 +973,11 @@ MD = "\n".join([
     "- Channel 2 witnesses: %s" % C2_WITNESSES,
     "- Channel 2 normalisation: %s" % C2_NORM_RULE,
     "- Channel 2 witness result (n_matched/n_comparable): %s" % C2_WIT_TXT,
-    "- %s" % REV3_TEXT,
-    "- candidate_vs_signed (n=%d): %s. Substantially different: %s. %s" % (len(rows), CAND_TXT, ", ".join(SUB_IDS), CAND_RULE),
+    "- rev: 4", "- %s" % REV4_TEXT, "- %s" % BASIS_LINE,
+    "- candidate_vs_signed (n=%d, WHOLE-SPAN basis): %s. Substantially different: %s. %s" % (len(rows), CAND_TXT, ", ".join(SUB_IDS), CAND_RULE),
+    "- partial_in_crop (orthogonal flag, 4): %s" % "; ".join("%s whole-span d=%d (%s) / in-crop d=%d (%s)" % (
+        s_, BY[s_]["cand_dist"], BY[s_]["cand_class"], BY[s_]["cand_dist_incrop"], BY[s_]["cand_class_incrop"]) for s_ in PARTIAL_IDS),
+    "- causes: %s. Unexplained: %s." % ("; ".join("%s: %s" % (s_, BY[s_]["cause"]) for s_ in SUB_IDS), ", ".join(UNEXPLAINED_IDS) or "none"),
     "- **Supersedes** `%s`: %s" % (SUPERSEDES, SUPERSEDES_WHY),
     "- Called-out registers: p493:n3 (1 confirmed + 3 corrected; editorial reading; tile 4 restored resh) and p594:n0 "
     "(4 confirmed + 1 sic; printed he in the signature, expected chet beside it; `expected_match` separate from `exact`).",
@@ -916,7 +999,7 @@ MD = "\n".join([
 
 # EXPECTED_CHECKS is pinned to the count observed on the first full run (3 per row in the build loop, plus the
 # file-level and born-checks above); a check added or removed changes it and this line then refuses to pass.
-EXPECTED_CHECKS = 281   # was 227 before rev 3 (54 new: 1 candidate-in-truth-set per row x45, plus 9 candidate_vs_signed born-checks); was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
+EXPECTED_CHECKS = 294   # was 281 before rev 4 (13 new: nikud bracket assertion + liveness, partial exactly 4, both distances, sidecar partials, partial own-element, no dist<=1 sub + liveness, boundary liveness, cause present, cause own-element, rev field, basis statement); was 227 before rev 3 (54 new: 1 candidate-in-truth-set per row x45, plus 9 candidate_vs_signed born-checks); was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
 if CHECKS != EXPECTED_CHECKS:
     raise AssertionError("ran %d checks, expected %d" % (CHECKS, EXPECTED_CHECKS))
 
