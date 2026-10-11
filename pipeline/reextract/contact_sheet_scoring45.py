@@ -24,11 +24,18 @@ WHAT THIS DOES NOT DO. It sends nothing: no network call of any kind, no key rea
 It cannot say whether a crop is legible -- only a human reading the pixels can; it can only make sure that human
 is shown the exact pixels and the exact bytes of text that would go out. It does not decide the scoring rule.
 
-THE CHANNEL-2 FINDING THIS SHEET EXISTS TO SURFACE. `latin_context` is loaded by `hebrew_aperture_diag.build_set`
-from the 2026-09-06 sitting records, which cover the OLD 21-span population. Most of these 45 are not in it, so
-their channel-2 string is ABSENT -- not empty. Absent means the loader the frontier run uses has nothing for the
-span and the run as built could not send it; empty would mean a note that had no Latin. The sheet prints which,
-per row, and counts them. It does not invent a note text from another source.
+CHANNEL 2, REV 2 (supersedes CONTACT_SHEET_scoring45_adb9a26835533dbc). The first build took `latin_context` from
+`hebrew_aperture_diag.build_set`, which reads the 2026-09-06 sitting records for the OLD ~21-span population, so
+channel 2 came out ABSENT for 44 of 45 -- reported honestly, but the text was not missing, the loader was pointing
+at the wrong file. This build takes the note text from `vol1_apparatus.jsonl` (every page, `notes[n].text`) and
+masks it with the existing `hebrew_frontier_or._ctx`.
+
+THE MAPPING IS A CLAIM AND IS WITNESSED, NOT ASSUMED. "n in a span id is an index into `notes`" is checked per
+row against witnesses (see C2_NORM_RULE below). The signing exports named in the brief carry NO note text (the
+signer shows a note CROP IMAGE; their `note` field is the signer's own free text), so they cannot be the witness;
+the witnesses used are named on the sheet. A span any witness contradicts is ABSENT, never guessed. A string that
+masks down to nothing is ABSENT too: a bulleted line with no words would tell an arm "this note has no words",
+which is false.
 
 HELPERS. `truth_set_sheet.py` is a script, not a module: importing it executes the whole 74-span sheet at module
 level (reads its cut, renders HTML, writes files). Its `_uri` / `_uri_im` / `_views` therefore cannot be imported
@@ -48,6 +55,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -81,7 +89,28 @@ F_R2_EXPORT = HAD.DATA / ("glyphsign_%s_pass3_r2_3span_signed_70fc08e1.jsonl" % 
 F_ADJ = HAD.DATA / "ADJUDICATION_pass3_r1_588879f2f4a2cee8.json"
 F_COST_BARE = HAD.DATA / "hebrew_frontier_or_notext_20261004.jsonl"
 F_COST_TEXT = HAD.DATA / "hebrew_frontier_or_reads_20260927.jsonl"
-SOURCES = (F_PASS1, F_PASS1_TILES, F_PASS2, F_PASS3R2, F_R1_EXPORT, F_R2_EXPORT, F_ADJ, F_COST_BARE, F_COST_TEXT)
+F_APP = HAD.DATA.parent / "vol1_apparatus.jsonl"
+F_TRUTH74 = HAD.DATA / ("truth_set74_%s.json" % SET)
+SOURCES = (F_PASS1, F_PASS1_TILES, F_PASS2, F_PASS3R2, F_R1_EXPORT, F_R2_EXPORT, F_ADJ, F_COST_BARE, F_COST_TEXT,
+           F_APP, F_TRUTH74)
+SUPERSEDES = "CONTACT_SHEET_scoring45_adb9a26835533dbc"
+SUPERSEDES_WHY = ("that sheet sourced channel 2 from hebrew_aperture_diag.build_set (the 2026-09-06 sitting records, "
+                  "an old ~21-span population) and so showed channel 2 ABSENT for 44 of 45 spans; the note text "
+                  "exists in vol1_apparatus.jsonl for all 45. The crop set is unchanged (same set digest). That "
+                  "earlier sheet is kept untouched as the record of the finding.")
+C2_MAP_RULE = ("Span id pP:nN -> the vol1_apparatus.jsonl line whose `page` == P (file page), item N (0-based) of "
+               "its `notes` list; the string is that item's `text`, passed through hebrew_frontier_or._ctx "
+               "(Hebrew runs -> U+2022).")
+C2_NORM_RULE = ("Witness comparisons: (Hebrew) NFC, keep only U+05D0-U+05EA, so nikud, cantillation, spaces and "
+                "Latin drop out; the truth set's printed Hebrew must be a substring of the note's Hebrew "
+                "consonants. (Latin, where an older Latin string exists) remove U+0590-U+05FF, lower-case, keep "
+                "word tokens [a-z0-9&]; the older token sequence must be a contiguous run of the apparatus "
+                "tokens. Tokenising folds whitespace and punctuation.")
+C2_WITNESSES = ("(1) index: the truth set's note_index (1-based, from the page image's note regions) minus 1 == N; "
+                "(2) count: the truth set's notes_on_page (image-derived) == len(notes) on that page; "
+                "(3) hebrew: the printed Hebrew occurs in note N; "
+                "(4) marker: note N's marker == [^N+1] (same record, so a consistency check, not independent); "
+                "(5) older Latin: where the 2026-09-06 sitting records hold a Latin string for the span.")
 
 POLICY = ("Before any outbound call, produce a contact sheet: every crop to be sent, native size, beside its "
           "signed text, before/after where changed; Chris approves it, then spend. Record the hash of every crop "
@@ -242,8 +271,57 @@ R1 = {r["span_id"]: r for r in _jl(F_R1_EXPORT)}
 R2 = {r["span_id"]: r for r in _jl(F_R2_EXPORT)}
 ADJ = json.load(io.open(str(F_ADJ), encoding="utf-8"))
 
-# ---- 3. channel 2 text, from the loader the frontier run itself uses
+# ---- 3. channel 2 text, from vol1_apparatus.jsonl, mapping witnessed per row
+# POP is kept only as a WITNESS (older Latin strings) and for loader_truth_agrees; it is not the source.
 POP = {s["span_id"]: s for s in HAD.build_set(include_sealed=True)}
+APP_NOTES = {}
+for _i, _line in enumerate(io.open(str(F_APP), encoding="utf-8")):
+    if not _line.strip():
+        continue
+    _o = json.loads(_line)
+    if _i == 0:
+        check(_o.get("kind") == "config_header", "vol1_apparatus.jsonl line 1 is not a config_header")
+        continue
+    APP_NOTES[int(_o["page"])] = _o["notes"]
+T74 = {r["span_id"]: r for r in json.load(io.open(str(F_TRUTH74), encoding="utf-8"))["rows"]}
+check(all(set(n) == {"marker", "text"} for ns in APP_NOTES.values() for n in ns),
+      "an apparatus note item does not have exactly marker and text")
+_HEB_CONS = re.compile(u"[^א-ת]")
+_LAT_TOK = re.compile(r"[a-z0-9&]+")
+
+
+def _heb_cons(s):
+    return _HEB_CONS.sub("", unicodedata.normalize("NFC", s or ""))
+
+
+def _lat_tokens(s):
+    return _LAT_TOK.findall(re.sub(u"[֐-׿]+", " ", unicodedata.normalize("NFC", s or "")).lower())
+
+
+def _contiguous(small, big):
+    n = len(small)
+    return n > 0 and any(big[i:i + n] == small for i in range(len(big) - n + 1))
+
+
+def c2_witness(sid):
+    """Per-witness verdicts for 'note N of the span id is notes[N] on that page'. None = not comparable."""
+    p, n = int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:])
+    notes = APP_NOTES.get(p)
+    w = {"in_apparatus": bool(notes) and 0 <= n < len(notes), "index": None, "count": None, "hebrew": None,
+         "marker": None, "older_latin": None}
+    if not w["in_apparatus"]:
+        return w
+    nt = notes[n]
+    t = T74.get(sid)
+    if t:
+        w["index"] = (int(t["note_index"]) - 1 == n)
+        w["count"] = (int(t["notes_on_page"]) == len(notes))
+        w["hebrew"] = bool(_heb_cons(t["hebrew"])) and _heb_cons(t["hebrew"]) in _heb_cons(nt["text"])
+    w["marker"] = (nt["marker"] == "[^%d]" % (n + 1))
+    old = (POP.get(sid) or {}).get("latin_context")
+    if old:
+        w["older_latin"] = _contiguous(_lat_tokens(old), _lat_tokens(nt["text"]))
+    return w
 
 rows = []
 for sid in ALL_IDS:
@@ -277,18 +355,41 @@ for sid in ALL_IDS:
           "other pixels" % (sid, r["crop_sha16"], r["crop_sha16_signed"]))
     check(bool(r["signature"]) and "?" not in r["signature"],
           "%s: signed text empty or carries an unresolved '?': %r" % (sid, r["signature"]))
-    lc = (POP.get(sid) or {}).get("latin_context")
-    if lc is None:
-        r.update(ch2_state="absent", ch2="", ch2_why="not in hebrew_aperture_diag.build_set(include_sealed=True): "
-                 "the loader hebrew_frontier_or.cells() uses has no latin_context for this span")
+    W = c2_witness(sid)
+    r["ch2_witness"] = W
+    _pn = (int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:]))
+    _contra = sorted(k for k in ("index", "count", "hebrew", "marker", "older_latin") if W[k] is False)
+    _indep = [k for k in ("index", "count", "hebrew") if W[k] is True]
+    if not W["in_apparatus"]:
+        r.update(ch2_state="absent", ch2="", ch2_why="no notes[%d] on page %d in vol1_apparatus.jsonl" % (_pn[1], _pn[0]))
+    elif _contra:
+        r.update(ch2_state="absent", ch2="", ch2_why="mapping contradicted by witness(es): " + ", ".join(_contra))
+    elif not _indep:
+        r.update(ch2_state="absent", ch2="", ch2_why="no witness could confirm the note index for this span")
     else:
-        masked = FOR._ctx(lc)
-        r.update(ch2_state="present" if masked else "empty", ch2=masked, ch2_why="")
+        masked = FOR._ctx(APP_NOTES[_pn[0]][_pn[1]]["text"])
+        if not masked.strip() or not re.search(r"[A-Za-z0-9]", masked):
+            r.update(ch2_state="absent", ch2="", ch2_why="the note masks down to nothing (no Latin words); a bare "
+                     "bullet line would tell an arm the note has no words")
+        else:
+            r.update(ch2_state="present", ch2=masked, ch2_why="")
     if sid in POP and POP[sid].get("truth") is not None:
         r["loader_truth_agrees"] = (POP[sid]["truth"] == r["signature"])
     rows.append(r)
 BY = {r["span_id"]: r for r in rows}
-N_CH2 = {k: sum(1 for r in rows if r["ch2_state"] == k) for k in ("present", "empty", "absent")}
+N_CH2 = {k: sum(1 for r in rows if r["ch2_state"] == k) for k in ("present", "absent")}
+C2_ABSENT_IDS = [r["span_id"] for r in rows if r["ch2_state"] == "absent"]
+C2_WIT = {}
+for _k in ("index", "count", "hebrew", "marker", "older_latin"):
+    _vals = [r["ch2_witness"][_k] for r in rows if r["ch2_witness"][_k] is not None]
+    C2_WIT[_k] = {"n_matched": sum(1 for v in _vals if v), "n_comparable": len(_vals)}
+_all_cmp = [r for r in rows if any(r["ch2_witness"][k] is not None for k in ("index", "count", "hebrew", "older_latin"))]
+C2_WIT["all_comparable_witnesses_agree"] = {
+    "n_matched": sum(1 for r in _all_cmp if not any(r["ch2_witness"][k] is False for k in
+                                                    ("index", "count", "hebrew", "marker", "older_latin"))),
+    "n_comparable": len(_all_cmp)}
+C2_SRC_SHA = sha16(open(str(F_APP), "rb").read())
+C2_WIT_TXT = "; ".join("%s %d/%d" % (k, v["n_matched"], v["n_comparable"]) for k, v in C2_WIT.items())
 
 # ---- 4. before/after for the three round-2 rows
 check(set(R1) == set(ROUND2) and set(R2) == set(ROUND2) and set(P3_IDS) == set(ROUND2),
@@ -426,9 +527,14 @@ def row_html(r):
         L.append("<tr><td>channel 2 string</td><td><b class='warn'>ABSENT</b> <span class='mut'>(not empty: %s)"
                  "</span><pre class=\"ch2\" data-state=\"absent\"></pre></td></tr>" % esc(r["ch2_why"]))
     else:
-        L.append("<tr><td>channel 2 string</td><td><span class='mut'>%s; exact bytes that would be sent as the "
-                 "text part:</span><pre class=\"ch2\" data-state=\"%s\">%s</pre></td></tr>"
-                 % ("present" if r["ch2_state"] == "present" else "EMPTY (loaded, but nothing after masking)",
+        _w = r["ch2_witness"]
+        _n = int(r["span_id"].split(":")[1][1:])
+        L.append("<tr><td>channel 2 string</td><td><span class='mut'>present; exact bytes that would be sent as the "
+                 "text part (apparatus note %d of file page %d, marker %s; witnesses %s):</span>"
+                 "<pre class=\"ch2\" data-state=\"%s\">%s</pre></td></tr>"
+                 % (_n, r["page_file"], esc(APP_NOTES[r["page_file"]][_n]["marker"]),
+                    esc(", ".join("%s=%s" % (k, {True: "ok", None: "n/a"}[_w[k]]) for k in
+                                  ("index", "count", "hebrew", "marker", "older_latin"))),
                     r["ch2_state"], esc(r["ch2"])))
     L.append("</table>")
     if sid in CALLED_OUT:
@@ -509,9 +615,20 @@ def header_html():
     kv("channel 1 (bare)", "the A2 span crop alone")
     kv("channel 2 (text)", "the same A2 span crop PLUS the Latin note text, every Hebrew run masked to U+2022 by "
        "<code>hebrew_frontier_or._ctx</code>. Note TEXT only: no note-box crop.")
-    kv("channel-2 availability", "%d present, %d empty, %d ABSENT (of %d). ABSENT = the loader the frontier run "
-       "uses has no latin_context for the span; EMPTY = loaded but nothing after masking."
-       % (N_CH2["present"], N_CH2["empty"], N_CH2["absent"], len(rows)))
+    kv("channel-2 availability", "%d present, %d ABSENT (of %d). ABSENT = no note text could be licensed for the "
+       "span (a witness contradicts the mapping, none could confirm it, or the note masks down to nothing); absent "
+       "rows: %s. A string that masks to nothing is absent, never present."
+       % (N_CH2["present"], N_CH2["absent"], len(rows), esc(", ".join(C2_ABSENT_IDS) or "none")))
+    kv("channel-2 source", "<code>%s</code> sha16 <code>%s</code> (959 lines; line 1 config_header)"
+       % (esc(F_APP.name), C2_SRC_SHA))
+    kv("channel-2 mapping rule", esc(C2_MAP_RULE))
+    kv("channel-2 witnesses", esc(C2_WITNESSES))
+    kv("channel-2 normalisation", esc(C2_NORM_RULE))
+    kv("channel-2 witness result", "<b>%d / %d</b> comparable rows agree on every comparable witness; per witness "
+       "(n_matched/n_comparable): %s. Witness source <code>%s</code> sha16 <code>%s</code>."
+       % (C2_WIT["all_comparable_witnesses_agree"]["n_matched"], C2_WIT["all_comparable_witnesses_agree"]["n_comparable"],
+          esc(C2_WIT_TXT), esc(F_TRUTH74.name), SRC_SHA[F_TRUTH74.name]))
+    kv("supersedes", "<code>%s</code>: %s" % (SUPERSEDES, esc(SUPERSEDES_WHY)))
     kv("standing rules", "<ul>" + "".join("<li>%s</li>" % esc(x) for x in RULES) + "</ul>")
     kv("scoring", "per channel: <code>exact</code> / <code>nikud</code> / <code>wrong</code> / "
        "<code>expected_match</code>, plus the agreement-and-wrong rate. Predicted first.")
@@ -556,11 +673,15 @@ DOC = "\n".join(parts) + "\n"
 # ---------------------------------------------------------------- born-checks over the emitted bytes
 sidecar = {
     "kind": "contact_sheet_scoring45", "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
-    "nothing_sent": True, "set_digest": SET_DIGEST, "digest_rule": DIGEST_RULE, "digest_lines": DIGEST_LINES,
+    "nothing_sent": True, "set_digest": SET_DIGEST, "channel2_source_sha16": C2_SRC_SHA, "digest_rule": DIGEST_RULE, "digest_lines": DIGEST_LINES,
     "derivation": DERIVATION, "policy": POLICY, "standing_rules": list(RULES), "models": list(MODELS),
     "channels": {"bare": "A2 span crop alone", "text": "A2 span crop plus Latin note text, Hebrew runs masked to U+2022"},
     "n_calls": N_CALLS, "cost": COST, "truth_sources_sha16": SRC_SHA,
-    "channel2_counts": N_CH2, "crop_w_range": [min(WS), max(WS)], "crop_h_range": [min(HS), max(HS)],
+    "channel2_counts": N_CH2, "channel2_absent_ids": C2_ABSENT_IDS,
+    "channel2_source": {"file": F_APP.name, "sha16": C2_SRC_SHA, "mapping_rule": C2_MAP_RULE,
+                        "witnesses": C2_WITNESSES, "normalisation_rule": C2_NORM_RULE,
+                        "witness_result": C2_WIT, "witness_source": F_TRUTH74.name},
+    "supersedes": SUPERSEDES, "supersedes_why": SUPERSEDES_WHY, "crop_w_range": [min(WS), max(WS)], "crop_h_range": [min(HS), max(HS)],
     "n_crops_under_%dpx_tall" % SHORT_PX: N_SHORT, "git_start": GIT_START, "git_end": GIT_END,
     "provisional": PROV, "provisional_reason": WHY_TXT, "before_after": BEFORE_AFTER,
     "rows": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows],
@@ -594,13 +715,34 @@ check(len(set(r["crop_sha16"] for r in rows)) == N_EXPECT, "crop sha16 values ar
 check(HEB_RX.search(PROBE_HEB), "Hebrew detector does not fire on its probe")
 CH2 = re.findall(r'<pre class="ch2" data-state="(\w+)">(.*?)</pre>', DOC, flags=re.S)
 check(len(CH2) == N_EXPECT, "liveness: %d channel-2 elements, expected %d" % (len(CH2), N_EXPECT))
-ST = {k: sum(1 for s, _t in CH2 if s == k) for k in ("present", "empty", "absent")}
+ST = {k: sum(1 for s, _t in CH2 if s == k) for k in ("present", "absent")}
 check(ST == N_CH2, "channel-2 states in the document %r != derived %r" % (ST, N_CH2))
 n_nonempty = sum(1 for s, t in CH2 if html.unescape(t).strip())
 check(n_nonempty == N_CH2["present"] and n_nonempty >= 1, "non-empty channel-2 count %d vs present %d" % (n_nonempty, N_CH2["present"]))
 check(all(not HEB_RX.search(html.unescape(t)) for _s, t in CH2), "a channel-2 string carries a Hebrew codepoint")
 n_masked = sum(1 for _s, t in CH2 if u"\u2022" in html.unescape(t))
 check(n_masked >= 1, "liveness: no channel-2 string carries the U+2022 mask, so the masking was never exercised")
+check(n_masked >= 10, "liveness: only %d channel-2 strings carry the mask; the 44-absent finding should be gone" % n_masked)
+# present/absent counts stated in the document and the sidecar, equal to the derived counts
+_hdr_txt = "%d present, %d ABSENT (of %d)" % (N_CH2["present"], N_CH2["absent"], N_EXPECT)
+check(_hdr_txt in DOC and sidecar["channel2_counts"] == N_CH2 and N_CH2["present"] + N_CH2["absent"] == N_EXPECT,
+      "the channel-2 present/absent counts are not stated consistently on the sheet and in the sidecar")
+# every present string is non-empty AFTER masking and stripping and carries a Latin word; a bullets-only string is absent
+check(all(re.search(r"[A-Za-z0-9]", html.unescape(t)) for s, t in CH2 if s == "present"),
+      "a present channel-2 string has no Latin word after masking")
+check(not any(s == "present" and not html.unescape(t).replace(u"\u2022", "").strip() for s, t in CH2),
+      "a present channel-2 string is empty after masking and stripping")
+# liveness for the emptiness predicate: a bullets-only string must be refused by it
+check(not re.search(r"[A-Za-z0-9]", u"\u2022 \u2022"), "liveness: the bullets-only probe passes the Latin-word test")
+# the mapping is witnessed: every present row has >=1 confirming independent witness and none contradicting
+check(all(r["ch2_state"] == "absent" or (any(r["ch2_witness"][k] is True for k in ("index", "count", "hebrew"))
+                                          and not any(v is False for v in r["ch2_witness"].values())) for r in rows),
+      "a present row lacks a confirming witness or has a contradicting one")
+check(C2_WIT["index"]["n_comparable"] >= 1 and C2_WIT["hebrew"]["n_comparable"] >= 1,
+      "liveness: a witness compared nothing")
+# the supersession and the channel-2 source digest are on the sheet and the sidecar
+check(SUPERSEDES in DOC and C2_SRC_SHA in DOC and "supersedes" in SIDE and C2_SRC_SHA in SIDE,
+      "the supersession or the channel-2 source sha16 is missing from an output")
 check(all(t == "" for s, t in CH2 if s == "absent"), "an absent row carries channel-2 text")
 
 # 5. register inside the called-out rows' OWN elements
@@ -633,7 +775,7 @@ check(all(row_el(s).count('data-before-after="%s"' % s) == 1 for s in ROUND2), "
 check(DOC.count("FILE PAGES") >= 1 and "FILE PAGES" in SIDE, "the file-page convention is missing from an output")
 
 # the .md summary (a class (a) record)
-OUT_STEM = "CONTACT_SHEET_scoring45_%s" % SET_DIGEST
+OUT_STEM = "CONTACT_SHEET_scoring45_%s_c2%s" % (SET_DIGEST, C2_SRC_SHA)
 MD = "\n".join([
     "# Scoring-run contact sheet, %d spans (digest `%s`)" % (len(rows), SET_DIGEST), "",
     "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - %d)." % PRINTED_OFFSET, "",
@@ -649,8 +791,13 @@ MD = "\n".join([
     "- Cost: %s" % (("derived estimate USD %s; %s" % (COST["total_usd"], COST["basis"])) if COST["total_usd"] is not None
                     else "UNKNOWN (no measured per-call cost found)"),
     "- Crop size: width %d-%d px, height %d-%d px; %d under %d px tall" % (min(WS), max(WS), min(HS), max(HS), N_SHORT, SHORT_PX),
-    "- Channel 2 string: %d present, %d empty, %d ABSENT. Absent means the loader the frontier run uses "
-    "(`hebrew_aperture_diag.build_set`) has no latin_context for the span." % (N_CH2["present"], N_CH2["empty"], N_CH2["absent"]),
+    "- Channel 2 string: %d present, %d ABSENT (%s). Source `%s` sha16 `%s`." % (
+        N_CH2["present"], N_CH2["absent"], ", ".join(C2_ABSENT_IDS) or "none", F_APP.name, C2_SRC_SHA),
+    "- Channel 2 mapping rule: %s" % C2_MAP_RULE,
+    "- Channel 2 witnesses: %s" % C2_WITNESSES,
+    "- Channel 2 normalisation: %s" % C2_NORM_RULE,
+    "- Channel 2 witness result (n_matched/n_comparable): %s" % C2_WIT_TXT,
+    "- **Supersedes** `%s`: %s" % (SUPERSEDES, SUPERSEDES_WHY),
     "- Called-out registers: p493:n3 (1 confirmed + 3 corrected; editorial reading; tile 4 restored resh) and p594:n0 "
     "(4 confirmed + 1 sic; printed he in the signature, expected chet beside it; `expected_match` separate from `exact`).",
     "- Changed rows: only %s (re-signed over byte-identical pixels); no other row changed." % ", ".join(ROUND2),
@@ -659,8 +806,9 @@ MD = "\n".join([
     "- Verdict: %s. %s" % ("PROVISIONAL" if PROV else "clean", WHY_TXT), "",
     "## What this does NOT solve", "",
     "It does not say any crop is legible; Chris reading the pixels does. It does not supply a note text for the "
-    "%d ABSENT rows, so channel 2 as built cannot send them. It does not fix the scoring rule for the two "
-    "editorial-register rows." % N_CH2["absent"], "",
+    "%d ABSENT rows. The index mapping is licensed by witnesses that share the page's note count and the truth "
+    "set's printed Hebrew; it is not a read of the pixels, and the signing exports named for this check carry no "
+    "note text. It does not fix the scoring rule for the two editorial-register rows." % N_CH2["absent"], "",
     "## Rows", "", "| span (file page) | printed | pass | px | crop sha16 | signed text | disposition | ch2 |",
     "|---|---|---|---|---|---|---|---|"] +
     ["| %s | %d | %d | %dx%d | `%s` | %s | %s | %s |" % (r["span_id"], r["page_printed"], r["pass"], r["crop_w"],
@@ -669,7 +817,7 @@ MD = "\n".join([
 
 # EXPECTED_CHECKS is pinned to the count observed on the first full run (3 per row in the build loop, plus the
 # file-level and born-checks above); a check added or removed changes it and this line then refuses to pass.
-EXPECTED_CHECKS = 217
+EXPECTED_CHECKS = 227   # was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
 if CHECKS != EXPECTED_CHECKS:
     raise AssertionError("ran %d checks, expected %d" % (CHECKS, EXPECTED_CHECKS))
 
