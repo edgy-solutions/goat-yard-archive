@@ -155,23 +155,38 @@ _ARGP.add_argument("--out-dir", default=None,
                     help="directory the HTML, sidecar, skeleton and note crops are WRITTEN to (default: "
                          "the audits directory). Inputs are always read from the audits directory. Lets a "
                          "mode be run for verification without touching tracked files there.")
+_ARGP.add_argument("--adjudication-file", default=None,
+                    help="round 2 only: read the adjudication overlay from this path instead of the audits "
+                         "directory. The pinned sha16 is STILL enforced, so this can only ever point at the "
+                         "same bytes; it exists so the refusal on an uncovered disagreement can be shown "
+                         "against a scratch copy.")
+_ARGP.add_argument("--test-console", choices=["pass3"], default=None,
+                    help="TEST ONLY, round 2 only, requires --out-dir elsewhere than the audits directory: "
+                         "render the round-2 page on the named OLDER console blob, so a born-test can prove it "
+                         "FAILS there. Never used to produce a page anyone signs on.")
 ARGS = _ARGP.parse_args()
 if ARGS.pass2 and ARGS.pass3:
     _ARGP.error("--pass2 and --pass3 are mutually exclusive")
 PASS2 = ARGS.pass2
 PASS3 = ARGS.pass3
 PASS3_ROUND = ARGS.pass3_round
+PASS4 = PASS3 and PASS3_ROUND == 2     # round 2 renders JS_PASS4
 if PASS3_ROUND != 1 and not PASS3:
     _ARGP.error("--pass3-round only applies with --pass3")
 PASS23 = PASS2 or PASS3
 OUT_DIR = pathlib.Path(ARGS.out_dir) if ARGS.out_dir else HAD.DATA
+if (ARGS.adjudication_file or ARGS.test_console) and not PASS4:
+    _ARGP.error("--adjudication-file and --test-console only apply with --pass3 --pass3-round 2")
+if ARGS.test_console and (not ARGS.out_dir or OUT_DIR.resolve() == pathlib.Path(HAD.DATA).resolve()):
+    _ARGP.error("--test-console needs --out-dir somewhere other than the audits directory")
+TEST_CONSOLE = ARGS.test_console
 
 # The check counter (Part F). A bare assert aborts loudly but is invisible to a COUNT: this counts every
 # check made by the identity pins and by pass 3's own guards, and the run refuses to finish unless the
 # number equals EXPECTED_CHECKS for its mode. (The older bare asserts below are unchanged and still abort.)
 CHECKS = 0
-EXPECTED_CHECKS_BY_MODE = {"default": 5, "pass2": 5, "pass3": 21}
-MODE = "pass3" if PASS3 else ("pass2" if PASS2 else "default")
+EXPECTED_CHECKS_BY_MODE = {"default": 8, "pass2": 8, "pass3": 24, "pass3r2": 28}
+MODE = ("pass3r2" if PASS4 else "pass3") if PASS3 else ("pass2" if PASS2 else "default")
 EXPECTED_CHECKS = EXPECTED_CHECKS_BY_MODE[MODE]
 
 
@@ -257,6 +272,10 @@ PASS3_ROUNDS = {
     1: ("glyphsign_%s_pass2_26span_signed_%s.jsonl" % (SET, "3285d39a"), "3285d39a12c14e6a"),
     2: ("glyphsign_%s_pass3_3span_signed_%s.jsonl" % (SET, "51c0e7ba"), "51c0e7ba02c8a6eb"),
 }
+# Round 2's import is NOT the pass-3 export as it stands: it is that export OVERLAID by the human rulings on the
+# 10 items where it disagreed with pass 2 over identical pixels (resign_overlay.py). The overlay file is
+# content-addressed and pinned here the way the exports above are.
+ADJUDICATION_BY_ROUND = {2: ("ADJUDICATION_pass3_r1_588879f2f4a2cee8.json", "588879f2f4a2cee8")}
 if PASS3 and PASS3_ROUND not in PASS3_ROUNDS:
     _ARGP.error("--pass3-round %d is not in PASS3_ROUNDS %r" % (PASS3_ROUND, sorted(PASS3_ROUNDS)))
 PASS2_EXPORT_NAME, PASS2_EXPORT_SHA16 = PASS3_ROUNDS[PASS3_ROUND if PASS3 else 1]
@@ -454,6 +473,38 @@ if PASS3:
     check(len(_p2_kept) == RUN_N and set(PASS2_ROWS) >= set(RUN_SPAN_IDS),
           "kept %d of pass 2's own lines for a %d-row selection" % (len(_p2_kept), RUN_N))
     PASS2_EMBED_TEXT = "\n".join(_p2_kept) + "\n"
+
+ADJ_META = None
+if PASS4:
+    import resign_overlay as RO                                           # noqa: E402
+    _adj_name, _adj_sha = ADJUDICATION_BY_ROUND[PASS3_ROUND]
+    _adj_path = pathlib.Path(ARGS.adjudication_file) if ARGS.adjudication_file else HAD.DATA / _adj_name
+    _prior_name, _prior_sha = PASS3_ROUNDS[1]
+    _prior_path = HAD.DATA / _prior_name
+    check(_adj_path.exists(), "round 2 needs the adjudication overlay %s at %s" % (_adj_name, _adj_path))
+    _prior_bytes = io.open(str(_prior_path), "rb").read()
+    check(hashlib.sha256(_prior_bytes).hexdigest()[:16] == PASS3_ROUNDS[1][1],
+          "the pass-2 export (the overlay's prior) has sha16 %s, not the pinned %s"
+          % (hashlib.sha256(_prior_bytes).hexdigest()[:16], PASS3_ROUNDS[1][1]))
+    _adj_bytes = io.open(str(_adj_path), "rb").read()
+    _adj = json.loads(_adj_bytes.decode("utf-8"))
+    try:
+        _diff = RO.compute_diff(PASS2_EXPORT_PATH, _prior_path, sys.executable)
+        _n_cov = RO.check_coverage(_diff, _adj)
+    except RO.OverlayRefusal as _e:
+        check(False, "ROUND 2 REFUSED -- %s" % _e)
+    # coverage first (it names WHAT is missing); the content pin second (it names that the bytes are not the ones
+    # Chris's rulings were pinned to). Both must hold.
+    check(RO.sha16_bytes(_adj_bytes) == _adj_sha,
+          "the adjudication overlay's sha16 is %s, not the pinned %s -- not the file whose rulings were "
+          "reported" % (RO.sha16_bytes(_adj_bytes), _adj_sha))
+    _prior_rows = [json.loads(_l) for _l in _prior_bytes.decode("utf-8").splitlines() if _l.strip()]
+    PASS2_EMBED_TEXT, _adj_tally = RO.overlay_text(
+        _p2_kept, _prior_rows, _adj, "restored from pass 2 (%s) by ruling: keep" % PASS3_ROUNDS[1][1][:8])
+    check(sum(_adj_tally.values()) == _n_cov == len(_diff["disagreements"]),
+          "the overlay applied %r rulings to a diff of %d disagreements" % (_adj_tally, len(_diff["disagreements"])))
+    ADJ_META = {"name": _adj_path.name, "sha16": _adj_sha, "diff_sha16": _diff["diff_sha16"],
+                "tally": _adj_tally, "rulings": _n_cov}
 
 # ---- pass 2 (Change 2): the full note crop, cut exactly the way wrong_line_trace.py does (Lane A's
 # substrate, read-only -- this file only CALLS ps.presplit / NLR.note_line_regions). Only loaded/used
@@ -810,7 +861,7 @@ TOTAL_TILES = TOTAL_CONSONANT_TILES + TOTAL_GAP_TILES
 
 # ---- change 6: the import expectation, derived read-only from pass 1's own signed file ----------------
 
-def _derive_import_expectation(path, allowed_ids=None):
+def _derive_import_expectation(path, allowed_ids=None, text=None):
     """The counts a correct import of `path` must produce, derived from the file itself -- never
     hard-coded, so a change to the frozen pass-1 artifact would change these numbers too. Returns None
     (never invents zeros) if the file is absent.
@@ -818,11 +869,11 @@ def _derive_import_expectation(path, allowed_ids=None):
     `allowed_ids`, when not None, restricts the derivation to rows whose span_id is in that set --
     pass 2 (Change 3) needs the expectation recomputed for the 26-row selection, not the 74-row figures,
     while reusing this same derivation rather than writing a second one."""
-    if not path.exists():
+    if text is None and not path.exists():
         return None
     rows = tiles = confirmed = corrected = disputed = 0
     notes = abstains = legacy_faults = insertions = 0
-    with io.open(str(path), encoding="utf-8") as f:
+    with (io.StringIO(text) if text is not None else io.open(str(path), encoding="utf-8")) as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -853,7 +904,8 @@ def _derive_import_expectation(path, allowed_ids=None):
             "legacy_faults": legacy_faults, "insertions": insertions}
 
 
-IMPORT_EXPECTATION = (_derive_import_expectation(PASS2_EXPORT_PATH, set(RUN_SPAN_IDS)) if PASS3 else
+IMPORT_EXPECTATION = (_derive_import_expectation(PASS2_EXPORT_PATH, set(RUN_SPAN_IDS),
+                                                  PASS2_EMBED_TEXT if PASS4 else None) if PASS3 else
                       _derive_import_expectation(PASS1_PATH, set(RUN_SPAN_IDS) if PASS2 else None))
 _EXP_ORDER = ("rows", "tiles", "confirmed", "corrected", "disputed", "notes", "abstains",
               "legacy_faults", "insertions")
@@ -1634,6 +1686,323 @@ window.addEventListener("load",function(){var k=restore();
 """
 # end JS_PASS3 -- everything above this line from its label is the pass-3 console.
 
+# JS_PASS4 -- the pass-4 console, forked from JS_PASS3 (byte copy, then the prior-state edits: tiles and
+# insertion chips show the signer's last answer, and are inert until a per-item "change"). A fourth fork
+# because JS_V1, JS_PASS2 and JS_PASS3 are all SPENT approval records; edit THIS block, never those three.
+JS_PASS4 = r"""
+var RM=__RM__, SETID=__SETID__, N=__N__, SKEL=__SKEL__, EXP=__EXP__, TYPED_FAULTS=__TYPED_FAULTS__,
+    LEGACY_FAULT=__LEGACY_FAULT__, STOREKEY=__STOREKEY__, AUTOIMPORT=__AUTOIMPORT__,
+    EMBED=__P3_EMBED__, EMBED_NAME=__P3_EMBED_NAME__, UNSIGNABLE=__P3_UNSIGNABLE__,
+    SIG_RULE=__P3_SIG_RULE__, SEEDS=__P3_SEEDS__, SIC_BASES=["prior_grounded","evidence_grounded"],
+    UNSIGNABLE_RX=new RegExp(UNSIGNABLE,"i"),
+    ST={}, CUR_S=null, CUR_I=null, PAL_MODE="tile", CUR_SEQ=null, CUR_AFTER=null;
+function trow(s){if(!ST[s])ST[s]={tv:{},pv:{},unl:{},note:"",fault:"",fault_legacy:"",abst:0,ins:[],insSeq:0,sic:{}};
+ if(!ST[s].pv)ST[s].pv={};if(!ST[s].unl)ST[s].unl={};
+ if(!ST[s].ins)ST[s].ins=[];if(!ST[s].sic)ST[s].sic={};if(ST[s].insSeq===undefined)ST[s].insSeq=0;
+ if(ST[s].fault_legacy===undefined)ST[s].fault_legacy="";
+ return ST[s];}
+function tileDiv(s,i){return document.getElementById("t_"+s+"_"+i);}
+/* ---- pass 4: a re-opened row shows the signer's LAST ANSWER on the tile's own face. r.pv is the prior
+   verdict, set ONLY by importText and never by a click; r.tv is the current one. A tile or chip carrying a
+   prior verdict is inert until its per-item "change" control is clicked (r.unl / it.unl); re-affirming the
+   prior needs no click, because it is already recorded. */
+function vDesc(v){if(!v||!v.verdict)return "unanswered";
+ if(v.verdict==="corrected")return "corrected "+(v.chose||"?");
+ if(v.verdict==="sic")return "sic (expected "+(v.expected||"?")+")";
+ if(v.verdict==="not_in_crop")return "not in crop";
+ return v.verdict;}
+function locked(s,i){var r=trow(s);return !!(r.pv[i]&&r.pv[i].verdict&&!r.unl[i]);}
+function mkSpan(cls,txt){var e=document.createElement("span");e.className=cls;e.textContent=txt;return e;}
+function renderPrior(s,i){var el=tileDiv(s,i);if(!el)return;var r=trow(s),pv=r.pv[i],k,
+ old=el.querySelectorAll(".priorbadge,.nowbadge,.restnote,.tbtn.chg"),bs=el.querySelectorAll(".tbtn");
+ for(k=0;k<old.length;k++)old[k].parentNode.removeChild(old[k]);
+ if(!pv||!pv.verdict){for(k=0;k<bs.length;k++)bs[k].disabled=false;return;}
+ var lk=locked(s,i),kids=[mkSpan("priorbadge","prior: "+vDesc(pv))];
+ if(pv.restored)kids.push(mkSpan("restnote",pv.restored));
+ if(lk){var c=document.createElement("button");c.className="tbtn chg";c.textContent="change";
+  c.setAttribute("data-s",s);c.setAttribute("data-i",i);c.setAttribute("onclick","tChange(this)");kids.push(c);}
+ else kids.push(mkSpan("nowbadge","now: "+vDesc(Object.assign({},r.tv[i]||{},
+  {expected:((r.sic[i]||{}).expected||"")}))));
+ for(k=kids.length-1;k>=0;k--)el.insertBefore(kids[k],el.firstChild);
+ for(k=0;k<bs.length;k++)if(!/\bchg\b/.test(bs[k].className))bs[k].disabled=lk;}
+function tChange(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i");
+ trow(s).unl[i]=true;renderPrior(s,i);renderSic(s,i);upd();}
+function setVerdict(s,i,verdict,chose){
+ if(locked(s,i))return;
+ var r=trow(s);r.tv[i]={verdict:verdict,chose:chose||""};
+ var td=tileDiv(s,i);if(td)td.setAttribute("data-v",verdict);
+ closePalette();renderSic(s,i);renderPrior(s,i);upd();}
+function tOk(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"confirmed","");}
+function tBad(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i"),k=b.getAttribute("data-k");
+ CUR_S=s;CUR_I=i;PAL_MODE="tile";
+ var pal=document.getElementById(k==="gap"?"gpal_gap":"gpal_cons");
+ pal.style.display="block";}
+function tDel(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"deleted","");}
+function tNic(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"not_in_crop","");}
+/* ---- pass 3 (Part D): the sic verdict. The PRINTED letter stays in the signature; the expectation lives
+   beside it (expected / reason / basis), never in it. A sic tile counts as answered only when all three
+   are present and valid. */
+function sicDraft(s,i){var r=trow(s);if(!r.sic[i])r.sic[i]={expected:"",reason:"",basis:""};return r.sic[i];}
+function sicShown(s,i){return tileShown(s,i,"consonant");}
+function sicValid(s,i){var d=trow(s).sic[i];if(!d)return false;
+ var e=d.expected||"",rs=(d.reason||"").replace(/\s+/g,"");
+ return Array.from(e).length===1&&e!==sicShown(s,i)&&rs.length>0&&SIC_BASES.indexOf(d.basis)>=0;}
+function escA(x){return String(x).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
+function sicMsg(s,i){var m=document.getElementById("sm_"+s+"_"+i);if(!m)return;
+ m.textContent=sicValid(s,i)?"sic recorded: complete":
+  "sic needs: one expected letter different from the printed one, a reason, and a basis";}
+function renderSic(s,i){var el=document.querySelector('.sicbox[data-s="'+s+'"][data-i="'+i+'"]');
+ if(!el)return;var r=trow(s),v=r.tv[i];
+ if(!v||v.verdict!=="sic"){el.innerHTML="";return;}
+ var d=sicDraft(s,i),a=' data-s="'+s+'" data-i="'+i+'"'+(locked(s,i)?' disabled':''),j,
+  h='<div class="sicform">printed <b>'+escA(sicShown(s,i))+'</b> stays in the signature; the expectation '+
+  'lives beside it, never in it.<br>expected <input class="sicin" size="2" dir="rtl" data-f="expected"'+a+
+  ' value="'+escA(d.expected)+'" oninput="sicSet(this)"><br>reason <input class="sicin" size="30" '+
+  'data-f="reason"'+a+' value="'+escA(d.reason)+'" oninput="sicSet(this)"><br>basis <select data-f="basis"'+
+  a+' onchange="sicSet(this)"><option value="">-- choose --</option>';
+ for(j=0;j<SIC_BASES.length;j++)h+='<option value="'+SIC_BASES[j]+'"'+(d.basis===SIC_BASES[j]?' selected':'')+
+  '>'+SIC_BASES[j]+'</option>';
+ h+='</select><div class="sicmsg" id="sm_'+s+'_'+i+'"></div></div>';
+ el.innerHTML=h;sicMsg(s,i);}
+function sicSet(inp){var s=inp.getAttribute("data-s"),i=inp.getAttribute("data-i"),f=inp.getAttribute("data-f");
+ sicDraft(s,i)[f]=inp.value;sicMsg(s,i);upd();}
+function tSic(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i");
+ sicDraft(s,i);setVerdict(s,i,"sic","");}
+function applySeeds(){var K=Object.keys(SEEDS),k;
+ for(k=0;k<K.length;k++){var s=K[k],sd=SEEDS[s];if(!RM[s])continue;
+  var r=trow(s);if(!r.sic[sd.tile_i])r.sic[sd.tile_i]={expected:sd.expected,reason:sd.reason,basis:""};
+  renderSic(s,sd.tile_i);}}
+/* ---- pass 3 (Part C): insertions carry a verdict, are shown as chips, and are counted by rowComplete. */
+var VLAB={confirmed:"confirmed",not_in_crop:"not in crop",deleted:"deleted"};
+function insLocked(it){return !!(it&&it.pv&&it.pv.verdict&&!it.unl);}
+function insDesc(it,v){var d=vDesc({verdict:v.verdict,chose:v.chose});
+ return (v.chose&&v.verdict!=="corrected")?d+" (added "+(v.chose==="space"?"space":v.chose)+")":d;}
+function insChange(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10),
+ r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){r.ins[i].unl=true;after=r.ins[i].after_i;break;}}
+ renderInsAt(s,after);upd();}
+function insVerdict(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10),
+ vv=b.getAttribute("data-vv"),r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){if(insLocked(r.ins[i]))return;
+  r.ins[i].verdict=vv;after=r.ins[i].after_i;break;}}
+ renderInsAt(s,after);upd();}
+function proseConflict(s){var r=trow(s);return UNSIGNABLE_RX.test(r.note||"")&&!hasNotInCrop(s);}
+function conflictText(s){var m=UNSIGNABLE_RX.exec(trow(s).note||"");
+ return 'Conflict: your note says part of the span is not in the crop ("'+(m?m[0]:"")+'"), but no tile and no '+
+  'insertion is marked not-in-crop. A row cannot be called complete while the two disagree. Mark the '+
+  'out-of-crop tile or insertion "not in crop", or reword the note.';}
+function rowDone(s){var kn=rowComplete(s);return kn[0]===kn[1]&&!proseConflict(s);}
+function closePalette(){var a=document.getElementById("gpal_cons"),b=document.getElementById("gpal_gap");
+ if(a)a.style.display="none";if(b)b.style.display="none";
+ CUR_S=null;CUR_I=null;PAL_MODE="tile";CUR_SEQ=null;CUR_AFTER=null;}
+function chooseLetterGlobal(b){
+ if(PAL_MODE==="ins"){insSetChoice(b.getAttribute("data-letter"),"consonant");return;}
+ if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-letter"));}
+function cantTellGlobal(){if(PAL_MODE==="ins")return;if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"disputed","");}
+function chooseGapGlobal(b){if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-choice"));}
+function insSpaceGlobal(){if(PAL_MODE==="ins")insSetChoice("space","gap");}
+function insKey(a){return a===null?"none":String(a);}
+function insSetChoice(chose,kind){if(CUR_S===null||CUR_SEQ===null)return;
+ var r=trow(CUR_S),i;for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===CUR_SEQ){
+  r.ins[i].kind=kind;r.ins[i].chose=chose;break;}}
+ var after=CUR_AFTER,s0=CUR_S;closePalette();renderInsAt(s0,after);upd();}
+function openIns(b){var s=b.getAttribute("data-s"),a=b.getAttribute("data-after");
+ var after=(a==="none")?null:parseInt(a,10);
+ var r=trow(s),seq=r.insSeq++;
+ r.ins.push({seq:seq,after_i:after,kind:null,chose:"",verdict:"",expected:"",reason:"",basis:""});
+ renderInsAt(s,after);upd();
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function editIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){if(insLocked(r.ins[i]))return;after=r.ins[i].after_i;break;}}
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function removeIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){if(insLocked(r.ins[i]))return;
+  after=r.ins[i].after_i;r.ins.splice(i,1);break;}}
+ renderInsAt(s,after);upd();}
+function renderInsAt(s,after){var el=document.querySelector('.insat[data-s="'+s+'"][data-after="'+insKey(after)+'"]');
+ if(!el)return;var r=trow(s),items=(r.ins||[]).filter(function(x){return x.after_i===after;}),h="",i;
+ items.sort(function(x,y){return x.seq-y.seq;});
+ for(i=0;i<items.length;i++){var it=items[i],v=it.verdict||"",
+  shown=it.chose?(it.kind==="gap"?"\u2194":it.chose):"\u2026",
+  st=!it.chose?"no letter chosen yet":(v?VLAB[v]:"unanswered"),
+  a=' data-s="'+s+'" data-seq="'+it.seq+'"',lk=insLocked(it),dz=lk?' disabled':'',
+  pb=(it.pv&&it.pv.verdict)?('<span class="priorbadge">prior: '+escA(insDesc(it,it.pv))+'</span>'+
+   (it.pv.restored?'<span class="restnote">'+escA(it.pv.restored)+'</span>':'')+
+   (lk?'<button class="tbtn chg"'+a+' onclick="insChange(this)">change</button>':
+    '<span class="nowbadge">now: '+escA(insDesc(it,{verdict:v,chose:it.chose}))+'</span>')+' '):'';
+  h+='<span class="inschip" data-v="'+v+'" data-seq="'+it.seq+'"><span class="insword">added</span> <b>'+shown+
+   '</b> <span class="insstate">'+st+'</span> '+pb+
+   '<button class="tbtn ok"'+a+dz+' data-vv="confirmed" onclick="insVerdict(this)">&#10003;</button>'+
+   '<button class="tbtn nic"'+a+dz+' data-vv="not_in_crop" onclick="insVerdict(this)">not in crop</button>'+
+   '<button class="tbtn del"'+a+dz+' data-vv="deleted" onclick="insVerdict(this)">del</button> '+
+   '<button class="tbtn edit"'+a+dz+' onclick="editIns(this)">edit</button> '+
+   '<button class="tbtn rm"'+a+dz+' onclick="removeIns(this)">x</button></span>';}
+ el.innerHTML=h;}
+function setnote(inp){trow(inp.getAttribute("data-s")).note=inp.value;upd();}
+function markFault(b){var s=b.getAttribute("data-s"),t=b.getAttribute("data-ft"),r=trow(s),i;
+ r.fault=(r.fault===t)?"":t;
+ var btns=document.querySelectorAll('.fault[data-s="'+s+'"]');
+ for(i=0;i<btns.length;i++){btns[i].className=(btns[i].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ upd();}
+function absn(b){var s=b.getAttribute("data-s"),r=trow(s);
+ r.abst=r.abst?0:1;b.className=r.abst?"abst on":"abst";upd();}
+function rowComplete(s){var m=RM[s],r=trow(s),n=m.tiles.length,k=0,i;
+ for(i=0;i<n;i++){var tv=r.tv[m.tiles[i].i];
+  if(tv&&tv.verdict&&(tv.verdict!=="sic"||sicValid(s,m.tiles[i].i)))k++;}
+ var ins=r.ins||[],j;
+ for(j=0;j<ins.length;j++){n++;if(ins[j].chose&&ins[j].verdict)k++;}
+ return [k,n];}
+function hasNotInCrop(s){var m=RM[s],r=trow(s),i;
+ for(i=0;i<m.tiles.length;i++){var v=r.tv[m.tiles[i].i];if(v&&v.verdict==="not_in_crop")return true;}
+ var ins=r.ins||[];
+ for(i=0;i<ins.length;i++){if(ins[i].verdict==="not_in_crop")return true;}
+ return false;}
+function pointsText(s){var el=document.querySelector('.points[data-s="'+s+'"]');
+ return el?el.getAttribute("data-cand"):"";}
+function tileShown(s,i,kind){if(kind==="gap")return "space";
+ var el=tileDiv(s,i);return el?el.getAttribute("data-cand"):"";}
+function tileOut(s,td){var r=trow(s),v=r.tv[td.i]||{verdict:"",chose:""},shown=tileShown(s,td.i,td.kind);
+ if(v.verdict==="deleted")return "";
+ if(v.verdict==="not_in_crop")return td.kind==="gap"?"[ ]":("["+shown+"]");
+ if(v.verdict==="confirmed")return td.kind==="gap"?" ":shown;
+ if(v.verdict==="sic")return shown;
+ if(v.verdict==="corrected"){if(td.kind==="gap")return v.chose==="space"?" ":"";return v.chose||"?";}
+ return "?";}
+function insOut(it){var v=it.verdict||"";if(v==="deleted")return "";if(!it.chose)return "?";
+ if(v==="not_in_crop")return it.kind==="gap"?"[ ]":("["+it.chose+"]");
+ return it.kind==="gap"?" ":it.chose;}
+function derivedFor(s){var m=RM[s],r=trow(s),out=[],j,k;
+ var atNone=(r.ins||[]).filter(function(x){return x.after_i===null;}).sort(function(a,b){return a.seq-b.seq;});
+ for(j=0;j<atNone.length;j++)out.push(insOut(atNone[j]));
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j];out.push(tileOut(s,td));
+  var ats=(r.ins||[]).filter(function(x){return x.after_i===td.i;}).sort(function(a,b){return a.seq-b.seq;});
+  for(k=0;k<ats.length;k++)out.push(insOut(ats[k]));}
+ return out.join("");}
+function lines(){
+ /* EVERY span, every time -- empty rows included. A partial download dropped over a full one is how
+    an approval record dies with every byte in it valid. */
+ var K=Object.keys(RM).sort(),L=[],si;
+ for(si=0;si<K.length;si++){var s=K[si],m=RM[s],r=trow(s),tiles=[],j;
+  for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=r.tv[td.i]||{verdict:"",chose:""};
+   var sd=(v.verdict==="sic")?(r.sic[td.i]||{}):{};
+   tiles.push({i:td.i,kind:td.kind,shown:tileShown(s,td.i,td.kind),verdict:v.verdict||"",
+    chose:v.chose||"",expected:sd.expected||"",reason:sd.reason||"",basis:sd.basis||"",
+    prior_verdict:(r.pv[td.i]||{}).verdict||"",prior_chose:(r.pv[td.i]||{}).chose||"",
+    paired_to:td.paired_to});}
+  var kn=rowComplete(s);
+  var ins=(r.ins||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,chose:x.chose,verdict:x.verdict||"",
+   expected:x.expected||"",reason:x.reason||"",basis:x.basis||"",
+   prior_verdict:(x.pv&&x.pv.verdict)||"",prior_chose:(x.pv&&x.pv.chose)||""};});
+  L.push(JSON.stringify({span_id:s,crop_sha16:m.crop16,candidate_sha16:m.cand16,tiles:tiles,
+   insertions:ins,complete:rowDone(s),abstain:!!r.abst,fault:r.fault||"",
+   fault_legacy:r.fault_legacy||"",note:r.note,
+   points_shown_not_adjudicated:{text:pointsText(s),n_points:m.n_points,nikud_flag:m.nikud},
+   paired_at:m.paired_at,letter_rung_would_have_fired:!!m.letter_fired,
+   full_span_pixel_signature:!hasNotInCrop(s),signature_rule:SIG_RULE,
+   derived_consonants:derivedFor(s),derived_from_verdicts:true,
+   signed_from:"pixels, candidate shown as consonant tiles, per-tile verdicts",
+   signed_in:"glyph signer, in the browser",set_sha16:SETID,sheet:SKEL}));}
+ return L.join("\n")+"\n";}
+function upd(){var K=Object.keys(RM).sort(),nc=0,ntouch=0,i;
+ for(i=0;i<K.length;i++){var s=K[i],kn=rowComplete(s),r=trow(s),done=rowDone(s),pc=proseConflict(s);
+  var rowEl=document.getElementById("row_"+s);
+  if(rowEl){var lab=document.getElementById("kn_"+s);
+   if(lab)lab.textContent=kn[0]+"/"+kn[1]+" items (tiles + insertions)"+
+    (hasNotInCrop(s)?" \u00b7 NOT a full-span pixel signature (not_in_crop present)":"");
+   var cf=document.getElementById("cf_"+s);
+   if(cf){cf.style.display=pc?"block":"none";cf.textContent=pc?conflictText(s):"";}
+   rowEl.className="row"+(done?" complete":"");}
+  var dtxt=document.getElementById("der_txt_"+s);if(dtxt)dtxt.textContent=derivedFor(s);
+  if(done)nc++;
+  if(kn[0]>0||r.fault||r.abst||r.note||(r.ins&&r.ins.length))ntouch++;}
+ document.getElementById("ncomplete").textContent=nc;
+ document.getElementById("nleft").textContent=(N-ntouch);
+ var a=document.getElementById("dl");
+ a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(lines());
+ try{localStorage.setItem("gs_"+STOREKEY,JSON.stringify(ST));}catch(e){}}
+function applyState(s){var r=ST[s],m=RM[s];if(!r||!m)return;var j;
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=(r.tv||{})[td.i];
+  var el=tileDiv(s,td.i);if(el&&v&&v.verdict)el.setAttribute("data-v",v.verdict);renderSic(s,td.i);renderPrior(s,td.i);}
+ var fbtns=document.querySelectorAll('.fault[data-s="'+s+'"]'),fi;
+ for(fi=0;fi<fbtns.length;fi++){
+  fbtns[fi].className=(fbtns[fi].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ var lg=document.querySelector('.legfault[data-s="'+s+'"]');
+ if(lg)lg.style.display=r.fault_legacy?"block":"none";
+ var ab=document.querySelector('.abst[data-s="'+s+'"]');if(ab&&r.abst)ab.className="abst on";
+ var nt=document.querySelector('.nt[data-s="'+s+'"]');if(nt)nt.value=r.note||"";
+ var seen={},ij;
+ for(ij=0;ij<(r.ins||[]).length;ij++){var ak=insKey(r.ins[ij].after_i);
+  if(!seen[ak]){seen[ak]=1;renderInsAt(s,r.ins[ij].after_i);}}}
+function restore(){
+ /* BEST EFFORT ONLY -- the download is the record, not this. */
+ var raw=null;try{raw=localStorage.getItem("gs_"+STOREKEY);}catch(e){raw=null;}
+ if(!raw)return 0;var S=null;try{S=JSON.parse(raw);}catch(e){return 0;}
+ var K=Object.keys(S),i,k=0;
+ for(i=0;i<K.length;i++){var s=K[i];if(!RM[s])continue;ST[s]=S[s];k++;applyState(s);}
+ return k;}
+function renderImportCheck(rc){var el=document.getElementById("impcheck");if(!el)return;
+ if(!EXP){el.textContent="no import expectation available (pass-1 file not found at generation time)";
+  return;}
+ var keys=["rows","tiles","confirmed","corrected","disputed","notes","abstains","legacy_faults",
+  "insertions"],h="",i;
+ for(i=0;i<keys.length;i++){var k=keys[i],r=rc[k]||0,e=EXP[k];
+  h+=k+": restored "+r+" vs expected "+e+" -- "+(r===e?"PASS":"MISMATCH")+"<br>";}
+ el.innerHTML=h;}
+function importText(txt,fname){
+ /* The whole of the former doImport body, now shared by the file-input path AND pass 2's auto-import
+    (Change 3) -- ONE importer, same span_id+crop_sha16 matching, same refusal list, same
+    renderImportCheck, whichever path called it. */
+ var ln=(txt||"").split("\n"),i,bad=[],k=0;
+ var rc={rows:0,tiles:0,confirmed:0,corrected:0,disputed:0,notes:0,abstains:0,legacy_faults:0,
+  insertions:0};
+ for(i=0;i<ln.length;i++){var s=ln[i].replace(/^\s+|\s+$/g,"");if(!s)continue;
+  var d=null;try{d=JSON.parse(s);}catch(e){continue;}
+  if(!d.span_id||!RM[d.span_id])continue;
+  if(d.crop_sha16!==RM[d.span_id].crop16){bad.push(d.span_id);continue;}
+  var rr=trow(d.span_id);rr.tv={};rr.sic={};rr.pv={};rr.unl={};var tj,dtiles=d.tiles||[];
+  rc.rows++;rc.tiles+=dtiles.length;
+  for(tj=0;tj<dtiles.length;tj++){var tt=dtiles[tj];
+   if(tt.verdict){rr.tv[tt.i]={verdict:tt.verdict,chose:tt.chose||""};
+    rr.pv[tt.i]={verdict:tt.verdict,chose:tt.chose||"",expected:(tt.verdict==="sic"?(tt.expected||""):""),
+     restored:tt.restored_from||""};
+    if(tt.verdict==="sic")rr.sic[tt.i]={expected:tt.expected||"",reason:tt.reason||"",basis:tt.basis||""};
+    if(tt.verdict==="confirmed")rc.confirmed++;
+    else if(tt.verdict==="corrected")rc.corrected++;
+    else if(tt.verdict==="disputed")rc.disputed++;}}
+  rr.note=d.note||"";if(rr.note)rc.notes++;
+  rr.abst=d.abstain?1:0;if(d.abstain)rc.abstains++;
+  rr.fault=(TYPED_FAULTS.indexOf(d.fault)>=0)?d.fault:"";
+  rr.fault_legacy=d.fault_legacy?d.fault_legacy:((d.fault===LEGACY_FAULT)?LEGACY_FAULT:"");
+  if(rr.fault_legacy)rc.legacy_faults++;
+  rr.ins=(d.insertions||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,
+   chose:x.chose||"",verdict:x.verdict||"",expected:x.expected||"",reason:x.reason||"",basis:x.basis||"",
+   pv:(x.verdict?{verdict:x.verdict,chose:x.chose||"",restored:x.restored_from||""}:null)};});
+  rr.insSeq=rr.ins.length?(Math.max.apply(null,rr.ins.map(function(x){return x.seq;}))+1):0;
+  rc.insertions+=rr.ins.length;
+  applyState(d.span_id);k++;}
+ var w=document.getElementById("impwarn");
+ w.textContent=bad.length?("NOT restored (crop_sha16 differs -- a re-cut span must not inherit a "+
+  "verdict): "+bad.join(", ")):"";
+ document.getElementById("impmsg").textContent="imported "+k+" row(s) from "+fname;
+ renderImportCheck(rc);
+ applySeeds();upd();}
+function doImport(inp){
+ var f=inp.files&&inp.files[0];if(!f)return;
+ var rd=new FileReader();
+ rd.onload=function(){importText(rd.result||"",f.name);};
+ rd.readAsText(f,"utf-8");}
+window.addEventListener("load",function(){var k=restore();
+ document.getElementById("rst").textContent=k?("restored "+k+" row(s) from this browser"):
+  "nothing restored from this browser";
+ if(AUTOIMPORT&&k===0){importText(EMBED,EMBED_NAME);}
+ applySeeds();upd();});
+"""
+# end JS_PASS4 -- everything above this line from its label is the pass-4 console.
+
 # ---- blob identity, pinned in EVERY mode. JS_V1 renders the console that produced pass 1 and JS_PASS2
 # the one Chris signed pass 2 on: each is a console that is already signed and spent, and an edit to
 # either rewrites the record of what was approved. Length is len(str) of the blob without its
@@ -1654,13 +2023,30 @@ check(_blob_id(JS_PASS3) == (17628, "ae889bc9422df5f0"),
       "JS_PASS3 measures %r, not (17628, ae889bc9422df5f0): it renders a console that is already signed "
       "and spent (pass 3); it must never be edited -- fork a new blob instead" % (_blob_id(JS_PASS3),))
 
-JS = JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)
-check(JS is (JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)) and (PASS3 or JS is not JS_PASS3),
+PASS4_LEN, PASS4_SHA16 = 21132, "8e92fd0a98d86b5c"   # PROVISIONAL until final
+check(_blob_id(JS_PASS4) == (PASS4_LEN, PASS4_SHA16),
+      "JS_PASS4 measures %r, not (%d, %s): it is the pass-4 console; once Chris signs on it, it is spent and "
+      "must never be edited -- fork a new blob instead" % (_blob_id(JS_PASS4), PASS4_LEN, PASS4_SHA16))
+
+_JS_WANT = ((JS_PASS3 if TEST_CONSOLE else JS_PASS4) if PASS4 else
+            (JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)))
+JS = _JS_WANT
+check(JS is _JS_WANT and (PASS3 or JS is not JS_PASS3) and (PASS4 or JS is not JS_PASS4),
       "the console chosen for this mode is not the one this mode names")
 
 _TITLE_SUFFIX = " (pass 3)" if PASS3 else (" (pass 2)" if PASS2 else "")
+PASS4_CSS = """
+.priorbadge{display:block;font:11px/1.3 system-ui,sans-serif;color:#fc8;background:#2a2012;border:1px solid #c86;
+ border-radius:3px;padding:1px 4px;margin-bottom:3px}
+.nowbadge{display:block;font:11px/1.3 system-ui,sans-serif;color:#8fc;background:#122a1d;border:1px solid #4a8;
+ border-radius:3px;padding:1px 4px;margin-bottom:3px}
+.restnote{display:block;font:10px/1.2 system-ui,sans-serif;color:#9ab;margin-bottom:3px}
+.tbtn:disabled{opacity:.35;cursor:not-allowed}
+.tbtn.chg{border-color:#c86;color:#fc8}
+.inschip .priorbadge,.inschip .nowbadge,.inschip .restnote{display:inline-block;margin:0 3px 0 0}
+"""
 H = ['<!doctype html><meta charset="utf-8"><title>glyph signer %s%s - %d spans, per-glyph verdicts</title>'
-     % (SET, _TITLE_SUFFIX, RUN_N), "<style>%s</style>" % CSS]
+     % (SET, _TITLE_SUFFIX, RUN_N), "<style>%s</style>" % (CSS + (PASS4_CSS if PASS4 else ""))]
 H.append("<h1>Glyph signer <code>%s</code>%s &mdash; %d spans, per-glyph verdicts</h1>"
          % (SET, " &mdash; PASS 3" if PASS3 else (" &mdash; PASS 2" if PASS2 else ""), RUN_N))
 H.append('<div class="sub">FILE pages throughout; printed = file &minus; %d. A2 span box, PAD=%d native '
@@ -1968,8 +2354,8 @@ for _ssid, _sd in SIC_SEEDS.items():
 SEEDS_JS = json.dumps(SIC_SEED_META)
 STOREKEY = (SET + "_pass3" + _R) if PASS3 else ((SET + "_pass2") if PASS2 else SET)
 
-H.append("<script>"
-         + JS.replace("__RM__", json.dumps(RM, sort_keys=True))
+def _fill(blob):
+    return (blob.replace("__RM__", json.dumps(RM, sort_keys=True))
              .replace("__SETID__", json.dumps(SET))
              .replace("__N__", str(RUN_N))
              .replace("__SKEL__", json.dumps(SKEL_NAME))
@@ -1984,8 +2370,10 @@ H.append("<script>"
              .replace("__P3_EMBED_NAME__", json.dumps(PASS2_EXPORT_NAME))
              .replace("__P3_UNSIGNABLE__", json.dumps(RULE.UNSIGNABLE_PATTERN))
              .replace("__P3_SIG_RULE__", json.dumps(SIGNATURE_RULE))
-             .replace("__P3_SEEDS__", SEEDS_JS)
-         + "</script>")
+             .replace("__P3_SEEDS__", SEEDS_JS))
+
+
+H.append("<script>" + _fill(JS) + "</script>")
 
 doc = "\n".join(H)
 
@@ -2056,6 +2444,19 @@ assert not _leak, \
     "at offset %d (%r)" \
     % (_leak.start() if _leak else -1,
        _doc_wo_cand_p1[max(0, _leak.start() - 40):_leak.start() + 10] if _leak else "")
+
+# 3d (round identity). The console in the BUILT DOCUMENT is the pinned blob the mode names: the document
+# contains exactly one script element equal to that blob with its placeholders filled, the blob measures
+# its pinned (length, sha16), and the other forks' signature functions are present or absent accordingly.
+_PIN_BY_BLOB = {"JS_V1": (11968, "7fa5fd3fd0d4f9f7"), "JS_PASS2": (12422, "3ccd5adfbb39c5c4"),
+                "JS_PASS3": (17628, "ae889bc9422df5f0"), "JS_PASS4": (PASS4_LEN, PASS4_SHA16)}
+_JS_NAME = next(n for n, b in (("JS_V1", JS_V1), ("JS_PASS2", JS_PASS2), ("JS_PASS3", JS_PASS3),
+                                ("JS_PASS4", JS_PASS4)) if b is JS)
+check(doc.count("<script>" + _fill(JS) + "</script>") == 1 and _blob_id(JS) == _PIN_BY_BLOB[_JS_NAME],
+      "the built document's script is not exactly one filled copy of the pinned %s" % _JS_NAME)
+check(("function tChange(" in doc) == (_JS_NAME == "JS_PASS4"),
+      "tChange (the pass-4 'change' control) is %s in a document built on %s"
+      % ("present" if "function tChange(" in doc else "absent", _JS_NAME))
 
 # 3c (pass 3). The embedded pass-2 signed rows are a round trip too: exactly the selection, each on the
 # pixels this run cut, and the Hebrew they carry is escaped (json.dumps), never raw in the document.
@@ -2273,6 +2674,9 @@ json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                             "length_mismatch_rows": sorted(ALT_LENGTH_MISMATCH),
                             "liveness": "reads_seen_in_set >= 6 and p657:n0 present, asserted live"},
            "prose_digest": PDIG,
+           "console_blob": _JS_NAME, "console_blob_id": list(_PIN_BY_BLOB[_JS_NAME]),
+           "test_console": TEST_CONSOLE,
+           "adjudication": ADJ_META,
            "crop_sha16": {sid: RM[sid]["crop16"] for sid in RUN_SPAN_IDS},
            "note_crops": ({sid: {"note_crop_sha16": NOTE_CROP_INFO[sid]["note_crop_sha16"],
                                   "native_wh": NOTE_CROP_INFO[sid]["native_wh"],

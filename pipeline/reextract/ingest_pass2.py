@@ -30,12 +30,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 from clean_run import git_state, provisional                              # noqa: E402
 import apparatus_signature_rule as RULE                                   # noqa: E402  one source of the rule
+import signature_attestation as SA                                        # noqa: E402  second-look marker only
 
 SET, SET_N = "0401b636ffa7bf1a", 26
 PRINTED_OFFSET = 88
 REPOS = {"goatyard-laneB": "C:/Users/cnogr/git/goatyard-laneB",
          "dr-voluminous": "C:/Users/cnogr/git/dr-voluminous"}
-EXPECTED_CHECKS = 2 * SET_N + 11          # 2 per row, plus ten file-level checks and the final count check
+EXPECTED_CHECKS = 2 * SET_N + 13          # 2 per row, plus twelve file-level checks and the final count check
 
 # order item 5: defect classes, derived from `note` text plus structure over THIS export only.
 CENSUS_RX = (
@@ -302,6 +303,10 @@ def facts_for(r):
     f["prose_says_unsignable"] = RULE.prose_says_unsignable(f["note"])
     f["signature_recomputed"] = derive(r)
     f["signature_in_crop"] = re.sub(r"\[[^\]]*\]", "", f["signature_recomputed"])
+    # SECOND-LOOK MARKER ONLY (signature_attestation.py): never read by disposition_pass2, never blocks a row,
+    # never feeds a score. None = not applicable (no in-crop signature).
+    f["signature_attestation"] = SA.attest(r)
+    f["signature_unattested"] = f["signature_attestation"]["signature_unattested"]
     f["n_insertions"] = len(r["insertions"])
     f["insertions_called_unsignable"] = f["n_insertions"] > 0 and f["prose_says_unsignable"]
     f["full_span_pixel_signature_console"] = bool(r.get("full_span_pixel_signature"))
@@ -354,6 +359,13 @@ _unk = sorted(set(DISPO.values()) - _KNOWN)
 check(not _unk, "unnamed disposition(s): %s" % _unk)
 check(sum(len(v) for v in by_dis.values()) == SET_N, "the tally does not sum to %d" % SET_N)
 
+check(all(f["signature_attestation"]["derived_in_crop"] == f["signature_in_crop"] for f in F.values()),
+      "signature_attestation derives a different in-crop string from this file's own port of derivedFor")
+check(all("signature_unattested" in f for f in F.values()) and len(F) == SET_N,
+      "a row has no signature_unattested fact")
+N_ATT_APP = sum(1 for f in F.values() if f["signature_attestation"]["applicable"])
+N_UNATT = sum(1 for f in F.values() if f["signature_unattested"])
+
 # ---------------------------------------------------------------- truth and held
 
 WHY = {
@@ -383,7 +395,8 @@ for r in rows:
             "full_span_pixel_signature_console": f["full_span_pixel_signature_console"],
             "fsps_console_disagrees": f["fsps_console_disagrees"],
             "signed_from": sf, "crop_sha16": r.get("crop_sha16"), "candidate_sha16": r.get("candidate_sha16"),
-            "n_points": pts.get("n_points"), "nikud_flag": pts.get("nikud_flag"), "pass": 2})
+            "n_points": pts.get("n_points"), "nikud_flag": pts.get("nikud_flag"), "pass": 2,
+            "signature_unattested": f["signature_unattested"]})
     else:
         held_rows.append({"span_id": s, "disposition": d, "note": f["note"], "why_held": WHY[d]})
 
@@ -480,17 +493,28 @@ L.append("- unclassified-by-rule (a structural edit, no class matched; needs an 
 L.append("")
 L.append("## Per-row facts")
 L.append("")
-L.append("| span | disposition | nic | del | corr | conf | empty | ins | prose_unsig | fsps console/recomputed |")
-L.append("|---|---|---|---|---|---|---|---|---|---|")
+L.append("| span | disposition | nic | del | corr | conf | empty | ins | prose_unsig | fsps console/recomputed "
+         "| unattested |")
+L.append("|---|---|---|---|---|---|---|---|---|---|---|")
 for s in sorted(F):
     f = F[s]
-    L.append("| %s | %s | %d | %d | %d | %d | %d | %d | %s | %s/%s |" % (
+    L.append("| %s | %s | %d | %d | %d | %d | %d | %d | %s | %s/%s | %s |" % (
         s, DISPO[s], f["n_nic"], f["n_deleted"], f["n_corrected"], f["n_confirmed"], f["n_empty"],
         f["n_insertions"], f["prose_says_unsignable"], f["full_span_pixel_signature_console"],
-        f["full_span_pixel_signature"]))
+        f["full_span_pixel_signature"], {True: "UNATTESTED", False: "attested", None: "n/a"}[f["signature_unattested"]]))
+L.append("")
+L.append("## signature_unattested (second-look marker only): %d of %d rows (%d applicable)"
+         % (N_UNATT, SET_N, N_ATT_APP))
+L.append("")
+L.append("A row's in-crop derived string is unattested when no channel produced it and the note does not hold it. "
+         "Channels in the export: the candidate only, so the flag reduces to 'differs from the candidate on the "
+         "in-crop tiles'. It never holds a row, never chooses a reading, never feeds a score "
+         "(signature_attestation.py).")
 L.append("")
 L.append("## What this does NOT solve")
 L.append("")
+L.append("- `signature_unattested` cannot tell a right correction from a wrong one, so it does not discriminate "
+         "the p493:n3 reversal (both the pass-2 and the pass-3 strings are unattested).")
 L.append("- Recomputed `full_span_pixel_signature` is tiles + prose-regex only; incomplete rows with empty tiles "
          "are not counted as not-full by it (they are held by disposition instead).")
 L.append("- A contradicted row is withheld, not adjudicated; which channel is right is a human reading.")
@@ -510,6 +534,7 @@ print("  fsps console disagrees: %d  %s" % (len(dis_rows), " ".join(dis_rows)))
 print("  census (this export): " + "; ".join("%s %d" % (k, len(v)) for k, v in census.items())
       + "; unclassified-by-rule %d" % len(needs_eye))
 print("  " + TRUTH_LINE)
+print("  signature_unattested (second-look marker only): %d of %d rows, %d applicable" % (N_UNATT, SET_N, N_ATT_APP))
 print("  checks run %d, expected %d" % (CHECKS, EXPECTED_CHECKS))
 print("  git: %s" % ("PROVISIONAL" if PROV else "clean run"))
 print("  wrote %s, %s, %s" % (TRUTH_OUT.name, HELD_OUT.name, REPORT.name))
