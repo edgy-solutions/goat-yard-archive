@@ -410,6 +410,43 @@ class GillSearchEngine:
     VECTOR_TIER_CAP = 3
     MANIFEST_TOTAL_CAP = 5
 
+    @staticmethod
+    def _rank_candidates(per_candidate: "dict[str, List[str]]") -> List[str]:
+        """Order substring candidates DISTINCTIVE-FIRST, as a total order.
+
+        A candidate matching 2 entities carries more information than one
+        matching 23, and only the first MANIFEST_TOTAL_CAP names survive, so
+        the generic token must not be allowed to spend the cap. The
+        alphabetical tie-break keeps the order total, which makes the manifest
+        a pure function of (query, corpus) -- no process, clock or seed in it.
+        """
+        return sorted(per_candidate, key=lambda c: (len(per_candidate[c]), c))
+
+    def _substring_candidates(self, query: str) -> List[str]:
+        """Tier-2 candidate keys, deduped in FIRST-APPEARANCE order.
+
+        A list, deliberately, not a set: see the incident note in
+        get_relevant_entities. Order here is only the stable starting point --
+        _rank_candidates decides what actually reaches the cap.
+        """
+        candidates: List[str] = []
+
+        def add(key: str) -> None:
+            if key and key not in candidates:
+                candidates.append(key)
+
+        for tok in re.findall(r"[A-Za-z]{5,}", query):
+            t_lower = tok.lower()
+            if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
+                continue
+            t_key = "".join(c for c in t_lower if c.isalnum())
+            if not t_key:
+                continue
+            add(t_key)
+            if t_key.endswith("s") and len(t_key) > 5:
+                add(t_key[:-1])
+        return candidates
+
     async def get_relevant_entities(
         self, query: str, limit: int | None = None
     ) -> tuple[List[str], str]:
@@ -498,18 +535,39 @@ class GillSearchEngine:
         # See ADR-0013 amendment 2026-07-13 for the incident trace.
         substring_names: List[str] = []
         seen_lower = {n.lower() for n in vector_names if n}
-        candidates = set()
-        for tok in re.findall(r"[A-Za-z]{5,}", query):
-            t_lower = tok.lower()
-            if t_lower in self._ENTITY_LOOKUP_STOPWORDS:
-                continue
-            t_key = "".join(c for c in t_lower if c.isalnum())
-            if not t_key:
-                continue
-            candidates.add(t_key)
-            if t_key.endswith("s") and len(t_key) > 5:
-                candidates.add(t_key[:-1])
 
+        # Candidate ORDER is load-bearing, so it must never be a set's.
+        #
+        # 2026-09-28 incident. `candidates` was a set, iterated directly.
+        # Iteration order over a set of str is randomized per PROCESS
+        # (PYTHONHASHSEED), so the same question returned a different
+        # manifest from one server process to the next while being
+        # perfectly stable inside any one process -- the shape that reads
+        # as "flaky eval" and that no in-process retry can ever surface.
+        # "What is the spiritual meaning of the scapegoat?" yields the
+        # candidates {scapegoat, spiritual}. Substring matches: scapegoat
+        # -> 2 names, spiritual -> 23. With MANIFEST_TOTAL_CAP at 5 the
+        # order alone decided the answer. scapegoat-first produced
+        # [scape-goat, antitypical scape-goat, + 3 spiritual*], Leviticus
+        # 16 reached the answer LM and the eval question scored 6/6.
+        # spiritual-first produced five spiritual* entities, Leviticus 16
+        # never reached the answer LM, and the question scored 0/6 with
+        # the model honestly reporting the corpus did not contain it.
+        # Measured over 7 processes x 10 calls: 30/30 with the good order,
+        # 0/30 with the bad one, zero variation inside any process.
+        #
+        # The fix is two things, not one. Determinism alone would only
+        # freeze the coin -- sorted() happens to put scapegoat first here
+        # and would put the generic token first for some other query. The
+        # reason order MATTERED is that a generic token floods the cap
+        # (limit 25 per candidate) and evicts a distinctive token's exact
+        # matches. That is the ADR-0013 2026-07-13 psalmist failure one
+        # layer further in: the length floor stopped SHORT tokens from
+        # matching; this stops a long but GENERIC one from crowding out a
+        # precise one.
+        candidates = self._substring_candidates(query)
+
+        per_candidate: dict[str, List[str]] = {}
         for cand in candidates:
             try:
                 resp = await self.entities.query.fetch_objects(
@@ -520,9 +578,15 @@ class GillSearchEngine:
             except Exception as e:
                 print(f"Substring entity lookup failed for '{cand}': {e}")
                 continue
-            for obj in resp.objects:
-                name = obj.properties.get("name")
-                if name and name.lower() not in seen_lower:
+            per_candidate[cand] = [
+                obj.properties.get("name")
+                for obj in resp.objects
+                if obj.properties.get("name")
+            ]
+
+        for cand in self._rank_candidates(per_candidate):
+            for name in per_candidate[cand]:
+                if name.lower() not in seen_lower:
                     seen_lower.add(name.lower())
                     substring_names.append(name)
 
