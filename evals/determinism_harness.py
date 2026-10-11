@@ -7,9 +7,10 @@ that the API returns when debug=True.
 
 REQUIRES GYA_DEBUG_STAGES=1 in the TARGET BACKEND's environment (0.3.2). The
 captures are a data-exposure channel, so the gate defaults to OFF everywhere
-and the route answers a debug request with 403 where it is not enabled; this
-harness turns that 403 into an explicit instruction rather than a stack trace. Then compares stage outputs across runs
-to isolate exactly which stage introduces variance.
+and the route answers a debug request with 403 where it is not enabled;
+evals/debug_capture.py turns that 403 into an explicit instruction rather
+than a stack trace. Stage outputs are then compared across runs to isolate
+exactly which stage introduces variance.
 
 Stages captured (in pipeline order):
   question                  -> the user query (sanity check, always identical)
@@ -48,6 +49,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+import debug_capture
+
 
 STAGES_IN_PIPELINE_ORDER = [
     "available_entities",
@@ -83,18 +86,10 @@ def call_endpoint(endpoint: str, question: str, timeout: float, auth: Optional[s
         headers["Authorization"] = f"Bearer {auth}"
     with httpx.Client(timeout=timeout) as client:
         r = client.post(endpoint, headers=headers, json={"query": question, "debug": True})
-        if r.status_code == 403:
-            # The debug captures this harness exists to read are gated per
-            # deployment (backend/debug_gate.py, 0.3.2): default OFF, including
-            # in development. Say what to set rather than letting a 403 read as
-            # an auth problem.
-            raise SystemExit(
-                "the backend refused debug captures (403). This harness needs them: set "
-                "GYA_DEBUG_STAGES=1 in the backend environment (the Helm chart sets it for "
-                "gya-test; production leaves it 0 on purpose) and restart the pod -- the "
-                "value is read from the container environment, so a configmap edit alone "
-                "does not take effect." + chr(10) + "endpoint: %s" % endpoint + chr(10)
-                + "body: %s" % r.text[:300])
+        # The captures this harness exists to read are gated per deployment
+        # (backend/debug_gate.py). One shared refusal, so the remedy cannot
+        # drift between the scripts that need it.
+        debug_capture.refuse_if_debug_disabled(r, endpoint, __file__)
         r.raise_for_status()
         return r.json()
 

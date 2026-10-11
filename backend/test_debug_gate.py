@@ -129,8 +129,72 @@ def test_source_main_imports_the_gate_module():
     assert "from . import debug_gate" in _MAIN
 
 
+def _debug_consumers():
+    """Every file under evals/ that asks the API for a debug capture.
+
+    DERIVED on every run. The docstring in debug_gate.py originally named one
+    consumer when there were two: determinism_harness.py had the 403 remedy
+    and zone3_eval_replay.py, a DAILY monitor, got the bare 403 that reads as
+    an ingress fault. A hand-maintained list would have been just as wrong, so
+    the set is read off disk.
+    """
+    evals = os.path.join(os.path.dirname(_HERE), "evals")
+    assert os.path.isdir(evals), evals
+    hits = {}
+    for fn in sorted(f for f in os.listdir(evals) if f.endswith(".py")):
+        text = io.open(os.path.join(evals, fn), encoding="utf-8").read()
+        body = text.split('if __name__')[0]
+        if '"debug": True' in body or '"debug": true' in body.lower():
+            hits[fn] = body
+    return hits
+
+
+def test_EVERY_eval_script_that_requests_a_debug_capture_handles_the_403():
+    hits = _debug_consumers()
+    # Liveness: a probe that matched nothing would pass on nothing, and this
+    # one's whole job is to notice a consumer nobody wired up.
+    assert len(hits) >= 2, sorted(hits)
+    bare = [fn for fn, body in hits.items()
+            if "refuse_if_debug_disabled" not in body]
+    assert not bare, (
+        "these evals request debug captures but do not route the response "
+        "through evals/debug_capture.py, so the gate's 403 reaches the "
+        "operator as a bare HTTP error: %r" % bare)
+
+
+def test_the_shared_refusal_NAMES_the_env_var_and_the_restart():
+    # The remedy is the whole point of the module: a 403 that does not say
+    # what to set is the stack trace it replaced.
+    p = os.path.join(os.path.dirname(_HERE), "evals", "debug_capture.py")
+    assert os.path.exists(p), p
+    text = io.open(p, encoding="utf-8").read()
+    assert dg.ENV_VAR in text, dg.ENV_VAR
+    assert "restart" in text.lower(), "the rollout-restart caveat is missing"
+
+
+def test_the_shared_refusal_is_SILENT_on_every_other_status():
+    # A module that aborted on any error status would hide a 500 behind a
+    # confident message about a flag it has no evidence about.
+    sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "evals"))
+    import debug_capture  # noqa: E402
+
+    class _R:
+        def __init__(self, code):
+            self.status_code = code
+            self.text = "body"
+
+    for code in (200, 404, 500, 502):
+        debug_capture.refuse_if_debug_disabled(_R(code), "http://x", "t")
+    try:
+        debug_capture.refuse_if_debug_disabled(_R(403), "http://x", "t")
+    except SystemExit as exc:
+        assert dg.ENV_VAR in str(exc), str(exc)
+    else:
+        raise AssertionError("403 did not abort")
+
+
 if __name__ == "__main__":
-    EXPECTED_TEST_COUNT = 9
+    EXPECTED_TEST_COUNT = 12
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print("FAIL  expected %d tests, collected %d -- a test silently disappeared"
