@@ -1723,9 +1723,17 @@ def main(argv: Optional[list] = None) -> int:
         # Representative row: the last SCORED run. A trailing timeout used to become the row
         # for the whole question, which is how a placeholder response ended up scored as a
         # content failure. If nothing scored, the row carries the error and is excluded.
-        scored_runs = [r for r in runs if not r.error]
-        last_r = scored_runs[-1] if scored_runs else runs[-1]
-        last_response = responses[runs.index(last_r)]
+        # `runs` and `responses` are appended together above, so index i of one belongs to
+        # index i of the other. Carry the INDEX rather than looking the run back up by value:
+        # these are dataclasses, so `runs.index(last_r)` compares by field equality and would
+        # hand back the FIRST run that happens to match -- and five runs of one question can
+        # agree on every recorded field. The representative response would then belong to a
+        # different attempt than the representative score.
+        scored_idx = [i for i, r in enumerate(runs) if not r.error]
+        rep_i = scored_idx[-1] if scored_idx else len(runs) - 1
+        scored_runs = [runs[i] for i in scored_idx]
+        last_r = runs[rep_i]
+        last_response = responses[rep_i]
         results.append(last_r)
 
         # Per-question raw record: the representative run, plus every run's verdict so an
@@ -1750,8 +1758,23 @@ def main(argv: Optional[list] = None) -> int:
                                   "expansion_error": r.expansion_error,
                                   "expansion_fallback": r.expansion_fallback,
                                   "entity_lookup_mode": r.entity_lookup_mode,
-                                  "verification_failure": r.verification_failure}
-                                 for r in runs]},
+                                  "verification_failure": r.verification_failure,
+                                  # Ruling 2026-10-11: record must_be_verified_ok PER RUN.
+                                  # Until now only the representative run's score was kept, so
+                                  # when the quote-pairing regex was fixed, four runs in five
+                                  # could not be re-scored from disk -- and this was the single
+                                  # check that decided both of the gate's ratchet trips. The
+                                  # wire value is kept beside the scored one because the scored
+                                  # one is DERIVED (a question with must_be_verified false reads
+                                  # ok=True, skipped=True however the API answered), and the sid
+                                  # lists are what a re-score needs to recompute the verdict
+                                  # without re-running the arm.
+                                  "must_be_verified_ok": bool(r.must_be_verified_ok),
+                                  "must_be_verified_skipped": bool(r.must_be_verified_skipped),
+                                  "verified_on_the_wire": resp.get("verified"),
+                                  "unverified_sentence_ids": resp.get("unverified_sentence_ids"),
+                                  "partial_match_sids": resp.get("partial_match_sids")}
+                                 for r, resp in zip(runs, responses)]},
                        indent=2, ensure_ascii=False),
             encoding="utf-8",
         )

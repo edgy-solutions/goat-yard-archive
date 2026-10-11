@@ -481,7 +481,24 @@ def test_integrity_violation_fails_the_exit_code():
 
 
 def test_representative_row_prefers_a_scored_run():
-    assert "scored_runs[-1] if scored_runs else runs[-1]" in SRC
+    # Still "the last run that was actually scored", but selected by INDEX: `runs` and
+    # `responses` are appended in step, and the old value lookup (`runs.index(last_r)`) compared
+    # a dataclass by field equality, so two attempts that agreed on every scored field paired
+    # the score of one with the response of the other. The absence of the old form is asserted
+    # too -- a probe for a present string says nothing about the string it replaced. Behaviour:
+    # test_the_representative_response_belongs_to_the_representative_RUN_not_a_field_twin.
+    assert "rep_i = scored_idx[-1] if scored_idx else len(runs) - 1" in SRC
+    assert "last_response = responses[rep_i]" in SRC
+    # Comment lines are dropped first: the block above EXPLAINS the retired form, so a probe
+    # over the raw source would be satisfied by its own warning and could never fire. The
+    # stripper gets its own liveness check, on a literal, so it cannot quietly become identity.
+    def _code_only(text):
+        return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+    assert _code_only("a = 1\n  # runs.index(nope)\nb = 2") == "a = 1\nb = 2", \
+        "the comment stripper this assertion depends on is not stripping"
+    assert "runs.index(" not in _code_only(SRC), \
+        "the representative response is looked up by VALUE again"
 
 
 def test_harness_never_addresses_an_ollama_host_directly():
@@ -1824,7 +1841,7 @@ def test_the_warmup_query_is_not_one_of_the_scored_questions():
     assert RE.WARMUP_QUERY.strip().lower() not in queries, RE.WARMUP_QUERY
 
 
-EXPECTED_TESTS = 160
+EXPECTED_TESTS = 165
 
 # --- the post-run re-read of read-faulted objects (ruling, 2026-10-04) --------------------
 
@@ -1904,6 +1921,119 @@ def test_the_report_renders_the_read_fault_caveat_and_does_NOT_call_the_run_clea
     assert "Clean on both axes" not in txt, txt
     assert "MISREAD" in txt, txt
     assert "CAVEAT" in txt and "u1" in txt, txt
+
+
+# --- the verification verdict, recorded PER RUN (ruling, Chris 2026-10-11) ---------------
+#
+# "No sixth 5x13. Record must_be_verified_ok per run going forward." The per-question record
+# kept fourteen fields per run and the verification verdict for the REPRESENTATIVE run only.
+# `must_be_verified_ok` is the single check that decided both of the paired gate's ratchet
+# trips (docs/audits/GATE_PAIRED_two_arm_pairs_laneA_20261004.md), and its scorer -- the
+# quote-pairing regex -- was broken when those arms were scored. So four runs in five could
+# not be re-scored from disk, and the re-score had to be abandoned. These tests exist so that
+# cannot happen to the gya-test week.
+
+
+class _FrozenClock:
+    """The real `time` module with `perf_counter` pinned.
+
+    Two stubbed runs of one question differ in elapsed_s by microseconds, which `score`
+    rounds to 2dp -- usually, but not reliably, to the same 0.0. A test about two runs being
+    FIELD-IDENTICAL cannot rest on that rounding, so the clock is pinned and the identity is
+    asserted rather than assumed.
+    """
+
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def perf_counter(self):
+        return 0.0
+
+
+def _runs_record(responses, qid, n_runs):
+    """Drive main over ONE question with n_runs runs and hand back its per-question record.
+
+    responses[0] is consumed by the warmup; the rest are the scored runs, in order.
+    """
+    rc, out, stub = _run_main_with_warmup(responses, [qid],
+                                          extra_argv=("--runs", str(n_runs)))
+    assert rc != 3, ("the preflight refused, so nothing was scored and this test asserts "
+                     "nothing", rc)
+    assert stub.calls == 1 + n_runs, ("the warmup plus one call per run", stub.calls)
+    rec = json.loads((out / ("%s.json" % qid)).read_text(encoding="utf-8"))
+    assert len(rec["runs"]) == n_runs, rec["runs"]
+    return rec
+
+
+def test_every_run_records_its_own_verification_verdict_not_just_the_representative():
+    # The representative run is the LAST scored one, so with [ok, FAILED, ok] the old record
+    # showed a clean question and the middle run's False was unrecoverable.
+    seq = [dict(GOOD, verified=v) for v in (True, False, True)]
+    rec = _runs_record([dict(GOOD)] + seq, "logos_001", 3)
+    assert [r["must_be_verified_ok"] for r in rec["runs"]] == [True, False, True], rec["runs"]
+    assert [r["verified_on_the_wire"] for r in rec["runs"]] == [True, False, True], rec["runs"]
+    # ...and the representative score still reads True, which is precisely the information
+    # that used to be the only information.
+    assert rec["score"]["must_be_verified_ok"] is True, rec["score"]
+    assert rec["run_passes"] == [True, False, True], rec["run_passes"]
+
+
+def test_the_WIRE_verified_is_recorded_beside_the_DERIVED_verdict():
+    # `must_be_verified_ok` is derived: absent-on-the-wire defaults to True, and a question
+    # that skips the check reads True however the API answered. A re-score needs the input,
+    # not only the conclusion, so both are kept and an absent flag reads None, not True.
+    rec = _runs_record([dict(GOOD), dict(GOOD)], "logos_001", 1)
+    run0 = rec["runs"][0]
+    assert run0["verified_on_the_wire"] is None, run0
+    assert run0["must_be_verified_ok"] is True, run0
+    assert run0["must_be_verified_skipped"] is False, run0
+
+
+def test_a_question_that_SKIPS_the_check_records_skipped_on_every_run():
+    # real_esau_pizza_001 expects a refusal, so must_be_verified defaults off. The wire said
+    # False and the derived verdict is still True -- the two fields must not be conflated.
+    rec = _runs_record([dict(GOOD)] + [dict(GOOD, verified=False)] * 2,
+                       "real_esau_pizza_001", 2)
+    for run in rec["runs"]:
+        assert run["must_be_verified_skipped"] is True, run
+        assert run["must_be_verified_ok"] is True, run
+        assert run["verified_on_the_wire"] is False, run
+
+
+def test_the_unverified_sid_lists_are_recorded_per_run_so_a_RESCORE_needs_no_rerun():
+    # The 2026-10-04 re-score resolved its sids from the representative response alone. These
+    # are the bytes a re-score reads: which sentences the verifier could not pair, per run.
+    seq = [dict(GOOD, verified=False, unverified_sentence_ids=["EXODUS_30_10_S00"],
+                partial_match_sids=["JOHN_6_39_S00"]),
+           dict(GOOD, verified=True, unverified_sentence_ids=[], partial_match_sids=[])]
+    rec = _runs_record([dict(GOOD)] + seq, "logos_001", 2)
+    assert [r["unverified_sentence_ids"] for r in rec["runs"]] == [["EXODUS_30_10_S00"], []], \
+        rec["runs"]
+    assert [r["partial_match_sids"] for r in rec["runs"]] == [["JOHN_6_39_S00"], []], rec["runs"]
+
+
+def test_the_representative_response_belongs_to_the_representative_RUN_not_a_field_twin():
+    # The record pairs run i with response i by INDEX. It used to find the response with
+    # `responses[runs.index(last_r)]`, and QuestionResult is a dataclass, so `.index` compares
+    # by field equality: two runs that agree on every scored field hand back the FIRST one.
+    # The stored `response` then belonged to a different attempt than the stored `score`.
+    real_time, RE.time = RE.time, _FrozenClock(RE.time)
+    try:
+        seq = [dict(GOOD, partial_match_sids=["FIRST_S00"]),
+               dict(GOOD, partial_match_sids=["SECOND_S00"])]
+        rec = _runs_record([dict(GOOD)] + seq, "logos_001", 2)
+    finally:
+        RE.time = real_time
+    # The premise, asserted rather than assumed: the two runs ARE field twins apart from the
+    # response-only sid lists. Without this, a future field that happens to differ would make
+    # the test below pass while discriminating nothing.
+    a, b = ({k: v for k, v in r.items() if k not in ("partial_match_sids",)}
+            for r in rec["runs"])
+    assert a == b, (a, b)
+    assert rec["response"]["partial_match_sids"] == ["SECOND_S00"], rec["response"]
 
 
 if __name__ == "__main__":
