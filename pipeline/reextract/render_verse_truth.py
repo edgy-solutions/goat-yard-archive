@@ -1080,6 +1080,13 @@ header #export{margin-left:0}
 .pwimg{display:block;image-rendering:pixelated}
 .pedit .prect{position:absolute;border:1px dashed #3a8;pointer-events:none;font-size:11px;color:#3a8;background:rgba(58,170,136,.06)}
 .pedit .prect span{background:#fff;padding:0 3px}
+.card{max-width:none;margin:12px 8px}
+.stagewrap,.pwinner{transform-origin:0 0}
+.handle{height:calc(12px * var(--inv,1))}
+.edit .tick{border-top-width:calc(1px * var(--inv,1));width:calc(14px * var(--inv,1))}
+.edit .det,.pedit .det{border-width:calc(1px * var(--inv,1))}
+.edit .rat,.pedit .rat{border-width:calc(2px * var(--inv,1))}
+.pedit .prect{font-size:calc(11px * var(--inv,1));border-width:calc(1px * var(--inv,1))}
 .pedit .bandov{position:absolute;border:2px solid #b5482e;pointer-events:none}
 .pedit .wordov{position:absolute;border:2px solid #2f6f9c;pointer-events:none}
 .drawbar{padding:4px 12px;font-size:12px}
@@ -1192,7 +1199,7 @@ function renderRegion(it, st) {
     div("rat", "left:" + (q[0] - ox) + "px;top:" + (q[1] - oy) + "px;width:" + (q[2] - q[0]) + "px;height:" + (q[3] - q[1]) + "px", layer);
     ["top", "bottom"].forEach(function (edge) {
       var y = edge === "top" ? q[1] : q[3];
-      var h = div("handle", "top:" + (y - oy - 6) + "px", layer);
+      var h = div("handle", "top:calc(" + (y - oy) + "px - 6px * var(--inv,1))", layer);
       h.dataset.edge = edge; h.dataset.kind = "region"; h.dataset.idx = String(i); h.dataset.item = it.item_id;
     });
     var tl = linesMoved(b[1], q[1], tops), bl = linesMoved(b[3], q[3], bots);
@@ -1226,7 +1233,7 @@ function renderMiss(it, st) {
     div("rat", "left:" + b[0] + "px;top:" + b[1] + "px;width:" + (b[2] - b[0]) + "px;height:" + (b[3] - b[1]) + "px", layer);
     ["top", "bottom"].forEach(function (edge) {
       var y = edge === "top" ? b[1] : b[3];
-      var h = div("handle", "top:" + (y - 6) + "px;left:" + b[0] + "px;width:" + (b[2] - b[0]) + "px", layer);
+      var h = div("handle", "top:calc(" + y + "px - 6px * var(--inv,1));left:" + b[0] + "px;width:" + (b[2] - b[0]) + "px", layer);
       h.dataset.edge = edge; h.dataset.kind = "miss"; h.dataset.idx = String(i); h.dataset.item = it.item_id;
     });
     var btn = document.createElement("button"); btn.type = "button";
@@ -1282,6 +1289,26 @@ document.addEventListener("input", function (e) {
   else if (t.classList.contains("headsnotshown")) s.heads_not_shown = t.value;
   save();
 });
+// ---- fit to width: crops and page windows scale down (never up) to the card; geometry stays native px ----
+var fitOn = true;
+function localPt(layer, e) {
+  var r = layer.getBoundingClientRect();
+  var k = r.height ? layer.offsetHeight / r.height : 1;
+  return { x: (e.clientX - r.left) * k, y: (e.clientY - r.top) * k };
+}
+function fitAll() {
+  document.querySelectorAll(".stagewrap, .pwinner").forEach(function (el) {
+    var w = parseFloat(el.style.width), h = parseFloat(el.style.height);
+    var avail = el.parentNode.clientWidth - 20;
+    var sc = (fitOn && avail > 0 && w > avail) ? avail / w : 1;
+    el.style.transform = sc === 1 ? "" : "scale(" + sc + ")";
+    el.style.marginRight = sc === 1 ? "" : (-w * (1 - sc)) + "px";
+    el.style.marginBottom = sc === 1 ? "" : (-h * (1 - sc)) + "px";
+    el.style.setProperty("--inv", String(1 / sc));
+    el.dataset.scale = String(sc);
+  });
+}
+window.addEventListener("resize", fitAll);
 // ---- edge drag (region crops and drawn rects on a page window) ----
 var drag = null, drawing = null;
 document.addEventListener("mousedown", function (e) {
@@ -1307,8 +1334,7 @@ document.addEventListener("mousedown", function (e) {
   if (h.classList && h.classList.contains("pedit")) {
     e.preventDefault();
     var it2 = ITEM_BY_ID[h.closest(".card").dataset.itemId];
-    var r = h.getBoundingClientRect();
-    var x = e.clientX - r.left, y = e.clientY - r.top;
+    var p0 = localPt(h, e), x = p0.x, y = p0.y;
     var col2 = (it2.xdiv != null) ? (x < it2.xdiv ? "left" : "right") : null;
     if (!col2) { Object.keys(it2.col_boxes).forEach(function (c) { var cb = it2.col_boxes[c]; if (x >= cb[0] && x <= cb[2]) col2 = c; }); }
     var msg = h.closest(".pwwrap").querySelector(".pwmsg"); msg.textContent = "";
@@ -1320,7 +1346,7 @@ document.addEventListener("mousedown", function (e) {
 });
 document.addEventListener("mousemove", function (e) {
   if (drag) {
-    var y = e.clientY - drag.layer.getBoundingClientRect().top + drag.originY;
+    var y = localPt(drag.layer, e).y + drag.originY;
     var res = applyDrag(drag.box, drag.edge, y, drag.targets, drag.range, !snapOn || e.altKey);
     drag.pending = res;
     var ev = drag.kind === "region"
@@ -1328,7 +1354,7 @@ document.addEventListener("mousemove", function (e) {
       : { type: "mdrag", item: drag.it, rectIdx: drag.idx, rect: res.rect, edge: drag.edge, edgeInfo: res.edgeInfo };
     renderItem(drag.it, verdictCoupling(drag.base, ev).state);
   } else if (drawing) {
-    var yy = e.clientY - drawing.layer.getBoundingClientRect().top;
+    var yy = localPt(drawing.layer, e).y;
     var cb = drawing.it.col_boxes[drawing.col];
     var a = Math.min(drawing.y0, yy), b = Math.max(drawing.y0, yy);
     drawing.temp.style.cssText = "pointer-events:none;left:" + cb[0] + "px;width:" + (cb[2] - cb[0]) + "px;top:" + a + "px;height:" + (b - a) + "px";
@@ -1337,13 +1363,13 @@ document.addEventListener("mousemove", function (e) {
 document.addEventListener("mouseup", function (e) {
   if (drag) {
     var d = drag; drag = null;
-    var y = e.clientY - d.layer.getBoundingClientRect().top + d.originY;
+    var y = localPt(d.layer, e).y + d.originY;
     var res = applyDrag(d.box, d.edge, y, d.targets, d.range, !snapOn || e.altKey);
     state[d.it.item_id] = d.base;
     commit(d.it, { type: d.kind === "region" ? "drag" : "mdrag", item: d.it, rectIdx: d.idx, rect: res.rect, edge: d.edge, edgeInfo: res.edgeInfo });
   } else if (drawing) {
     var w = drawing; drawing = null;
-    var yy = e.clientY - w.layer.getBoundingClientRect().top;
+    var yy = localPt(w.layer, e).y;
     if (w.temp.parentNode) w.temp.parentNode.removeChild(w.temp);
     if (Math.abs(yy - w.y0) < 4) return;
     var fp = w.it.file_page, cb = w.it.col_boxes[w.col];
@@ -1353,6 +1379,7 @@ document.addEventListener("mouseup", function (e) {
   }
 });
 // ---- init ----
+fitAll();
 if (CARRY) {
   var oldItems = {};
   try {
@@ -1371,15 +1398,18 @@ ITEMS.forEach(function (it) {
     var fail = function () { ban.hidden = false; };
     img.addEventListener("error", fail);
     if (img.complete && img.naturalWidth === 0) fail();
-    win.scrollTop = Math.max(0, it.miss.band[1] - 300);
+    var psc = parseFloat(card.querySelector(".pwinner").dataset.scale || "1");
+    win.scrollTop = Math.max(0, it.miss.band[1] * psc - 300);
     var cbx = it.col_boxes && it.col_boxes[it.miss.col];
-    win.scrollLeft = (it.miss.col === "right" && cbx) ? Math.max(0, cbx[0] - 20) : 0;
+    win.scrollLeft = (it.miss.col === "right" && cbx) ? Math.max(0, cbx[0] * psc - 20) : 0;
   }
 });
 renderCarryBanner(carryNotes());
 var snapBox = document.getElementById("snap");
 snapBox.checked = snapOn;
 snapBox.addEventListener("change", function () { snapOn = snapBox.checked; save(); });
+var fitBox = document.getElementById("fit");
+fitBox.addEventListener("change", function () { fitOn = fitBox.checked; fitAll(); });
 renderStat();
 function download(name, text) {
   var a = document.createElement("a");
@@ -1419,7 +1449,7 @@ def _render_html_ui2(set_sha, items_for_js, run_config_hash, ui_config_hash, sna
 <title>Verse-box truth console -- step 3 -- UI 2 -- {set_sha}</title>
 <style>{_CSS}{_CSS_UI2}</style></head><body>
 <header><h1>Verse-box truth console (place boxes)</h1>
-<span id="stat"></span><label class="snap"><input type="checkbox" id="snap" checked> Snap</label>
+<span id="stat"></span><label class="snap"><input type="checkbox" id="snap" checked> Snap</label><label class="snap"><input type="checkbox" id="fit" checked> Fit width</label>
 <button id="export" type="button">Export verdicts JSONL</button></header>
 <div class="carrybanner" id="carrybanner" hidden></div>
 <div class="migbanner" id="mig" hidden><span></span><button type="button">download them as ui1 JSONL</button></div>
