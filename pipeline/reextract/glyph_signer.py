@@ -2023,10 +2023,11 @@ check(_blob_id(JS_PASS3) == (17628, "ae889bc9422df5f0"),
       "JS_PASS3 measures %r, not (17628, ae889bc9422df5f0): it renders a console that is already signed "
       "and spent (pass 3); it must never be edited -- fork a new blob instead" % (_blob_id(JS_PASS3),))
 
-PASS4_LEN, PASS4_SHA16 = 21132, "8e92fd0a98d86b5c"   # PROVISIONAL until final
+PASS4_LEN, PASS4_SHA16 = 21132, "8e92fd0a98d86b5c"   # SPENT: Chris signed round 2 (export 70fc08e1) on this blob
 check(_blob_id(JS_PASS4) == (PASS4_LEN, PASS4_SHA16),
-      "JS_PASS4 measures %r, not (%d, %s): it is the pass-4 console; once Chris signs on it, it is spent and "
-      "must never be edited -- fork a new blob instead" % (_blob_id(JS_PASS4), PASS4_LEN, PASS4_SHA16))
+      "JS_PASS4 measures %r, not (%d, %s): it renders a console that is already signed and spent "
+      "(pass 3 round 2); it must never be edited -- fork a new blob instead"
+      % (_blob_id(JS_PASS4), PASS4_LEN, PASS4_SHA16))
 
 _JS_WANT = ((JS_PASS3 if TEST_CONSOLE else JS_PASS4) if PASS4 else
             (JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)))

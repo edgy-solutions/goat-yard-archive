@@ -235,6 +235,353 @@ if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
     sys.exit(0)
 
 
+# ---------------------------------------------------------------- round 2 of the pass-3 console (--round2)
+# python ingest_pass2.py --round2 <r2_export.jsonl> <r1_export.jsonl> <pass1_ingest.json>
+#
+# ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88).
+#
+# The three rows pass 2 held as `contradicted_prose_vs_structure`, re-signed over byte-identical pixels. Their
+# two channels now agree (every row has not-in-crop tiles AND prose saying so), so each is
+# `signed_partial_in_crop`: truth holds over the IN-CROP SUBSTRING only. The `fault` flag is a statement about
+# the BOX; the tile marks are a statement about which LETTERS the pixels support. A faulted box whose cut the
+# signer delimited precisely still gives a valid partial signature, so the fault does not hold the row out of
+# truth -- it TRAVELS with it as `box_fault`, named in `signed_from`, so nobody scores against a span whose
+# box needs redrawing without knowing it.
+#
+# What the in-crop signature is: the console's derived string with every `[...]` (not-in-crop) removed, then
+# LEADING AND TRAILING separator output stripped (a word gap with nothing beyond it is a boundary artifact,
+# not a signed letter). The trim is recorded per row in `in_crop_trimmed`, never silent, and an INTERIOR
+# separator is never touched. A `sic` tile prints the PRINTED form into the signature; the signer's
+# `expected` form, `reason` and `basis` ride beside it as separate fields (`sic`), never inside it.
+#
+# The prior state for the re-signing diff is what the signer was SHOWN: each tile's and insertion's own
+# `prior_verdict` / `prior_chose`. Pixels (crop_sha16, candidate_sha16) can only come from the earlier export,
+# so the round-1 export is read for those two hashes alone and the gate compares them as it always does.
+#
+# WHAT THIS DOES NOT SOLVE. No scorer: it only guarantees that `printed`/`expected`/`reason`/`basis` exist and
+# survive. A partly-corrected signature is a signed reading, not a pure pixel signature; the counts say how
+# much. A box fault stays an open fault: the span's box still needs redrawing before a full-span claim.
+# The ruling on the one disagreement is DERIVED (no click by Chris) and says so.
+
+R2_SET_N = 3
+R2_EXPECT_ROWS = ("p493:n3", "p594:n0", "p803:n0")
+R2_EXPECT_SIG = {"p493:n3": "חסיר", "p594:n0": "בהרשת",
+                 "p803:n0": "נים נתונים"}
+R2_EXPECT_DIFF = {("p594:n0", "tile", 1)}
+R2_AUTHORITY = "DERIVED — the sole change in round 2, a sic placed deliberately; no prior reading discarded"
+EXPECTED_CHECKS_R2 = 41                   # file-level and diff checks, then per-row and sic checks, plus the final count check
+R2_VERDICTS = ("confirmed", "corrected", "sic")
+
+
+def r2_tile_out(t):
+    v, gap = t.get("verdict") or "", t["kind"] == "gap"
+    if v == "deleted":
+        return ""
+    if v == "not_in_crop":
+        return "[ ]" if gap else "[" + t["shown"] + "]"
+    if v == "confirmed":
+        return " " if gap else t["shown"]
+    if v == "sic":
+        return t["shown"]                      # the PRINTED form; `expected` never enters the string
+    if v == "corrected":
+        if gap:
+            return " " if t.get("chose") == "space" else ""
+        return t.get("chose") or "?"
+    return "?"
+
+
+def r2_ins_out(it):
+    if it.get("verdict") == "not_in_crop":
+        return "[ ]" if it["kind"] == "gap" else "[" + (it.get("chose") or "") + "]"
+    if not it.get("chose"):
+        return "?"
+    return " " if it["kind"] == "gap" else it["chose"]
+
+
+def r2_derive(r):
+    out = [r2_ins_out(x) for x in sorted((x for x in r["insertions"] if x["after_i"] is None),
+                                         key=lambda x: x["seq"])]
+    for t in r["tiles"]:
+        out.append(r2_tile_out(t))
+        out.extend(r2_ins_out(x) for x in sorted((x for x in r["insertions"] if x["after_i"] == t["i"]),
+                                                 key=lambda x: x["seq"]))
+    return "".join(out)
+
+
+def r2_prior_rows(cur_rows, r1_rows):
+    """The prior state the signer was SHOWN, rebuilt from each item's own prior_* fields. Pixel hashes are
+    taken from the round-1 export row (the only place they exist) so the gate's identity check is real."""
+    r1 = {r["span_id"]: r for r in r1_rows}
+    out = []
+    for r in cur_rows:
+        check(r["span_id"] in r1, "%s has no round-1 row to take its pixel hashes from" % r["span_id"])
+        check(all("prior_verdict" in t for t in r["tiles"]) and all("prior_verdict" in x for x in r["insertions"]),
+              "%s: an item has no prior_verdict, so the shown state cannot be rebuilt" % r["span_id"])
+        out.append({"span_id": r["span_id"], "crop_sha16": r1[r["span_id"]]["crop_sha16"],
+                    "candidate_sha16": r1[r["span_id"]]["candidate_sha16"],
+                    "tiles": [{"i": t["i"], "kind": t["kind"], "shown": t["shown"],
+                               "verdict": t["prior_verdict"], "chose": t.get("prior_chose") or ""}
+                              for t in r["tiles"]],
+                    "insertions": [{"seq": x["seq"], "after_i": x["after_i"], "kind": x["kind"],
+                                    "chose": x.get("prior_chose") or "", "verdict": x["prior_verdict"]}
+                                   for x in r["insertions"]]})
+    return out
+
+
+def r2_ruling(d):
+    """DERIVED rulings only, and only for the one shape this round is known to hold: a tile the signer
+    moved confirmed -> sic over the same printed glyph. Anything else gets no ruling, so admission refuses."""
+    if (d["what"] == "tile" and d["prior"]["verdict"] == "confirmed" and d["current"]["verdict"] == "sic"
+            and d["prior"]["shown"] == d["current"]["shown"] and not d["reversal_corrected_to_confirmed"]):
+        return "take"
+    return None
+
+
+def r2_git_raw(where):
+    import subprocess
+    st = subprocess.run(["git", "-C", where, "status", "--porcelain"], capture_output=True, text=True,
+                        encoding="utf-8").stdout.splitlines()
+    hd = subprocess.run(["git", "-C", where, "rev-parse", "HEAD"], capture_output=True, text=True,
+                        encoding="utf-8").stdout.strip()
+    return {"head": hd, "porcelain": st}
+
+
+def jl_r2(path, recs):
+    io.open(str(path), "w", encoding="utf-8", newline="\n").write(
+        "".join(json.dumps(x, ensure_ascii=False) + "\n" for x in recs))
+
+
+def round2(r2_path, r1_path, pass1_path):
+    git_raw_start = {k: r2_git_raw(v) for k, v in REPOS.items()}
+    cur = [json.loads(l) for l in io.open(r2_path, encoding="utf-8") if l.strip()]
+    r1 = [json.loads(l) for l in io.open(r1_path, encoding="utf-8") if l.strip()]
+    pass1 = json.load(io.open(pass1_path, encoding="utf-8"))
+    r2_sha, r1_sha = _rs_file_sha16(r2_path), _rs_file_sha16(r1_path)
+    check(len(cur) == R2_SET_N and tuple(sorted(r["span_id"] for r in cur)) == R2_EXPECT_ROWS,
+          "the round-2 export holds %s, expected %s" % ([r["span_id"] for r in cur], list(R2_EXPECT_ROWS)))
+    check(all(r.get("set_sha16") == SET for r in cur), "a round-2 row carries a different set_sha16")
+    check(len(pass1["rows"]) > 0 and pass1.get("set_sha16") == SET, "pass 1 ingest is empty or from another set")
+
+    # held and truth rows of pass 2, read from the files (not literals)
+    held2 = [json.loads(l) for l in io.open(str(HAD.DATA / "held_pass2.jsonl"), encoding="utf-8") if l.strip()]
+    truth2 = [json.loads(l) for l in io.open(str(HAD.DATA / "truth_pass2.jsonl"), encoding="utf-8") if l.strip()]
+    held2_ids = [h["span_id"] for h in held2]
+    check(all(r["span_id"] in held2_ids for r in cur),
+          "a round-2 span is not among pass 2's held rows %s" % held2_ids)
+
+    # the diff gate, over the shown state
+    prior_rows = r2_prior_rows(cur, r1)
+    prior_sha = sha16(json.dumps(prior_rows, sort_keys=True, ensure_ascii=True))
+    rep = diff_resigned(cur, prior_rows, r2_sha, prior_sha)
+    got_diff = set((d["span_id"], d["what"], d["i"] if d["what"] == "tile" else d["seq"])
+                   for d in rep["disagreements"])
+    check(got_diff == R2_EXPECT_DIFF, "disagreements differ: only-computed %s, only-expected %s"
+          % (sorted(got_diff - R2_EXPECT_DIFF), sorted(R2_EXPECT_DIFF - got_diff)))
+    check(rep["rate"]["insertions_changed"] == 0 and rep["rate"]["reversals_corrected_to_confirmed"] == 0,
+          "round 2 changed an insertion or reversed a correction: %s" % rep["rate"])
+
+    # the content-addressed adjudication file
+    rulings = []
+    for d in rep["disagreements"]:
+        v = r2_ruling(d)
+        if v is None:
+            continue
+        rulings.append({"span_id": d["span_id"], "what": d["what"], "tile_i": d["i"], "verdict": v,
+                        "authority": R2_AUTHORITY,
+                        "basis": "Not clicked by Chris. The signer moved this tile from confirmed to sic over "
+                                 "byte-identical pixels this round: an ADDITION (the printed form stays in the "
+                                 "signature, the expectation is recorded beside it), not a reversal of any "
+                                 "prior reading. The current reading is taken as it stands. DERIVED, not "
+                                 "quoted: Chris may reject it.",
+                        "prior": d["prior"], "current": d["current"]})
+    adj = {"kind": "resign_adjudication",
+           "note": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88). Rulings on the disagreements the "
+                   "re-signing diff found between the pass-3 round-2 export (current) and the state the signer "
+                   "was SHOWN (the export's own prior_verdict/prior_chose fields), over byte-identical pixels. "
+                   "keep = prior reading, take = current reading, neither = leave unanswered. The one ruling "
+                   "is DERIVED and labelled so.",
+           "set_sha16": SET, "diff_sha16": rep["diff_sha16"],
+           "current_file": os.path.basename(r2_path), "current_file_sha16": r2_sha,
+           "prior_file": "reconstructed from the round-2 export's own prior_verdict/prior_chose fields; pixel "
+                         "hashes from " + os.path.basename(r1_path),
+           "prior_file_sha16": prior_sha, "round1_export_sha16": r1_sha, "rulings": rulings}
+    adj_bytes = json.dumps(adj, indent=1, ensure_ascii=True).encode("utf-8")
+    adj_sha = hashlib.sha256(adj_bytes).hexdigest()[:16]
+    adj_path = HAD.DATA / ("ADJUDICATION_pass3_r2_%s.json" % adj_sha)
+    if not adj_path.exists():
+        io.open(str(adj_path), "wb").write(adj_bytes)
+    check(io.open(str(adj_path), "rb").read() == adj_bytes, "%s holds different bytes" % adj_path.name)
+    check(_rs_file_sha16(adj_path) == adj_sha and adj_sha in adj_path.name,
+          "the adjudication file is not named by its own sha16")
+    loaded = json.load(io.open(str(adj_path), encoding="utf-8"))
+    check(loaded["diff_sha16"] == rep["diff_sha16"], "the adjudication file is for a different diff")
+    adjudications = {(x["span_id"], x["what"], x["tile_i"] if x["what"] == "tile" else x["seq"]): x["verdict"]
+                     for x in loaded["rulings"]}
+    check(set(adjudications) == R2_EXPECT_DIFF and all(x["authority"].startswith("DERIVED") for x in loaded["rulings"]),
+          "the adjudication file does not cover exactly the one disagreement, or a ruling is not marked DERIVED")
+
+    # the refusal, demonstrated: without the ruling the door shuts
+    refusal = ""
+    try:
+        admit_resigned([r for r in cur if r["span_id"] == "p594:n0"][0], rep, {})
+    except ResignDiffError as e:
+        refusal = str(e)
+    check("no keep/take/neither verdict" in refusal, "admission did not refuse without the ruling: %r" % refusal)
+
+    truth_rows, held_rows = [], []
+    for r in cur:
+        s = r["span_id"]
+        derived = r2_derive(r)
+        check(derived == r["derived_consonants"], "%s: port gives %r, console said %r"
+              % (s, derived, r["derived_consonants"]))
+        note = (r.get("note") or "").strip()
+        n_nic = (sum(1 for t in r["tiles"] if t.get("verdict") == "not_in_crop")
+                 + sum(1 for x in r["insertions"] if x.get("verdict") == "not_in_crop"))
+        prose = RULE.prose_says_unsignable(note)
+        check(r.get("complete") and n_nic > 0 and prose, "%s: not complete with not-in-crop tiles that the prose "
+              "agrees with (complete %s, n_nic %d, prose %s)" % (s, r.get("complete"), n_nic, prose))
+        disp = "signed_partial_in_crop"
+        raw = re.sub(r"\[[^\]]*\]", "", derived)
+        sig = raw.strip(" ")
+        lead, trail = len(raw) - len(raw.lstrip(" ")), len(raw) - len(raw.rstrip(" "))
+        trimmed = ("leading and trailing separator" if lead and trail else
+                   "leading separator" if lead else "trailing separator" if trail else "")
+        check(sig == R2_EXPECT_SIG[s], "%s: in-crop signature %r, expected %r" % (s, sig, R2_EXPECT_SIG[s]))
+        in_tiles = [t for t in r["tiles"] if t["kind"] == "consonant" and t.get("verdict") in R2_VERDICTS]
+        n_conf = sum(1 for t in in_tiles if t["verdict"] == "confirmed")
+        n_corr = sum(1 for t in in_tiles if t["verdict"] == "corrected")
+        n_sic = sum(1 for t in in_tiles if t["verdict"] == "sic")
+        n_ins_in = sum(1 for x in r["insertions"] if x.get("verdict") != "not_in_crop" and x["kind"] == "consonant")
+        check(n_conf + n_corr + n_sic + n_ins_in == len(sig.replace(" ", "")),
+              "%s: %d+%d+%d+%d in-crop letters counted, signature has %d" % (
+                  s, n_conf, n_corr, n_sic, n_ins_in, len(sig.replace(" ", ""))))
+        sics = []
+        for t in in_tiles:
+            if t["verdict"] == "sic":
+                check(t.get("expected") and t.get("reason") and t.get("basis"),
+                      "%s tile %d: a sic with no expected/reason/basis" % (s, t["i"]))
+                check(t["shown"] in sig and t["expected"] not in sig,
+                      "%s tile %d: the signature must hold the printed %r and not the expected %r"
+                      % (s, t["i"], t["shown"], t["expected"]))
+                sics.append({"tile_i": t["i"], "printed": t["shown"], "expected": t["expected"],
+                             "reason": t["reason"], "basis": t["basis"]})
+        sf = ("pixels, %d confirmed + %d corrected + %d sic letter(s)%s, in-crop only; box_fault %s "
+              "(the box needs redrawing; this signature holds over the in-crop substring only)"
+              % (n_conf, n_corr, n_sic, (", + %d signer insertion(s)" % n_ins_in) if n_ins_in else "",
+                 r.get("fault") or "none"))
+        check(not r.get("full_span_pixel_signature"), "%s: full_span_pixel_signature must be False" % s)
+        pts = r.get("points_shown_not_adjudicated") or {}
+        row = {"span_id": s, "disposition": disp, "signature": sig, "signature_full": derived,
+               "full_span_pixel_signature": False,
+               "full_span_pixel_signature_console": bool(r.get("full_span_pixel_signature")),
+               "signed_from": sf, "box_fault": r.get("fault") or "",
+               "in_crop_trimmed": trimmed, "n_confirmed": n_conf, "n_corrected": n_corr, "n_sic": n_sic,
+               "sic": sics, "crop_sha16": r.get("crop_sha16"), "candidate_sha16": r.get("candidate_sha16"),
+               "n_points": pts.get("n_points"), "nikud_flag": pts.get("nikud_flag"), "pass": 3, "round": 2}
+        try:
+            adm = admit_resigned(r, rep, adjudications)
+            row["resign_diff_sha16"] = adm["resign_diff_sha16"]
+            truth_rows.append(row)
+        except ResignDiffError as e:
+            held_rows.append({"span_id": s, "disposition": disp, "note": note,
+                              "why_held": "the re-signing diff channel objected: %s" % e})
+    check(len(truth_rows) == R2_SET_N and not held_rows, "admitted %d of %d; held %s" % (
+        len(truth_rows), R2_SET_N, [h["span_id"] for h in held_rows]))
+    check(all(t["disposition"] == "signed_partial_in_crop" and t["resign_diff_sha16"] == rep["diff_sha16"]
+              for t in truth_rows), "an admitted row is not signed_partial_in_crop through the diff")
+    trimmed_rows = [t["span_id"] for t in truth_rows if t["in_crop_trimmed"]]
+
+    # combined total, derived from the files
+    p1_truth = [x["span_id"] for x in pass1["rows"] if x["disposition"] in PASS1_TRUTH_DISPOS]
+    p2_truth = [t["span_id"] for t in truth2]
+    r2_truth = [t["span_id"] for t in truth_rows]
+    check(len(set(p1_truth) | set(p2_truth) | set(r2_truth)) == len(p1_truth) + len(p2_truth) + len(r2_truth),
+          "a span is in truth in more than one pass")
+    total = len(p1_truth) + len(p2_truth) + len(r2_truth)
+    line = "TRUTH TOTAL: %d (pass 1 %d + pass 2 %d + pass 3 r2 %d)" % (total, len(p1_truth), len(p2_truth),
+                                                                      len(r2_truth))
+    still_held = [h for h in held2 if h["span_id"] not in r2_truth]
+    check(len(still_held) == len(held2) - len(r2_truth), "held count does not follow from the files")
+
+    # write truth/held, then read back: the sic fields must survive
+    out_t, out_h = HAD.DATA / "truth_pass3_r2.jsonl", HAD.DATA / "held_pass3_r2.jsonl"
+    jl_r2(out_t, truth_rows)
+    if held_rows:
+        jl_r2(out_h, held_rows)
+    back = [json.loads(l) for l in io.open(str(out_t), encoding="utf-8") if l.strip()]
+    sic_back = [t for t in back if t["sic"]]
+    check(len(sic_back) == 1 and sic_back[0]["span_id"] == "p594:n0"
+          and sic_back[0]["sic"][0]["printed"] == "ה" and sic_back[0]["sic"][0]["expected"] == "ח"
+          and sic_back[0]["sic"][0]["reason"] == "Exod 31:5 / fabrefactione"
+          and sic_back[0]["sic"][0]["basis"] == "evidence_grounded"
+          and "ה" in sic_back[0]["signature"] and "ח" not in sic_back[0]["signature"],
+          "the sic fields did not round-trip through the truth file")
+    check(all(b["box_fault"] == "box-edge-cut" and "box_fault box-edge-cut" in b["signed_from"] for b in back),
+          "box_fault does not travel with every truth row")
+    check(CHECKS + 1 == EXPECTED_CHECKS_R2, "ran %d checks before the final count, expected %d"
+          % (CHECKS + 1, EXPECTED_CHECKS_R2))
+
+    git_raw_end = {k: r2_git_raw(v) for k, v in REPOS.items()}
+    gend = states()
+    prov_r2 = (prov(GIT_START, gend) or any(git_raw_start[k] != git_raw_end[k] for k in REPOS)
+               or any(git_raw_start[k]["porcelain"] for k in REPOS))
+    report = HAD.DATA / ("INGEST_pass3_r2_%s.md" % r2_sha)
+    L = ["# Ingest of pass-3 round 2 (%d spans)%s" % (R2_SET_N, "  -- PROVISIONAL" if prov_r2 else ""), "",
+         "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - %d)." % PRINTED_OFFSET, "",
+         "- round-2 export: `%s` (sha16 %s)" % (os.path.basename(r2_path), r2_sha),
+         "- round-1 export (pixel hashes only): `%s` (sha16 %s)" % (os.path.basename(r1_path), r1_sha),
+         "- prior state: reconstructed from the export's own prior_verdict/prior_chose (sha16 %s)" % prior_sha,
+         "- diff_sha16 %s; adjudication `%s` (content sha16 %s; DERIVED)" % (rep["diff_sha16"], adj_path.name, adj_sha),
+         "- checks run: %d (expected %d)" % (CHECKS, EXPECTED_CHECKS_R2),
+         "- run: %s" % ("PROVISIONAL (not citable)" if prov_r2 else "clean"), ""]
+    for k in REPOS:
+        L.append("- git %s: start head %s, %d porcelain line(s) -> end head %s, %d porcelain line(s)" % (
+            k, git_raw_start[k]["head"][:7], len(git_raw_start[k]["porcelain"]),
+            git_raw_end[k]["head"][:7], len(git_raw_end[k]["porcelain"])))
+        L.append("  - start porcelain: %s" % ("; ".join(git_raw_start[k]["porcelain"]) or "(clean)"))
+        L.append("  - end porcelain: %s" % ("; ".join(git_raw_end[k]["porcelain"]) or "(clean)"))
+    L += ["", "## %s" % line, "",
+          "Pass 1 from `%s` rows in %s; pass 2 = lines of `truth_pass2.jsonl`; pass 3 r2 = rows admitted here. "
+          "Read from files, not literals." % (os.path.basename(pass1_path), list(PASS1_TRUTH_DISPOS)), "",
+          "## Admitted (%d), held (%d)" % (len(truth_rows), len(held_rows)), ""]
+    for t in truth_rows:
+        L.append("- %s `%s` signature len %d, trimmed: %s; box_fault %s; letters %d confirmed + %d corrected + "
+                 "%d sic; from: %s" % (t["span_id"], t["disposition"], len(t["signature"]),
+                                       t["in_crop_trimmed"] or "none", t["box_fault"], t["n_confirmed"],
+                                       t["n_corrected"], t["n_sic"], t["signed_from"]))
+    L += ["", "Separator trims: %d row(s) %s." % (len(trimmed_rows), trimmed_rows), "",
+          "## Pass 2's %d held rows: %d remain held" % (len(held2), len(still_held)), ""]
+    for h in still_held:
+        L.append("- %s `%s`" % (h["span_id"], h["disposition"]))
+    L += ["", "## Refusal without the ruling", "", "`%s`" % refusal, "",
+          "## What this does NOT solve", "",
+          "- The three signatures hold over the in-crop substring only; the box of each still needs redrawing.",
+          "- A partly-corrected signature is a signed reading, not a pure pixel signature (counts above).",
+          "- The sic ruling is DERIVED, not clicked; no scorer reads `printed`/`expected` yet.",
+          "- Held box-fault and abstain rows are untouched."]
+    io.open(str(report), "w", encoding="utf-8", newline="\n").write("\n".join(L) + "\n")
+
+    print("round 2 ingest of %s (%d rows)%s" % (os.path.basename(r2_path), len(cur), "  PROVISIONAL" if prov_r2 else ""))
+    print("  admitted %d via admit_resigned, held %d; disagreements %s; diff_sha16 %s" % (
+        len(truth_rows), len(held_rows), sorted(got_diff), rep["diff_sha16"]))
+    print("  adjudication %s; refusal without it: %s" % (adj_path.name, "yes" if refusal else "NO"))
+    for t in truth_rows:
+        print("  %s %s len %d trimmed=%s letters %d/%d/%d (conf/corr/sic) box_fault=%s" % (
+            t["span_id"], t["disposition"], len(t["signature"]), t["in_crop_trimmed"] or "none",
+            t["n_confirmed"], t["n_corrected"], t["n_sic"], t["box_fault"]))
+    print("  " + line)
+    print("  pass 2 held %d, remain held %d: %s" % (len(held2), len(still_held),
+                                                    " ".join(h["span_id"] for h in still_held)))
+    print("  trims %d, checks run %d, expected %d" % (len(trimmed_rows), CHECKS, EXPECTED_CHECKS_R2))
+    print("  git: %s" % ("PROVISIONAL" if prov_r2 else "clean run"))
+    print("  wrote %s, %s%s" % (out_t.name, report.name, (", " + out_h.name) if held_rows else ""))
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--round2":
+    round2(sys.argv[2], sys.argv[3], sys.argv[4])
+    sys.exit(0)
+
+
 # ---------------------------------------------------------------- inputs, read-only
 
 EXPORT_PATH, PASS1_PATH = sys.argv[1], sys.argv[2]
