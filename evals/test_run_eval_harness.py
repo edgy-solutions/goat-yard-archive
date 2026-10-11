@@ -2046,7 +2046,12 @@ if __name__ == "__main__":
             except AssertionError as e:
                 failed += 1
                 print("FAIL %s: %s" % (name, e))
-            except Exception as e:
+            except KeyboardInterrupt:
+                raise
+            # SystemExit is NOT an Exception, so `except Exception` let a test that reaches sys.exit
+            # end the WHOLE run silently -- no summary line, which reads as a shorter suite. Witnessed
+            # 2026-10-11 in evals/test_gate_paired.py (argparse exits 2 on an unrecognized flag).
+            except BaseException as e:
                 failed += 1
                 print("ERROR %s: %s: %s" % (name, type(e).__name__, e))
     print("%d passed, %d failed" % (passed, failed))

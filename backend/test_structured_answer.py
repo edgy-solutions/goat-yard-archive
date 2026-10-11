@@ -309,7 +309,12 @@ if __name__ == "__main__":
         try:
             fn()
             print(f"  ok   {name}")
-        except Exception as e:
+        except KeyboardInterrupt:
+            raise
+        # SystemExit is NOT an Exception, so `except Exception` let a test that reaches sys.exit
+        # end the WHOLE run silently -- no summary line, which reads as a shorter suite. Witnessed
+        # 2026-10-11 in evals/test_gate_paired.py (argparse exits 2 on an unrecognized flag).
+        except BaseException as e:
             print(f"  FAIL {name}: {type(e).__name__}: {e}")
             failed.append(name)
     print("")
