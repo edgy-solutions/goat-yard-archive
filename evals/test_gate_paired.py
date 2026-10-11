@@ -320,6 +320,18 @@ def _six(root, off_k, on_k, null_k=(5, 5)):
     return load_arm(off), load_arm(on), [(load_arm(na), load_arm(nb))]
 
 
+def _rep(root, off_k, on_k, tag="r"):
+    """A SECOND off/on pair over the same six questions -- a replicate of the comparison.
+
+    Its own directories, deliberately: a "replicate" that reuses one of the first pair's arms
+    puts the same rate on both sides of the comparison, which is the correlation the
+    non-independent-null note exists to name.
+    """
+    off2 = _arm(root, tag + "_off2", {("q%d" % i): _k(off_k) for i in range(6)})
+    on2 = _arm(root, tag + "_on2", {("q%d" % i): _k(on_k) for i in range(6)})
+    return load_arm(off2), load_arm(on2)
+
+
 def test_a_distinguishable_pair_that_only_IMPROVED_does_not_fire():
     root = _tmp()
     try:
@@ -335,15 +347,186 @@ def test_a_distinguishable_pair_that_only_IMPROVED_does_not_fire():
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_a_distinguishable_pair_WITH_a_regression_fires():
+def test_a_distinguishable_pair_WITH_a_regression_fires_ONLY_WITH_A_REPLICATE():
     root = _tmp()
     try:
         off, on, nulls = _six(root, off_k=5, on_k=1)       # -0.8 on every question, band 0
-        r = G.gate(off, on, nulls)
+        r = G.gate(off, on, nulls, replicate=_rep(root, 5, 1))
         assert r["sign_test"]["significant"] is True, r["sign_test"]
+        assert r["sign_test_replicate_gating"]["significant"] is True, r
         assert r["regressions_beyond_noise_n"] == 6, r["regressions_beyond_noise_n"]
+        assert r["replication_n"] == 6, r["replication_n"]
+        assert all(t["direction_replicated"] for t in r["replication"]), r["replication"]
+        assert r["effect_clause"]["state"] == "fired", r["effect_clause"]
         assert r["gate_fires"] is True, r
-        assert "paired test + regression" in r["verdict"], r["verdict"]
+        assert "replicated effect + regression" in r["verdict"], r["verdict"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_effect_clause_ABSTAINS_on_one_replicate_and_does_NOT_FALL_BACK():
+    # The same arms that fired above. The retired clause's own inputs are present and
+    # significant; what changed is that they no longer decide. A gate that quietly reverts to a
+    # retired clause when its new input is missing has no rule at all.
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=1)
+        r = G.gate(off, on, nulls)
+        assert r["replicate_supplied"] is False, r["replicate_supplied"]
+        assert r["sign_test_gating"]["significant"] is True, r["sign_test_gating"]
+        assert r["regressions_gating_n"] == 6, r["regressions_gating_n"]
+        assert r["effect_clause"]["state"] == "abstained", r["effect_clause"]
+        assert r["effect_clause"]["fires"] is False, r["effect_clause"]
+        assert r["replication"] == [] and r["sign_test_replicate"] is None, r
+        assert r["ratchet_tripped_n"] == 0, r["ratchet_tripped"]
+        assert r["gate_fires"] is False, r
+        # And the non-firing verdict must not read as a clean one.
+        assert "ABSTAINED" in r["verdict"] and "not a clean verdict" in r["verdict"], r["verdict"]
+        assert [n for n in r["notes"] if "EFFECT CLAUSE ABSTAINS" in n], r["notes"]
+        assert [n for n in r["notes"] if "p=1.0 and p=0.0391" in n], r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_regression_whose_DIRECTION_does_not_repeat_cannot_fire():
+    # Six questions down 0.8 in the first pair and UP 0.8 in the replicate. Both pairs are
+    # individually distinguishable; neither question kept its sign, and that is the whole rule.
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=1)
+        r = G.gate(off, on, nulls, replicate=_rep(root, 1, 5))
+        assert r["sign_test_gating"]["significant"] is True, r["sign_test_gating"]
+        assert r["sign_test_replicate_gating"]["significant"] is True, r
+        assert not any(t["direction_replicated"] for t in r["replication"]), r["replication"]
+        assert r["replicated_regressions"] == [], r["replicated_regressions"]
+        assert r["effect_clause"]["state"] == "did_not_fire", r["effect_clause"]
+        assert r["gate_fires"] is False, r
+        assert [n for n in r["notes"] if "NO GATING REGRESSION SURVIVED REPLICATION" in n], \
+            r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_replicates_that_DISAGREE_IN_AGGREGATE_are_named_and_block_the_clause():
+    # The measured case: one replicate distinguishable, the other not, same configuration.
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=1)
+        r = G.gate(off, on, nulls, replicate=_rep(root, 5, 5))   # no movement at all
+        assert r["effect_clause"]["significant_a"] is True, r["effect_clause"]
+        assert r["effect_clause"]["significant_b"] is False, r["effect_clause"]
+        assert r["effect_clause"]["state"] == "did_not_fire", r["effect_clause"]
+        assert r["gate_fires"] is False, r
+        assert [n for n in r["notes"] if "THE REPLICATES DISAGREE IN AGGREGATE" in n], r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_movement_held_inside_a_band_only_a_CORRELATED_null_supplied_is_NAMED():
+    # The 2026-10-04 shape exactly: the only null pair available is the two replicates' own OFF
+    # arms, so it is correlated with BOTH effect pairs. Both replicates fall -0.40 and both are
+    # held inside its 0.60 band. The band is not overridden -- it is a real measurement of two
+    # like-configured arms -- but a reader is told that no independent null bounds these
+    # questions.
+    root = _tmp()
+    try:
+        off_d = _arm(root, "off", {("q%d" % i): _k(5) for i in range(6)})
+        on_d = _arm(root, "on", {("q%d" % i): _k(3) for i in range(6)})
+        off2_d = _arm(root, "off2", {("q%d" % i): _k(2) for i in range(6)})
+        on2_d = _arm(root, "on2", {("q%d" % i): _k(0) for i in range(6)})
+        sources = {"OFF": off_d, "ON": on_d, "OFF2": off2_d, "ON2": on2_d,
+                   "null0.a": off_d, "null0.b": off2_d}
+        r = G.gate(load_arm(off_d), load_arm(on_d),
+                   [(load_arm(off_d), load_arm(off2_d))],
+                   sources=sources,
+                   replicate=(load_arm(off2_d), load_arm(on2_d)))
+        assert all(t["direction_replicated"] for t in r["replication"]), r["replication"]
+        assert not any(t["beats_noise_either"] for t in r["replication"]), r["replication"]
+        assert all(t["band_from_correlated_null_only"] for t in r["replication"]), r["replication"]
+        held = [n for n in r["notes"] if "HELD INSIDE A CORRELATED BAND" in n]
+        assert len(held) == 1, r["notes"]
+        assert "q0" in held[0] and "Not overridden" in held[0], held[0]
+        # Named, not acted on: the band still holds, so nothing fired on it.
+        assert r["replicated_regressions"] == [], r["replicated_regressions"]
+        # And the correlation itself is named once, not once per pair it touches.
+        assert len([n for n in r["notes"] if "NOT INDEPENDENT" in n]) == 2, r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_an_INDEPENDENT_band_that_holds_a_replicated_movement_is_NOT_named():
+    # The companion: same movement, a null pair that shares nothing with either effect pair.
+    # The suppression is then independently founded and there is nothing to warn about -- the
+    # note above has to be able to stay silent, or it says nothing when it fires.
+    root = _tmp()
+    try:
+        off_d = _arm(root, "off", {("q%d" % i): _k(5) for i in range(6)})
+        on_d = _arm(root, "on", {("q%d" % i): _k(3) for i in range(6)})
+        off2_d = _arm(root, "off2", {("q%d" % i): _k(5) for i in range(6)})
+        on2_d = _arm(root, "on2", {("q%d" % i): _k(3) for i in range(6)})
+        na = _arm(root, "na", {("q%d" % i): _k(5) for i in range(6)})
+        nb = _arm(root, "nb", {("q%d" % i): _k(2) for i in range(6)})   # band 0.60
+        sources = {"OFF": off_d, "ON": on_d, "OFF2": off2_d, "ON2": on2_d,
+                   "null0.a": na, "null0.b": nb}
+        r = G.gate(load_arm(off_d), load_arm(on_d), [(load_arm(na), load_arm(nb))],
+                   sources=sources, replicate=(load_arm(off2_d), load_arm(on2_d)))
+        assert all(t["direction_replicated"] for t in r["replication"]), r["replication"]
+        assert not any(t["beats_noise_either"] for t in r["replication"]), r["replication"]
+        assert not any(t["band_from_correlated_null_only"] for t in r["replication"]), \
+            r["replication"]
+        assert not [n for n in r["notes"] if "HELD INSIDE A CORRELATED BAND" in n], r["notes"]
+        assert not [n for n in r["notes"] if "NOT INDEPENDENT" in n], r["notes"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_REPLICATE_pair_over_two_question_sets_is_refused():
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=1)
+        off2 = _arm(root, "off2", {("q%d" % i): _k(5) for i in range(6)})
+        on2 = _arm(root, "on2", {("q%d" % i): _k(1) for i in range(5)})   # q5 never asked
+        try:
+            G.gate(off, on, nulls, replicate=(load_arm(off2), load_arm(on2)))
+            raise AssertionError("a pair asked different questions is not a replicate")
+        except SystemExit as e:
+            assert "not a replicate of the comparison" in str(e), str(e)
+            assert "q5" in str(e), str(e)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_two_arms_sharing_a_LABEL_is_refused_rather_than_dropping_one():
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=1)
+        try:
+            G.gate(off, on, nulls, replicate=_rep(root, 5, 1),
+                   labels={"off": "a", "on": "b", "off2": "a", "on2": "c"})
+            raise AssertionError("two arms keyed to one label must not be silently merged")
+        except SystemExit as e:
+            assert "same label" in str(e), str(e)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_RATCHET_reads_both_replicates_ON_arms_and_reports_one_row_per_question():
+    # The clause is unchanged; it is applied to every ON arm supplied. A question that
+    # stable-fails only in the REPLICATE's ON arm still fires -- "it used to work and now never
+    # does" does not wait for a direction to repeat -- and a question caught in both arms is
+    # one trip, not two.
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=5)        # nothing moves in the first pair
+        r = G.gate(off, on, nulls, replicate=_rep(root, 5, 0))
+        assert r["ratchet_tripped_n"] == 6, r["ratchet_tripped"]
+        assert all(t["stable_failed_in"] == ["ON2"] for t in r["ratchet_tripped"]), \
+            r["ratchet_tripped"]
+        assert r["gate_fires"] is True and "ratchet" in r["verdict"], r["verdict"]
+        both = G.gate(off, _rep(root, 5, 0, tag="x")[1], nulls, replicate=_rep(root, 5, 0))
+        assert both["ratchet_tripped_n"] == 6, both["ratchet_tripped"]
+        assert all(t["stable_failed_in"] == ["ON", "ON2"] for t in both["ratchet_tripped"]), \
+            both["ratchet_tripped"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -532,11 +715,29 @@ def test_both_clauses_firing_are_named_in_the_verdict():
     root = _tmp()
     try:
         off, on, nulls = _six(root, off_k=5, on_k=0)
-        r = G.gate(off, on, nulls)
+        r = G.gate(off, on, nulls, replicate=_rep(root, 5, 0))
         assert r["ratchet_tripped_n"] == 6 and r["regressions_beyond_noise_n"] == 6, r
         assert r["gate_fires"] is True
-        assert "ratchet" in r["verdict"] and "paired test + regression" in r["verdict"], \
+        assert "ratchet" in r["verdict"] and "replicated effect + regression" in r["verdict"], \
             r["verdict"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_VERDICT_credits_only_the_clauses_that_ACTUALLY_fired():
+    # The verdict string is a causal claim about why the gate fired. It used to be built from
+    # the ALL-questions regression list while the firing was computed from the GATING one, so a
+    # run that fired on the ratchet alone could credit "paired test + regression" -- the clause
+    # ruling 1 had deliberately prevented from deciding. Here the effect clause abstains and
+    # cannot be credited with anything.
+    root = _tmp()
+    try:
+        off, on, nulls = _six(root, off_k=5, on_k=0)
+        r = G.gate(off, on, nulls)
+        assert r["gate_fires"] is True, r
+        assert r["effect_clause"]["state"] == "abstained", r["effect_clause"]
+        assert r["verdict"] == "GATE FIRES: ratchet", r["verdict"]
+        assert "regression" not in r["verdict"], r["verdict"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -561,6 +762,57 @@ def test_main_exits_1_when_the_gate_fires_and_0_when_it_does_not():
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
+def test_the_CLI_passes_a_REPLICATE_through_and_prints_its_table():
+    # The replicate block in the report is six format strings over keys that did not exist
+    # before today. A gate() test cannot see any of them: the printing happens in main(), and a
+    # bad format raises at PRINT time, with the record already computed and the exit code never
+    # returned. Same shape as the argparse "%" footgun below.
+    root = _tmp()
+    try:
+        off = _arm(root, "off", {("q%d" % i): _k(5) for i in range(6)})
+        on = _arm(root, "on", {("q%d" % i): _k(1) for i in range(6)})
+        off2 = _arm(root, "off2", {("q%d" % i): _k(5) for i in range(6)})
+        on2 = _arm(root, "on2", {("q%d" % i): _k(1) for i in range(6)})
+        na = _arm(root, "na", {("q%d" % i): _k(5) for i in range(6)})
+        nb = _arm(root, "nb", {("q%d" % i): _k(5) for i in range(6)})
+        jf = os.path.join(root, "gate.json")
+        rc = G.main(["--off", off, "--on", on, "--null", na, nb,
+                     "--replicate", off2, on2, "--json-out", jf])
+        assert rc == 1, rc
+        w = json.load(io.open(jf, encoding="utf-8"))
+        assert w["replicate_supplied"] is True, w["replicate_supplied"]
+        assert w["labels"]["off2"] == "off2" and w["labels"]["on2"] == "on2", w["labels"]
+        assert w["effect_clause"]["state"] == "fired", w["effect_clause"]
+        assert w["verdict"] == "GATE FIRES: replicated effect + regression", w["verdict"]
+        assert w["replication_n"] == 6, w["replication_n"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_CLI_disambiguates_two_pairs_whose_BASENAMES_COLLIDE():
+    # Arms are labelled by directory basename, and the natural way to lay out a replicate is
+    # two parents with the same four names under them. gate() REFUSES a label collision (it
+    # keys the arms dict), so without the walk-up in main() the ordinary layout would be
+    # unrunnable from the CLI -- and a refusal here would be the tool blaming its own naming.
+    root = _tmp()
+    try:
+        off = _arm(root, "p1/off", {("q%d" % i): _k(5) for i in range(6)})
+        on = _arm(root, "p1/on", {("q%d" % i): _k(5) for i in range(6)})
+        off2 = _arm(root, "p2/off", {("q%d" % i): _k(5) for i in range(6)})
+        on2 = _arm(root, "p2/on", {("q%d" % i): _k(5) for i in range(6)})
+        na = _arm(root, "na", {("q%d" % i): _k(5) for i in range(6)})
+        nb = _arm(root, "nb", {("q%d" % i): _k(5) for i in range(6)})
+        jf = os.path.join(root, "gate.json")
+        rc = G.main(["--off", off, "--on", on, "--null", na, nb,
+                     "--replicate", off2, on2, "--json-out", jf])
+        assert rc == 0, rc
+        w = json.load(io.open(jf, encoding="utf-8"))
+        labs = w["labels"]
+        assert len({labs["off"], labs["on"], labs["off2"], labs["on2"]}) == 4, labs
+        assert labs["off2"].endswith("p2/off") and labs["on2"].endswith("p2/on"), labs
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
 
 def test_the_parser_can_actually_render_its_own_help():
     # A bare "%" in an argparse help string raises at FORMAT time, not at definition time, so
@@ -571,6 +823,7 @@ def test_the_parser_can_actually_render_its_own_help():
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     assert r.returncode == 0, r.stderr[-800:]
     assert "--null" in r.stdout and "--history" in r.stdout, r.stdout[:400]
+    assert "--replicate" in r.stdout, r.stdout[:400]
 
 
 def test_alpha_is_reported_next_to_the_p_value_it_judged():
@@ -589,7 +842,29 @@ def test_alpha_is_reported_next_to_the_p_value_it_judged():
 # A hand-rolled suite reports what it RAN, and a raise inside a test file ends the run silently.
 # Pin the count so a test lost to a rename or a bad merge is a failure rather than a smaller
 # number nobody reads.
-EXPECTED_TESTS = 33
+def test_EVERY_hand_rolled_RUNNER_in_the_repo_reports_a_sys_exit_as_a_FAILURE():
+    """Third instance of one class: an exception that is not an `Exception` ends a hand-rolled
+    suite silently. Here it was SystemExit from argparse, and the run printed 7 FAILs out of a
+    real 13 with no summary line at all -- a truncated run reads as a shorter suite.
+
+    One probe for all sixteen suites rather than a line in each, with a liveness count: a probe
+    that matched nothing would pass on nothing.
+    """
+    roots = [Path(G.__file__).resolve().parent, Path(G.__file__).resolve().parent.parent / "backend"]
+    files = sorted(p for r in roots for p in r.glob("test_*.py"))
+    assert len(files) >= 16, [str(p) for p in files]
+    bad = []
+    for p in files:
+        text = io.open(p, encoding="utf-8").read()
+        tail = text.split('if __name__ == "__main__":')[-1]
+        code = chr(10).join(l for l in tail.splitlines() if not l.lstrip().startswith("#"))
+        if "except BaseException" not in code and "except (Exception, SystemExit)" not in code:
+            bad.append(p.name)
+    assert not bad, ("these runners end the whole suite on a sys.exit instead of failing the "
+                     "one test: %s" % ", ".join(bad))
+
+
+EXPECTED_TESTS = 45
 
 
 def test_a_null_pair_sharing_an_arm_with_the_effect_is_named_as_NOT_INDEPENDENT():
@@ -637,7 +912,15 @@ if __name__ == "__main__":
         try:
             fn()
             print("  PASS  %s" % name)
-        except Exception:
+        except KeyboardInterrupt:
+            raise
+        except BaseException:
+            # SystemExit is NOT an Exception, so `except Exception` let a test that reaches
+            # sys.exit unwind the runner: the born-check of this very change ENDED at the first
+            # --replicate CLI test (argparse exits 2 on an unrecognized flag), printed no
+            # summary line and no count, and so read as a shorter suite rather than as an
+            # abort. gate() raises SystemExit for its refusals too, so this is reachable from
+            # ordinary tests. Ctrl-C is re-raised by cause, not by catching a narrower type.
             failed += 1
             print("  FAIL  %s" % name)
             traceback.print_exc()
