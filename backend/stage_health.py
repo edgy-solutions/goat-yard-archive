@@ -259,6 +259,72 @@ def record_request(
         pass
 
 
+def public_snapshot() -> dict:
+    """Name and boolean per stage, for a production monitor. No counters.
+
+    0.3.2: this is what GET /health/stages returns. `snapshot()` keeps every
+    counter and stays the internal API; nothing exposes it over HTTP.
+
+    healthy == "this stage RAN at least once in this process AND recorded no
+    fault". A stage that never ran is therefore false, not true: a monitor
+    whose green light means "nothing has happened yet" is the silence this
+    module exists to remove, so the ambiguity is resolved toward alarm.
+
+    THE CONFLATION, stated rather than hidden: false means "never ran" OR
+    "faulted", and the boolean cannot tell an operator which. That is the price
+    of name+boolean. `snapshot()` distinguishes them and is one import away for
+    anything running in-process.
+
+    A fault always wins over a pass: a stage with one degraded run and a
+    thousand clean ones is false. These are cumulative since process start,
+    so a stage that faulted once never goes green again without a restart.
+    That is deliberate at this granularity -- a rate belongs in a counter,
+    and this response has none.
+
+    "not_observable" is a THIRD outcome, and it exists because of this release
+    line. 0.3.x has no backend/degradation.py and no verification_failure to
+    read, so main.py records answer and verifier as UNOBSERVABLE on every
+    request. A boolean has nowhere to put "the stage ran and this build cannot
+    say": false would be an alarm that can never clear, and true would be a
+    fabricated pass in the one tool built to detect fabricated health. So the
+    stage gets NO boolean and is named here instead. A consumer that reads
+    `stages["answer"]` without checking this list gets a KeyError rather than
+    a wrong answer, which is the error I want it to make.
+    """
+    s = snapshot()
+    stages, not_observable = {}, []
+
+    exp = s["expansion"]
+    # A fallback is only ever recorded in the BAML-expansion except block, so
+    # fallbacks without errored should be impossible; it is in the condition
+    # anyway because a future caller recording one without an error would
+    # otherwise turn a degraded expansion green.
+    stages["expansion"] = bool(
+        (exp["ok"] + exp["errored"]) > 0 and exp["errored"] == 0 and not exp["fallbacks"])
+
+    modes = s["entity_lookup"]["modes"]
+    # "full" is the only healthy mode; "degraded_no_vector" means the embedding
+    # call failed and the lookup served BM25/substring only, and "other" means a
+    # mode this build does not recognise.
+    stages["entity_lookup"] = bool(
+        sum(modes.values()) > 0 and all(v == 0 for k, v in modes.items() if k != "full")
+        and modes.get("full", 0) > 0)
+
+    for name, fault_key in (("answer", "degraded"), ("verifier", "failures")):
+        st = s[name]
+        faulted = any(v > 0 for v in st[fault_key].values())
+        if faulted:
+            stages[name] = False
+        elif st["ok"] > 0:
+            stages[name] = True
+        elif st["unobservable"] > 0:
+            not_observable.append(name)
+        else:
+            stages[name] = False
+
+    return {"stages": stages, "not_observable": not_observable}
+
+
 def snapshot() -> dict:
     """Return the current cumulative per-stage health snapshot.
 

@@ -455,8 +455,146 @@ def test_source_expansion_error_assigned_outside_stages_capture_guard():
     assert assign_indent == guard_indent, (assign_indent, guard_indent)
 
 
+# --------------------------------------------------------------------------
+# 13. The PUBLIC projection: GET /health/stages returns name + boolean only.
+# --------------------------------------------------------------------------
+
+_COUNTER_WORDS = ("requests_recorded", "errored", "causes", "fallbacks",
+                  "modes", "unobservable", "not_run", "degraded", "failures",
+                  "pid", "commit_sha", "started_at", "uptime_s")
+
+
+def test_public_snapshot_is_NAME_and_BOOLEAN_only():
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      entity_lookup_mode="full", answer_degraded=None,
+                      verification_failure=None)
+    pub = sh.public_snapshot()
+    assert set(pub) == {"stages", "not_observable"}, pub
+    assert pub["stages"] == {"expansion": True, "entity_lookup": True,
+                             "answer": True, "verifier": True}, pub
+    for k, v in pub["stages"].items():
+        assert isinstance(v, bool), (k, type(v).__name__)
+    blob = json.dumps(pub)
+    # Not "no counters by inspection": the counter NAMES must not appear at
+    # all, so a future field that carries one has to fail here first.
+    for word in _COUNTER_WORDS:
+        assert word not in blob, (word, blob)
+    assert not any(ch.isdigit() for ch in blob), blob
+
+
+def test_a_stage_that_NEVER_RAN_reads_FALSE_not_TRUE():
+    # The whole point of the module: a green light that means "nothing has
+    # happened yet" is the silence it exists to remove.
+    sh._reset_for_tests()
+    pub = sh.public_snapshot()
+    assert pub["stages"] == {"expansion": False, "entity_lookup": False,
+                             "answer": False, "verifier": False}, pub
+    assert pub["not_observable"] == [], pub
+
+
+def test_ONE_fault_outweighs_many_clean_runs_in_this_process():
+    sh._reset_for_tests()
+    sh.record_request(expansion_error="boom 429", expansion_fallback="dedup_only",
+                      entity_lookup_mode="full", answer_degraded="llm_timeout",
+                      verification_failure="cited_sources_not_in_context")
+    for _ in range(50):
+        sh.record_request(expansion_error=None, expansion_fallback=None,
+                          entity_lookup_mode="full", answer_degraded=None,
+                          verification_failure=None)
+    pub = sh.public_snapshot()
+    assert pub["stages"] == {"expansion": False, "entity_lookup": True,
+                             "answer": False, "verifier": False}, pub
+    # The counters are still there for whoever needs the rate.
+    assert sh.snapshot()["answer"]["ok"] == 50, sh.snapshot()["answer"]
+
+
+def test_a_stage_this_BUILD_CANNOT_OBSERVE_gets_no_boolean_and_is_NAMED():
+    # What main.py actually records on the 0.3.x line: no degradation.py and no
+    # verification_failure to read, so every request reports UNOBSERVABLE. false
+    # would be an alarm that can never clear; true would be a fabricated pass in
+    # the one tool built to detect fabricated health.
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      entity_lookup_mode="full",
+                      answer_degraded=sh.UNOBSERVABLE,
+                      verification_failure=sh.UNOBSERVABLE)
+    pub = sh.public_snapshot()
+    assert pub["stages"] == {"expansion": True, "entity_lookup": True}, pub
+    assert pub["not_observable"] == ["answer", "verifier"], pub
+    for name in ("answer", "verifier"):
+        try:
+            pub["stages"][name]
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("%s got a boolean it did not earn" % name)
+
+
+def test_a_FAULT_wins_over_UNOBSERVABLE_so_the_stage_reads_FALSE():
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      entity_lookup_mode="full",
+                      answer_degraded=sh.UNOBSERVABLE,
+                      verification_failure=sh.UNOBSERVABLE)
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      entity_lookup_mode="full", answer_degraded="llm_timeout",
+                      verification_failure="cited_sources_not_in_context")
+    pub = sh.public_snapshot()
+    assert pub["stages"]["answer"] is False, pub
+    assert pub["stages"]["verifier"] is False, pub
+    assert pub["not_observable"] == [], pub
+
+
+def test_a_DEGRADED_entity_lookup_mode_is_not_healthy_even_mixed_with_full():
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      entity_lookup_mode="degraded_no_vector",
+                      answer_degraded=None, verification_failure=None)
+    assert sh.public_snapshot()["stages"]["entity_lookup"] is False
+    for _ in range(10):
+        sh.record_request(expansion_error=None, expansion_fallback=None,
+                          entity_lookup_mode="full", answer_degraded=None,
+                          verification_failure=None)
+    assert sh.public_snapshot()["stages"]["entity_lookup"] is False
+
+
+def test_an_expansion_FALLBACK_with_no_recorded_ERROR_still_reads_false():
+    # Today a fallback is only recorded in the except block, so this state
+    # should be unreachable. The condition covers it anyway: a future caller
+    # recording a fallback without an error would otherwise turn a degraded
+    # expansion green, which is the direction that must not be cheap.
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback="dedup_only",
+                      entity_lookup_mode="full", answer_degraded=None,
+                      verification_failure=None)
+    snap = sh.snapshot()
+    assert snap["expansion"]["errored"] == 0 and snap["expansion"]["fallbacks"], snap
+    assert sh.public_snapshot()["stages"]["expansion"] is False
+
+
+def test_public_snapshot_is_json_serialisable_and_has_no_sentinel():
+    sh._reset_for_tests()
+    sh.record_request(expansion_error=None, expansion_fallback=None,
+                      entity_lookup_mode="full",
+                      answer_degraded=sh.UNOBSERVABLE,
+                      verification_failure=sh.UNOBSERVABLE)
+    blob = json.dumps(sh.public_snapshot())
+    assert sh.UNOBSERVABLE not in blob, blob
+    assert "__" not in blob, blob
+
+
+def test_source_health_stages_route_returns_the_PUBLIC_projection():
+    # Matched with the "return " prefix on purpose: the route's docstring names
+    # stage_health.snapshot() to say where the counters went, and a bare
+    # substring probe would be satisfied by that sentence -- the hazard that
+    # bit twice on 2026-10-11 in evals/.
+    assert "return stage_health.public_snapshot()" in _MAIN
+    assert _MAIN.count("return stage_health.snapshot()") == 0, \
+        "the route still returns the full counter snapshot"
+
 if __name__ == "__main__":
-    EXPECTED_TEST_COUNT = 22
+    EXPECTED_TEST_COUNT = 31
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print(

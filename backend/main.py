@@ -1156,13 +1156,21 @@ async def health_check():
 
 @app.get("/health/stages")
 async def health_stages():
-    """Production-safe, read-only per-stage LM health for THIS process.
+    """Production-safe, read-only per-stage health for THIS process.
 
-    Cumulative counters since process start (see backend/stage_health.py).
-    Never raw text -- see that module's docstring for the safety rules this
-    route depends on.
+    Stage NAME and BOOLEAN only, no counters: {"stages": {...}, "not_observable":
+    [...]}. healthy means "ran at least once in this process and recorded no
+    fault", so a stage that never ran reads false -- the ambiguity is resolved
+    toward alarm, and false cannot tell never-ran from faulted. A stage this
+    build cannot observe at all (answer and verifier on the 0.3.x line) gets no
+    boolean and is named in not_observable instead of being given a pass it did
+    not earn. See backend/stage_health.public_snapshot for the whole contract.
+
+    The counters stay internal: stage_health.snapshot() keeps them and nothing
+    exposes it over HTTP. Never raw text -- see that module's docstring for the
+    safety rules this route depends on.
     """
-    return stage_health.snapshot()
+    return stage_health.public_snapshot()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
