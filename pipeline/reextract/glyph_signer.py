@@ -148,6 +148,9 @@ _ARGP.add_argument("--pass3", action="store_true",
                     help="sheet only the rows pass 2's ingest held as contradicted_prose_vs_structure, with "
                          "insertion verdicts, the sic verdict and the prose refusal. Mutually exclusive "
                          "with --pass2. Without either, output is byte-identical to 5a0a65b.")
+_ARGP.add_argument("--pass3-round", type=int, default=1,
+                    help="which signed export --pass3 imports (see PASS3_ROUNDS). Default 1 = the signed "
+                         "pass-2 export, i.e. the original behaviour; 2 = Chris's signed pass-3 verdicts.")
 _ARGP.add_argument("--out-dir", default=None,
                     help="directory the HTML, sidecar, skeleton and note crops are WRITTEN to (default: "
                          "the audits directory). Inputs are always read from the audits directory. Lets a "
@@ -157,6 +160,9 @@ if ARGS.pass2 and ARGS.pass3:
     _ARGP.error("--pass2 and --pass3 are mutually exclusive")
 PASS2 = ARGS.pass2
 PASS3 = ARGS.pass3
+PASS3_ROUND = ARGS.pass3_round
+if PASS3_ROUND != 1 and not PASS3:
+    _ARGP.error("--pass3-round only applies with --pass3")
 PASS23 = PASS2 or PASS3
 OUT_DIR = pathlib.Path(ARGS.out_dir) if ARGS.out_dir else HAD.DATA
 
@@ -164,7 +170,7 @@ OUT_DIR = pathlib.Path(ARGS.out_dir) if ARGS.out_dir else HAD.DATA
 # check made by the identity pins and by pass 3's own guards, and the run refuses to finish unless the
 # number equals EXPECTED_CHECKS for its mode. (The older bare asserts below are unchanged and still abort.)
 CHECKS = 0
-EXPECTED_CHECKS_BY_MODE = {"default": 4, "pass2": 4, "pass3": 20}
+EXPECTED_CHECKS_BY_MODE = {"default": 5, "pass2": 5, "pass3": 21}
 MODE = "pass3" if PASS3 else ("pass2" if PASS2 else "default")
 EXPECTED_CHECKS = EXPECTED_CHECKS_BY_MODE[MODE]
 
@@ -245,8 +251,17 @@ INGEST2_REPORT_PATH = HAD.DATA / ("INGEST_pass2_%s.md" % SET)
 # starter SKELETON -- a different file with the same stem, and that fixed-filename collision is how an
 # earlier approval record was destroyed. The signed copy therefore carries its own content hash in its
 # name and the build pins that hash too, so the name and the bytes have to agree.
-PASS2_EXPORT_SHA16 = "3285d39a12c14e6a"
-PASS2_EXPORT_NAME = "glyphsign_%s_pass2_26span_signed_%s.jsonl" % (SET, PASS2_EXPORT_SHA16[:8])
+# --pass3 rounds: an explicit, pinned table. Round 1 imports the signed pass-2 export; round 2 imports
+# Chris's signed pass-3 verdicts (so his not-in-crop work is preserved and he only adds sic cards).
+PASS3_ROUNDS = {
+    1: ("glyphsign_%s_pass2_26span_signed_%s.jsonl" % (SET, "3285d39a"), "3285d39a12c14e6a"),
+    2: ("glyphsign_%s_pass3_3span_signed_%s.jsonl" % (SET, "51c0e7ba"), "51c0e7ba02c8a6eb"),
+}
+if PASS3 and PASS3_ROUND not in PASS3_ROUNDS:
+    _ARGP.error("--pass3-round %d is not in PASS3_ROUNDS %r" % (PASS3_ROUND, sorted(PASS3_ROUNDS)))
+PASS2_EXPORT_NAME, PASS2_EXPORT_SHA16 = PASS3_ROUNDS[PASS3_ROUND if PASS3 else 1]
+assert PASS2_EXPORT_NAME.split("_signed_")[1][:8] == PASS2_EXPORT_SHA16[:8]
+_R = "" if PASS3_ROUND == 1 else "_r%d" % PASS3_ROUND     # round 1 keeps its original filenames
 PASS2_EXPORT_PATH = HAD.DATA / PASS2_EXPORT_NAME
 # Order item 4, already adjudicated by Chris: the project's first sic instance. Printed form, expectation
 # and reason are SEEDED as editable defaults; the verdict itself stays his click.
@@ -371,7 +386,7 @@ if PASS3:
           % (sorted(set(PASS2_SELECTED_IDS) - PASS3_EXPECT_IDS), sorted(PASS3_EXPECT_IDS - set(PASS2_SELECTED_IDS))))
     assert not (set(PASS2_SELECTED_IDS) - set(SPAN_IDS)), "a pass-3 span is not in the frozen 74"
     assert not (set(HAD.SEALED_TRUTH) & set(PASS2_SELECTED_IDS)), "a pass-3 span is in HAD.SEALED_TRUTH"
-    SKEL_NAME = "glyphsign_%s_pass3_%dspan.jsonl" % (SET, len(PASS2_SELECTED_IDS))
+    SKEL_NAME = "glyphsign_%s_pass3%s_%dspan.jsonl" % (SET, _R, len(PASS2_SELECTED_IDS))
 
 RUN_SPAN_IDS = PASS2_SELECTED_IDS
 RUN_N = len(RUN_SPAN_IDS)
@@ -1635,6 +1650,10 @@ check(_blob_id(JS_PASS2) == (12422, "3ccd5adfbb39c5c4"),
       "JS_PASS2 measures %r, not (12422, 3ccd5adfbb39c5c4): it renders a console that is already signed "
       "and spent (pass 2); it must never be edited -- fork a new blob instead" % (_blob_id(JS_PASS2),))
 
+check(_blob_id(JS_PASS3) == (17628, "ae889bc9422df5f0"),
+      "JS_PASS3 measures %r, not (17628, ae889bc9422df5f0): it renders a console that is already signed "
+      "and spent (pass 3); it must never be edited -- fork a new blob instead" % (_blob_id(JS_PASS3),))
+
 JS = JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)
 check(JS is (JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)) and (PASS3 or JS is not JS_PASS3),
       "the console chosen for this mode is not the one this mode names")
@@ -1947,7 +1966,7 @@ for _ssid, _sd in SIC_SEEDS.items():
               % (_ssid, _hits))
         SIC_SEED_META[_ssid] = {"tile_i": _hits[0], "expected": _sd["expected"], "reason": _sd["reason"]}
 SEEDS_JS = json.dumps(SIC_SEED_META)
-STOREKEY = (SET + "_pass3") if PASS3 else ((SET + "_pass2") if PASS2 else SET)
+STOREKEY = (SET + "_pass3" + _R) if PASS3 else ((SET + "_pass2") if PASS2 else SET)
 
 H.append("<script>"
          + JS.replace("__RM__", json.dumps(RM, sort_keys=True))
@@ -2200,7 +2219,7 @@ DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
 # Output filename and sidecar carry "pass2" and the row count under --pass2, so the two consoles can
 # never be confused; the pass-1 console's own name (this else-branch) must not change.
 if PASS3:
-    OUT = OUT_DIR / ("glyphsign_%s_pass3_%dspan_%s.html" % (SET, RUN_N, DIG))
+    OUT = OUT_DIR / ("glyphsign_%s_pass3%s_%dspan_%s.html" % (SET, _R, RUN_N, DIG))
 elif PASS2:
     OUT = OUT_DIR / ("glyphsign_%s_pass2_%dspan_%s.html" % (SET, RUN_N, DIG))
 else:

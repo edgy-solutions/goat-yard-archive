@@ -76,6 +76,164 @@ def prov(a, b):
 
 GIT_START = states()
 
+# ---------------------------------------------------------------- re-signing diff gate
+# A re-signing round can INTRODUCE errors as well as fix them (p493:n3 tile 4: pass 2 `corrected` to resh,
+# pass 3 `confirmed` the printed final-pe). A changed tile over IDENTICAL pixels is an adjudication event:
+# two human verdicts about the same crop disagree. This surfaces the pair; it never says which is right.
+# No score, no winner, no dictionary, no word-likeness: the verdict per disagreement is keep / take /
+# neither and is a human's. A re-signed row is admitted only through admit_resigned(), which requires the
+# diff this function produced and a human verdict for every disagreement in it.
+#
+# WHAT THIS DOES NOT SOLVE. It cannot tell a regression from a fix; it makes the pair impossible to miss.
+# It compares two signed exports only: a wrong verdict that both rounds agree on is invisible to it.
+
+def sha16(b):
+    return hashlib.sha256(b if isinstance(b, bytes) else b.encode("utf-8")).hexdigest()[:16]
+
+
+class ResignDiffError(Exception):
+    pass
+
+
+ADJUDICATIONS = ("keep", "take", "neither")      # keep = prior reading, take = current reading
+
+
+def _rs_file_sha16(path):
+    return hashlib.sha256(io.open(path, "rb").read()).hexdigest()[:16]
+
+
+def _rs_digest(dis, current_sha16, prior_sha16, ids):
+    body = json.dumps([{k: v for k, v in d.items() if k != "adjudication"} for d in dis],
+                      sort_keys=True, ensure_ascii=True)
+    return sha16(sha16(body) + "|" + current_sha16 + "|" + prior_sha16 + "|" + ",".join(ids))
+
+
+def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
+    """Every tile whose (shown, verdict, chose) changed and every insertion whose (chose, verdict) changed,
+    for each span in `current_rows`, against `prior_rows`. Raises ResignDiffError unless crop_sha16 and
+    candidate_sha16 are identical for every compared span (a diff only means something over the same
+    pixels) and the tile index sets agree. Returns the report; `adjudication` is None on every entry."""
+    prior = {r["span_id"]: r for r in prior_rows}
+    if len(prior) != len(prior_rows):
+        raise ResignDiffError("duplicate span_id in the prior export")
+    cur_ids = [r["span_id"] for r in current_rows]
+    if len(set(cur_ids)) != len(cur_ids):
+        raise ResignDiffError("duplicate span_id in the current export")
+    dis, rows_touched, reversal_rows = [], set(), set()
+    n_tiles = n_ins = n_rev = 0
+    for r in current_rows:
+        sid = r["span_id"]
+        if sid not in prior:
+            raise ResignDiffError("%s is in the current export but has no prior row to compare" % sid)
+        p = prior[sid]
+        for k in ("crop_sha16", "candidate_sha16"):
+            if not r.get(k) or r.get(k) != p.get(k):
+                raise ResignDiffError("%s: %s differs (%r vs %r) -- not the same pixels, a diff means nothing"
+                                      % (sid, k, r.get(k), p.get(k)))
+        ct, pt = {t["i"]: t for t in r["tiles"]}, {t["i"]: t for t in p["tiles"]}
+        if len(ct) != len(r["tiles"]) or len(pt) != len(p["tiles"]) or set(ct) != set(pt):
+            raise ResignDiffError("%s: the tile index sets differ over identical pixels" % sid)
+        for i in sorted(ct):
+            a, b = pt[i], ct[i]
+            ka = (a.get("shown") or "", a.get("verdict") or "", a.get("chose") or "")
+            kb = (b.get("shown") or "", b.get("verdict") or "", b.get("chose") or "")
+            if ka != kb:
+                rev = (ka[1] == "corrected" and kb[1] == "confirmed")
+                dis.append({"span_id": sid, "what": "tile", "i": i, "kind": b.get("kind"),
+                            "prior": {"shown": ka[0], "verdict": ka[1], "chose": ka[2]},
+                            "current": {"shown": kb[0], "verdict": kb[1], "chose": kb[2]},
+                            "reversal_corrected_to_confirmed": rev, "adjudication": None})
+                n_tiles += 1
+                rows_touched.add(sid)
+                if rev:
+                    n_rev += 1
+                    reversal_rows.add(sid)
+
+        def ikey(x):
+            return (x.get("seq"), x.get("after_i"), x.get("kind"))
+        ci, pi = {ikey(x): x for x in r["insertions"]}, {ikey(x): x for x in p["insertions"]}
+        if len(ci) != len(r["insertions"]) or len(pi) != len(p["insertions"]):
+            raise ResignDiffError("%s: duplicate insertion key" % sid)
+        for k in sorted(set(ci) | set(pi), key=lambda z: (z[0] is None, z[0] or 0, str(z))):
+            a, b = pi.get(k), ci.get(k)
+            ka = None if a is None else (a.get("chose") or "", a.get("verdict") or "")
+            kb = None if b is None else (b.get("chose") or "", b.get("verdict") or "")
+            if ka != kb:
+                dis.append({"span_id": sid, "what": "insertion", "seq": k[0], "after_i": k[1], "kind": k[2],
+                            "prior": None if ka is None else {"chose": ka[0], "verdict": ka[1]},
+                            "current": None if kb is None else {"chose": kb[0], "verdict": kb[1]},
+                            "reversal_corrected_to_confirmed": False, "adjudication": None})
+                n_ins += 1
+                rows_touched.add(sid)
+    return {"current_file_sha16": current_sha16, "prior_file_sha16": prior_sha16,
+            "spans_compared": cur_ids,
+            "pixels": {r["span_id"]: [r["crop_sha16"], r["candidate_sha16"]] for r in current_rows},
+            "disagreements": dis,
+            "rate": {"rows_compared": len(cur_ids), "rows_touched": len(rows_touched),
+                     "tiles_compared": sum(len(r["tiles"]) for r in current_rows), "tiles_changed": n_tiles,
+                     "insertions_changed": n_ins, "reversals_corrected_to_confirmed": n_rev,
+                     "reversal_rows": sorted(reversal_rows)},
+            "diff_sha16": _rs_digest(dis, current_sha16, prior_sha16, cur_ids)}
+
+
+def admit_resigned(row, report, adjudications=None):
+    """The only door a re-signed row goes through. Refuses unless `report` is an intact output of
+    diff_resigned covering this row, and every disagreement on this row carries a human verdict in
+    ADJUDICATIONS (adjudications: {(span_id, what, i_or_seq): 'keep'|'take'|'neither'}). Returns a copy of
+    the row annotated with the diff id; it does not choose between readings."""
+    if not isinstance(report, dict) or "diff_sha16" not in report or "disagreements" not in report:
+        raise ResignDiffError("no diff report: a re-signed row is not admitted without the diff")
+    sid = row["span_id"]
+    if sid not in report["spans_compared"]:
+        raise ResignDiffError("%s was not covered by the diff" % sid)
+    if report["pixels"][sid] != [row.get("crop_sha16"), row.get("candidate_sha16")]:
+        raise ResignDiffError("%s: the row's pixels are not the ones the diff compared" % sid)
+    if report["diff_sha16"] != _rs_digest(report["disagreements"], report["current_file_sha16"],
+                                          report["prior_file_sha16"], report["spans_compared"]):
+        raise ResignDiffError("the diff report was altered after it was produced")
+    adjudications = adjudications or {}
+    for d in report["disagreements"]:
+        if d["span_id"] != sid:
+            continue
+        key = (sid, d["what"], d["i"] if d["what"] == "tile" else d["seq"])
+        if adjudications.get(key) not in ADJUDICATIONS:
+            raise ResignDiffError("%s %s %s changed over identical pixels and has no keep/take/neither "
+                                  "verdict from a human" % key)
+    out = dict(row)
+    out["resign_diff_sha16"] = report["diff_sha16"]
+    return out
+
+
+def format_resign_diff(rep):
+    L = []
+    for d in rep["disagreements"]:
+        loc = ("%s tile %d" % (d["span_id"], d["i"])) if d["what"] == "tile" else \
+              ("%s insertion seq %s after_i %s" % (d["span_id"], d["seq"], d["after_i"]))
+        L.append("  %-30s prior %s  ->  current %s%s" % (
+            loc, json.dumps(d["prior"], ensure_ascii=True), json.dumps(d["current"], ensure_ascii=True),
+            "   <== REVERSAL corrected->confirmed (a prior reading discarded)"
+            if d["reversal_corrected_to_confirmed"] else ""))
+    r = rep["rate"]
+    L.append("rate: %d/%d tiles changed, %d insertion(s) changed, %d/%d row(s) touched, "
+             "%d corrected->confirmed reversal(s) in row(s) %s" % (
+                 r["tiles_changed"], r["tiles_compared"], r["insertions_changed"], r["rows_touched"],
+                 r["rows_compared"], r["reversals_corrected_to_confirmed"], r["reversal_rows"]))
+    L.append("pixels identical for all %d span(s); diff_sha16 %s; every verdict (keep/take/neither) is "
+             "still a human's" % (r["rows_compared"], rep["diff_sha16"]))
+    return "\n".join(L)
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
+    _cur, _pri = sys.argv[2], sys.argv[3]
+    _rep = diff_resigned([json.loads(l) for l in io.open(_cur, encoding="utf-8") if l.strip()],
+                         [json.loads(l) for l in io.open(_pri, encoding="utf-8") if l.strip()],
+                         _rs_file_sha16(_cur), _rs_file_sha16(_pri))
+    print(format_resign_diff(_rep))
+    if len(sys.argv) > 4:
+        io.open(sys.argv[4], "w", encoding="utf-8").write(json.dumps(_rep, indent=1, ensure_ascii=True))
+    sys.exit(0)
+
+
 # ---------------------------------------------------------------- inputs, read-only
 
 EXPORT_PATH, PASS1_PATH = sys.argv[1], sys.argv[2]
