@@ -41,6 +41,8 @@ from typing import List, Optional
 
 import httpx
 
+from evals import debug_capture
+
 from evals.zone3_judge_prod_sampler import (
     AnswerSample,
     DailyReport,
@@ -86,6 +88,10 @@ def _run_query(endpoint: str, question: str, timeout: float = 180.0) -> dict:
     stages so we can pick up commit_sha and excision counts."""
     with httpx.Client(timeout=timeout) as client:
         r = client.post(endpoint, json={"query": question, "debug": True})
+        # This replay reads stages['zone3_excisions'], so it needs the gated
+        # debug channel too -- it was missed when the gate went in, and a bare
+        # 403 here reads as an ingress fault on a daily monitor.
+        debug_capture.refuse_if_debug_disabled(r, endpoint, __file__)
         r.raise_for_status()
         return r.json()
 

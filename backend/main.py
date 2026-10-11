@@ -34,6 +34,8 @@ from .webhooks import router as webhook_router
 from .bible_api import router as bible_router
 from .auth import get_optional_user_id, security
 from .bible_mapping import format_book_ranges
+from . import stage_health
+from . import debug_gate
 
 # Rate Limiting
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -401,9 +403,22 @@ async def search(request: Request, req: SearchRequest):
     if not search_engine:
         raise HTTPException(status_code=500, detail="Search Engine not initialized")
 
-    # Per-stage capture for the determinism harness — only populated when
-    # req.debug=True so production traffic is unaffected.
-    stages_capture: Optional[dict] = {} if req.debug else None
+    # A debug response carries the bot's raw pre-sweep answer, the embedding
+    # hash and the retrieved SIDs, so `debug: true` is a data-exposure channel
+    # and not a feature flag. REFUSED LOUDLY where it is not enabled: returning
+    # 200 with stages: null would read to the caller as "this build has no
+    # stage captures", which is a different and false statement.
+    if req.debug and not debug_gate.stage_debug_allowed():
+        raise HTTPException(
+            status_code=403,
+            detail=("stage debug captures are disabled in this deployment; set "
+                    "%s=1 on the backend to enable them" % debug_gate.ENV_VAR))
+
+    # Per-stage capture for the determinism harness. Gated a second time on
+    # purpose: if the 403 above is ever relaxed or moved, the capture itself
+    # must still not populate. The expensive direction has to stay expensive.
+    stages_capture: Optional[dict] = (
+        {} if (req.debug and debug_gate.stage_debug_allowed()) else None)
     if stages_capture is not None:
         stages_capture["question"] = req.query
 
@@ -456,6 +471,11 @@ async def search(request: Request, req: SearchRequest):
     # dispatch on which sentinel signal fired (ADR-0012 poisoned-manifest
     # suppression vs dedup-only fallback).
     _punt_reasons: list[str] = []
+    # Plain local for stage_health (backend/stage_health.py): the raw BAML
+    # exception text, readable at the end of the request regardless of
+    # req.debug. stages_capture["baml_error"] carries the same text but only
+    # when debug mode is on.
+    _expansion_error: Optional[str] = None
     # Entity-boost telemetry, populated in the BAML-success path. Defaults
     # cover the punt/exception paths where BAML produced no usable pick.
     entity_boost_telemetry: dict = {
@@ -660,6 +680,9 @@ async def search(request: Request, req: SearchRequest):
             stages_capture["baml_entities"] = sorted(mapped_entities) if mapped_entities else []
             stages_capture["baml_error"] = str(e)
             stages_capture["baml_fallback"] = fallback_kind
+        # Plain-local mirror for stage_health, readable at the end of the
+        # request regardless of req.debug (see initialisation above).
+        _expansion_error = str(e)
 
     # ADR-0014 fail-anchored gate. If the entity lookup degraded (vector
     # tier / litellm enrichment infra down for that call), the manifest —
@@ -680,6 +703,10 @@ async def search(request: Request, req: SearchRequest):
         mapped_entities = []
         if stages_capture is not None:
             stages_capture["baml_fallback"] = "vector_tier_degraded_suppressed"
+        # Plain-local mirror for stage_health -- this gate can fire on the
+        # BAML-success path too (no exception, so fallback_kind would
+        # otherwise be unset), so it is assigned here unconditionally.
+        fallback_kind = "vector_tier_degraded_suppressed"
         print("[ADR-0014] entity lookup degraded -> entity boost suppressed; "
               "retrieval on deterministic floor (raw + expansion, no boost).")
 
@@ -734,6 +761,19 @@ async def search(request: Request, req: SearchRequest):
         stages_capture["retrieval_chunk_ids_ordered"] = [r.get("chunk_id", "") for r in raw_results]
 
     if not raw_results:
+        # This exit still exercised expansion and the entity lookup, so it is
+        # recorded. answer/verifier never ran on this path -- see the not_run
+        # state in backend/stage_health.py; counting them as ok here would be
+        # the fabricated pass this module exists to prevent.
+        stage_health.record_request(
+            expansion_error=locals().get("_expansion_error", None),
+            expansion_fallback=locals().get("fallback_kind", None),
+            entity_lookup_mode=locals().get("entity_lookup_mode", None),
+            answer_degraded=None,
+            verification_failure=None,
+            answer_ran=False,
+            verifier_ran=False,
+        )
         return SearchResponse(
             answer="No relevant commentary found.",
             citations=[],
@@ -1071,6 +1111,19 @@ async def search(request: Request, req: SearchRequest):
     
     final_citations = [ev.citation for ev in evidence_objects]
 
+    # This build has no backend/degradation.py and no verification_failure
+    # local, so the answer and verifier stages RAN and their health cannot be
+    # read here. UNOBSERVABLE says exactly that; None would report them
+    # healthy, which would be a fabricated pass.
+    stage_health.record_request(
+        expansion_error=locals().get("_expansion_error", None),
+        expansion_fallback=locals().get("fallback_kind", None),
+        entity_lookup_mode=locals().get("entity_lookup_mode", None),
+        answer_degraded=stage_health.UNOBSERVABLE,
+        verification_failure=stage_health.UNOBSERVABLE,
+        answer_ran=bot is not None,
+        verifier_ran=bot is not None,
+    )
     return SearchResponse(
         answer=answer,
         citations=final_citations,
@@ -1118,6 +1171,24 @@ async def feedback(req: FeedbackRequest):
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "goat-yard-archive"}
+
+@app.get("/health/stages")
+async def health_stages():
+    """Production-safe, read-only per-stage health for THIS process.
+
+    Stage NAME and BOOLEAN only, no counters: {"stages": {...}, "not_observable":
+    [...]}. healthy means "ran at least once in this process and recorded no
+    fault", so a stage that never ran reads false -- the ambiguity is resolved
+    toward alarm, and false cannot tell never-ran from faulted. A stage this
+    build cannot observe at all (answer and verifier on the 0.3.x line) gets no
+    boolean and is named in not_observable instead of being given a pass it did
+    not earn. See backend/stage_health.public_snapshot for the whole contract.
+
+    The counters stay internal: stage_health.snapshot() keeps them and nothing
+    exposes it over HTTP. Never raw text -- see that module's docstring for the
+    safety rules this route depends on.
+    """
+    return stage_health.public_snapshot()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

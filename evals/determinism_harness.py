@@ -3,8 +3,14 @@ Stage-by-stage determinism harness.
 
 For each question in gill_reference_set.jsonl, hits POST /api/search with
 {"debug": true} N times and captures the per-stage I/O snapshot (`stages` dict)
-that the API returns when debug=True. Then compares stage outputs across runs
-to isolate exactly which stage introduces variance.
+that the API returns when debug=True.
+
+REQUIRES GYA_DEBUG_STAGES=1 in the TARGET BACKEND's environment (0.3.2). The
+captures are a data-exposure channel, so the gate defaults to OFF everywhere
+and the route answers a debug request with 403 where it is not enabled;
+evals/debug_capture.py turns that 403 into an explicit instruction rather
+than a stack trace. Stage outputs are then compared across runs to isolate
+exactly which stage introduces variance.
 
 Stages captured (in pipeline order):
   question                  -> the user query (sanity check, always identical)
@@ -43,6 +49,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+import debug_capture
+
 
 STAGES_IN_PIPELINE_ORDER = [
     "available_entities",
@@ -78,6 +86,10 @@ def call_endpoint(endpoint: str, question: str, timeout: float, auth: Optional[s
         headers["Authorization"] = f"Bearer {auth}"
     with httpx.Client(timeout=timeout) as client:
         r = client.post(endpoint, headers=headers, json={"query": question, "debug": True})
+        # The captures this harness exists to read are gated per deployment
+        # (backend/debug_gate.py). One shared refusal, so the remedy cannot
+        # drift between the scripts that need it.
+        debug_capture.refuse_if_debug_disabled(r, endpoint, __file__)
         r.raise_for_status()
         return r.json()
 

@@ -34,6 +34,14 @@ data:
   # test = "development"). Filterable via the Environment column on Traces.
   LANGFUSE_TRACING_ENVIRONMENT: {{ .Values.api.env.APP_ENV | quote }}
   {{- end }}
+  # Per-stage debug captures on POST /api/search (backend/debug_gate.py). A
+  # debug response carries the bot's raw pre-sweep answer, the embedding hash
+  # and the retrieved SIDs, so this is a data-exposure channel: OFF in
+  # values.yaml, ON only where a harness needs it. The pod reads it through
+  # envFrom at container start, so a change needs a rollout restart.
+  {{- if .Values.api.env.GYA_DEBUG_STAGES }}
+  GYA_DEBUG_STAGES: {{ .Values.api.env.GYA_DEBUG_STAGES | quote }}
+  {{- end }}
   {{- if .Values.api.env.LITELLM_PROXY_URL }}
   LITELLM_PROXY_URL: {{ .Values.api.env.LITELLM_PROXY_URL | quote }}
   {{- end }}
