@@ -15,6 +15,12 @@ api:
     # name was returning 404 from the backend.)
     MINIO_HTTP_ENDPOINT: "http://gya-frontend-minio.gya-test.svc.cluster.local:9000"
   
+    # ADR-0009 structured answer path ON for the one-week gya-test soak
+    # (ruling, Chris 2026-10-11). Production stays "0" in values.yaml until the
+    # release after 0.3.2, and only if the paired gate holds -- with one replicate
+    # pair the gate's EFFECT clause abstains, so the RATCHET decides that flip.
+    GILL_STRUCTURED_ANSWER: "1"
+
   image:
     tag: "latest"
     
