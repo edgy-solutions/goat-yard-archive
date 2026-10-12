@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 37
+EXPECTED_TESTS = 40
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -766,6 +766,39 @@ def test_prior_refuses_mixed_sets_unknown_rows_and_missing_pitch():
             assert what in str(e) or what == "set", e
     assert RVT.run_pitch_px([{"kind": "run_summary", "thresholds": {}}]) is None
     assert RVT.run_pitch_px([{"kind": "run_summary", "thresholds": {"inset_thr": {"pitch_px": 57.0}}}]) == 57.0
+
+
+def _prec_v(fp, rect_y0, head_y0, verse):
+    r = _prec(fp, rect_y0, head_y0)
+    r["verse"] = verse
+    return r
+
+
+def test_prior_unread_old_verse_matches_by_head_position():
+    old = [_prec_v(5, 100, 100, None)]
+    rows = [_xrow("r:5:left:100", "verse", "adjusted", ratified=[_rat(5, "left", 90, 310)], note="n")]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 100, verse=(5,))])
+    e = P["map"]["r:5:left:100"]
+    assert e["match"] == "near_old_verse_unread" and e["class"] == "carried_same_layout", e
+    assert e["seeded"]["verdict"] == "adjusted" and c["by_match"] == {"near_old_verse_unread": 1}
+    P2, _, _ = _prior([_prec_v(5, 100, 100, [])], rows, [_prec(5, 120, 120, verse=(5,))])   # [] counts as unread; dy 20
+    assert P2["map"]["r:5:left:120"]["match"] == "near_old_verse_unread"
+
+
+def test_prior_two_different_read_verses_stay_unmatched():
+    old = [_prec_v(5, 100, 100, [4])]
+    rows = [_xrow("r:5:left:100", "verse", "adjusted", ratified=[_rat(5, "left", 90, 310)])]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 100, verse=(5,))])
+    assert P["map"] == {} and l["new_unmatched"] == ["r:5:left:100"]
+    assert [d["item_id"] for d in l["old_unmatched"]] == ["r:5:left:100"]
+
+
+def test_prior_two_unread_old_heads_within_tol_is_identity_conflict():
+    old = [_prec_v(5, 100, 100, None), _prec_v(5, 140, 130, None)]
+    rows = [_xrow("r:5:left:100", "verse", "correct", ratified=[_rat(5, "left", 100, 300)]),
+            _xrow("r:5:left:140", "verse", "correct", ratified=[_rat(5, "left", 140, 340)])]
+    P, c, l = _prior(old, rows, [_prec(5, 115, 115, verse=(5,))])
+    assert P["map"] == {} and l["identity_conflict"] == ["r:5:left:115"]
 
 
 def test_prior_html_only_embeds_map_and_manifest_and_changes_the_ui_config_hash():

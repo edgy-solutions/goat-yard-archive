@@ -907,7 +907,9 @@ def compute_prior(old_run_records, old_export_rows, new_items, pitch_px=None, ex
     (PRIOR, counts, lists). Refuses (ValueError) on a mixed-set export, on an export row whose
     item_id is not an item of the old run (+ the export's own miss rows), and when pitch_px is
     absent. Matching: exact head identity; near (same fp/col/verse, |dy| <= floor(pitch/2), exactly
-    one candidate); from a miss's drawn region. Each old source is used at most once."""
+    one candidate); near_old_verse_unread (stage 2b: the OLD verse is None/[] -- the witness was silent --
+    same fp/col, same tolerance, same uniqueness rules; two READ verses that differ never match);
+    from a miss's drawn region. Each old source is used at most once."""
     tol = prior_head_tol_px(pitch_px)
     rows = list(old_export_rows)
     sets = sorted({r.get("set_sha16") for r in rows}, key=str)
@@ -975,6 +977,15 @@ def compute_prior(old_run_records, old_export_rows, new_items, pitch_px=None, ex
                 and _verse_tuple(o.get("verse")) == _verse_tuple(n.get("verse"))
                 and abs(y0 - _head_col_y0(o)[1]) <= tol]
     claim(near_cands, "region", "near")
+
+    # 2b. near, old verse unread: an unread verse is the witness's silence, not a different heading
+    def unread_cands(n):
+        col, y0 = _head_col_y0(n)
+        return [o["item_id"] for o in old_regions
+                if o["item_id"] not in used_old and o.get("head") and _verse_tuple(o.get("verse")) == ()
+                and int(o["file_page"]) == int(n["file_page"]) and _head_col_y0(o)[0] == col
+                and abs(y0 - _head_col_y0(o)[1]) <= tol]
+    claim(unread_cands, "region", "near_old_verse_unread")
 
     # 3. from a miss's drawn region
     def miss_cands(n):

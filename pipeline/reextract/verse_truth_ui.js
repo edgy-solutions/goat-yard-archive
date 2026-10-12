@@ -288,7 +288,7 @@ function nextIncompleteId(orderedItems, state, cursorId) {
   return null;
 }
 
-var _MATCH_TXT = { exact: "exact", near: "near", from_miss: "from your drawn region", page: "page answer" };
+var _MATCH_TXT = { exact: "exact", near: "near", near_old_verse_unread: "near; your earlier card had no verse number read", from_miss: "from your drawn region", page: "page answer" };
 function priorBadgeText(ent, st) {
   // Badge lines for a PRIOR.map entry given the current card state. [] when nothing to say.
   var out = [];
