@@ -22,6 +22,7 @@ Stage map (S1-S5), each deterministic, each emits flags, none gates:
 from __future__ import annotations
 
 import difflib
+import math
 import re
 from collections import namedtuple, Counter
 
@@ -89,6 +90,19 @@ HEAD_RULE_MAX_H_FRAC = 0.75       # band h / median_line_h; mode midpoint (rule 
 HEAD_RULE_MIN_FILL = 0.275        # peak row ink fill over the band's x0:x1; mode midpoint (0.075 vs 0.475)
 HEAD_RULE_LINE_H_MAX_PX = 85      # median_line_h above this = multi-line median -> abstain (single-line
                                   # 49-70 px on 203 pages, multi-line 100-256 on 4; envelope, not a mode midpoint)
+
+# Column rule (the printed vertical double rule between the columns), located per page as a LINE
+# centre(y) = slope*y + c0 because the page skews (up to 68 px over the body). Geometry xdiv is NOT the
+# rule (10-50 px off, 223 px on p745). Thresholds: MEASURE_col_split_20261011.md (dr-voluminous
+# 3e8f398b), 207-page vol.1 sample.
+RULE_COL_FRAC = 0.59        # per-column ink fraction in a strip; mode midpoint (type 0.18 vs rule 1.00)
+RULE_MERGE_GAP_PX = 20      # merge >=cut runs across white gaps <= this; mode midpoint (7 vs 32 px)
+RULE_MIN_STRIP_FRAC = 0.5   # share of body strips that must carry a rule; mode midpoint (0.0 vs 1.0)
+RULE_MAX_RESID_PX = 15      # structural: = DOUBLE_RULE_FLANK_PX; a track residual beyond the flank is in type
+RULE_SEARCH_PX = 300        # +/- window around geometry xdiv (max measured |xdiv - rule| is 223)
+RULE_STRIP_PX = 300         # strip height
+RULE_Y_TOP_PX = 700         # body window top, as measured
+RULE_MIN_STRIPS = 3         # minimum rule strips to fit a line
 
 # text_lines' default valley-split picks the n-1 globally deepest candidate rows with no
 # separation constraint, so two minima of ONE inter-line valley can both be picked and starve a
@@ -323,6 +337,112 @@ def _treat_double_rule_as_white(colhas, centre_idx, merge_px=DOUBLE_RULE_MERGE_P
     return out
 
 
+def _rule_clusters(frac, lo):
+    """Maximal runs of frac >= RULE_COL_FRAC, merged across white gaps <= RULE_MERGE_GAP_PX.
+    Returns [(a, b, mass)] with a/b window-local (b exclusive); mass = mean of frac over ONLY the
+    >=cut columns inside the cluster (width-weighted mean of its runs' means)."""
+    runs = []
+    on = frac >= RULE_COL_FRAC
+    n = len(on)
+    i = 0
+    while i < n:
+        if on[i]:
+            j = i
+            while j < n and on[j]:
+                j += 1
+            runs.append([i, j, float(frac[i:j].mean())])
+            i = j
+        else:
+            i += 1
+    out = []
+    for a, b, m in runs:
+        if out and a - out[-1][1] <= RULE_MERGE_GAP_PX:
+            pa, pb, pm = out[-1]
+            w0, w1 = pb - pa, b - a
+            out[-1] = [pa, b, (pm * w0 + m * w1) / (w0 + w1)]
+        else:
+            out.append([a, b, m])
+    return out
+
+
+def locate_column_rule(ink, geom_record):
+    """Pure. Locates the printed column rule as a slanted line centre(y) = slope*y + c0 over the body
+    (MEASURE_col_split_20261011.md). Returns {"status": "ok", slope, c0, half_w, pad, max_resid,
+    n_strips, n_rule, y_range, xdiv_geometry, strips} or {"status": "abstained", "reason":
+    "no_xdiv" | "no_rule" | "track_nonlinear", ...}."""
+    xdiv = geom_record.get("xdiv")
+    if not xdiv:
+        return {"status": "abstained", "reason": "no_xdiv"}
+    xdiv = int(xdiv)
+    H, W = ink.shape
+    rules = [r for r in (geom_record.get("rules") or []) if r is not None]
+    y_end = (min(rules) - 20) if rules else (H - 300)
+    lo, hi = max(0, xdiv - RULE_SEARCH_PX), min(W, xdiv + RULE_SEARCH_PX)
+
+    strips = []
+    n_strips = 0
+    for y in range(RULE_Y_TOP_PX, y_end - RULE_STRIP_PX // 2, RULE_STRIP_PX):
+        ys1 = min(y + RULE_STRIP_PX, y_end)
+        n_strips += 1
+        frac = ink[y:ys1, lo:hi].mean(axis=0)
+        cl = _rule_clusters(frac, lo)
+        if not cl:
+            continue
+        a, b, _m = max(cl, key=lambda c: (c[1] - c[0]) * c[2])
+        strips.append({"y_mid": (y + ys1) / 2, "centre": lo + (a + b) / 2, "width": b - a})
+
+    n_rule = len(strips)
+    if n_strips == 0 or n_rule < RULE_MIN_STRIPS or n_rule / n_strips < RULE_MIN_STRIP_FRAC:
+        return {"status": "abstained", "reason": "no_rule", "n_strips": n_strips, "n_rule": n_rule,
+                "strips": strips}
+    ys = np.array([t["y_mid"] for t in strips])
+    cs = np.array([t["centre"] for t in strips])
+    slope, c0 = np.polyfit(ys, cs, 1)
+    max_resid = float(np.abs(cs - (slope * ys + c0)).max())
+    if max_resid > RULE_MAX_RESID_PX:
+        return {"status": "abstained", "reason": "track_nonlinear", "n_strips": n_strips, "n_rule": n_rule,
+                "slope": round(float(slope), 6), "c0": round(float(c0), 1),
+                "max_resid": round(max_resid, 1), "strips": strips}
+    half_w = float(np.median([t["width"] for t in strips])) / 2
+    return {"status": "ok", "slope": round(float(slope), 6), "c0": round(float(c0), 1),
+            "half_w": round(half_w, 1), "pad": int(math.ceil(max_resid)),
+            "max_resid": round(max_resid, 1), "n_strips": n_strips, "n_rule": n_rule,
+            "y_range": [RULE_Y_TOP_PX, int(y_end)], "xdiv_geometry": xdiv, "strips": strips}
+
+
+def split_centre(split, y):
+    return split["slope"] * y + split["c0"]
+
+
+def left_edge(split, y):
+    return split_centre(split, y) - split["half_w"] - split["pad"]
+
+
+def right_edge(split, y):
+    return split_centre(split, y) + split["half_w"] + split["pad"]
+
+
+def _split_record(split):
+    return {k: v for k, v in split.items() if k != "strips"}
+
+
+def _mask_column_by_split(col_ink, col, box, split):
+    """Copy of the column ink with pixels past the slanted split set False: left column where
+    x_abs >= left_edge(y_abs); right column where x_abs < right_edge(y_abs). Vectorised."""
+    x0, y0, x1, y1 = box
+    ys = np.arange(y0, y1)
+    xs = np.arange(x0, x1)
+    if col == "left":
+        edge = split["slope"] * ys + split["c0"] - split["half_w"] - split["pad"]
+        kill = xs[None, :] >= edge[:, None]
+    else:
+        edge = split["slope"] * ys + split["c0"] + split["half_w"] + split["pad"]
+        kill = xs[None, :] < edge[:, None]
+    out = col_ink.copy()
+    out[kill] = False
+    return out
+
+
 def _gutter_rule_cols(ink_mask, xdiv, y0, y1, W=GUTTER_WINDOW_W):
     """Single shared definition of 'rule, not text' near the gutter, for rows [y0, y1) of the
     FULL-PAGE ink mask. Returns (x0, colhas, cleaned): x0 the page-absolute start column of the
@@ -360,7 +480,7 @@ def gutter_gap(ink_mask, xdiv, y0, y1, W=GUTTER_WINDOW_W):
     return int(gap_px), centre
 
 
-def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=GUTTER_WINDOW_W):
+def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=GUTTER_WINDOW_W, xdiv_at=None):
     """col_ink: bool ink array for the WHOLE column box (already strip_vrules'd); abs_y0/abs_y1
     page-absolute row bounds of this band; col_box = (x0,y0,x1,y1) of the column region (abs).
     ink/xdiv/gutter_window: the FULL-PAGE ink mask and gutter geometry, used to zero the printed
@@ -373,7 +493,8 @@ def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=G
     band_ink = col_ink[ly0:ly1]
     baseline, xh = _line_geom(band_ink)
 
-    gx0, colhas, cleaned = _gutter_rule_cols(ink, xdiv, abs_y0, abs_y1, W=gutter_window)
+    band_xdiv = xdiv_at((abs_y0 + abs_y1) / 2) if xdiv_at is not None else xdiv
+    gx0, colhas, cleaned = _gutter_rule_cols(ink, band_xdiv, abs_y0, abs_y1, W=gutter_window)
     rule_cols_abs = np.where(colhas & ~cleaned)[0] + gx0
 
     masked = band_ink.copy()
@@ -397,7 +518,7 @@ def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=G
     }
 
 
-def _merge_full_bands(left_bands, right_bands, ink, xdiv, gutter_window=GUTTER_WINDOW_W):
+def _merge_full_bands(left_bands, right_bands, ink, xdiv, gutter_window=GUTTER_WINDOW_W, xdiv_at=None):
     """Classifies each column-local band by its own per-band gutter test (gutter_gap, over the
     FULL page width, that band's own y-range) against TWO measured edges, abstaining between them
     (a single derived threshold is refused by the data -- see
@@ -412,7 +533,8 @@ def _merge_full_bands(left_bands, right_bands, ink, xdiv, gutter_window=GUTTER_W
     def _flag(bands):
         flagged, rest = [], []
         for b in bands:
-            gap_px, centre = gutter_gap(ink, xdiv, b["y0"], b["y1"], W=gutter_window)
+            bx = xdiv_at((b["y0"] + b["y1"]) / 2) if xdiv_at is not None else xdiv
+            gap_px, centre = gutter_gap(ink, bx, b["y0"], b["y1"], W=gutter_window)
             if gap_px <= FULL_GAP_MAX_PX:
                 flagged.append(dict(b, gap_px=gap_px, gap_centre=centre, gutter_ambiguous=False))
             else:
@@ -494,6 +616,25 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     xdiv = geom_record["xdiv"]
     col_boxes = {r["col"]: tuple(r["box"]) for r in geom_record["body_regions"] if r["col"] in ("left", "right")}
 
+    split = locate_column_rule(ink, geom_record)
+    flags = []
+    xdiv_at = None
+    if split["status"] == "ok":
+        new_boxes = {}
+        for col, (bx0, by0, bx1, by1) in col_boxes.items():
+            if col == "left":
+                bx1 = int(math.ceil(max(left_edge(split, by0), left_edge(split, by1 - 1))))
+            else:
+                bx0 = int(math.floor(min(right_edge(split, by0), right_edge(split, by1 - 1))))
+            bx0, bx1 = max(0, min(W, bx0)), max(0, min(W, bx1))
+            new_boxes[col] = (bx0, by0, bx1, by1)
+        col_boxes = new_boxes
+
+        def xdiv_at(y_mid, _s=split):
+            return int(round(split_centre(_s, y_mid)))
+    else:
+        flags.append(f"col_split_abstained:{split['reason']}")
+
     # Raw (pre-split) band heights per column, on the SAME strip_vrules-cleaned column ink used
     # for the real split below -- pooled median over BOTH columns' raw bands is the page-wide
     # single-line-height estimate (choose_line_h / LINE_H_EMPTY_BAND_MULT). NOTE: if BOTH columns
@@ -504,7 +645,10 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     pooled_raw_heights = []
     for col, box in col_boxes.items():
         x0, y0, x1, y1 = box
-        cleaned = strip_vrules(ink[y0:y1, x0:x1])
+        col_ink = ink[y0:y1, x0:x1]
+        if split["status"] == "ok":
+            col_ink = _mask_column_by_split(col_ink, col, box, split)
+        cleaned = strip_vrules(col_ink)
         cleaned_by_col[col] = cleaned
         heights = [ry1 - ry0 for (ry0, ry1) in _text_lines(cleaned)]
         raw_heights_by_col[col] = heights
@@ -516,7 +660,6 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     line_h = {}
     bands = {}
     slivers = []
-    flags = []
     for col, box in col_boxes.items():
         x0, y0, x1, y1 = box
         cleaned = cleaned_by_col[col]
@@ -526,7 +669,7 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
         line_h[col] = {"basis": basis, "column_raw_median": column_raw_median, "page_line_h": page_line_h}
         if basis == "page":
             flags.append(f"line_h_from_page:{col}")
-        raw_bands = [_make_band(col, box, y0 + ly0, y0 + ly1, cleaned, ink, xdiv, gutter_window)
+        raw_bands = [_make_band(col, box, y0 + ly0, y0 + ly1, cleaned, ink, xdiv, gutter_window, xdiv_at)
                      for (ly0, ly1) in text_lines(cleaned, min_sep_frac=TEXT_LINE_MIN_SEP_FRAC,
                                                    line_h=col_line_h, snap=TEXT_LINE_SNAP)]
         kept, col_slivers = _split_slivers(raw_bands)
@@ -534,7 +677,7 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
         slivers.extend(col_slivers)
 
     full_bands, left_rest, right_rest = _merge_full_bands(
-        bands.get("left", []), bands.get("right", []), ink, xdiv, gutter_window)
+        bands.get("left", []), bands.get("right", []), ink, xdiv, gutter_window, xdiv_at)
 
     # Running head = the measured top ZONE: every band (full OR column) starting above
     # RUNNING_HEAD_TOP_FRAC*H. A letter-spaced running head can fail the gutter test and be filed
@@ -591,7 +734,12 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
             left_rest = [b for b in left_rest if id(b) not in rm]
             right_rest = [b for b in right_rest if id(b) not in rm]
 
+    if split["status"] == "ok":
+        xdiv_effective = int(round(split_centre(split, sum(split["y_range"]) / 2)))
+    else:
+        xdiv_effective = xdiv
     return {
+        "col_split": _split_record(split), "xdiv_effective": xdiv_effective,
         "file_page": geom_record.get("file_page"), "W": int(W), "H": int(H), "xdiv": xdiv,
         "left": left_rest, "right": right_rest, "full": other_full, "slivers": slivers,
         "running_head": running_head, "flags": flags, "col_boxes": col_boxes, "line_h": line_h, "head_rules": head_rules,
@@ -1584,12 +1732,17 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
 # box_sanity adapter
 # ==============================================================================================
 
-def adapter_geom(geom_record, col, head_bottom_y):
+def adapter_geom(geom_record, col, head_bottom_y, y_mid=None):
     """One box_sanity geom per COLUMN (box_sanity takes a single gutter+rule_y; the geometry
     record carries a rule per column), built fresh per region-rect check. title_frac is the
     MEASURED running-head bottom / H, never the fossil fixed 0.03."""
     W, H = geom_record["page"][0], geom_record["page"][1]
     xdiv = geom_record["xdiv"]
+    split = (geom_record.get("_s1") or {}).get("col_split") or {}
+    if split.get("status") == "ok":
+        if y_mid is None:
+            y_mid = sum(split["y_range"]) / 2
+        xdiv = int(round(split["slope"] * y_mid + split["c0"]))
     rules = geom_record.get("rules") or [None, None]
     rule_y = (rules[0] if col == "left" else rules[1]) if col in ("left", "right") else None
     if rule_y is None:
@@ -1615,10 +1768,10 @@ def check_region_rects(regions, geom_records_by_page):
             if s1 is not None and s1.get("running_head") is not None:
                 running_head = s1["running_head"]["y1"]
             if col == "full":
-                adapter = adapter_geom(geom_record, "left", running_head)
+                adapter = adapter_geom(geom_record, "left", running_head, y_mid=(rect["box"][1] + rect["box"][3]) / 2)
                 disp, reason = box_sanity.check_box(rect["box"], adapter)
                 rect["sanity"] = {"disposition": disp, "reason": reason, "checker": "full_width_rule"}
             else:
-                adapter = adapter_geom(geom_record, col, running_head)
+                adapter = adapter_geom(geom_record, col, running_head, y_mid=(rect["box"][1] + rect["box"][3]) / 2)
                 disp, reason = box_sanity.check_box(rect["box"], adapter)
                 rect["sanity"] = {"disposition": disp, "reason": reason, "checker": "box_sanity"}

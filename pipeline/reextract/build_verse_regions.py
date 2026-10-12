@@ -137,6 +137,14 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "inset_mode_min_sep_pitch_frac": VR.INSET_MODE_MIN_SEP_PITCH_FRAC,
         "inset_mode_valley_frac": VR.INSET_MODE_VALLEY_FRAC,
         "text_line_snap": VR.TEXT_LINE_SNAP,
+        "rule_col_frac": VR.RULE_COL_FRAC,
+        "rule_merge_gap_px": VR.RULE_MERGE_GAP_PX,
+        "rule_min_strip_frac": VR.RULE_MIN_STRIP_FRAC,
+        "rule_max_resid_px": VR.RULE_MAX_RESID_PX,
+        "rule_search_px": VR.RULE_SEARCH_PX,
+        "rule_strip_px": VR.RULE_STRIP_PX,
+        "rule_y_top_px": VR.RULE_Y_TOP_PX,
+        "rule_min_strips": VR.RULE_MIN_STRIPS,
         "straddle_core_frac": VHR.STRADDLE_CORE_FRAC,
         "straddle_core_min_rows": VHR.STRADDLE_CORE_MIN_ROWS,
         "align_sim_mid": VR.ALIGN_SIM_MID,
@@ -388,6 +396,11 @@ def main(argv=None):
         "full_width_edges": {"full_gap_max_px": VR.FULL_GAP_MAX_PX, "col_gap_min_px": VR.COL_GAP_MIN_PX,
                               "basis": "MEASURE_step2_gutter_inset_20261004.md"},
         "inset_thr": inset_result,
+        "col_split": {"rule_col_frac": VR.RULE_COL_FRAC, "rule_merge_gap_px": VR.RULE_MERGE_GAP_PX,
+                      "rule_min_strip_frac": VR.RULE_MIN_STRIP_FRAC, "rule_max_resid_px": VR.RULE_MAX_RESID_PX,
+                      "rule_search_px": VR.RULE_SEARCH_PX, "rule_strip_px": VR.RULE_STRIP_PX,
+                      "rule_y_top_px": VR.RULE_Y_TOP_PX, "rule_min_strips": VR.RULE_MIN_STRIPS,
+                      "basis": "MEASURE_col_split_20261011.md"},
     }
 
     rejected_pre_read_by_page = {}
@@ -511,7 +524,9 @@ def main(argv=None):
         records.append({"kind": "page", "file_page": fp, **{k: v for k, v in ps.items() if k != "file_page"},
                          "s1_flags": s1_by_page[fp]["flags"],
                          "running_head_present": s1_by_page[fp]["running_head"] is not None,
-                         "n_head_rules": len(s1_by_page[fp]["head_rules"])})
+                         "n_head_rules": len(s1_by_page[fp]["head_rules"]),
+                         "col_split": s1_by_page[fp]["col_split"],
+                         "col_boxes": {c: list(b) for c, b in s1_by_page[fp]["col_boxes"].items()}})
         if head_abstained:
             records.append({"kind": "page_abstained", "file_page": fp,
                              "reason": "head_detection_abstained:inset_not_bimodal"})
@@ -527,6 +542,14 @@ def main(argv=None):
     _write(out_path, records)
 
     print("\n=== run_summary ===")
+    col_split_summary = {"ok": 0, "abstained": {}}
+    for fp in usable_pages:
+        cs = s1_by_page[fp]["col_split"]
+        if cs["status"] == "ok":
+            col_split_summary["ok"] += 1
+        else:
+            col_split_summary["abstained"][cs["reason"]] = col_split_summary["abstained"].get(cs["reason"], 0) + 1
+
     summary = {
         "kind": "run_summary",
         "pages_requested": len(pages_requested), "pages_usable": len(usable_pages),
@@ -535,6 +558,7 @@ def main(argv=None):
         "regions": len(regions),
         "flags": dict(sorted(flag_counts.items())),
         "layout": layout["counts"],
+        "col_split": col_split_summary,
         "thresholds": records[0]["thresholds"],
         "config_hash": config["hash"],
         "read": args.read,

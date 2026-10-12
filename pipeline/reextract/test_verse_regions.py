@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 58
+EXPECTED_TESTS = 64
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -1313,6 +1313,144 @@ def test_assemble_regions_abstained_flag_emits_zero_regions_and_head_detection()
     assert regions == []
     assert page_summaries[1]["head_detection"] == "abstained"
     assert page_summaries[1]["n_heads"] == 0
+
+
+# ---- column split from the printed rule (fix A) ----------------------------------------------
+# Synthetic pages only. A page is 3584 x 5000; the printed double rule is two 6-px lines 6 px apart
+# (18 px overall) along centre(y) = c0 + slope*y; type is low-fill strokes (10 on / 8 off) in lines
+# 44 tall on a 120 pitch (column ink fraction 0.37, under RULE_COL_FRAC).
+
+_CS_W, _CS_H = 3584, 5000
+_CS_LINE_H, _CS_PITCH, _CS_Y0 = 44, 120, 800
+_CS_RULE_Y = 4600          # geometry footnote rule -> y_end = 4580
+
+
+def _cs_centre(c0, slope, y):
+    return c0 + slope * y
+
+
+def _cs_page(c0=1939.6, slope=0.00828, xdiv=1931, rule=True, flank=18, jump=None, full_line_y=None,
+             right_flank=None):
+    """Returns (ink, geom, texts) where texts = {(col, y0): (x_start, x_end)} the synthetic type extents.
+    Left type ends `flank` px left of the rule's left edge on every line; right type starts `flank` px
+    right of the rule's right edge. No rule -> the same type with a fixed 140-px gutter around c0."""
+    ink = np.zeros((_CS_H, _CS_W), dtype=bool)
+
+    def centre(y):
+        c = _cs_centre(c0, slope, y)
+        if jump is not None and y >= jump[0]:
+            c += jump[1]
+        return c
+
+    if rule:
+        for y in range(700, _CS_RULE_Y):
+            c = int(round(centre(y)))
+            ink[y, c - 9:c - 3] = True
+            ink[y, c + 3:c + 9] = True
+    texts = {}
+    rf = flank if right_flank is None else right_flank
+    for y in range(_CS_Y0, _CS_RULE_Y - 120, _CS_PITCH):
+        yb = y + _CS_LINE_H
+        c_lo = min(centre(y), centre(yb - 1))
+        c_hi = max(centre(y), centre(yb - 1))
+        if rule:
+            l_end = int(np.floor(c_lo - 9 - flank))
+            r_start = int(np.ceil(c_hi + 9 + rf))
+        else:
+            l_end, r_start = int(c0 - 70), int(c0 + 70)
+        for x in range(l_end - 10, 100, -18):          # strokes anchored so the last one ends at l_end
+            ink[y:yb, x:x + 10] = True
+        l_start = x
+        for x in range(r_start, _CS_W - 100, 18):
+            ink[y:yb, x:x + 10] = True
+        r_end = x + 10
+        texts[("left", y)] = (l_start, l_end)
+        texts[("right", y)] = (r_start, r_end)
+    if full_line_y is not None:
+        for x in range(100, _CS_W - 100, 18):
+            ink[full_line_y:full_line_y + _CS_LINE_H, x:x + 10] = True
+    geom = {"file_page": 1, "mode": "two_column", "xdiv": xdiv, "page": [_CS_W, _CS_H],
+            "rules": [_CS_RULE_Y, _CS_RULE_Y],
+            "body_regions": [{"col": "left", "box": [0, 640, xdiv, _CS_RULE_Y]},
+                              {"col": "right", "box": [xdiv, 640, _CS_W, _CS_RULE_Y]}]}
+    return ink, geom, texts
+
+
+def test_col_split_745_like_far_xdiv():
+    c0, slope = 1754.0, -0.0169
+    ink, geom, _ = _cs_page(c0=c0, slope=slope, xdiv=1482)
+    s1 = VR.analyze_page_s1(ink, geom)
+    sp = s1["col_split"]
+    assert sp["status"] == "ok", sp
+    assert abs(sp["c0"] - 1754) <= 3 and abs(sp["slope"] - slope) < 0.002, sp
+    assert s1["full"] == [], [(b["y0"], b["y1"]) for b in s1["full"]]
+    assert s1["left"] and all(b["right_ink_x"] > 1482 for b in s1["left"])
+    lbox = s1["col_boxes"]["left"]
+    rule_left_at_top = _cs_centre(c0, slope, lbox[1]) - 9
+    assert lbox[2] >= rule_left_at_top - 1, (lbox, rule_left_at_top)
+    # control: the geometry-xdiv behaviour (split abstained) files full bands on this very page, so the
+    # assertions above would FAIL on the pre-split code (proves the test is sensitive to the bug)
+    orig = VR.locate_column_rule
+    VR.locate_column_rule = lambda ink_, g_: {"status": "abstained", "reason": "no_rule"}
+    try:
+        old = VR.analyze_page_s1(ink, geom)
+    finally:
+        VR.locate_column_rule = orig
+    assert old["full"], "control: geometry xdiv must file a full band on the 745-like page"
+
+
+def test_col_split_p23_like_no_rule_abstains():
+    ink, geom, _ = _cs_page(c0=1790, slope=0.0, xdiv=1790, rule=False)
+    s1 = VR.analyze_page_s1(ink, geom)
+    assert s1["col_split"]["status"] == "abstained" and s1["col_split"]["reason"] == "no_rule", s1["col_split"]
+    assert s1["flags"].count("col_split_abstained:no_rule") == 1, s1["flags"]
+    assert s1["col_boxes"] == {r["col"]: tuple(r["box"]) for r in geom["body_regions"]}
+    assert s1["xdiv_effective"] == 1790 and s1["xdiv"] == 1790
+
+
+def test_col_split_130_like_normal_page():
+    c0, slope = 1939.6, 0.00828
+    ink, geom, texts = _cs_page(c0=c0, slope=slope, xdiv=1931, flank=18)
+    s1 = VR.analyze_page_s1(ink, geom)
+    assert s1["col_split"]["status"] == "ok", s1["col_split"]
+    assert s1["left"] and s1["right"]
+    for b in s1["left"]:
+        l_start, l_end = texts[("left", b["y0"])]
+        assert b["right_ink_x"] == l_end, (b["y0"], b["right_ink_x"], l_end)
+    for b in s1["right"]:
+        rule_right = _cs_centre(c0, slope, (b["y0"] + b["y1"]) / 2) + 9
+        assert b["left_ink_x"] >= rule_right, (b["y0"], b["left_ink_x"], rule_right)
+    assert s1["col_boxes"]["left"][2] > 1931
+    assert s1["xdiv_effective"] == int(round(VR.split_centre(s1["col_split"], sum(s1["col_split"]["y_range"]) / 2)))
+    assert "col_split" in s1 and "strips" not in s1["col_split"]
+
+
+def test_col_split_nonlinear_track_abstains():
+    ink, geom, _ = _cs_page(c0=1939.6, slope=0.0, xdiv=1931, jump=(2800, 40))
+    s1 = VR.analyze_page_s1(ink, geom)
+    assert s1["col_split"]["status"] == "abstained" and s1["col_split"]["reason"] == "track_nonlinear", s1["col_split"]
+    assert "col_split_abstained:track_nonlinear" in s1["flags"]
+    assert s1["col_boxes"]["left"][2] == 1931
+
+
+def test_col_split_full_width_line_still_full():
+    ink, geom, _ = _cs_page(c0=1939.6, slope=0.00828, xdiv=1931, full_line_y=2400 + 0)
+    s1 = VR.analyze_page_s1(ink, geom)
+    assert s1["col_split"]["status"] == "ok"
+    assert any(b["y0"] <= 2400 + _CS_LINE_H and b["y1"] >= 2400 for b in s1["full"]), \
+        ([(b["y0"], b["y1"]) for b in s1["full"]], [(b["y0"], b["y1"]) for b in s1["left"] if 2300 < b["y0"] < 2500])
+
+
+def test_adapter_geom_uses_split_at_rect_mid():
+    geom = {"page": [3584, 5000], "xdiv": 1500, "rules": [4600, 4600]}
+    assert VR.adapter_geom(geom, "left", 100, y_mid=2000)["gutter"] == 1500
+    geom["_s1"] = {"col_split": {"status": "abstained", "reason": "no_rule"}}
+    assert VR.adapter_geom(geom, "left", 100, y_mid=2000)["gutter"] == 1500
+    geom["_s1"] = {"col_split": {"status": "ok", "slope": 0.01, "c0": 1700.0, "y_range": [700, 4580]}}
+    assert VR.adapter_geom(geom, "left", 100, y_mid=2000)["gutter"] == round(0.01 * 2000 + 1700.0)
+    assert VR.adapter_geom(geom, "right", 100, y_mid=4000)["gutter"] == round(0.01 * 4000 + 1700.0)
+    assert VR.adapter_geom(geom, "left", 100)["gutter"] == round(0.01 * 2640 + 1700.0)
+
 
 
 if __name__ == "__main__":

@@ -91,6 +91,13 @@ function initialRatified(item) {
   return item.rects.map(function (r) { return { box: r.box.slice(), edges: _freshEdges() }; });
 }
 
+// Column under a page point. A miss item carrying col_split {slope, c0} (the printed rule, slanted:
+// centre(y) = slope*y + c0) splits on that line at the pointer's page-y; otherwise the geometry xdiv.
+function pageColumn(item, x, y) {
+  if (item.col_split) return x < item.col_split.slope * y + item.col_split.c0 ? "left" : "right";
+  return item.xdiv != null ? (x < item.xdiv ? "left" : "right") : null;
+}
+
 function _copy(o) { return JSON.parse(JSON.stringify(o)); }
 
 function _boxesEqual(a, b) {
@@ -290,7 +297,7 @@ function buildExportRow(item, state, consts) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    snap: snap, clampEdge: clampEdge, linesMoved: linesMoved, applyDrag: applyDrag, newRect: newRect,
+    pageColumn: pageColumn, snap: snap, clampEdge: clampEdge, linesMoved: linesMoved, applyDrag: applyDrag, newRect: newRect,
     initialRatified: initialRatified, verdictCoupling: verdictCoupling, isRated: isRated,
     buildExportRow: buildExportRow, carryForward: carryForward, rowsToOldItems: rowsToOldItems,
   };

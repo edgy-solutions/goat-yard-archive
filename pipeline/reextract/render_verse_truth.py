@@ -301,7 +301,18 @@ def _render_region_crops(item, volume_dir, image_cache):
     return crops, overlays_per_crop
 
 
-def _miss_overlays(item, geometry_by_fp, origin, crop_size):
+def page_records_by_fp(run_records):
+    """{file_page: the run's `page` record} -- carries col_split / col_boxes (fix A)."""
+    return {r["file_page"]: r for r in run_records if r.get("kind") == "page" and "file_page" in r}
+
+
+def _ok_split(page_by_fp, fp):
+    """The page record's col_split when its status is ok, else None."""
+    cs = ((page_by_fp or {}).get(fp) or {}).get("col_split")
+    return cs if cs and cs.get("status") == "ok" else None
+
+
+def _miss_overlays(item, geometry_by_fp, origin, crop_size, page_by_fp=None):
     """Overlay list for a miss crop; shared by build() and --html-only."""
     m = item["miss"]
     fp = item["file_page"]
@@ -311,11 +322,18 @@ def _miss_overlays(item, geometry_by_fp, origin, crop_size):
     ov.append({"kind": "word", "box": word_local, "label": "tess word", "color": "head"})
 
     geom = geometry_by_fp.get(fp)
-    xdiv = geom.get("xdiv") if geom else None
-    if xdiv is not None:
-        local_x = xdiv - origin[0]
+    split = _ok_split(page_by_fp, fp)
+    if split is not None:
+        y_mid = origin[1] + crop_size[1] / 2
+        local_x = round(split["slope"] * y_mid + split["c0"]) - origin[0]
         if 0 <= local_x <= crop_size[0]:
-            ov.append({"kind": "vline", "x": local_x, "label": "xdiv", "color": "xdiv"})
+            ov.append({"kind": "vline", "x": local_x, "label": "rule split", "color": "xdiv"})
+    else:
+        xdiv = geom.get("xdiv") if geom else None
+        if xdiv is not None:
+            local_x = xdiv - origin[0]
+            if 0 <= local_x <= crop_size[0]:
+                ov.append({"kind": "vline", "x": local_x, "label": "xdiv (geometry)", "color": "xdiv"})
 
     inset_px = m.get("inset_px")
     col_left_x = m.get("col_left_x")
@@ -328,7 +346,7 @@ def _miss_overlays(item, geometry_by_fp, origin, crop_size):
     return ov
 
 
-def _render_miss_crop(item, geometry_by_fp, volume_dir, image_cache):
+def _render_miss_crop(item, geometry_by_fp, volume_dir, image_cache, page_by_fp=None):
     m = item["miss"]
     fp = item["file_page"]
     arr, W, H = _get_page_gray(fp, volume_dir, image_cache)
@@ -340,7 +358,7 @@ def _render_miss_crop(item, geometry_by_fp, volume_dir, image_cache):
     ink_sub = sub[band_local[1]:band_local[3], band_local[0]:band_local[2]]
     ink_frac = float(VR.page_ink(ink_sub).mean()) if ink_sub.size else 0.0
 
-    ov = _miss_overlays(item, geometry_by_fp, origin, crop_size)
+    ov = _miss_overlays(item, geometry_by_fp, origin, crop_size, page_by_fp)
 
     png_bytes = _encode_png(sub)
     crop = {
@@ -843,6 +861,7 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
     check_layout(run_records)
     check_misses_not_stale(run_records, misses_doc)
     geometry_by_fp = load_geometry_by_fp(geometry_path)
+    page_by_fp = page_records_by_fp(run_records)
 
     run_header = next((r for r in run_records if r.get("kind") == "run_header"), None)
     run_config_hash = (run_header.get("config") or {}).get("hash") if run_header else None
@@ -859,7 +878,8 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
         if kind in REGION_KINDS:
             crops, overlays = _render_region_crops(item, volume_dir, image_cache)
         elif kind == "miss":
-            crop, ov = _render_miss_crop(item, geometry_by_fp, volume_dir, image_cache)
+            crop, ov = _render_miss_crop(item, geometry_by_fp, volume_dir, image_cache,
+                                         page_records_by_fp(run_records))
             crops, overlays = [crop], [ov]
         else:
             crops, overlays = [], []
@@ -1335,7 +1355,7 @@ document.addEventListener("mousedown", function (e) {
     e.preventDefault();
     var it2 = ITEM_BY_ID[h.closest(".card").dataset.itemId];
     var p0 = localPt(h, e), x = p0.x, y = p0.y;
-    var col2 = (it2.xdiv != null) ? (x < it2.xdiv ? "left" : "right") : null;
+    var col2 = pageColumn(it2, x, y);
     if (!col2) { Object.keys(it2.col_boxes).forEach(function (c) { var cb = it2.col_boxes[c]; if (x >= cb[0] && x <= cb[2]) col2 = c; }); }
     var msg = h.closest(".pwwrap").querySelector(".pwmsg"); msg.textContent = "";
     if (!col2 || !it2.col_boxes[col2]) { msg.textContent = "no column extent in the geometry for that position"; return; }
@@ -1564,6 +1584,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
     run_records = load_run_records(run_path)
     misses_doc = load_misses(misses_path)
     geometry_by_fp = load_geometry_by_fp(geometry_path)
+    page_by_fp = page_records_by_fp(run_records)
     run_header = next((r for r in run_records if r.get("kind") == "run_header"), None)
     run_config_hash = (run_header.get("config") or {}).get("hash") if run_header else None
     check_misses_not_stale(run_records, misses_doc)
@@ -1642,13 +1663,17 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
             origin, size = tuple(c["crop_origin"]), tuple(c["crop_size"])
             crop = {"crop_size": list(size), "clamped_edges": c["clamped_edges"], "rect": c["rect"],
                     "file_page": it["file_page"], "col": it["miss"].get("col")}
-            ov = _miss_overlays(it, geometry_by_fp, origin, size)
+            ov = _miss_overlays(it, geometry_by_fp, origin, size, page_by_fp)
             geom = geometry_by_fp[it["file_page"]]
             W, H = dims[it["file_page"]]
             entry["miss"] = {"band": it["miss"]["band"], "word": it["miss"]["word"], "col": it["miss"].get("col")}
             entry["page_w"], entry["page_h"] = int(W), int(H)
             entry["xdiv"] = geom.get("xdiv")
             entry["col_boxes"] = {r["col"]: r["box"] for r in geom.get("body_regions", []) if r.get("col") in ("left", "right")}
+            _sp = _ok_split(page_by_fp, it["file_page"])
+            if _sp is not None:
+                entry["col_boxes"] = {c: list(b) for c, b in ((page_by_fp[it["file_page"]].get("col_boxes")) or {}).items()} or entry["col_boxes"]
+                entry["col_split"] = {"slope": _sp["slope"], "c0": _sp["c0"]}
             entry["page_rects"] = rects_by_fp.get(it["file_page"], [])
             card = _miss_card(it, crop, ov, rels[0], volume_dir, extra_html=_pagewin_html(it, volume_dir, W, H),
                               fieldset_fn=_verdict_fieldset_ui2)

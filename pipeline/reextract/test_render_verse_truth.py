@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 23
+EXPECTED_TESTS = 25
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -573,6 +573,39 @@ def test_build_with_carry_from_raises():
         except ValueError as e:
             assert "--carry-from" in str(e)
         assert not (tmp_dir / "out").exists()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_miss_overlay_labels_rule_split_vs_geometry_xdiv():
+    item = {"file_page": 101, "miss": {"band": [90, 95, 160, 120], "word": [100, 100, 130, 115]}}
+    geometry = {101: {"file_page": 101, "xdiv": 100}}
+    origin, size = (50, 40), (200, 120)           # crop middle y = 100
+    ok = {101: {"kind": "page", "file_page": 101,
+                "col_split": {"status": "ok", "slope": 0.01, "c0": 120.0}}}
+    vl = [o for o in RVT._miss_overlays(item, geometry, origin, size, ok) if o["kind"] == "vline"]
+    assert [(o["label"], o["x"]) for o in vl] == [("rule split", round(0.01 * 100 + 120.0) - 50)], vl
+    for page_by_fp in (None, {}, {101: {"col_split": {"status": "abstained", "reason": "no_rule"}}}):
+        vl = [o for o in RVT._miss_overlays(item, geometry, origin, size, page_by_fp) if o["kind"] == "vline"]
+        assert [(o["label"], o["x"]) for o in vl] == [("xdiv (geometry)", 100 - 50)], (page_by_fp, vl)
+
+
+def test_html_only_miss_entry_carries_col_split_and_col_boxes_from_page_record():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        recs = [json.loads(l) for l in run_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        for r in recs:
+            if r.get("kind") == "page" and r["file_page"] == 101:
+                r["col_split"] = {"status": "ok", "slope": 0.0123, "c0": 111.5}
+                r["col_boxes"] = {"left": [0, 0, 105, 200], "right": [105, 0, 200, 200]}
+        run_path.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+        RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+        html_text = (result["out_dir"] / "index.html").read_text(encoding="utf-8")
+        assert '"col_split": {"slope": 0.0123, "c0": 111.5}' in html_text
+        assert '"left": [0, 0, 105, 200]' in html_text
+        assert '"xdiv": 100' in html_text
+        assert "function pageColumn(" in html_text and "pageColumn(it2, x, y)" in html_text
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

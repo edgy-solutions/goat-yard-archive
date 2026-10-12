@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const U = require("./verse_truth_ui.js");
 
-const EXPECTED_TESTS = 25;
+const EXPECTED_TESTS = 26;
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
@@ -194,6 +194,18 @@ test("export row: carried_from and edited_after_carry for miss and non-miss item
   const plain = U.buildExportRow(regionItem, undefined, consts);
   assert.equal(plain.carried_from, null);
   assert.equal(plain.edited_after_carry, false);
+});
+
+test("pageColumn: slanted col_split decides by y; geometry xdiv only without it", () => {
+  const it = { xdiv: 1482, col_split: { slope: -0.0169, c0: 1754 } };
+  // rule at y=700 is 1742.2, at y=4000 is 1686.4: the same x flips column with y
+  assert.equal(U.pageColumn(it, 1700, 700), "left");
+  assert.equal(U.pageColumn(it, 1700, 4000), "right");
+  // geometry xdiv (223 px off) would have called x=1600 right everywhere
+  assert.equal(U.pageColumn(it, 1600, 2000), "left");
+  assert.equal(U.pageColumn({ xdiv: 1482 }, 1600, 2000), "right");
+  assert.equal(U.pageColumn({ xdiv: 1482 }, 1400, 2000), "left");
+  assert.equal(U.pageColumn({}, 1400, 2000), null);
 });
 
 let pass = 0, fail = 0;

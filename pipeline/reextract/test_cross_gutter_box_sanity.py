@@ -130,8 +130,10 @@ def check1_left_right_rects_ok(ctx, fp, report):
              if r["file_page"] == fp and r["col"] in ("left", "right")]
     n = 0
     for r in rects:
-        adapter = VR.adapter_geom(geom, r["col"], rh_y)
-        assert adapter["gutter"] == xdiv
+        y_mid = (r["box"][1] + r["box"][3]) / 2
+        adapter = VR.adapter_geom(geom, r["col"], rh_y, y_mid=y_mid)
+        sp = s1["col_split"]
+        assert adapter["gutter"] == (int(round(sp["slope"] * y_mid + sp["c0"])) if sp["status"] == "ok" else xdiv)
         disp, reason = box_sanity.check_box(r["box"], adapter)
         expected_reason = "body-left" if r["col"] == "left" else "body-right"
         assert (disp, reason) == ("ok", expected_reason), (
