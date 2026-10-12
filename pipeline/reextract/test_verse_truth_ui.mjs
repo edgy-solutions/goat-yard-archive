@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const U = require("./verse_truth_ui.js");
 
-const EXPECTED_TESTS = 31;
+const EXPECTED_TESTS = 32;
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
@@ -292,6 +292,17 @@ test("priorBadgeText: carried, adjusted-with-delta, and layout-changed wordings"
 });
 
 let pass = 0, fail = 0;
+test("seeded miss card (carried_miss) reports needs cause, not needs region; badge says miss_same_word", () => {
+  const item = { item_id: "m:5:3000", item_kind: "miss" };
+  const ent = { "class": "carried_miss", match: "miss_same_word", old_item_id: "m:5:3000", delta: null,
+    seeded: { verdict: "region_drawn", ratified: [{ col: "left", box: [0, 1, 2, 3], edges: {} }] }, prior: { verdict: "region_drawn", rects: [] } };
+  const res = U.seedPrior({}, { from_set_sha16: "S1", map: { "m:5:3000": ent } });
+  const st = res.state["m:5:3000"];
+  assert.deepStrictEqual(U.missingFields(item, st), ["cause"]);
+  assert.strictEqual(U.needsBadgeText(item, st), "needs: cause");
+  assert.ok(U.priorBadgeText(ent, st)[0].indexOf("miss_same_word") >= 0);
+});
+
 if (tests.length !== EXPECTED_TESTS) {
   console.log(`EXPECTED_TESTS mismatch: discovered ${tests.length}, expected ${EXPECTED_TESTS}`);
   process.exit(1);

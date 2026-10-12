@@ -1045,6 +1045,25 @@ def compute_prior(old_run_records, old_export_rows, new_items, pitch_px=None, ex
                 ent["delta"] = delta
         pmap[nid] = ent
 
+    # ---- misses: the same word on the same page keeps the drawn rect (his own pixel box) ----
+    # A miss row already consumed by from_miss is NEVER also seeded onto a miss card. The cause is not
+    # carried (a cause is about the new run's miss, and none was ever clicked in the export).
+    ok_miss = {m["item_id"] for m in miss_src}
+    for mi in new_items:
+        if mi["item_kind"] != "miss" or mi["item_id"] not in ok_miss or mi["item_id"] in used_miss:
+            continue
+        mrow = row_by_id[mi["item_id"]]
+        T = [_prior_rect(t) for t in mrow["as_ratified"]]
+        mnote = mrow.get("note") or ""
+        seeded = {"verdict": "region_drawn", "ratified": T}
+        if mnote.strip():
+            seeded["note"] = mnote
+        used_miss.add(mi["item_id"])
+        pmap[mi["item_id"]] = {"class": "carried_miss", "match": "miss_same_word", "old_item_id": mi["item_id"],
+                               "seeded": seeded, "delta": None,
+                               "prior": {"verdict": "region_drawn", "rects": T, "note": mnote if mnote.strip() else "",
+                                         "heads_not_shown": None}}
+
     # ---- pages ----
     new_pages = [i for i in new_items if i["item_kind"] == "page"]
     for pg in new_pages:

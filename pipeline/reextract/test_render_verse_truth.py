@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 40
+EXPECTED_TESTS = 43
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -799,6 +799,39 @@ def test_prior_two_unread_old_heads_within_tol_is_identity_conflict():
             _xrow("r:5:left:140", "verse", "correct", ratified=[_rat(5, "left", 140, 340)])]
     P, c, l = _prior(old, rows, [_prec(5, 115, 115, verse=(5,))])
     assert P["map"] == {} and l["identity_conflict"] == ["r:5:left:115"]
+
+
+def _prior_m(old_recs, rows, new_recs, new_miss_ids, pitch=PITCH):
+    ms = [{"fp": int(i.split(":")[1]), "word": [0, int(i.split(":")[2]), 0, 0]} for i in new_miss_ids]
+    return RVT.compute_prior(old_recs, rows, RVT.build_items(new_recs, ms), pitch_px=pitch)
+
+
+def test_prior_miss_same_word_carries_drawn_rect_and_no_cause():
+    rows = [_xrow("m:5:3000", "miss", "region_drawn", ratified=[_rat(5, "right", 2990, 3400, x=(1900, 3700))], note="mine")]
+    P, c, l = _prior_m([_prec(5, 100, 100)], rows, [_prec(5, 100, 100)], ["m:5:3000"])
+    e = P["map"]["m:5:3000"]
+    assert e["class"] == "carried_miss" and e["match"] == "miss_same_word" and e["old_item_id"] == "m:5:3000", e
+    assert e["seeded"]["verdict"] == "region_drawn" and e["seeded"]["note"] == "mine"
+    assert [r["box"] for r in e["seeded"]["ratified"]] == [[1900, 2990, 3700, 3400]]
+    assert e["seeded"]["ratified"][0]["col"] == "right"
+    assert "cause_verdict" not in e["seeded"]
+    assert c["by_match"].get("miss_same_word") == 1 and l["old_unmatched"] == []
+
+
+def test_prior_miss_consumed_by_from_miss_does_not_also_seed_a_miss_card():
+    rows = [_xrow("m:5:3000", "miss", "region_drawn", ratified=[_rat(5, "left", 2990, 3400)])]
+    P, c, l = _prior_m([_prec(5, 100, 100)], rows, [_prec(5, 3005, 3020, verse=(9,))], ["m:5:3000"])
+    assert P["map"]["r:5:left:3005"]["match"] == "from_miss"
+    assert "m:5:3000" not in P["map"], "a consumed miss row must not seed a miss card too"
+    assert c["by_match"].get("miss_same_word") is None and l["old_unmatched"] == []
+
+
+def test_prior_miss_not_region_drawn_or_empty_ratified_is_not_carried():
+    rows = [_xrow("m:5:3000", "miss", "not_a_verse"),
+            _xrow("m:5:4000", "miss", "region_drawn", ratified=[], note="empty")]
+    P, c, l = _prior_m([_prec(5, 100, 100)], rows, [_prec(5, 100, 100)], ["m:5:3000", "m:5:4000"])
+    assert not [k for k in P["map"] if k.startswith("m:")]
+    assert [u["item_id"] for u in l["old_unmatched"]] == ["m:5:3000", "m:5:4000"]
 
 
 def test_prior_html_only_embeds_map_and_manifest_and_changes_the_ui_config_hash():
