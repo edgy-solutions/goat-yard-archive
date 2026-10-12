@@ -24,6 +24,7 @@ import hashlib
 import html as html_mod
 import io
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -836,6 +837,268 @@ def carry_from_console(old_dir, items, item_shas=None):
 
 
 
+# ==================================================================================================
+# prior verdicts carried by HEADING IDENTITY (the old console's region / page verdicts)
+# ==================================================================================================
+
+PRIOR_VERDICTS_WITH_BOX = ("correct", "adjusted", "region_drawn")
+
+
+def run_pitch_px(run_records):
+    """thresholds.inset_thr.pitch_px of the run's run_summary, or None when absent."""
+    for r in run_records:
+        if r.get("kind") == "run_summary":
+            try:
+                p = r["thresholds"]["inset_thr"]["pitch_px"]
+            except (KeyError, TypeError):
+                return None
+            return p if isinstance(p, (int, float)) and p > 0 else None
+    return None
+
+
+def prior_head_tol_px(pitch_px):
+    """Half-pitch tolerance. Refuses (no default) when the pitch is absent."""
+    if not isinstance(pitch_px, (int, float)) or isinstance(pitch_px, bool) or pitch_px <= 0:
+        raise ValueError("compute_prior: the new run's run_summary.thresholds.inset_thr.pitch_px is absent; "
+                         "refusing to default the near-match tolerance")
+    return int(math.floor(pitch_px / 2))
+
+
+def _fp_of_item_id(item_id):
+    return int(item_id.split(":")[1])
+
+
+def _verse_tuple(v):
+    if v is None:
+        return ()
+    return tuple(v) if isinstance(v, (list, tuple)) else (v,)
+
+
+def _head_col_y0(item):
+    """(col, y0) of the item's head; col falls back to the first rect's col, y0 to head.box[1]."""
+    h = item["head"]
+    return (h.get("col") or item["rects"][0]["col"]), (h["y0"] if h.get("y0") is not None else h["box"][1])
+
+
+def _prior_identity(item):
+    fp = int(item["file_page"])
+    if not item.get("head"):
+        return ("cont", fp, item["rects"][0]["col"])
+    col, y0 = _head_col_y0(item)
+    return ("head", fp, col, y0, _verse_tuple(item.get("verse")))
+
+
+def _prior_edges(edges):
+    out = {}
+    for k in ("top", "bottom"):
+        e = (edges or {}).get(k) or {}
+        out[k] = {"snapped": bool(e.get("snapped")), "at_crop_limit": bool(e.get("at_crop_limit"))}
+    return out
+
+
+def _prior_rect(r):
+    return {"file_page": int(r["file_page"]), "col": r["col"], "box": [int(v) for v in r["box"]],
+            "edges": _prior_edges(r.get("edges"))}
+
+
+def compute_prior(old_run_records, old_export_rows, new_items, pitch_px=None, export_sha256=None,
+                  old_run_sha256=None):
+    """Carry the old console's verdicts to the new items by heading identity. Returns
+    (PRIOR, counts, lists). Refuses (ValueError) on a mixed-set export, on an export row whose
+    item_id is not an item of the old run (+ the export's own miss rows), and when pitch_px is
+    absent. Matching: exact head identity; near (same fp/col/verse, |dy| <= floor(pitch/2), exactly
+    one candidate); from a miss's drawn region. Each old source is used at most once."""
+    tol = prior_head_tol_px(pitch_px)
+    rows = list(old_export_rows)
+    sets = sorted({r.get("set_sha16") for r in rows}, key=str)
+    if len(sets) != 1:
+        raise ValueError(f"compute_prior: export rows come from {len(sets)} sets {sets}; need exactly one")
+    from_set = sets[0]
+    miss_rows = [r for r in rows if r.get("item_kind") == "miss"]
+    old_misses = [{"fp": _fp_of_item_id(r["item_id"]), "word": [0, int(r["item_id"].rsplit(":", 1)[1]), 0, 0]}
+                  for r in miss_rows]
+    old_items = build_items(old_run_records, old_misses)
+    old_by_id = {i["item_id"]: i for i in old_items}
+    for r in rows:
+        if r["item_id"] not in old_by_id:
+            raise ValueError(f"compute_prior: export row {r['item_id']} is not an item of the old run")
+    row_by_id = {r["item_id"]: r for r in rows}
+
+    old_regions = [i for i in old_items if i["item_kind"] in REGION_KINDS]
+    new_regions = [i for i in new_items if i["item_kind"] in REGION_KINDS]
+    miss_src = []
+    for r in miss_rows:
+        if r.get("verdict") == "region_drawn" and r.get("as_ratified"):
+            miss_src.append({"item_id": r["item_id"], "fp": _fp_of_item_id(r["item_id"]),
+                             "y": int(r["item_id"].rsplit(":", 1)[1]),
+                             "cols": {d["col"] for d in r["as_ratified"]}})
+
+    src = {}                    # new id -> (kind, old id, match)
+    used_old, used_miss, conflicts = set(), set(), []
+
+    # 1. exact
+    by_ident = {}
+    for o in old_regions:
+        by_ident.setdefault(_prior_identity(o), []).append(o["item_id"])
+    for n in new_regions:
+        for oid in by_ident.get(_prior_identity(n), []):
+            if oid not in used_old:
+                used_old.add(oid)
+                src[n["item_id"]] = ("region", oid, "exact")
+                break
+
+    def pending():
+        return [n for n in new_regions if n["item_id"] not in src and n["item_id"] not in conflicts
+                and n.get("head")]
+
+    def claim(cands_fn, kind, match):
+        claims = {}
+        for n in pending():
+            cands = cands_fn(n)
+            if len(cands) >= 2:
+                conflicts.append(n["item_id"])
+            elif len(cands) == 1:
+                claims.setdefault(cands[0], []).append(n["item_id"])
+        for oid, nids in claims.items():
+            if len(nids) > 1:
+                conflicts.extend(nids)
+            else:
+                (used_old if kind == "region" else used_miss).add(oid)
+                src[nids[0]] = (kind, oid, match)
+
+    # 2. near
+    def near_cands(n):
+        col, y0 = _head_col_y0(n)
+        return [o["item_id"] for o in old_regions
+                if o["item_id"] not in used_old and o.get("head")
+                and int(o["file_page"]) == int(n["file_page"]) and _head_col_y0(o)[0] == col
+                and _verse_tuple(o.get("verse")) == _verse_tuple(n.get("verse"))
+                and abs(y0 - _head_col_y0(o)[1]) <= tol]
+    claim(near_cands, "region", "near")
+
+    # 3. from a miss's drawn region
+    def miss_cands(n):
+        col, y0 = _head_col_y0(n)
+        return [m["item_id"] for m in miss_src
+                if m["item_id"] not in used_miss and m["fp"] == int(n["file_page"]) and col in m["cols"]
+                and abs(y0 - m["y"]) <= tol]
+    claim(miss_cands, "miss", "from_miss")
+
+    # ---- classify ----
+    pmap = {}
+    for n in new_regions:
+        nid = n["item_id"]
+        if nid not in src:
+            continue
+        kind, oid, match = src[nid]
+        row = row_by_id.get(oid)
+        v = (row or {}).get("verdict") or "unrated"
+        note = (row or {}).get("note") or ""
+        if not note.strip():
+            note = ""
+        if kind == "miss":
+            T_raw = row["as_ratified"]
+        else:
+            T_raw = (row or {}).get("as_ratified") or (row or {}).get("as_detected")
+        T = [_prior_rect(t) for t in (T_raw or [])]
+        ent = {"class": None, "match": match, "old_item_id": oid, "seeded": None, "delta": None,
+               "prior": {"verdict": v, "rects": T, "note": note, "heads_not_shown": None}}
+        if v not in PRIOR_VERDICTS_WITH_BOX and v != "not_a_verse":
+            ent["class"] = "fresh"
+        elif v == "not_a_verse":
+            ent["class"] = "carried_verdict"
+            ent["seeded"] = {"verdict": "not_a_verse"}
+            if note:
+                ent["seeded"]["note"] = note
+        else:
+            nkeys = [(int(r["file_page"]), r["col"]) for r in n["rects"]]
+            tkeys = [(t["file_page"], t["col"]) for t in T]
+            same = bool(T) and len(set(nkeys)) == len(nkeys) and len(set(tkeys)) == len(tkeys) \
+                and set(nkeys) == set(tkeys)
+            if not same:
+                ent["class"] = "layout_changed"
+            else:
+                tmap = {(t["file_page"], t["col"]): t for t in T}
+                rat, delta, all_eq = [], {}, True
+                for r, key in zip(n["rects"], nkeys):
+                    t = tmap[key]
+                    box = [int(r["box"][0]), t["box"][1], int(r["box"][2]), t["box"][3]]
+                    if box != [int(x) for x in r["box"]]:
+                        all_eq = False
+                    rat.append({"box": box, "edges": t["edges"]})
+                    delta[f"{key[0]}:{key[1]}"] = [t["box"][1] - int(r["box"][1]), t["box"][3] - int(r["box"][3])]
+                ent["class"] = "carried_same_layout"
+                ent["seeded"] = {"verdict": "correct" if all_eq else "adjusted", "ratified": rat}
+                if note:
+                    ent["seeded"]["note"] = note
+                ent["delta"] = delta
+        pmap[nid] = ent
+
+    # ---- pages ----
+    new_pages = [i for i in new_items if i["item_kind"] == "page"]
+    for pg in new_pages:
+        fp = int(pg["file_page"])
+        prow = row_by_id.get(f"p:{fp}")
+        hns = (prow or {}).get("heads_not_shown")
+        if not (prow and prow.get("verdict") == "answered" and isinstance(hns, int) and not isinstance(hns, bool)):
+            continue
+        pnote = prow.get("note") or ""
+        regs_new = [n["item_id"] for n in new_regions if int(n["file_page"]) == fp]
+        ok_new = all(i in pmap and pmap[i]["class"] in ("carried_same_layout", "carried_verdict") for i in regs_new)
+        ok_old = all(o["item_id"] in used_old for o in old_regions if int(o["file_page"]) == fp)
+        ent = {"class": None, "match": "page", "old_item_id": f"p:{fp}", "seeded": None, "delta": None,
+               "prior": {"verdict": "answered", "rects": [], "note": pnote, "heads_not_shown": hns}}
+        if ok_new and ok_old:
+            ent["class"] = "carried_same_layout"
+            ent["seeded"] = {"heads_not_shown": hns}
+            if pnote.strip():
+                ent["seeded"]["note"] = pnote
+        else:
+            ent["class"] = "layout_changed"
+        pmap[pg["item_id"]] = ent
+
+    # ---- leftovers (retired: never carried, never silently dropped) ----
+    old_unmatched = []
+    for o in old_regions:
+        r = row_by_id.get(o["item_id"])
+        if o["item_id"] not in used_old and r and (r.get("verdict") or "unrated") != "unrated":
+            old_unmatched.append({"item_id": o["item_id"], "verdict": r["verdict"], "note": r.get("note") or ""})
+    for m in miss_rows:
+        if m["item_id"] not in used_miss and (m.get("verdict") or "unrated") != "unrated":
+            old_unmatched.append({"item_id": m["item_id"], "verdict": m["verdict"], "note": m.get("note") or ""})
+    new_page_ids = {p["item_id"] for p in new_pages}
+    for r in rows:
+        if r.get("item_kind") == "page" and r.get("verdict") == "answered" and r["item_id"] not in new_page_ids:
+            old_unmatched.append({"item_id": r["item_id"], "verdict": r["verdict"], "note": r.get("note") or ""})
+    old_unmatched.sort(key=lambda d: d["item_id"])
+    new_unmatched = sorted(n["item_id"] for n in new_regions if n["item_id"] not in src and n["item_id"] not in conflicts)
+
+    prior = {"from_set_sha16": from_set, "export_sha256": export_sha256, "old_run_sha256": old_run_sha256,
+             "map": pmap}
+    by_class, by_match = {}, {}
+    for nid, e in pmap.items():
+        by_class.setdefault(e["class"], []).append(nid)
+        by_match[e["match"]] = by_match.get(e["match"], 0) + 1
+    counts = {"by_class": {k: len(v) for k, v in sorted(by_class.items())}, "by_match": dict(sorted(by_match.items())),
+              "seeded": sum(1 for e in pmap.values() if e["seeded"]),
+              "identity_conflict": len(conflicts), "old_unmatched": len(old_unmatched),
+              "new_unmatched": len(new_unmatched)}
+    lists = {"by_class": {k: sorted(v) for k, v in sorted(by_class.items())},
+             "identity_conflict": sorted(conflicts), "old_unmatched": old_unmatched, "new_unmatched": new_unmatched}
+    return prior, counts, lists
+
+
+def prior_from_paths(prior_export, prior_run, new_run_records, new_items):
+    """File front end for compute_prior: reads the export + old run, hashes them, reads the pitch
+    from the NEW run. Returns (PRIOR, prior_sha16, counts, lists)."""
+    rows = [json.loads(l) for l in Path(prior_export).read_text(encoding="utf-8").splitlines() if l.strip()]
+    old_recs = load_run_records(prior_run)
+    prior, counts, lists = compute_prior(old_recs, rows, new_items, pitch_px=run_pitch_px(new_run_records),
+                                         export_sha256=_sha256_file(prior_export),
+                                         old_run_sha256=_sha256_file(prior_run))
+    return prior, _sha16_json(prior), counts, lists
+
+
 def _utc_now_iso():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -844,8 +1107,18 @@ def _utc_now_iso():
 # build (the orchestrator -- the only thing that touches images/disk, besides the loaders above)
 # ==================================================================================================
 
+def _prior_manifest_fields(prior_export, prior_run, prior, prior_sha, counts, lists):
+    return {
+        "prior_export": str(prior_export) if prior_export else None,
+        "export_sha256": prior["export_sha256"] if prior else None,
+        "prior_run": str(prior_run) if prior_run else None,
+        "old_run_sha256": prior["old_run_sha256"] if prior else None,
+        "prior_map_sha16": prior_sha, "prior_counts": counts, "prior_lists": lists,
+    }
+
+
 def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=False, module_path=None,
-          carry_from=None):
+          carry_from=None, prior_export=None, prior_run=None):
     if carry_from:
         raise ValueError("--carry-from is not valid for a fresh build (it emits UI1): build first, then run "
                          "--html-only --carry-from <old console dir>")
@@ -867,6 +1140,11 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
     run_config_hash = (run_header.get("config") or {}).get("hash") if run_header else None
 
     items = build_items(run_records, misses_doc)
+    if bool(prior_export) != bool(prior_run):
+        raise ValueError("--prior-export and --prior-run go together")
+    prior, prior_sha, prior_counts, prior_lists = None, None, None, None
+    if prior_export:
+        prior, prior_sha, prior_counts, prior_lists = prior_from_paths(prior_export, prior_run, run_records, items)
 
     image_cache = {}
     n_clamped = 0
@@ -950,6 +1228,8 @@ def build(run_path, misses_path, geometry_path, volume_dir, out_root, force=Fals
         "run_config_hash": run_config_hash, "set_sha16": set_sha, "n_items": n_items_by_kind,
         "carry_from": None, "carry_from_set_sha16": None, "carry_map_sha16": None, "carry_counts": None,
         "carry_identity_conflict": None, "carry_old_unmatched": None, "carry_new_unmatched": None,
+        # the UI1 this fresh build emits does not seed from the prior; the UI that does is --html-only
+        **_prior_manifest_fields(prior_export, prior_run, prior, prior_sha, prior_counts, prior_lists),
     }
     lines = [json.dumps(header, sort_keys=True)]
 
@@ -1116,6 +1396,14 @@ header #export{margin-left:0}
 .carrybanner{padding:8px 16px;font-size:13px;color:#fff;background:#1f7a3a}
 .carrybanner.red{background:#9a2b2b}
 .carrybanner input,.carrybanner button{margin-left:8px}
+.priorbadge{background:#1f7a3a;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;margin-left:8px}
+.priorbadge.layout{background:#9a2b2b}
+.needsbadge{background:#b36b00;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;margin-left:8px}
+.priorbox{padding:2px 12px;font-size:12px;color:#7a2a12;font-family:ui-monospace,monospace}
+.edit .ghost{position:absolute;border:2px dashed #7b3fb3;background:none;pointer-events:none}
+.edit .ghost span{position:absolute;left:2px;top:0;font-size:calc(11px * var(--inv,1));background:#fff;color:#7b3fb3;padding:0 3px}
+#missing{margin-left:12px;font-size:13px}
+#nextinc{margin-left:8px}
 .carrybadge{background:#1f7a3a;color:#fff;font-size:11px;padding:1px 6px;border-radius:3px;margin-left:8px}
 """
 
@@ -1187,6 +1475,35 @@ function cardOf(it) { return document.getElementById("card_" + it.item_id.split(
 function renderStat() {
   var n = ITEMS.filter(function (it) { return isRated(it, state[it.item_id]); }).length;
   document.getElementById("stat").textContent = n + " / " + ITEMS.length + " rated";
+  document.getElementById("missing").textContent = formatMissing(missingSummary(ITEMS, state));
+  ITEMS.forEach(refreshNeeds);
+}
+function refreshNeeds(it) {
+  var card = cardOf(it); if (!card) return;
+  var hd = card.querySelector(".cardhead"); if (!hd) return;
+  var b = hd.querySelector(".needsbadge"), txt = needsBadgeText(it, state[it.item_id]);
+  if (!txt) { if (b) hd.removeChild(b); return; }
+  if (!b) { b = document.createElement("span"); b.className = "needsbadge"; hd.appendChild(b); }
+  b.textContent = txt;
+}
+function renderPrior(it, st) {
+  var card = cardOf(it); if (!card || typeof PRIOR === "undefined" || !PRIOR) return;
+  var ent = PRIOR.map[it.item_id]; if (!ent) return;
+  var hd = card.querySelector(".cardhead");
+  card.querySelectorAll(".priorbadge,.priorbox").forEach(function (e) { e.parentNode.removeChild(e); });
+  var carried = !!(st && st.carried_from && st.carried_from["class"]);
+  if (ent["class"] !== "layout_changed" && !carried) return;
+  priorBadgeText(ent, st).forEach(function (t, i) {
+    var sp = document.createElement("span");
+    sp.className = "priorbadge" + (ent["class"] === "layout_changed" ? " layout" : "");
+    sp.textContent = t + (i === 0 && st && st.edited_after_carry ? " (edited)" : "");
+    hd.appendChild(sp);
+  });
+  var pr = ent.prior || {}, bits = ["your earlier verdict: " + (pr.heads_not_shown != null ? pr.heads_not_shown : pr.verdict)];
+  (pr.rects || []).forEach(function (t) { bits.push("earlier box " + t.file_page + ":" + t.col + " y " + t.box[1] + "-" + t.box[3]); });
+  if (pr.note) bits.push("earlier note: " + pr.note);
+  var bx = document.createElement("div"); bx.className = "priorbox"; bx.textContent = bits.join("  |  ");
+  hd.parentNode.insertBefore(bx, hd.nextSibling);
 }
 function snapList(fp, col, which) {
   var p = SNAP[String(fp)]; var c = p && p[col]; return (c && c[which]) || [];
@@ -1213,6 +1530,15 @@ function renderRegion(it, st) {
     bots.forEach(function (t) { if (t >= oy && t <= oy + ch) div("tick b", "top:" + (t - oy) + "px", layer); });
     var b = r.box;
     div("det", "left:" + (b[0] - ox) + "px;top:" + (b[1] - oy) + "px;width:" + (b[2] - b[0]) + "px;height:" + (b[3] - b[1]) + "px", layer);
+    var pent = (typeof PRIOR !== "undefined" && PRIOR) ? PRIOR.map[it.item_id] : null;
+    if (pent && pent.prior) (pent.prior.rects || []).forEach(function (t) {
+      if (t.file_page !== r.file_page || t.col !== r.col) return;
+      var gy0 = Math.max(t.box[1], oy), gy1 = Math.min(t.box[3], oy + ch);
+      var gx0 = Math.max(t.box[0], ox), gx1 = Math.min(t.box[2], ox + r.size[0]);
+      if (gy1 <= gy0 || gx1 <= gx0) return;
+      var g = div("ghost", "left:" + (gx0 - ox) + "px;top:" + (gy0 - oy) + "px;width:" + (gx1 - gx0) + "px;height:" + (gy1 - gy0) + "px", layer);
+      var gl = document.createElement("span"); gl.textContent = "your earlier box"; g.appendChild(gl);
+    });
     var lm = card.querySelector('.lm[data-idx="' + i + '"]');
     if (!rat) { if (lm) lm.textContent = "not a verse: no box"; return; }
     var q = rat[i].box;
@@ -1267,6 +1593,8 @@ function renderItem(it, st) {
   st = st || state[it.item_id] || {};
   if (it.item_kind === "miss") renderMiss(it, st);
   else if (it.rects) renderRegion(it, st);
+  renderPrior(it, st);
+  refreshNeeds(it);
 }
 function restoreFields(it) {
   var card = cardOf(it); if (!card) return;
@@ -1287,6 +1615,7 @@ function commit(it, event) {
     res = verdictCoupling(state[it.item_id] || {}, event);
   }
   state[it.item_id] = res.state;
+  if (res.state.carried_from) res.state.edited_after_carry = true;
   save(); renderItem(it); restoreFields(it);
 }
 document.addEventListener("change", function (e) {
@@ -1306,8 +1635,9 @@ document.addEventListener("input", function (e) {
   var s = state[card.dataset.itemId] || (state[card.dataset.itemId] = {});
   if (t.classList.contains("note")) { s.note = t.value; if (s.carried_from) s.edited_after_carry = true; }
   else if (t.classList.contains("pnumber")) s.printed_number_as_seen = t.value;
-  else if (t.classList.contains("headsnotshown")) s.heads_not_shown = t.value;
+  else if (t.classList.contains("headsnotshown")) { s.heads_not_shown = t.value; if (s.carried_from) s.edited_after_carry = true; }
   save();
+  if (s.carried_from) { var itx = ITEM_BY_ID[card.dataset.itemId]; if (itx) renderPrior(itx, s); }
 });
 // ---- fit to width: crops and page windows scale down (never up) to the card; geometry stays native px ----
 var fitOn = true;
@@ -1410,6 +1740,12 @@ if (CARRY) {
   state = cres.items;
   if (cres.carried.length) save();
 }
+var priorSeeded = [];
+if (typeof PRIOR !== "undefined" && PRIOR) {
+  var sres = seedPrior(state, PRIOR);
+  state = sres.state; priorSeeded = sres.seeded;
+  if (priorSeeded.length) save();
+}
 ITEMS.forEach(function (it) {
   restoreFields(it);
   renderItem(it);
@@ -1425,6 +1761,29 @@ ITEMS.forEach(function (it) {
   }
 });
 renderCarryBanner(carryNotes());
+(function () {
+  if (typeof PRIOR === "undefined" || !PRIOR) return;
+  var ids = Object.keys(PRIOR.map), nCarried = 0, nLayout = 0;
+  ids.forEach(function (id) {
+    var s = state[id]; if (s && s.carried_from && s.carried_from["class"]) nCarried++;
+    if (PRIOR.map[id]["class"] === "layout_changed") nLayout++;
+  });
+  var ban = document.getElementById("priorbanner"); ban.hidden = false;
+  var t = nCarried + " cards carry your earlier verdicts (console " + PRIOR.from_set_sha16 + "; " + priorSeeded.length +
+    " seeded just now); " + nLayout + " cards changed layout and need a fresh verdict.";
+  var un = (typeof PRIOR_REPORT !== "undefined" && PRIOR_REPORT && PRIOR_REPORT.old_unmatched) || [];
+  if (un.length) t += " Retired (no matching card, not carried): " + un.map(function (u) { return u.item_id + " (" + u.verdict + ")"; }).join(", ") + ".";
+  ban.textContent = t;
+})();
+var nextCursor = null;
+document.getElementById("nextinc").addEventListener("click", function () {
+  var order = Array.prototype.map.call(document.querySelectorAll(".card"), function (c) { return ITEM_BY_ID[c.dataset.itemId]; }).filter(Boolean);
+  var id = nextIncompleteId(order, state, nextCursor);
+  if (!id) { document.getElementById("missing").textContent = "all complete"; return; }
+  nextCursor = id;
+  var hdr = document.querySelector("header"), off = hdr ? hdr.getBoundingClientRect().height : 0;
+  window.scrollTo(0, cardOf(ITEM_BY_ID[id]).getBoundingClientRect().top + window.pageYOffset - off - 6);
+});
 var snapBox = document.getElementById("snap");
 snapBox.checked = snapOn;
 snapBox.addEventListener("change", function () { snapOn = snapBox.checked; save(); });
@@ -1459,7 +1818,7 @@ try {
 
 
 def _render_html_ui2(set_sha, items_for_js, run_config_hash, ui_config_hash, snap, cards_html_list, ui_js_text,
-                     carry=None, carry_lists=None):
+                     carry=None, carry_lists=None, prior=None, prior_lists=None):
     ls_key = "versetruth_" + set_sha + "_ui2"
     ls1_key = "versetruth_" + set_sha
     export_filename = f"verse_box_verdicts_{set_sha}_ui2.jsonl"
@@ -1469,9 +1828,10 @@ def _render_html_ui2(set_sha, items_for_js, run_config_hash, ui_config_hash, sna
 <title>Verse-box truth console -- step 3 -- UI 2 -- {set_sha}</title>
 <style>{_CSS}{_CSS_UI2}</style></head><body>
 <header><h1>Verse-box truth console (place boxes)</h1>
-<span id="stat"></span><label class="snap"><input type="checkbox" id="snap" checked> Snap</label><label class="snap"><input type="checkbox" id="fit" checked> Fit width</label>
+<span id="stat"></span><span id="missing"></span><button id="nextinc" type="button">Next incomplete</button><label class="snap"><input type="checkbox" id="snap" checked> Snap</label><label class="snap"><input type="checkbox" id="fit" checked> Fit width</label>
 <button id="export" type="button">Export verdicts JSONL</button></header>
 <div class="carrybanner" id="carrybanner" hidden></div>
+<div class="carrybanner" id="priorbanner" hidden></div>
 <div class="migbanner" id="mig" hidden><span></span><button type="button">download them as ui1 JSONL</button></div>
 <main id="cards">
 {cards}
@@ -1487,6 +1847,8 @@ const UI_CONFIG_HASH = {json.dumps(ui_config_hash)};
 const SNAP = {json.dumps(snap)};
 const CARRY = {json.dumps(carry, ensure_ascii=False, sort_keys=True)};
 const CARRY_REPORT = {json.dumps(carry_lists, ensure_ascii=False, sort_keys=True)};
+const PRIOR = {json.dumps(prior, ensure_ascii=False, sort_keys=True)};
+const PRIOR_REPORT = {json.dumps(prior_lists, ensure_ascii=False, sort_keys=True)};
 const ITEMS = {json.dumps(items_for_js, ensure_ascii=False)};
 {ui_js_text}
 {_JS_UI2_GLUE}
@@ -1567,7 +1929,7 @@ def compute_snap_targets(items, geometry_by_fp, volume_dir, image_cache=None):
 
 
 def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, console_dir=None, force=False,
-              module_path=None, carry_from=None):
+              module_path=None, carry_from=None, prior_export=None, prior_run=None):
     """Rebuild ONLY index.html (UI 2) for an existing console. Verifies the crops against the
     manifest first; raises (writing nothing) on any mismatch."""
     run_path, misses_path, geometry_path = Path(run_path), Path(misses_path), Path(geometry_path)
@@ -1613,6 +1975,11 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
     if set_sha != header.get("set_sha16") or set_sha != out_dir.name:
         raise ValueError(f"set_sha16 mismatch: recomputed {set_sha}, manifest {header.get('set_sha16')}, dir {out_dir.name}")
 
+    if bool(prior_export) != bool(prior_run):
+        raise ValueError("--prior-export and --prior-run go together")
+    prior, prior_sha, prior_counts, prior_lists = None, None, None, None
+    if prior_export:
+        prior, prior_sha, prior_counts, prior_lists = prior_from_paths(prior_export, prior_run, run_records, items)
     image_cache = {}
     carry, carry_sha, carry_counts, carry_lists = None, None, None, None
     if carry_from:
@@ -1625,7 +1992,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
     ui_js_sha256 = BVR.compute_module_sha256(ui_js_path)
     config_hash = _sha16_json({"ui_version": UI_VERSION, "module_sha256": module_sha256,
                                "ui_js_sha256": ui_js_sha256, "snap_targets_sha16": snap_sha, "set_sha16": set_sha,
-                               "carry_map_sha16": carry_sha})
+                               "carry_map_sha16": carry_sha, "prior_map_sha16": prior_sha})
 
     index_path = out_dir / "index.html"
     last = mlines[-1]
@@ -1694,7 +2061,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         if grp["page"]:
             all_cards.append(grp["page"])
     html_text = _render_html_ui2(set_sha, items_for_js, run_config_hash, config_hash, snap, all_cards, ui_js_text,
-                                 carry=carry, carry_lists=carry_lists)
+                                 carry=carry, carry_lists=carry_lists, prior=prior, prior_lists=prior_lists)
 
     miss_fps = sorted({it["file_page"] for it in items if it["item_kind"] == "miss"})
     page_png_sha256 = {str(fp): _sha256_file(volume_dir / f"page{fp}_image1.png") for fp in miss_fps}
@@ -1711,6 +2078,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         "carry_identity_conflict": carry_lists["identity_conflict"] if carry_lists else None,
         "carry_old_unmatched": carry_lists["old_unmatched"] if carry_lists else None,
         "carry_new_unmatched": carry_lists["new_unmatched"] if carry_lists else None,
+        **_prior_manifest_fields(prior_export, prior_run, prior, prior_sha, prior_counts, prior_lists),
     }
     # ---- write order: manifest line FIRST, then rename, then the new index.html ----
     text = manifest_path.read_text(encoding="utf-8")
@@ -1724,7 +2092,7 @@ def html_only(run_path, misses_path, geometry_path, volume_dir, out_root, consol
         f.write(html_text)
     return {"out_dir": out_dir, "set_sha16": set_sha, "config_hash": config_hash, "snap": snap,
             "snap_edge_coincidence": coincidence, "html_bytes": len(html_text.encode("utf-8")),
-            "renamed_to": renamed_to, "manifest_record": rec, "carry": carry}
+            "renamed_to": renamed_to, "manifest_record": rec, "carry": carry, "prior": prior}
 
 
 # ==================================================================================================
@@ -1746,12 +2114,35 @@ def build_arg_parser():
                          "(valid with --html-only or --carry-dry-run; refused for a fresh build)")
     ap.add_argument("--carry-dry-run", action="store_true",
                     help="with --carry-from: print the carry classification for (old dir, --misses) and write nothing")
+    ap.add_argument("--prior-export", default=None,
+                    help="OLD console's UI2 export JSONL: its region/page verdicts are carried by heading identity (needs --prior-run)")
+    ap.add_argument("--prior-run", default=None, help="the run JSONL the old console was built from (needs --prior-export)")
+    ap.add_argument("--prior-dry-run", action="store_true",
+                    help="print the prior classification for (--prior-export, --prior-run, --run) and write nothing")
     ap.add_argument("--console-dir", default=None, help="existing console dir (default: the only one under --out-root)")
     return ap
 
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
+    if bool(args.prior_export) != bool(args.prior_run):
+        print("--prior-export and --prior-run go together", file=sys.stderr)
+        return 2
+    if args.prior_dry_run:
+        if not args.prior_export:
+            print("--prior-dry-run needs --prior-export and --prior-run", file=sys.stderr)
+            return 2
+        recs = load_run_records(args.run)
+        items = build_items(recs, load_misses(args.misses))
+        try:
+            prior, sha, counts, lists = prior_from_paths(args.prior_export, args.prior_run, recs, items)
+        except ValueError as e:
+            print(f"REFUSED: {e}", file=sys.stderr)
+            return 2
+        print(f"from_set_sha16: {prior['from_set_sha16']}  prior_map_sha16: {sha}")
+        print(f"prior_counts: {counts}")
+        print(f"lists: {lists}")
+        return 0
     if args.carry_dry_run:
         if not args.carry_from:
             print("--carry-dry-run needs --carry-from", file=sys.stderr)
@@ -1772,7 +2163,8 @@ def main(argv=None):
     if args.html_only:
         try:
             r = html_only(args.run, args.misses, args.geometry, args.volume_dir, args.out_root,
-                          console_dir=args.console_dir, force=args.force, carry_from=args.carry_from)
+                          console_dir=args.console_dir, force=args.force, carry_from=args.carry_from,
+                          prior_export=args.prior_export, prior_run=args.prior_run)
         except RefuseOverwrite as e:
             print(str(e), file=sys.stderr)
             return 2
@@ -1783,7 +2175,8 @@ def main(argv=None):
         print(f"html size: {r['html_bytes'] / 1024:.1f} KB")
         return 0
     try:
-        result = build(args.run, args.misses, args.geometry, args.volume_dir, args.out_root, force=args.force)
+        result = build(args.run, args.misses, args.geometry, args.volume_dir, args.out_root, force=args.force,
+                       prior_export=args.prior_export, prior_run=args.prior_run)
     except RefuseOverwrite as e:
         print(str(e), file=sys.stderr)
         return 2

@@ -212,6 +212,106 @@ function rowsToOldItems(rows, fromSet) {
   return { items: items, refused: refused };
 }
 
+function seedPrior(state, prior) {
+  // Pure. For each PRIOR.map[id] with `seeded` and NO existing state for id (absent or empty),
+  // state[id] = copy of seeded + carried_from {set_sha16, item_id, class, match}. Existing state is
+  // NEVER overwritten. Returns {state, seeded:[ids]}.
+  var out = _copy(state || {});
+  var seeded = [];
+  if (!prior || !prior.map) return { state: out, seeded: seeded };
+  Object.keys(prior.map).forEach(function (id) {
+    var ent = prior.map[id];
+    if (!ent || !ent.seeded) return;
+    var cur = out[id];
+    if (cur && Object.keys(cur).length > 0) return;
+    var st = _copy(ent.seeded);
+    st.carried_from = { set_sha16: prior.from_set_sha16, item_id: ent.old_item_id, "class": ent["class"], match: ent.match };
+    out[id] = st;
+    seeded.push(id);
+  });
+  return { state: out, seeded: seeded };
+}
+
+function missingFields(item, st) {
+  // The fields a card still needs: region -> ["verdict"]; miss -> ["region","cause"]; page -> ["count"].
+  st = st || {};
+  var k = item.item_kind, out = [];
+  if (k === "page") {
+    if (st.heads_not_shown === undefined || st.heads_not_shown === null || st.heads_not_shown === "") out.push("count");
+  } else if (k === "miss") {
+    if (!st.verdict) out.push("region");
+    if (!st.cause_verdict) out.push("cause");
+  } else if (!st.verdict) out.push("verdict");
+  return out;
+}
+
+function missingSummary(items, state) {
+  // {kind: {field: n}} with kind in region|miss|page (every region kind counts as "region").
+  var out = {};
+  (items || []).forEach(function (it) {
+    var kind = it.item_kind === "miss" ? "miss" : (it.item_kind === "page" ? "page" : "region");
+    missingFields(it, (state || {})[it.item_id]).forEach(function (f) {
+      out[kind] = out[kind] || {};
+      out[kind][f] = (out[kind][f] || 0) + 1;
+    });
+  });
+  return out;
+}
+
+function formatMissing(summary) {
+  // "region: 3 need a verdict · miss: 2 need a cause, 1 needs a region · page: 18 need a count"
+  var parts = [];
+  ["region", "miss", "page"].forEach(function (kind) {
+    var fs = summary[kind];
+    if (!fs) return;
+    var bits = Object.keys(fs).sort().map(function (f) {
+      return fs[f] + (fs[f] === 1 ? " needs a " : " need a ") + f;
+    });
+    parts.push(kind + ": " + bits.join(", "));
+  });
+  return parts.length ? parts.join(" · ") : "all complete";
+}
+
+function needsBadgeText(item, st) {
+  var f = missingFields(item, st).map(function (x) { return x === "count" ? "heads-not-shown count" : x; });
+  return f.length ? "needs: " + f.join(", ") : "";
+}
+
+function nextIncompleteId(orderedItems, state, cursorId) {
+  // First incomplete card strictly after cursorId in document order, wrapping; null when none.
+  var n = orderedItems.length, start = 0;
+  if (cursorId) for (var i = 0; i < n; i++) if (orderedItems[i].item_id === cursorId) { start = i + 1; break; }
+  for (var j = 0; j < n; j++) {
+    var it = orderedItems[(start + j) % n];
+    if (missingFields(it, (state || {})[it.item_id]).length) return it.item_id;
+  }
+  return null;
+}
+
+var _MATCH_TXT = { exact: "exact", near: "near", from_miss: "from your drawn region", page: "page answer" };
+function priorBadgeText(ent, st) {
+  // Badge lines for a PRIOR.map entry given the current card state. [] when nothing to say.
+  var out = [];
+  if (!ent) return out;
+  var v = (ent.prior && ent.prior.verdict) || "";
+  if (ent["class"] === "layout_changed") {
+    out.push("LAYOUT CHANGED — your earlier verdict " + (ent.prior.heads_not_shown != null ? ent.prior.heads_not_shown : v) +
+             " is shown below; this card needs a fresh verdict");
+    return out;
+  }
+  if (ent["class"] === "carried_same_layout" || ent["class"] === "carried_verdict") {
+    out.push("carried from your earlier verdict (" + (_MATCH_TXT[ent.match] || ent.match) + ")");
+    if (ent.seeded && ent.seeded.verdict === "adjusted" && ent.delta) {
+      var keys = Object.keys(ent.delta);
+      out.push("your box differs from the new detection: " + keys.map(function (k) {
+        var d = ent.delta[k], sg = function (x) { return (x > 0 ? "+" : "") + x; };
+        return (keys.length > 1 ? k + " " : "") + "top Δ" + sg(d[0]) + ", bottom Δ" + sg(d[1]);
+      }).join("; ") + " px");
+    }
+  }
+  return out;
+}
+
 function _intBox(b) { return b.map(function (v) { return Math.round(v); }); }
 
 function _snapList(consts, fp, col, which) {
@@ -232,6 +332,8 @@ function buildExportRow(item, state, consts) {
     run_config_hash: consts.run_config_hash, ui_version: 2, door: "human-verse-box-truth",
     session_freshness: "in-context-WARN", exported_utc: consts.exported_utc,
     carried_from: st.carried_from || null, edited_after_carry: !!st.edited_after_carry,
+    prior_class: (st.carried_from && st.carried_from["class"]) || null,
+    prior_match: (st.carried_from && st.carried_from.match) || null,
   };
   if (kind === "page") {
     var raw = st.heads_not_shown;
@@ -300,5 +402,7 @@ if (typeof module !== "undefined") {
     pageColumn: pageColumn, snap: snap, clampEdge: clampEdge, linesMoved: linesMoved, applyDrag: applyDrag, newRect: newRect,
     initialRatified: initialRatified, verdictCoupling: verdictCoupling, isRated: isRated,
     buildExportRow: buildExportRow, carryForward: carryForward, rowsToOldItems: rowsToOldItems,
+    seedPrior: seedPrior, missingFields: missingFields, missingSummary: missingSummary, formatMissing: formatMissing,
+    needsBadgeText: needsBadgeText, nextIncompleteId: nextIncompleteId, priorBadgeText: priorBadgeText,
   };
 }

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const U = require("./verse_truth_ui.js");
 
-const EXPECTED_TESTS = 26;
+const EXPECTED_TESTS = 31;
 const tests = [];
 function test(name, fn) { tests.push([name, fn]); }
 
@@ -206,6 +206,89 @@ test("pageColumn: slanted col_split decides by y; geometry xdiv only without it"
   assert.equal(U.pageColumn({ xdiv: 1482 }, 1600, 2000), "right");
   assert.equal(U.pageColumn({ xdiv: 1482 }, 1400, 2000), "left");
   assert.equal(U.pageColumn({}, 1400, 2000), null);
+});
+
+const PRIOR = {
+  from_set_sha16: "OLD",
+  map: {
+    "r:5:left:100": { "class": "carried_same_layout", match: "near", old_item_id: "r:5:left:90",
+      seeded: { verdict: "adjusted", ratified: [{ box: [10, 150, 300, 260], edges: { top: { snapped: true, at_crop_limit: false }, bottom: { snapped: false, at_crop_limit: false } } }], note: "mine" },
+      delta: { "5:left": [-7, 6] }, prior: { verdict: "adjusted", rects: [], note: "mine", heads_not_shown: null } },
+    "r:5:left:400": { "class": "layout_changed", match: "exact", old_item_id: "r:5:left:400", seeded: null, delta: null,
+      prior: { verdict: "correct", rects: [], note: "", heads_not_shown: null } },
+    "r:6:left:50": { "class": "carried_verdict", match: "exact", old_item_id: "r:6:left:50", seeded: { verdict: "not_a_verse" }, delta: null,
+      prior: { verdict: "not_a_verse", rects: [], note: "", heads_not_shown: null } },
+  },
+};
+
+test("seedPrior: seeds only ids with `seeded` and no state, tags carried_from, never overwrites", () => {
+  const existing = { "r:6:left:50": { verdict: "correct", note: "already decided" } };
+  const r = U.seedPrior(existing, PRIOR);
+  assert.deepEqual(r.seeded, ["r:5:left:100"]);
+  assert.equal(r.state["r:6:left:50"].verdict, "correct", "existing state untouched");
+  assert.equal(r.state["r:6:left:50"].carried_from, undefined);
+  assert.deepEqual(r.state["r:5:left:100"].carried_from, { set_sha16: "OLD", item_id: "r:5:left:90", "class": "carried_same_layout", match: "near" });
+  assert.equal(r.state["r:5:left:100"].verdict, "adjusted");
+  assert.equal(r.state["r:5:left:400"], undefined, "layout_changed seeds nothing");
+  assert.deepEqual(existing, { "r:6:left:50": { verdict: "correct", note: "already decided" } }, "input not mutated");
+  const again = U.seedPrior(r.state, PRIOR);
+  assert.deepEqual(again.seeded, [], "second pass seeds nothing");
+  assert.deepEqual(again.state, r.state);
+});
+
+test("missingSummary: a miss with a verdict but no cause counts as cause, not region; formatMissing words it", () => {
+  const items = [
+    { item_id: "r:1", item_kind: "verse" }, { item_id: "r:2", item_kind: "continuation_unanchored" },
+    { item_id: "m:1", item_kind: "miss" }, { item_id: "m:2", item_kind: "miss" }, { item_id: "m:3", item_kind: "miss" },
+    { item_id: "p:1", item_kind: "page" }, { item_id: "p:2", item_kind: "page" },
+  ];
+  const state = {
+    "r:2": { verdict: "correct" },
+    "m:1": { verdict: "region_drawn" }, "m:2": { verdict: "region_drawn", cause_verdict: "unsure" },
+    "p:2": { heads_not_shown: 0 },
+  };
+  const s = U.missingSummary(items, state);
+  assert.deepEqual(s, { region: { verdict: 1 }, miss: { cause: 2, region: 1 }, page: { count: 1 } });
+  assert.equal(U.formatMissing(s), "region: 1 needs a verdict · miss: 2 need a cause, 1 needs a region · page: 1 needs a count");
+  assert.equal(U.formatMissing({}), "all complete");
+  assert.equal(U.needsBadgeText(items[2], state["m:1"]), "needs: cause");
+  assert.equal(U.needsBadgeText(items[5], undefined), "needs: heads-not-shown count");
+  assert.equal(U.needsBadgeText(items[3], state["m:2"]), "");
+});
+
+test("nextIncompleteId: first incomplete after the cursor in document order, wrapping, null when none", () => {
+  const items = [{ item_id: "a", item_kind: "verse" }, { item_id: "b", item_kind: "verse" }, { item_id: "c", item_kind: "verse" }];
+  const st = { b: { verdict: "correct" } };
+  assert.equal(U.nextIncompleteId(items, st, null), "a");
+  assert.equal(U.nextIncompleteId(items, st, "a"), "c");
+  assert.equal(U.nextIncompleteId(items, st, "c"), "a", "wraps");
+  assert.equal(U.nextIncompleteId(items, { a: { verdict: "correct" }, b: { verdict: "correct" }, c: { verdict: "correct" } }, "a"), null);
+});
+
+test("buildExportRow carries prior_class / prior_match; null when not carried by a prior", () => {
+  const seeded = U.seedPrior({}, PRIOR).state["r:5:left:100"];
+  const item = { item_id: "r:5:left:100", item_kind: "verse", file_page: 5, printed_page: -83, item_sha16: "x",
+                 rects: [{ file_page: 5, col: "left", box: [10, 157, 300, 254] }] };
+  const row = U.buildExportRow(item, seeded, consts);
+  assert.equal(row.prior_class, "carried_same_layout");
+  assert.equal(row.prior_match, "near");
+  assert.equal(row.verdict, "adjusted");
+  const plain = U.buildExportRow(item, { verdict: "correct", carried_from: { set_sha16: "O", item_id: "m:1", item_sha16: "s", ui_version: 2 } }, consts);
+  assert.equal(plain.prior_class, null);
+  assert.equal(plain.prior_match, null);
+  assert.equal(U.buildExportRow(item, { verdict: "correct" }, consts).prior_class, null);
+});
+
+test("priorBadgeText: carried, adjusted-with-delta, and layout-changed wordings", () => {
+  const a = U.priorBadgeText(PRIOR.map["r:5:left:100"], {});
+  assert.equal(a[0], "carried from your earlier verdict (near)");
+  assert.equal(a[1], "your box differs from the new detection: top Δ-7, bottom Δ+6 px");
+  const l = U.priorBadgeText(PRIOR.map["r:5:left:400"], {});
+  assert.equal(l.length, 1);
+  assert.ok(l[0].startsWith("LAYOUT CHANGED — your earlier verdict correct is shown below; this card needs a fresh verdict"));
+  assert.deepEqual(U.priorBadgeText(null, {}), []);
+  const m = Object.assign({}, PRIOR.map["r:5:left:100"], { match: "from_miss", seeded: { verdict: "correct" } });
+  assert.deepEqual(U.priorBadgeText(m, {}), ["carried from your earlier verdict (from your drawn region)"]);
 });
 
 let pass = 0, fail = 0;

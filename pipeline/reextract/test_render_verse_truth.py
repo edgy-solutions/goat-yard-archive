@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 25
+EXPECTED_TESTS = 37
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -606,6 +606,200 @@ def test_html_only_miss_entry_carries_col_split_and_col_boxes_from_page_record()
         assert '"left": [0, 0, 105, 200]' in html_text
         assert '"xdiv": 100' in html_text
         assert "function pageColumn(" in html_text and "pageColumn(it2, x, y)" in html_text
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# 13. prior verdicts carried by heading identity ---------------------------------------------------------
+
+PITCH = 57.0   # tol = floor(57 / 2) = 28
+
+
+def _prec(fp, rect_y0, head_y0, verse=(1,), col="left", extra_rects=(), x=(0, 1900), kind="verse", h=200, head=True):
+    rects = [{"file_page": fp, "col": col, "box": [x[0], rect_y0, x[1], rect_y0 + h]}]
+    for ecol in extra_rects:
+        rects.append({"file_page": fp, "col": ecol, "box": [1900, rect_y0, 3800, rect_y0 + h]})
+    hd = {"file_page": fp, "col": col, "y0": head_y0, "y1": head_y0 + 60, "box": [x[0], head_y0, x[1], head_y0 + 60]} if head else None
+    return {"kind": kind, "file_page_first": fp, "head": hd, "rects": rects, "verse": list(verse) if head else None,
+            "flags": []}
+
+
+def _xrow(item_id, kind, verdict, ratified=None, detected=None, note="", set_="S1", heads=None):
+    return {"item_id": item_id, "item_kind": kind, "file_page": int(item_id.split(":")[1]), "verdict": verdict,
+            "as_ratified": ratified, "as_detected": detected, "note": note, "set_sha16": set_,
+            "heads_not_shown": heads}
+
+
+def _rat(fp, col, y0, y1, x=(0, 1900)):
+    return {"file_page": fp, "col": col, "box": [x[0], y0, x[1], y1],
+            "edges": {"top": {"snapped": True, "lines_moved": 1, "at_crop_limit": False},
+                      "bottom": {"snapped": False, "lines_moved": 0, "at_crop_limit": True}}}
+
+
+def _prior(old_recs, rows, new_recs, pitch=PITCH):
+    return RVT.compute_prior(old_recs, rows, RVT.build_items(new_recs, []), pitch_px=pitch)
+
+
+def test_prior_exact_match_same_layout_correct_seeds_correct():
+    old = [_prec(5, 100, 100)]
+    rows = [_xrow("r:5:left:100", "verse", "correct", ratified=[_rat(5, "left", 100, 300)], note="fine")]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 100)])
+    e = P["map"]["r:5:left:100"]
+    assert (e["class"], e["match"]) == ("carried_same_layout", "exact"), e
+    assert e["seeded"]["verdict"] == "correct" and e["seeded"]["note"] == "fine"
+    assert e["seeded"]["ratified"][0]["box"] == [0, 100, 1900, 300]
+    assert e["delta"] == {"5:left": [0, 0]} and c["seeded"] == 1 and P["from_set_sha16"] == "S1"
+
+
+def test_prior_near_match_within_half_pitch_and_not_beyond():
+    old = [_prec(5, 100, 100)]
+    rows = [_xrow("r:5:left:100", "verse", "correct", ratified=[_rat(5, "left", 100, 300)])]
+    P, c, l = _prior(old, rows, [_prec(5, 120, 128)])           # dy = 28 == tol
+    e = P["map"]["r:5:left:120"]
+    assert e["match"] == "near" and e["old_item_id"] == "r:5:left:100", e
+    P2, c2, l2 = _prior(old, rows, [_prec(5, 120, 129)])        # dy = 29 > tol
+    assert "r:5:left:120" not in P2["map"] and l2["new_unmatched"] == ["r:5:left:120"]
+    assert [d["item_id"] for d in l2["old_unmatched"]] == ["r:5:left:100"]
+
+
+def test_prior_near_with_two_candidates_is_identity_conflict_and_carries_nothing():
+    old = [_prec(5, 100, 100), _prec(5, 140, 130)]               # same verse, both within 28 of 115
+    rows = [_xrow("r:5:left:100", "verse", "correct", ratified=[_rat(5, "left", 100, 300)]),
+            _xrow("r:5:left:140", "verse", "correct", ratified=[_rat(5, "left", 140, 340)])]
+    P, c, l = _prior(old, rows, [_prec(5, 115, 115)])
+    assert P["map"] == {} and l["identity_conflict"] == ["r:5:left:115"] and c["identity_conflict"] == 1
+    assert len(l["old_unmatched"]) == 2, "unused old sources are retired, not dropped"
+
+
+def test_prior_not_a_verse_is_carried_verdict_with_note():
+    old = [_prec(5, 100, 100)]
+    rows = [_xrow("r:5:left:100", "verse", "not_a_verse", note="a footnote number")]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 100)])
+    e = P["map"]["r:5:left:100"]
+    assert e["class"] == "carried_verdict" and e["seeded"] == {"verdict": "not_a_verse", "note": "a footnote number"}
+
+
+def test_prior_same_layout_with_moved_y_seeds_adjusted_with_delta_and_new_x():
+    old = [_prec(5, 100, 100)]
+    rows = [_xrow("r:5:left:100", "verse", "adjusted", ratified=[_rat(5, "left", 90, 310, x=(7, 1800))], note="n")]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 100)])
+    e = P["map"]["r:5:left:100"]
+    assert e["class"] == "carried_same_layout"
+    assert e["seeded"]["verdict"] == "adjusted"
+    assert e["seeded"]["ratified"][0]["box"] == [0, 90, 1900, 310], "x comes from the NEW detection"
+    assert e["seeded"]["ratified"][0]["edges"]["top"] == {"snapped": True, "at_crop_limit": False}
+    assert e["delta"] == {"5:left": [-10, 10]}
+
+
+def test_prior_layout_changed_seeds_nothing_and_keeps_the_prior_as_content():
+    old = [_prec(5, 100, 100)]
+    rows = [_xrow("r:5:left:100", "verse", "adjusted", ratified=[_rat(5, "left", 90, 310)], note="mine")]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 100, extra_rects=("right",))])
+    e = P["map"]["r:5:left:100"]
+    assert e["class"] == "layout_changed" and e["seeded"] is None and e["delta"] is None
+    assert e["prior"]["verdict"] == "adjusted" and e["prior"]["note"] == "mine"
+    assert e["prior"]["rects"][0]["box"] == [0, 90, 1900, 310]
+    assert c["seeded"] == 0 and c["by_class"] == {"layout_changed": 1}
+
+
+def test_prior_from_miss_drawn_region_matches_a_new_head():
+    rows = [_xrow("m:5:3000", "miss", "region_drawn", ratified=[_rat(5, "left", 2990, 3400)], note="drawn")]
+    old = [_prec(5, 100, 100)]
+    P, c, l = _prior(old, rows, [_prec(5, 3005, 3020, verse=(9,))])   # |3020 - 3000| = 20 <= 28
+    e = P["map"]["r:5:left:3005"]
+    assert e["match"] == "from_miss" and e["old_item_id"] == "m:5:3000", e
+    assert e["class"] == "carried_same_layout" and e["seeded"]["verdict"] == "adjusted"
+    assert e["seeded"]["ratified"][0]["box"] == [0, 2990, 1900, 3400]
+    assert l["old_unmatched"] == [], "the miss was used"
+
+
+def test_prior_page_item_carried_only_when_every_region_carried():
+    old = [_prec(5, 100, 100), _prec(5, 500, 500, verse=(2,)), {"kind": "page", "file_page": 5}]
+    rows = [_xrow("r:5:left:100", "verse", "correct", ratified=[_rat(5, "left", 100, 300)]),
+            _xrow("r:5:left:500", "verse", "not_a_verse"),
+            _xrow("p:5", "page", "answered", heads=3, note="three")]
+    new = [_prec(5, 100, 100), _prec(5, 500, 500, verse=(2,)), {"kind": "page", "file_page": 5}]
+    P, c, l = _prior(old, rows, new)
+    pe = P["map"]["p:5"]
+    assert pe["class"] == "carried_same_layout" and pe["seeded"] == {"heads_not_shown": 3, "note": "three"}
+    new2 = [_prec(5, 100, 100, extra_rects=("right",)), _prec(5, 500, 500, verse=(2,)), {"kind": "page", "file_page": 5}]
+    P2, c2, l2 = _prior(old, rows, new2)
+    pe2 = P2["map"]["p:5"]
+    assert pe2["class"] == "layout_changed" and pe2["seeded"] is None and pe2["prior"]["heads_not_shown"] == 3
+    new3 = [_prec(5, 100, 100), {"kind": "page", "file_page": 5}]      # an old region no longer matched
+    P3, c3, l3 = _prior(old, rows, new3)
+    assert P3["map"]["p:5"]["class"] == "layout_changed"
+    assert [d["item_id"] for d in l3["old_unmatched"]] == ["r:5:left:500"]
+
+
+def test_prior_old_unmatched_lists_verdict_and_note_and_skips_unrated():
+    old = [_prec(5, 100, 100), _prec(5, 700, 700, verse=(3,))]
+    rows = [_xrow("r:5:left:100", "verse", "adjusted", ratified=[_rat(5, "left", 90, 300)], note="gone"),
+            _xrow("r:5:left:700", "verse", "unrated")]
+    P, c, l = _prior(old, rows, [_prec(5, 2000, 2000, verse=(8,))])
+    assert l["old_unmatched"] == [{"item_id": "r:5:left:100", "verdict": "adjusted", "note": "gone"}]
+    assert c["old_unmatched"] == 1 and l["new_unmatched"] == ["r:5:left:2000"]
+
+
+def test_prior_cont_regions_match_on_exact_identity_only():
+    old = [_prec(5, 100, 0, kind="continuation_unanchored", head=False)]
+    rows = [_xrow("r:5:left:100", "continuation_unanchored", "correct", ratified=[_rat(5, "left", 100, 300)])]
+    P, c, l = _prior(old, rows, [_prec(5, 100, 0, kind="continuation_unanchored", head=False)])
+    assert P["map"]["r:5:left:100"]["match"] == "exact"
+    P1, _, _ = _prior(old, rows, [_prec(5, 110, 0, kind="continuation_unanchored", head=False)])
+    assert P1["map"]["r:5:left:110"]["match"] == "exact", "identity is (fp, col): a moved top still matches"
+    P2, c2, l2 = _prior(old, rows, [_prec(5, 100, 0, col="right", kind="continuation_unanchored", head=False)])
+    assert P2["map"] == {} and l2["new_unmatched"] == ["r:5:right:100"], "another column never near-matches"
+
+
+def test_prior_refuses_mixed_sets_unknown_rows_and_missing_pitch():
+    old = [_prec(5, 100, 100)]
+    mixed = [_xrow("r:5:left:100", "verse", "correct", ratified=[_rat(5, "left", 100, 300)]),
+             _xrow("m:5:3000", "miss", "region_drawn", ratified=[_rat(5, "left", 2990, 3400)], set_="S2")]
+    for rows, pitch, what in ((mixed, PITCH, "set"),
+                              ([_xrow("r:9:left:1", "verse", "correct")], PITCH, "not an item"),
+                              ([_xrow("r:5:left:100", "verse", "correct")], None, "pitch")):
+        try:
+            _prior(old, rows, [_prec(5, 100, 100)], pitch=pitch)
+            assert False, f"expected ValueError ({what})"
+        except ValueError as e:
+            assert what in str(e) or what == "set", e
+    assert RVT.run_pitch_px([{"kind": "run_summary", "thresholds": {}}]) is None
+    assert RVT.run_pitch_px([{"kind": "run_summary", "thresholds": {"inset_thr": {"pitch_px": 57.0}}}]) == 57.0
+
+
+def test_prior_html_only_embeds_map_and_manifest_and_changes_the_ui_config_hash():
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rvt_test_"))
+    try:
+        (run_path, misses_path, geometry_path, volume_dir, out_root), result = _built_console(tmp_dir)
+        out_dir = result["out_dir"]
+        _rewrite_summary(run_path, {"kind": "run_summary", "thresholds": {"inset_thr": {"pitch_px": 57.0}},
+                                    "layout": {"head_first": 0, "overlap": 0, "rect_before_head": 0}})
+        RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root)
+        last0 = json.loads((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert last0["prior_map_sha16"] is None and last0["prior_counts"] is None
+        html0 = (out_dir / "index.html").read_text(encoding="utf-8")
+        assert "const PRIOR = null;" in html0
+        recs = RVT.load_run_records(run_path)
+        rows = [_xrow("r:101:left:30", "verse", "correct", ratified=[_rat(101, "left", 30, 60, x=(30, 150))], note="ok"),
+                _xrow("p:101", "page", "answered", heads=2)]
+        exp = tmp_dir / "export.jsonl"
+        exp.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        r = RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root, prior_export=exp,
+                          prior_run=run_path, force=True)
+        html1 = (out_dir / "index.html").read_text(encoding="utf-8")
+        assert '"class": "carried_same_layout"' in html1 and "function seedPrior(" in html1
+        assert 'id="nextinc"' in html1 and 'id="missing"' in html1 and "const PRIOR_REPORT" in html1
+        rec = json.loads((out_dir / "manifest.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert rec["prior_map_sha16"] == RVT._sha16_json(r["prior"]) and rec["prior_export"] == str(exp)
+        assert rec["export_sha256"] == RVT._sha256_file(exp) and rec["old_run_sha256"] == RVT._sha256_file(run_path)
+        assert rec["prior_counts"]["by_class"] == {"carried_same_layout": 2, "fresh": 1}, rec["prior_counts"]
+        assert rec["config_hash"] != last0["config_hash"], "prior_map_sha16 enters the ui config hash"
+        try:
+            RVT.html_only(run_path, misses_path, geometry_path, volume_dir, out_root, prior_export=exp, force=True)
+            assert False, "expected ValueError"
+        except ValueError:
+            pass
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
