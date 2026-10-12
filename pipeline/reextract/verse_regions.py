@@ -480,7 +480,7 @@ def gutter_gap(ink_mask, xdiv, y0, y1, W=GUTTER_WINDOW_W):
     return int(gap_px), centre
 
 
-def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=GUTTER_WINDOW_W, xdiv_at=None):
+def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=GUTTER_WINDOW_W, xdiv_at=None, split=None):
     """col_ink: bool ink array for the WHOLE column box (already strip_vrules'd); abs_y0/abs_y1
     page-absolute row bounds of this band; col_box = (x0,y0,x1,y1) of the column region (abs).
     ink/xdiv/gutter_window: the FULL-PAGE ink mask and gutter geometry, used to zero the printed
@@ -509,9 +509,17 @@ def _make_band(col, col_box, abs_y0, abs_y1, col_ink, ink, xdiv, gutter_window=G
     xs = np.where(colhas_band)[0]
     left_local = int(xs[0]) if len(xs) else 0
     right_local = int(xs[-1]) if len(xs) else -1
+    bx0, bx1 = int(cx0), int(cx1)
+    if split is not None:
+        # Band x-edge tight to the slanted split over THIS band's own rows (linear in y: the two
+        # endpoints are exact). The column box carries the worst case over the whole column.
+        if col == "left":
+            bx1 = min(bx1, int(math.ceil(max(left_edge(split, abs_y0), left_edge(split, abs_y1 - 1)))))
+        elif col == "right":
+            bx0 = max(bx0, int(math.floor(min(right_edge(split, abs_y0), right_edge(split, abs_y1 - 1)))))
     return {
         "col": col, "y0": int(abs_y0), "y1": int(abs_y1),
-        "x0": int(cx0), "x1": int(cx1),
+        "x0": bx0, "x1": bx1,
         "left_ink_x": int(cx0 + left_local), "right_ink_x": int(cx0 + right_local + 1),
         "baseline": int(abs_y0 + baseline), "xheight": int(xh),
         "rule_cols_removed": rule_cols_removed,
@@ -669,7 +677,8 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
         line_h[col] = {"basis": basis, "column_raw_median": column_raw_median, "page_line_h": page_line_h}
         if basis == "page":
             flags.append(f"line_h_from_page:{col}")
-        raw_bands = [_make_band(col, box, y0 + ly0, y0 + ly1, cleaned, ink, xdiv, gutter_window, xdiv_at)
+        raw_bands = [_make_band(col, box, y0 + ly0, y0 + ly1, cleaned, ink, xdiv, gutter_window, xdiv_at,
+                                split if split["status"] == "ok" else None)
                      for (ly0, ly1) in text_lines(cleaned, min_sep_frac=TEXT_LINE_MIN_SEP_FRAC,
                                                    line_h=col_line_h, snap=TEXT_LINE_SNAP)]
         kept, col_slivers = _split_slivers(raw_bands)

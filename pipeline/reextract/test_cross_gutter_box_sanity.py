@@ -80,9 +80,13 @@ def _build_real_run():
         geom_by_page[fp]["_s1"] = s1_by_page[fp]
 
     inset_result, _ = BVR.derive_inset_thr(s1_by_page)
-    assert inset_result["status"] == "ok" and inset_result["value"] == 35.0, (
-        f"the 20-page set must derive a bimodal inset threshold of 35.0 (MEASURE_step2_d_inset_modes), "
-        f"got: {inset_result}")
+    # 32.5 is a snapshot of a DERIVED value, and the column-rule split (fix A) moves it: with the
+    # split abstained the 20 pages derived 35.0 (flush_bin 0, indent_bin 13); with the split on, the
+    # slanted split exposes right-column head indents the old xdiv hid, so the indent mode moved to
+    # bin 12 -> 32.5 (still bimodal: flush_bin 0, indent_bin 12).
+    assert inset_result["status"] == "ok" and inset_result["value"] == 32.5, (
+        f"the 20-page set must derive a bimodal inset threshold of 32.5 (split on; was 35.0 under "
+        f"xdiv, MEASURE_step2_d_inset_modes), got: {inset_result}")
     inset_thr = inset_result["value"]
 
     for fp in PAGES:

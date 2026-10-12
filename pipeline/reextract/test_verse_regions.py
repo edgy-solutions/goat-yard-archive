@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 64
+EXPECTED_TESTS = 65
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -1451,6 +1451,24 @@ def test_adapter_geom_uses_split_at_rect_mid():
     assert VR.adapter_geom(geom, "right", 100, y_mid=4000)["gutter"] == round(0.01 * 4000 + 1700.0)
     assert VR.adapter_geom(geom, "left", 100)["gutter"] == round(0.01 * 2640 + 1700.0)
 
+
+
+def test_col_split_band_x_edges_tight_to_slanted_split():
+    c0, slope = 1754.0, -0.0169            # 65 px of drift over the body
+    ink, geom, _ = _cs_page(c0=c0, slope=slope, xdiv=1700)
+    s1 = VR.analyze_page_s1(ink, geom)
+    sp = s1["col_split"]
+    assert sp["status"] == "ok" and abs(sp["slope"] * (sp["y_range"][1] - sp["y_range"][0])) >= 50, sp
+    lbox, rbox = s1["col_boxes"]["left"], s1["col_boxes"]["right"]
+    bottom_left = [b for b in s1["left"] if b["y0"] > 4000]
+    top_right = [b for b in s1["right"] if b["y1"] < 1400]
+    assert bottom_left and top_right
+    for b in bottom_left:
+        le = max(VR.left_edge(sp, b["y0"]), VR.left_edge(sp, b["y1"] - 1))
+        assert b["x1"] <= le + 1 and b["x1"] < lbox[2] - 30, (b["y0"], b["x1"], le, lbox)
+    for b in top_right:
+        re_ = min(VR.right_edge(sp, b["y0"]), VR.right_edge(sp, b["y1"] - 1))
+        assert b["x0"] >= re_ - 1 and b["x0"] > rbox[0] + 30, (b["y0"], b["x0"], re_, rbox)
 
 
 if __name__ == "__main__":
