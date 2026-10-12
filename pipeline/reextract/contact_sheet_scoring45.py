@@ -65,6 +65,7 @@ from PIL import Image                                                      # noq
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 import hebrew_frontier_or as FOR                                          # noqa: E402  _ctx, ARMS, APERTURE
 from clean_run import git_state, provisional                              # noqa: E402
+import ch2_position as CP                                                 # noqa: E402  rev 5: position-sourced channel 2
 
 SET = "0401b636ffa7bf1a"
 PRINTED_OFFSET = 88
@@ -91,26 +92,66 @@ F_COST_BARE = HAD.DATA / "hebrew_frontier_or_notext_20261004.jsonl"
 F_COST_TEXT = HAD.DATA / "hebrew_frontier_or_reads_20260927.jsonl"
 F_APP = HAD.DATA.parent / "vol1_apparatus.jsonl"
 F_TRUTH74 = HAD.DATA / ("truth_set74_%s.json" % SET)
+F_CUT74 = HAD.DATA / ("truthset74_cut_%s.json" % SET)
+F_REV4 = HAD.DATA / "CONTACT_SHEET_scoring45_adb9a26835533dbc_c22cdb77d8a2779e2d.json"
 SOURCES = (F_PASS1, F_PASS1_TILES, F_PASS2, F_PASS3R2, F_R1_EXPORT, F_R2_EXPORT, F_ADJ, F_COST_BARE, F_COST_TEXT,
-           F_APP, F_TRUTH74)
-SUPERSEDES = "CONTACT_SHEET_scoring45_adb9a26835533dbc"
-SUPERSEDES_WHY = ("that sheet sourced channel 2 from hebrew_aperture_diag.build_set (the 2026-09-06 sitting records, "
-                  "an old ~21-span population) and so showed channel 2 ABSENT for 44 of 45 spans; the note text "
-                  "exists in vol1_apparatus.jsonl for all 45. The crop set is unchanged (same set digest). That "
-                  "earlier sheet is kept untouched as the record of the finding.")
-C2_MAP_RULE = ("Span id pP:nN -> the vol1_apparatus.jsonl line whose `page` == P (file page), item N (0-based) of "
-               "its `notes` list; the string is that item's `text`, passed through hebrew_frontier_or._ctx "
-               "(Hebrew runs -> U+2022).")
-C2_NORM_RULE = ("Witness comparisons: (Hebrew) NFC, keep only U+05D0-U+05EA, so nikud, cantillation, spaces and "
-                "Latin drop out; the truth set's `hebrew` field (the extractor's candidate, not the signed reading) must be a "
-                "substring of the note's Hebrew consonants. (Latin, where an older Latin string exists) remove U+0590-U+05FF, lower-case, keep "
-                "word tokens [a-z0-9&]; the older token sequence must be a contiguous run of the apparatus "
-                "tokens. Tokenising folds whitespace and punctuation.")
-C2_WITNESSES = ("(1) index: the truth set's note_index (1-based, from the page image's note regions) minus 1 == N; "
-                "(2) count: the truth set's notes_on_page (image-derived) == len(notes) on that page; "
-                "(3) hebrew: the truth set's `hebrew` field, which is the extractor's candidate from the whole-note read (same lineage as the note text), occurs in note N; this is NOT the printed or signed reading, and what it establishes is index bookkeeping within that lineage, not a pixel correspondence; "
-                "(4) marker: note N's marker == [^N+1] (same record, so a consistency check, not independent); "
-                "(5) older Latin: where the 2026-09-06 sitting records hold a Latin string for the span.")
+           F_APP, F_TRUTH74, F_CUT74, F_REV4)
+SUPERSEDES = "CONTACT_SHEET_scoring45_adb9a26835533dbc_c22cdb77d8a2779e2d"
+SUPERSEDES_WHY = ("rev 4 of this sheet, because Chris rejected it for the p245:n1 text: its channel-2 string for "
+                  "p245:n1 was the PREVIOUS note's gloss, 'in monte Dominus videbitur' (the signed string is note "
+                  "[2]'s lemma, not note [1]'s). Rev 4 took the note by the candidate's note_index; the candidate, "
+                  "its index and the note text were mutually consistent and all pointed at the wrong note. Rev 5 "
+                  "re-sources channel 2 by the crop's POSITION on the page and cross-checks it against an "
+                  "independent content witness. Rev 4 survives in git history and on disk, untouched.")
+SUPERSEDES_REV1 = "CONTACT_SHEET_scoring45_adb9a26835533dbc"
+SUPERSEDES_REV1_WHY = ("rev 1 remains the record of the absent-channel finding: it sourced channel 2 from "
+                       "hebrew_aperture_diag.build_set (the 2026-09-06 sitting records, an old ~21-span population) "
+                       "and so showed channel 2 ABSENT for 44 of 45 spans.")
+C2_MAP_RULE = ("POSITION, not index. Span id pP:nN -> take the span's stored box (strip frame, upscale=1; "
+               "truth_set74.box), compute page P's note regions with note_line_region (Lane A, called not edited), "
+               "find the ONE region containing the box (rule below), and take that region's ordinal k -> the "
+               "vol1_apparatus.jsonl line whose `page` == P (file page), item k (0-based) of its `notes` list; the "
+               "string is that item's `text`, passed through hebrew_frontier_or._ctx (Hebrew runs -> U+2022). The "
+               "note TEXT has no geometry of its own (one whole-strip read), so region -> text is ORDINAL within the "
+               "page, valid only under the count gate. The span id's N is NOT used to choose the note.")
+C2_NORM_RULE = ("Content witness: fold both sides to base consonants (NFC, strip `[` `]`, keep U+05D0-U+05EA, fold the "
+                "five final forms ך ם ן ף ץ to כ מ נ פ צ); distance for a note = the better of (a) Levenshtein "
+                "distance from the SIGNED string (signature_full, else signature) to the note's FIRST Hebrew run "
+                "(its opening lemma) and (b) 0 if the signed string occurs anywhere in the note's Hebrew. The note "
+                "with the lowest distance wins; a TIE for lowest between two notes is an ABSTENTION. Latin "
+                "comparison (older_latin): remove U+0590-U+05FF, lower-case, keep word tokens [a-z0-9&]; the older "
+                "token sequence must be a contiguous run of the apparatus tokens.")
+C2_WITNESSES = ("CONTENT WITNESS (relied on for identity, cross-lineage: the signed string is a human's read of the "
+                "PIXELS, the note text is the model's read of the STRIP; it is checked against every note on the "
+                "page, see the normalisation rule). OTHER WITNESSES, shown and NOT relied on for identity: "
+                "(1) index_self_consistency: the truth set's note_index (1-based) minus 1 == N, i.e. the "
+                "candidate's note_index agrees with the apparatus list position WITHIN ONE LINEAGE; this is "
+                "SELF-CONSISTENCY, NOT IDENTITY (falsifying instance below); "
+                "(2) count_agreement: the truth set's notes_on_page == len(notes) on that page; a count agreement is "
+                "not a correspondence; "
+                "(3) candidate_in_note: the truth set's `hebrew` field, the extractor's candidate from the whole-note "
+                "read (same lineage as the note text), occurs in note N; this is NOT the printed or signed reading, "
+                "and what it establishes is bookkeeping within that lineage, not a pixel correspondence; "
+                "(4) marker_same_record: note N's marker == [^N+1] (same record, so a consistency check, not "
+                "independent); "
+                "(5) older_latin: where the 2026-09-06 sitting records hold a Latin string for the span.")
+INDEX_SC_FALSIFIER = ("Chris, 2026-10-11: `p245:n1`'s index chain is internally coherent and points at the wrong "
+                      "note; its channel-2 string was the previous note's gloss, \"in monte Dominus videbitur\".")
+INDEX_SC_TEXT = ("index_self_consistency: the candidate's note_index agrees with the apparatus list position within "
+                 "ONE lineage (the extractor that proposed the candidate and the extractor that listed the notes "
+                 "share the same page reading). That is self-consistency, not identity: it can agree and be "
+                 "wrong. Falsifying instance: " + INDEX_SC_FALSIFIER)
+REV5_TEXT = ("REV 5 (rev field = 5). Supersedes " + SUPERSEDES + " (rev 4) BECAUSE CHRIS REJECTED IT FOR THE p245:n1 "
+             "TEXT. What changed: channel 2 is re-sourced by the crop's POSITION on the page (the note region "
+             "containing the box), not by candidate note index, and all 45 rows are re-derived; a content witness "
+             "(signed string against every note on the page, cross-lineage) cross-checks the position; a row that "
+             "cannot be resolved by position, or where position and content disagree, runs BARE-ONLY (channel 1 "
+             "only) and says so. The index witness is renamed index_self_consistency and no longer licenses a "
+             "string. Rows whose channel-2 string changed from rev 4 are listed with old and new side by side. "
+             "n_calls and cost are recomputed from the actual channel counts. The 45 rows, crop hashes, set "
+             "digest, register call-outs, before/after blocks and candidate_vs_signed are unchanged. This is a "
+             "proposal, not an approval record. " + SUPERSEDES_REV1 + " (rev 1) remains the record of the "
+             "absent-channel finding.")
 
 REV3_TEXT_OLD = ("REV 3. What changed from rev 2: (a) witness (3) is relabelled. Rev 2 described the truth set's `hebrew` "
              "field as the text printed on the page; it is the extractor's candidate from the whole-note read, the same lineage "
@@ -313,6 +354,8 @@ for _i, _line in enumerate(io.open(str(F_APP), encoding="utf-8")):
         continue
     APP_NOTES[int(_o["page"])] = _o["notes"]
 T74 = {r["span_id"]: r for r in json.load(io.open(str(F_TRUTH74), encoding="utf-8"))["rows"]}
+CUT74 = {r["span_id"]: r for r in json.load(io.open(str(F_CUT74), encoding="utf-8"))["rows"]}
+REV4_BY = {r["span_id"]: r for r in json.load(io.open(str(F_REV4), encoding="utf-8"))["rows"]}
 check(all(set(n) == {"marker", "text"} for ns in APP_NOTES.values() for n in ns),
       "an apparatus note item does not have exactly marker and text")
 _HEB_CONS = re.compile(u"[^א-ת]")
@@ -364,21 +407,25 @@ def _contiguous(small, big):
     return n > 0 and any(big[i:i + n] == small for i in range(len(big) - n + 1))
 
 
+WITNESS_KEYS = ("index_self_consistency", "count_agreement", "candidate_in_note", "marker_same_record", "older_latin")
+WITNESS_KEYS_CMP = ("index_self_consistency", "count_agreement", "candidate_in_note", "older_latin")
+
+
 def c2_witness(sid):
     """Per-witness verdicts for 'note N of the span id is notes[N] on that page'. None = not comparable."""
     p, n = int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:])
     notes = APP_NOTES.get(p)
-    w = {"in_apparatus": bool(notes) and 0 <= n < len(notes), "index": None, "count": None, "hebrew": None,
-         "marker": None, "older_latin": None}
+    w = {"in_apparatus": bool(notes) and 0 <= n < len(notes), "index_self_consistency": None,
+         "count_agreement": None, "candidate_in_note": None, "marker_same_record": None, "older_latin": None}
     if not w["in_apparatus"]:
         return w
     nt = notes[n]
     t = T74.get(sid)
     if t:
-        w["index"] = (int(t["note_index"]) - 1 == n)
-        w["count"] = (int(t["notes_on_page"]) == len(notes))
-        w["hebrew"] = bool(_heb_cons(t["hebrew"])) and _heb_cons(t["hebrew"]) in _heb_cons(nt["text"])
-    w["marker"] = (nt["marker"] == "[^%d]" % (n + 1))
+        w["index_self_consistency"] = (int(t["note_index"]) - 1 == n)
+        w["count_agreement"] = (int(t["notes_on_page"]) == len(notes))
+        w["candidate_in_note"] = bool(_heb_cons(t["hebrew"])) and _heb_cons(t["hebrew"]) in _heb_cons(nt["text"])
+    w["marker_same_record"] = (nt["marker"] == "[^%d]" % (n + 1))
     old = (POP.get(sid) or {}).get("latin_context")
     if old:
         w["older_latin"] = _contiguous(_lat_tokens(old), _lat_tokens(nt["text"]))
@@ -436,21 +483,41 @@ for sid in ALL_IDS:
         else:
             r["cause"] = UNEXPLAINED
     _pn = (int(sid.split(":")[0][1:]), int(sid.split(":")[1][1:]))
-    _contra = sorted(k for k in ("index", "count", "hebrew", "marker", "older_latin") if W[k] is False)
-    _indep = [k for k in ("index", "count", "hebrew") if W[k] is True]
-    if not W["in_apparatus"]:
-        r.update(ch2_state="absent", ch2="", ch2_why="no notes[%d] on page %d in vol1_apparatus.jsonl" % (_pn[1], _pn[0]))
-    elif _contra:
-        r.update(ch2_state="absent", ch2="", ch2_why="mapping contradicted by witness(es): " + ", ".join(_contra))
-    elif not _indep:
-        r.update(ch2_state="absent", ch2="", ch2_why="no witness could confirm the note index for this span")
+    # ---- channel 2, rev 5: POSITION first, then an independent CONTENT witness, then the combined state
+    _t = T74[sid]
+    _app_n = len(APP_NOTES.get(_pn[0]) or [])
+    r["pos"] = CP.resolve(sid, _pn[0], _t["box"], _app_n, int(_t["notes_on_page"]),
+                          CUT74[sid]["crop"]["native_rects"] if CUT74.get(sid, {}).get("crop") else None)
+    r["content"] = (CP.content_witness(r["basis_full_text"], APP_NOTES[_pn[0]]) if _app_n else
+                    {"distances": [], "best": None, "tied": [], "best_distance": None, "runner_up_distance": None})
+    r["ch2_flag"] = ""
+    r["ch2_note_ordinal"] = None
+    r["ch2"] = ""
+    if r["pos"]["state"] != "resolved":
+        r.update(combined="bare_only_position_unresolved", ch2_state="absent",
+                 ch2_why="position unresolved at the %s gate: %s" % (r["pos"]["gate"], r["pos"]["why"]))
+    elif r["content"]["best"] is not None and r["content"]["best"] != r["pos"]["ordinal"]:
+        r.update(combined="bare_only_position_content_disagree", ch2_state="absent",
+                 ch2_why="position and content disagree about which note this span belongs to "
+                 "(position: region %d; content: note %d at distance %d, runner-up %s)"
+                 % (r["pos"]["ordinal"], r["content"]["best"], r["content"]["best_distance"],
+                    r["content"]["runner_up_distance"]))
     else:
-        masked = FOR._ctx(APP_NOTES[_pn[0]][_pn[1]]["text"])
+        _k = r["pos"]["ordinal"]
+        r["ch2_note_ordinal"] = _k
+        masked = FOR._ctx(APP_NOTES[_pn[0]][_k]["text"])
         if not masked.strip() or not re.search(r"[A-Za-z0-9]", masked):
-            r.update(ch2_state="absent", ch2="", ch2_why="the note masks down to nothing (no Latin words); a bare "
-                     "bullet line would tell an arm the note has no words")
+            r.update(combined="bare_only_masks_to_nothing", ch2_state="absent",
+                     ch2_why="the note masks down to nothing (no Latin words); a bare bullet line would tell an "
+                     "arm the note has no words")
+        elif r["content"]["best"] is None:
+            r.update(combined="present_content_abstained", ch2_state="present", ch2=masked, ch2_why="",
+                     ch2_flag="content_abstained")
         else:
-            r.update(ch2_state="present", ch2=masked, ch2_why="")
+            r.update(combined="present_agree", ch2_state="present", ch2=masked, ch2_why="")
+    _old = REV4_BY[sid]
+    r["ch2_rev4"] = {"state": _old["ch2_state"], "string": _old["ch2"]}
+    r["ch2_changed"] = (r["ch2_rev4"]["state"], r["ch2_rev4"]["string"]) != (r["ch2_state"], r["ch2"])
     if sid in POP and POP[sid].get("truth") is not None:
         r["loader_truth_agrees"] = (POP[sid]["truth"] == r["signature"])
     rows.append(r)
@@ -458,13 +525,13 @@ BY = {r["span_id"]: r for r in rows}
 N_CH2 = {k: sum(1 for r in rows if r["ch2_state"] == k) for k in ("present", "absent")}
 C2_ABSENT_IDS = [r["span_id"] for r in rows if r["ch2_state"] == "absent"]
 C2_WIT = {}
-for _k in ("index", "count", "hebrew", "marker", "older_latin"):
+for _k in WITNESS_KEYS:
     _vals = [r["ch2_witness"][_k] for r in rows if r["ch2_witness"][_k] is not None]
     C2_WIT[_k] = {"n_matched": sum(1 for v in _vals if v), "n_comparable": len(_vals)}
-_all_cmp = [r for r in rows if any(r["ch2_witness"][k] is not None for k in ("index", "count", "hebrew", "older_latin"))]
+_all_cmp = [r for r in rows if any(r["ch2_witness"][k] is not None for k in WITNESS_KEYS_CMP)]
 C2_WIT["all_comparable_witnesses_agree"] = {
     "n_matched": sum(1 for r in _all_cmp if not any(r["ch2_witness"][k] is False for k in
-                                                    ("index", "count", "hebrew", "marker", "older_latin"))),
+                                                    WITNESS_KEYS)),
     "n_comparable": len(_all_cmp)}
 CAND_N = {k: sum(1 for r in rows if r["cand_class"] == k) for k in CAND_CLASSES}
 SUB_IDS = [r["span_id"] for r in rows if r["cand_class"] == "substantially_different"]
@@ -485,6 +552,35 @@ CAND_VS_SIGNED = {"basis": "whole_span (signature_full, else signature)", "basis
 CAND_TXT = ", ".join("%s %d" % (k, CAND_N[k]) for k in CAND_CLASSES)
 C2_SRC_SHA = sha16(open(str(F_APP), "rb").read())
 C2_WIT_TXT = "; ".join("%s %d/%d" % (k, v["n_matched"], v["n_comparable"]) for k, v in C2_WIT.items())
+
+# ---- 3b. rev 5 aggregates: position, content, combined, changed rows, payload identity
+COMBINED_KINDS = ("present_agree", "present_content_abstained", "bare_only_position_content_disagree",
+                  "bare_only_position_unresolved", "bare_only_masks_to_nothing")
+COMBINED_N = {k: sum(1 for r in rows if r["combined"] == k) for k in COMBINED_KINDS}
+POS_RESOLVED_IDS = [r["span_id"] for r in rows if r["pos"]["state"] == "resolved"]
+POS_UNRESOLVED = {r["span_id"]: r["pos"]["gate"] for r in rows if r["pos"]["state"] != "resolved"}
+POS_GATE_N = {g: sum(1 for v in POS_UNRESOLVED.values() if v == g) for g in ("frame", "count", "containment")}
+_idx0 = {r["span_id"]: int(T74[r["span_id"]]["note_index"]) - 1 for r in rows}
+CONTENT_AGREE_IDX = [r["span_id"] for r in rows if r["content"]["best"] is not None and r["content"]["best"] == _idx0[r["span_id"]]]
+CONTENT_DISAGREE_IDX = [r["span_id"] for r in rows if r["content"]["best"] is not None and r["content"]["best"] != _idx0[r["span_id"]]]
+CONTENT_TIE = [r["span_id"] for r in rows if r["content"]["best"] is None]
+SHIFT_DIST = {}
+for _r in rows:
+    if _r["content"]["best"] is not None:
+        _sh = abs(_r["content"]["best"] - _idx0[_r["span_id"]])
+        SHIFT_DIST[_sh] = SHIFT_DIST.get(_sh, 0) + 1
+CONTENT_VS_POSITION_DISAGREE = [r["span_id"] for r in rows if r["pos"]["state"] == "resolved"
+                                and r["content"]["best"] is not None and r["content"]["best"] != r["pos"]["ordinal"]]
+POS_EQ_INDEX = [r["span_id"] for r in rows if r["pos"]["state"] == "resolved" and r["pos"]["ordinal"] == _idx0[r["span_id"]]]
+CHANGED_IDS = [r["span_id"] for r in rows if r["ch2_changed"]]
+BARE_ONLY_IDS = [r["span_id"] for r in rows if r["ch2_state"] == "absent"]
+PAYLOAD_TRIPLES = sorted((r["span_id"], r["ch2_state"], r["ch2"]) for r in rows)
+PAYLOAD_RULE = ("channel2_payload_sha16 = first 16 hex of the SHA-256 of the UTF-8 bytes of "
+                "json.dumps([[span_id, ch2_state, ch2_string], ...], ensure_ascii=False, separators=(',', ':')) "
+                "over the 45 triples sorted in plain Python tuple order; ch2_string is the exact masked text that "
+                "would be sent ('' for an absent row).")
+PAYLOAD_SHA16 = sha16(json.dumps([list(t_) for t_ in PAYLOAD_TRIPLES], ensure_ascii=False,
+                                 separators=(",", ":")).encode("utf-8"))
 
 # ---- 4. before/after for the three round-2 rows
 check(set(R1) == set(ROUND2) and set(R2) == set(ROUND2) and set(P3_IDS) == set(ROUND2),
@@ -517,8 +613,12 @@ check(RULING is not None and RULING["verdict"] == "keep" and "void" in RULING["b
 DIGEST_LINES = sorted("%s %s" % (r["span_id"], r["crop_sha16"]) for r in rows)
 SET_DIGEST = sha16("\n".join(DIGEST_LINES))
 SRC_SHA = {p.name: sha16(open(str(p), "rb").read()) for p in SOURCES}
-N_CALLS = len(rows) * len(CHANNELS) * len(MODELS)
-check(N_CALLS == 180, "call count %d != 180" % N_CALLS)
+N_BARE_ONLY = sum(1 for r in rows if r["ch2_state"] == "absent")
+N_DUAL = sum(1 for r in rows if r["ch2_state"] == "present")
+N_CALLS = (N_BARE_ONLY * 1 + N_DUAL * 2) * len(MODELS)       # a bare-only row is 2 calls, a dual-channel row 4
+N_CALLS_REV4 = 180
+check(N_BARE_ONLY + N_DUAL == len(rows) and N_CALLS == 2 * N_BARE_ONLY + 4 * N_DUAL,
+      "call count %d does not follow the channel counts (%d bare-only, %d dual)" % (N_CALLS, N_BARE_ONLY, N_DUAL))
 HS = [r["crop_h"] for r in rows]
 WS = [r["crop_w"] for r in rows]
 N_SHORT = sum(1 for h in HS if h < SHORT_PX)
@@ -540,16 +640,19 @@ for m in MODELS:
         _unk = True
         COST["per_model"][m] = {"unknown": True}
         continue
-    est = len(rows) * (b + t)
+    est = len(rows) * b + N_DUAL * t
     _tot += est
     COST["per_model"][m] = {"mean_usd_per_call_bare": round(b, 6), "n_costed_bare": nb,
                             "mean_usd_per_call_text": round(t, 6), "n_costed_text": nt,
-                            "estimate_usd_for_%d_spans_both_channels" % len(rows): round(est, 4)}
+                            "estimate_usd_for_%d_spans_actual_channels" % len(rows): round(est, 4)}
 COST["total_usd"] = None if _unk else round(_tot, 4)
+COST_REV4_USD = 0.2631             # rev 4 sidecar, 45 x (bare + text) per model, before any row was bare-only
+COST["n_calls"] = N_CALLS
+COST["channels"] = {"bare_only_rows": N_BARE_ONLY, "dual_channel_rows": N_DUAL}
 COST["caveats"] = ("measured on the 19-20-span OLD population; these 45 crops differ in size and the text channel "
-                   "here is masked note text for a minority of rows (see channel-2 counts), so channel 2 will "
-                   "cost less than the measured text-channel call for the absent rows. A measurement of other "
-                   "inputs, not a forecast." if not _unk else "cost UNKNOWN: no measured per-call cost found.")
+                   "is a masked note text. n_calls and the estimate follow the ACTUAL channel counts: a bare-only "
+                   "row is 2 calls (one per model), a dual-channel row 4. A measurement of other inputs, not a "
+                   "forecast." if not _unk else "cost UNKNOWN: no measured per-call cost found.")
 
 # ---------------------------------------------------------------- the document
 CSS = """
@@ -634,19 +737,51 @@ def row_html(r):
                  "(whole-span basis): the note text for this span was selected by a candidate that is not what this "
                  'crop was signed as. cause: <span class="cause" data-cause="%s">%s</span></div>'
                  "</td></tr>" % (SUB_MARK, "unexplained" if r["cause"] == UNEXPLAINED else "stated", esc(r["cause"])))
+    pos, ct = r["pos"], r["content"]
+    _tf = {True: "agrees", False: "DISAGREES", None: "n/a"}
+    if pos["state"] == "resolved":
+        L.append("<tr><td>channel 2 position</td><td data-pos=\"resolved\" data-ordinal=\"%d\">RESOLVED: the box lies in "
+                 "note region <b>%d</b> (0-based) of %d detected regions (apparatus notes %d, truth-set notes_on_page "
+                 "%d). Share of the box's height per region: %s. Frame: box inside the strip, inside one band, maps "
+                 "to the stored native rectangle(s), regions' union covers it (%.3f).</td></tr>"
+                 % (pos["ordinal"], pos["ordinal"], pos["n_regions"], pos["apparatus_n"], pos["notes_on_page"],
+                    esc(json.dumps(pos["overlap"])), pos["frame"]["union_cover_fraction"]))
+    else:
+        L.append("<tr><td>channel 2 position</td><td data-pos=\"unresolved\" data-gate=\"%s\"><b class='warn'>UNRESOLVED</b> "
+                 "at the <b>%s</b> gate: %s</td></tr>" % (esc(pos["gate"]), esc(pos["gate"]), esc(pos["why"])))
+    if ct["best"] is not None:
+        L.append("<tr><td>channel 2 content witness</td><td data-content=\"best\" data-best=\"%d\">best note <b>%d</b> at "
+                 "distance %d, runner-up distance %s; distance to every note: %s. <span class='mut'>(signed string "
+                 "vs each note's opening Hebrew run, base consonants; cross-lineage)</span></td></tr>"
+                 % (ct["best"], ct["best"], ct["best_distance"], esc(ct["runner_up_distance"]), esc(json.dumps(ct["distances"]))))
+    else:
+        L.append("<tr><td>channel 2 content witness</td><td data-content=\"abstain\"><b class='warn'>ABSTAINS</b>: notes %s "
+                 "tie at distance %s; distance to every note: %s.</td></tr>"
+                 % (esc(json.dumps(ct["tied"])), esc(ct["best_distance"]), esc(json.dumps(ct["distances"]))))
+    L.append("<tr><td>channel 2 combined</td><td data-combined=\"%s\" data-ch2-state=\"%s\"><code>%s</code> &rarr; "
+             "<b>%s</b>%s</td></tr>"
+             % (r["combined"], r["ch2_state"], r["combined"], "dual-channel (4 calls)" if r["ch2_state"] == "present" else "BARE-ONLY (2 calls)",
+                " <span class='warn'>flag: %s</span>" % esc(r["ch2_flag"]) if r["ch2_flag"] else ""))
     if r["ch2_state"] == "absent":
-        L.append("<tr><td>channel 2 string</td><td><b class='warn'>ABSENT</b> <span class='mut'>(not empty: %s)"
+        L.append("<tr><td>channel 2 string</td><td><b class='warn'>ABSENT</b> <span class='mut'>(bare-only; not empty: %s)"
                  "</span><pre class=\"ch2\" data-state=\"absent\"></pre></td></tr>" % esc(r["ch2_why"]))
     else:
         _w = r["ch2_witness"]
-        _n = int(r["span_id"].split(":")[1][1:])
+        _k = r["ch2_note_ordinal"]
         L.append("<tr><td>channel 2 string</td><td><span class='mut'>present; exact bytes that would be sent as the "
-                 "text part (apparatus note %d of file page %d, marker %s; witnesses %s):</span>"
+                 "text part (apparatus note %d of file page %d, marker %s, chosen by POSITION; same-lineage "
+                 "witnesses, not identity: %s):</span>"
                  "<pre class=\"ch2\" data-state=\"%s\">%s</pre></td></tr>"
-                 % (_n, r["page_file"], esc(APP_NOTES[r["page_file"]][_n]["marker"]),
-                    esc(", ".join("%s=%s" % (k, {True: "ok", None: "n/a"}[_w[k]]) for k in
-                                  ("index", "count", "hebrew", "marker", "older_latin"))),
+                 % (_k, r["page_file"], esc(APP_NOTES[r["page_file"]][_k]["marker"]),
+                    esc(", ".join("%s=%s" % (k, _tf[_w[k]]) for k in WITNESS_KEYS)),
                     r["ch2_state"], esc(r["ch2"])))
+    if r["ch2_changed"]:
+        L.append("<tr><td>channel 2 vs rev 4</td><td data-ch2-changed=\"yes\"><b class='warn'>CHANGED</b> from rev 4. "
+                 "<div class=\"chgbox\">old (rev 4), state <code>%s</code>:<pre class=\"chg-old\">%s</pre>"
+                 "new (rev 5), state <code>%s</code>:<pre class=\"chg-new\">%s</pre></div></td></tr>"
+                 % (esc(r["ch2_rev4"]["state"]), esc(r["ch2_rev4"]["string"]), esc(r["ch2_state"]), esc(r["ch2"])))
+    else:
+        L.append("<tr><td>channel 2 vs rev 4</td><td data-ch2-changed=\"no\">identical to rev 4 (same state, same string)</td></tr>")
     L.append("</table>")
     if sid in CALLED_OUT:
         L.append(called_out_html(sid))
@@ -710,8 +845,8 @@ def header_html():
     def kv(k, v):
         tb.append("<tr><td class='mut'>%s</td><td>%s</td></tr>" % (esc(k), v))
     kv("page convention", "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - %d). Every span id here is a file page." % PRINTED_OFFSET)
-    kv("rev", "<b id='rev-field'>4</b>")
-    kv("revision", esc(REV4_TEXT))
+    kv("rev", "<b id='rev-field'>5</b>")
+    kv("revision", esc(REV5_TEXT))
     kv("status", "NOTHING IS SENT. No network call of any kind was made to produce this sheet.")
     kv("policy", esc(POLICY))
     kv("approval is for", "the PIXELS in each row, not the text beside them. The signed text is shown because "
@@ -728,22 +863,57 @@ def header_html():
     kv("channel 1 (bare)", "the A2 span crop alone")
     kv("channel 2 (text)", "the same A2 span crop PLUS the Latin note text, every Hebrew run masked to U+2022 by "
        "<code>hebrew_frontier_or._ctx</code>. Note TEXT only: no note-box crop.")
-    kv("channel-2 availability", "%d present, %d ABSENT (of %d). ABSENT = no note text could be licensed for the "
-       "span (a witness contradicts the mapping, none could confirm it, or the note masks down to nothing); absent "
-       "rows: %s. A string that masks to nothing is absent, never present."
+    kv("channel-2 availability", "%d present, %d ABSENT (of %d). ABSENT = BARE-ONLY: no note text is licensed for the "
+       "span (position unresolved at a named gate, position and content disagree about the note, or the note masks "
+       "down to nothing); bare-only rows: %s. Channel 2 is never guessed and never falls back to the index mapping. "
+       "A string that masks to nothing is absent, never present."
        % (N_CH2["present"], N_CH2["absent"], len(rows), esc(", ".join(C2_ABSENT_IDS) or "none")))
     kv("channel-2 source", "<code>%s</code> sha16 <code>%s</code> (959 lines; line 1 config_header)"
        % (esc(F_APP.name), C2_SRC_SHA))
     kv("channel-2 mapping rule", esc(C2_MAP_RULE))
+    kv("containment rule (position)", "<span id='containment-rule'>%s</span> Thresholds: win >= %d%% of the box's height; "
+       "no other region >= %d%%; x-centre inside the winning region's x-range." % (esc(CP.RULE_TEXT), int(CP.WIN_FRAC * 100), int(CP.LOSE_FRAC * 100)))
+    kv("frame assertion", esc("The stored box (truth_set74 `box`, strip frame, presplit upscale=1) and the note regions "
+       "(note_line_region.detect_regions on the same upscale=1 strip) are asserted to share one frame, per span: the box "
+       "lies inside the strip; its top lies in exactly one band's paste window and its x-extent within that band's "
+       "width; strip_box_to_native(box) reproduces EXACTLY the native rectangle(s) the crop cut stored "
+       "(truthset74_cut native_rects), which is the independent anchor; and the regions' union covers the box's "
+       "y-extent. A page that cannot establish this makes every span on it unresolved."))
+    kv("position result", "<b id='pos-result'>%d / %d</b> resolved by position; unresolved by gate: frame %d, count %d, "
+       "containment %d%s. Of the resolved, the region ordinal equals the candidate's note_index-1 on <b>%d</b>."
+       % (len(POS_RESOLVED_IDS), len(rows), POS_GATE_N["frame"], POS_GATE_N["count"], POS_GATE_N["containment"],
+          (" (" + esc(", ".join("%s:%s" % kv_ for kv_ in sorted(POS_UNRESOLVED.items()))) + ")") if POS_UNRESOLVED else "",
+          len(POS_EQ_INDEX)))
+    kv("position is not independent of the index", esc("HONEST LIMIT: the stored boxes were themselves placed by "
+       "note_line_region.locate_span inside regions[note_index-1] (draw_pool.py), so the region holding a box is "
+       "the region the candidate's index named, by construction. Position therefore CANNOT by itself catch an "
+       "index error; it removes the dependence on the apparatus list position and gives the count gate, and the "
+       "CONTENT witness is the only channel here that can contradict the index."))
     kv("channel-2 witnesses", esc(C2_WITNESSES))
     kv("channel-2 normalisation", esc(C2_NORM_RULE))
-    kv("channel-2 witness result", "<b>%d / %d</b> comparable rows agree on every comparable witness; per witness "
-       "(n_matched/n_comparable): %s. Witness source <code>%s</code> sha16 <code>%s</code>."
+    kv("content witness result", "<span id='content-result'>%d agree with the index mapping, %d DISAGREE (%s), %d TIE/abstain (%s)</span>; "
+       "shift |content note - index note| distribution %s; content vs POSITION: %d disagree (%s)."
+       % (len(CONTENT_AGREE_IDX), len(CONTENT_DISAGREE_IDX), esc(", ".join(CONTENT_DISAGREE_IDX) or "none"),
+          len(CONTENT_TIE), esc(", ".join(CONTENT_TIE) or "none"), esc(json.dumps(SHIFT_DIST, sort_keys=True)),
+          len(CONTENT_VS_POSITION_DISAGREE), esc(", ".join(CONTENT_VS_POSITION_DISAGREE) or "none")))
+    kv("combined states", "<span id='combined-states'>%s</span> (partition of %d). present + absent = %d + %d."
+       % (esc(", ".join("%s %d" % (k_, COMBINED_N[k_]) for k_ in COMBINED_KINDS)), len(rows), N_CH2["present"], N_CH2["absent"]))
+    kv("same-lineage witnesses", "<b>%d / %d</b> comparable rows agree on every same-lineage witness; per witness "
+       "(n_matched/n_comparable): %s. These are consistency checks within one extraction and license nothing. Witness "
+       "source <code>%s</code> sha16 <code>%s</code>."
        % (C2_WIT["all_comparable_witnesses_agree"]["n_matched"], C2_WIT["all_comparable_witnesses_agree"]["n_comparable"],
           esc(C2_WIT_TXT), esc(F_TRUTH74.name), SRC_SHA[F_TRUTH74.name]))
+    kv("index_self_consistency", "<span id='index-sc'>%s</span> Rows where it agrees: %d / %d, including the falsifying "
+       "row." % (esc(INDEX_SC_TEXT), C2_WIT["index_self_consistency"]["n_matched"], C2_WIT["index_self_consistency"]["n_comparable"]))
+    kv("changed channel-2 strings (vs rev 4)", "<span id='changed-count'><b>%d</b> of %d rows changed</span>: %s. Each is "
+       "rendered old beside new in its own row."
+       % (len(CHANGED_IDS), len(rows), esc("; ".join("%s: %s -> %s" % (
+           s_, BY[s_]["ch2_rev4"]["state"] if not BY[s_]["ch2_rev4"]["string"] else BY[s_]["ch2_rev4"]["state"] + " " + repr(BY[s_]["ch2_rev4"]["string"][:60]),
+           BY[s_]["ch2_state"] if not BY[s_]["ch2"] else BY[s_]["ch2_state"] + " " + repr(BY[s_]["ch2"][:60])) for s_ in CHANGED_IDS) or "none")))
+    kv("channel2_payload_sha16", "<code id='payload-sha'>%s</code> %s" % (PAYLOAD_SHA16, esc(PAYLOAD_RULE)))
     kv("candidate_vs_signed", "<b>%s</b> <span id='cand-table'>%s</span> (n=%d). %s Substantially different: %s. The truth set's "
        "`hebrew` field is the extractor's candidate from the whole-note read; it is not the signed reading. The "
-       "neighbour-note control gives witness (3) discriminating power on 44 of 45 rows (carried from rev 2), within "
+       "neighbour-note control gives candidate_in_note discriminating power on 44 of 45 rows (carried from rev 2), within "
        "one lineage: the witnesses share the note text's own extraction, so they are not independent of it."
        % (esc(BASIS_LINE), esc(CAND_TXT), len(rows), esc(CAND_RULE), esc(", ".join(SUB_IDS))))
     kv("partial_in_crop (4, orthogonal flag)", esc("; ".join("%s whole-span d=%d (%s) / in-crop d=%d (%s)" % (
@@ -752,14 +922,16 @@ def header_html():
     kv("causes", esc("; ".join("%s: %s" % (s_, BY[s_]["cause"]) for s_ in SUB_IDS)) +
        " Unexplained: " + esc(", ".join(UNEXPLAINED_IDS) or "none") + ".")
     kv("supersedes", "<code>%s</code>: %s" % (SUPERSEDES, esc(SUPERSEDES_WHY)))
+    kv("record of the absent-channel finding", "<code>%s</code>: %s" % (SUPERSEDES_REV1, esc(SUPERSEDES_REV1_WHY)))
     kv("standing rules", "<ul>" + "".join("<li>%s</li>" % esc(x) for x in RULES) + "</ul>")
     kv("scoring", "per channel: <code>exact</code> / <code>nikud</code> / <code>wrong</code> / "
        "<code>expected_match</code>, plus the agreement-and-wrong rate. Predicted first.")
-    kv("call count", "%d spans x %d channels x %d models = <b>%d</b>" % (len(rows), len(CHANNELS), len(MODELS), N_CALLS))
+    kv("call count", "%d bare-only rows x 1 channel x %d models + %d dual-channel rows x 2 channels x %d models = <b id='n-calls'>%d</b> "
+       "(rev 4: %d, which assumed all 45 dual-channel)" % (N_BARE_ONLY, len(MODELS), N_DUAL, len(MODELS), N_CALLS, N_CALLS_REV4))
     kv("cost", esc(json.dumps(COST, ensure_ascii=False)))
     kv("crop geometry", "width %d to %d px, height %d to %d px; %d crop(s) under %d px tall"
        % (min(WS), max(WS), min(HS), max(HS), N_SHORT, SHORT_PX))
-    kv("changed rows", "Only the 3 round-2 rows (%s) were re-signed; each shows before/after below. No other row "
+    kv("re-signed rows", "Only the 3 round-2 rows (%s) were re-signed; each shows before/after below. No other row "
        "changed, and each of the other %d says so." % (", ".join(ROUND2), len(rows) - len(ROUND2)))
     kv("git at start", esc(json.dumps({k: {"head": v["git_head"], "dirty": v["git_dirty"]} for k, v in GIT_START.items()})))
     tb.append("</table>")
@@ -795,7 +967,19 @@ DOC = "\n".join(parts) + "\n"
 
 # ---------------------------------------------------------------- born-checks over the emitted bytes
 sidecar = {
-    "kind": "contact_sheet_scoring45", "rev": 4, "revision": 4, "revision_note": REV4_TEXT, "candidate_vs_signed": CAND_VS_SIGNED, "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
+    "kind": "contact_sheet_scoring45", "rev": 5, "revision": 5, "revision_note": REV5_TEXT, "prior_revision_note_rev4": REV4_TEXT,
+    "channel2_payload_sha16": PAYLOAD_SHA16, "channel2_payload_rule": PAYLOAD_RULE, "n_calls_rev4": N_CALLS_REV4,
+    "cost_rev4_usd": COST_REV4_USD, "containment_rule": CP.RULE_TEXT,
+    "containment_thresholds": {"win_fraction_of_box_height": CP.WIN_FRAC, "other_region_fraction_max_exclusive": CP.LOSE_FRAC,
+                               "x_centre_in_winning_region_x_range": True},
+    "index_self_consistency": {"text": INDEX_SC_TEXT, "falsifying_instance": INDEX_SC_FALSIFIER, "span_id": "p245:n1"},
+    "combined_states": COMBINED_N, "position": {"resolved": len(POS_RESOLVED_IDS), "unresolved_by_gate": POS_UNRESOLVED,
+                                                 "gate_counts": POS_GATE_N, "region_ordinal_equals_index": len(POS_EQ_INDEX)},
+    "content_witness": {"agree_with_index": CONTENT_AGREE_IDX, "disagree_with_index": CONTENT_DISAGREE_IDX, "ties": CONTENT_TIE,
+                        "shift_distribution": {str(k_): v_ for k_, v_ in SHIFT_DIST.items()},
+                        "disagree_with_position": CONTENT_VS_POSITION_DISAGREE},
+    "channel2_changed_vs_rev4": {s_: {"old": BY[s_]["ch2_rev4"], "new": {"state": BY[s_]["ch2_state"], "string": BY[s_]["ch2"]}} for s_ in CHANGED_IDS},
+    "bare_only_ids": BARE_ONLY_IDS, "candidate_vs_signed": CAND_VS_SIGNED, "page_convention": "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88)",
     "nothing_sent": True, "set_digest": SET_DIGEST, "channel2_source_sha16": C2_SRC_SHA, "digest_rule": DIGEST_RULE, "digest_lines": DIGEST_LINES,
     "derivation": DERIVATION, "policy": POLICY, "standing_rules": list(RULES), "models": list(MODELS),
     "channels": {"bare": "A2 span crop alone", "text": "A2 span crop plus Latin note text, Hebrew runs masked to U+2022"},
@@ -804,7 +988,7 @@ sidecar = {
     "channel2_source": {"file": F_APP.name, "sha16": C2_SRC_SHA, "mapping_rule": C2_MAP_RULE,
                         "witnesses": C2_WITNESSES, "normalisation_rule": C2_NORM_RULE,
                         "witness_result": C2_WIT, "witness_source": F_TRUTH74.name},
-    "supersedes": SUPERSEDES, "supersedes_why": SUPERSEDES_WHY, "crop_w_range": [min(WS), max(WS)], "crop_h_range": [min(HS), max(HS)],
+    "supersedes": SUPERSEDES, "supersedes_why": SUPERSEDES_WHY, "record_of_absent_channel_finding": SUPERSEDES_REV1, "crop_w_range": [min(WS), max(WS)], "crop_h_range": [min(HS), max(HS)],
     "n_crops_under_%dpx_tall" % SHORT_PX: N_SHORT, "git_start": GIT_START, "git_end": GIT_END,
     "provisional": PROV, "provisional_reason": WHY_TXT, "before_after": BEFORE_AFTER,
     "rows": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows],
@@ -857,15 +1041,16 @@ check(not any(s == "present" and not html.unescape(t).replace(u"\u2022", "").str
       "a present channel-2 string is empty after masking and stripping")
 # liveness for the emptiness predicate: a bullets-only string must be refused by it
 check(not re.search(r"[A-Za-z0-9]", u"\u2022 \u2022"), "liveness: the bullets-only probe passes the Latin-word test")
-# the mapping is witnessed: every present row has >=1 confirming independent witness and none contradicting
-check(all(r["ch2_state"] == "absent" or (any(r["ch2_witness"][k] is True for k in ("index", "count", "hebrew"))
-                                          and not any(v is False for v in r["ch2_witness"].values())) for r in rows),
-      "a present row lacks a confirming witness or has a contradicting one")
-check(C2_WIT["index"]["n_comparable"] >= 1 and C2_WIT["hebrew"]["n_comparable"] >= 1,
-      "liveness: a witness compared nothing")
+# rev 5: a present row is licensed by POSITION resolved and CONTENT not disagreeing, never by a same-lineage witness
+check(all(r["ch2_state"] == "absent" or (r["pos"]["state"] == "resolved" and
+                                          (r["content"]["best"] is None or r["content"]["best"] == r["pos"]["ordinal"]))
+          for r in rows), "a present row is not licensed by a resolved position and a non-disagreeing content witness")
+check(C2_WIT["index_self_consistency"]["n_comparable"] >= 1 and C2_WIT["candidate_in_note"]["n_comparable"] >= 1,
+      "liveness: a same-lineage witness compared nothing")
 # the supersession and the channel-2 source digest are on the sheet and the sidecar
-check(SUPERSEDES in DOC and C2_SRC_SHA in DOC and "supersedes" in SIDE and C2_SRC_SHA in SIDE,
-      "the supersession or the channel-2 source sha16 is missing from an output")
+check(SUPERSEDES in DOC and SUPERSEDES_REV1 in DOC and C2_SRC_SHA in DOC and "supersedes" in SIDE and C2_SRC_SHA in SIDE
+      and "BECAUSE CHRIS REJECTED IT FOR THE p245:n1 TEXT" in DOC,
+      "the supersession (rev 4, with Chris's reason), the rev 1 record, or the channel-2 source sha16 is missing from an output")
 check(all(t == "" for s, t in CH2 if s == "absent"), "an absent row carries channel-2 text")
 
 # 5. register inside the called-out rows' OWN elements
@@ -910,12 +1095,12 @@ check(all(SUB_MARK not in row_el(r["span_id"]) for r in rows if r["cand_class"] 
 check(DOC.count(SUB_MARK) == len(SUB_IDS), "the marker count in the document %d != %d substantially_different rows"
       % (DOC.count(SUB_MARK), len(SUB_IDS)))
 check("p493:n3" in SUB_IDS and "p245:n1" in SUB_IDS, "p493:n3 or p245:n1 is not substantially_different on the whole-span basis")
-_w3 = re.search(r"\(3\) hebrew:.*?(?=; \(4\))", C2_WITNESSES, flags=re.S)
+_w3 = re.search(r"\(3\) candidate_in_note:.*?(?=; \(4\))", C2_WITNESSES, flags=re.S)
 check(_w3 is not None and "printed Hebrew" not in _w3.group(0) and "NOT the printed or signed reading" in _w3.group(0)
       and "extractor's candidate" in _w3.group(0) and "printed Hebrew" not in C2_NORM_RULE
       and "printed Hebrew" not in DOC and "printed Hebrew" not in SIDE,
       "the relabelled witness (3) text is missing, or a 'printed Hebrew' claim survives")
-check(json.loads(SIDE)["candidate_vs_signed"]["counts"] == CAND_N and CAND_TXT in DOC and "REV 4" in DOC,
+check(json.loads(SIDE)["candidate_vs_signed"]["counts"] == CAND_N and CAND_TXT in DOC and "REV 5" in DOC,
       "candidate_vs_signed or the rev-4 statement is missing from an output")
 
 # 7. rev 4: basis, partial flag, bracket assertion, cause in own element, rev field
@@ -946,12 +1131,128 @@ check(all(BY[s_]["cause"] for s_ in SUB_IDS) and all(BY[r["span_id"]]["cause"] i
 check(all(row_el(s_).count('class="cause"') == 1 and ('>%s</span>' % esc(BY[s_]["cause"])) in row_el(s_) for s_ in SUB_IDS)
       and sum(row_el(r["span_id"]).count('class="cause"') for r in rows) == len(SUB_IDS),
       "a substantially_different row does not render its cause in its OWN element")
-check(json.loads(SIDE)["rev"] == 4 and json.loads(SIDE)["rev"] is not True and "id='rev-field'>4<" in DOC,
-      "the sidecar rev field is missing or not 4, or rev is not visible on the HTML")
+check(json.loads(SIDE)["rev"] == 5 and json.loads(SIDE)["rev"] is not True and "id='rev-field'>5<" in DOC,
+      "the sidecar rev field is missing or not 5, or rev is not visible on the HTML")
 check(BASIS_LINE in DOC and "whole_span" in SIDE, "the basis statement is missing from an output")
 
+# 8. rev 5: position-sourced channel 2, each with a liveness count
+# 8a. the falsifying instance. Premises first, so the check cannot pass vacuously: the page has a note that carries
+# 'benedicent se' and a different note that carries 'in monte Dominus videbitur'.
+_n245 = APP_NOTES[245]
+_idx_bene = [k_ for k_, n_ in enumerate(_n245) if "benedicent se" in n_["text"]]
+_idx_monte = [k_ for k_, n_ in enumerate(_n245) if "in monte Dominus videbitur" in n_["text"]]
+check(len(_idx_bene) == 1 and len(_idx_monte) == 1 and _idx_bene != _idx_monte,
+      "premise: page 245 does not carry 'benedicent se' and 'in monte Dominus videbitur' in two different notes: %r %r"
+      % (_idx_bene, _idx_monte))
+_E245 = row_el("p245:n1")
+_m245 = re.search(r'<pre class="ch2" data-state="(\w+)">(.*?)</pre>', _E245, flags=re.S)
+check(_m245 is not None, "liveness: p245:n1 row element has no channel-2 element")
+_st245, _tx245 = _m245.group(1), html.unescape(_m245.group(2))
+P245_BRANCH = "bare-only" if _st245 == "absent" else "note-string"
+check(_st245 in ("absent", "present"), "p245:n1 channel-2 state is %r" % _st245)
+if _st245 == "absent":
+    check(_tx245 == "" and BY["p245:n1"]["ch2_why"] != "" and 'data-combined="bare_only_' in _E245,
+          "p245:n1 took the bare-only branch but carries text or no reason")
+else:
+    check("benedicent se" in _tx245 and "in monte Dominus videbitur" not in _tx245,
+          "p245:n1 took the string branch but the string is not note [2]'s")
+check("in monte Dominus videbitur" not in _tx245, "p245:n1's channel-2 string carries the previous note's gloss")
+check(re.search(r'<pre class="chg-old">[^<]*in monte Dominus videbitur', _E245) is not None
+      and re.search(r'<pre class="chg-new">[^<]*in monte Dominus videbitur', _E245) is None,
+      "p245:n1: the old string is not shown in its own old element, or the new element carries it")
+# 8b. no Hebrew in a channel-2 string; the U+2022 mask exercised
+N_MASK_ROWS = n_masked
+check(HEB_RX.search(PROBE_HEB) and all(not HEB_RX.search(html.unescape(t)) for _s, t in CH2) and N_MASK_ROWS >= 10,
+      "a channel-2 string carries a U+0590-U+05FF codepoint, or the mask was not exercised (%d rows)" % N_MASK_ROWS)
+# 8c. states partition 45
+check(sum(COMBINED_N.values()) == N_EXPECT and set(COMBINED_N) == set(COMBINED_KINDS)
+      and N_CH2["present"] + N_CH2["absent"] == N_EXPECT
+      and COMBINED_N["present_agree"] + COMBINED_N["present_content_abstained"] == N_CH2["present"],
+      "the combined states do not partition %d: %r" % (N_EXPECT, COMBINED_N))
+check(len(re.findall(r'data-combined="(\w+)" data-ch2-state="', DOC)) == N_EXPECT
+      and all(row_el(r["span_id"]).count('data-combined="%s"' % r["combined"]) == 1 for r in rows),
+      "a row does not carry its combined state in its OWN element")
+# 8d. every absent row has a non-empty reason, and the reason is rendered in the row
+_abs_rows = [r for r in rows if r["ch2_state"] == "absent"]
+check(len(_abs_rows) >= 1 and all(r["ch2_why"].strip() for r in _abs_rows)
+      and all(esc(r["ch2_why"]) in row_el(r["span_id"]) for r in _abs_rows),
+      "an absent row has an empty ch2_why or does not render it (absent rows: %d)" % len(_abs_rows))
+# 8e. every present row's ordinal came from a REGION
+_pres_rows = [r for r in rows if r["ch2_state"] == "present"]
+check(len(_pres_rows) >= 1 and len(_pres_rows) == N_CH2["present"]
+      and all(r["pos"]["state"] == "resolved" and r["pos"]["ordinal"] is not None and r["pos"]["overlap"]
+              and r["ch2_note_ordinal"] == r["pos"]["ordinal"] for r in _pres_rows)
+      and all('data-ordinal="%d"' % r["pos"]["ordinal"] in row_el(r["span_id"]) for r in _pres_rows),
+      "a present row's note ordinal is not the position ordinal, or the position field is unpopulated")
+# 8f. the containment thresholds are RENDERED TEXT on the sheet (inside their own element)
+_cr = re.search(r"<span id='containment-rule'>(.*?)</span>", DOC, flags=re.S)
+check(_cr is not None and ">= 80% of the box's height" in html.unescape(_cr.group(1))
+      and ">= 20%" in html.unescape(_cr.group(1)) and "x-centre" in html.unescape(_cr.group(1))
+      and "Thresholds: win >= 80%" in DOC and CP.WIN_FRAC == 0.80 and CP.LOSE_FRAC == 0.20,
+      "the containment rule's thresholds are not rendered as text on the sheet")
+# 8g. changed rows render old and new in the row's OWN element
+check(len(CHANGED_IDS) >= 1 and DOC.count('<pre class="chg-old">') == len(CHANGED_IDS)
+      and DOC.count('<pre class="chg-new">') == len(CHANGED_IDS)
+      and DOC.count('data-ch2-changed="yes"') == len(CHANGED_IDS)
+      and DOC.count('data-ch2-changed="no"') == N_EXPECT - len(CHANGED_IDS),
+      "changed-string rows are not rendered one old/new pair each")
+for _sid in CHANGED_IDS:
+    _e = row_el(_sid)
+    _o = re.search(r'<pre class="chg-old">(.*?)</pre>', _e, flags=re.S)
+    _n = re.search(r'<pre class="chg-new">(.*?)</pre>', _e, flags=re.S)
+    check(_o is not None and _n is not None and html.unescape(_o.group(1)) == BY[_sid]["ch2_rev4"]["string"]
+          and html.unescape(_n.group(1)) == BY[_sid]["ch2"],
+          "%s: old/new strings in its own row element do not match the derivation" % _sid)
+check(all('data-ch2-changed="no"' in row_el(r["span_id"]) and "chg-old" not in row_el(r["span_id"]) for r in rows if not r["ch2_changed"]),
+      "an unchanged row carries a changed marker or an old/new element")
+check("<span id='changed-count'><b>%d</b> of %d rows changed" % (len(CHANGED_IDS), N_EXPECT) in DOC,
+      "the changed-row count is not stated on the sheet")
+# 8h. the rev 4 strings really are rev 4's (read from the file, not re-derived): 45 of them, and p245:n1's has the gloss
+check(len(REV4_BY) == N_EXPECT and "in monte Dominus videbitur" in REV4_BY["p245:n1"]["ch2"],
+      "the rev 4 comparison strings were not read from the rev 4 sidecar")
+# 8i. the renamed witness, with the falsifying instance, on the sheet and the sidecar
+check("index_self_consistency" in DOC and "index_self_consistency" in SIDE and "SELF-CONSISTENCY, NOT IDENTITY" in DOC
+      and "self-consistency, not identity" in INDEX_SC_TEXT and INDEX_SC_FALSIFIER in html.unescape(DOC)
+      and "in monte Dominus videbitur" in INDEX_SC_FALSIFIER and "index=ok" not in DOC
+      and "witnesses index=" not in DOC and not any(('"%s"' % k_) in json.dumps(R_["ch2_witness"]) for R_ in rows for k_ in ("index", "count", "hebrew", "marker")),
+      "the index witness is not renamed index_self_consistency with its falsifying instance")
+# 8j. payload identity, recomputed from the EMITTED sidecar rows
+_re = sorted((x_["span_id"], x_["ch2_state"], x_["ch2"]) for x_ in json.loads(SIDE)["rows"])
+check(sha16(json.dumps([list(t_) for t_ in _re], ensure_ascii=False, separators=(",", ":")).encode("utf-8")) == PAYLOAD_SHA16
+      and json.loads(SIDE)["channel2_payload_sha16"] == PAYLOAD_SHA16 and PAYLOAD_SHA16 in DOC and len(_re) == N_EXPECT,
+      "channel2_payload_sha16 does not recompute from the emitted rows")
+# 8k. n_calls follows the actual channel counts, on the sheet and the sidecar
+check(N_CALLS == 2 * N_BARE_ONLY + 4 * N_DUAL and json.loads(SIDE)["n_calls"] == N_CALLS and "id='n-calls'>%d<" % N_CALLS in DOC
+      and N_BARE_ONLY >= 1 and N_DUAL >= 1, "n_calls does not follow the channel counts (%d bare-only, %d dual)" % (N_BARE_ONLY, N_DUAL))
+# 8l. the position gates REFUSE: liveness probes over the real page-245 strip and the pure containment rule
+_r245 = T74["p245:n1"]
+_nat245 = CUT74["p245:n1"]["crop"]["native_rects"]
+_ok245 = CP.resolve("probe", 245, _r245["box"], 3, 3, _nat245)
+check(_ok245["state"] == "resolved" and _ok245["ordinal"] == 1, "liveness: the position probe does not resolve p245:n1 to region 1")
+check(CP.resolve("probe", 245, _r245["box"], 4, 3, _nat245)["gate"] == "count"
+      and CP.resolve("probe", 245, _r245["box"], 3, 4, _nat245)["gate"] == "count",
+      "liveness: the count gate does not refuse a region/apparatus mismatch")
+check(CP.resolve("probe", 245, _r245["box"], 3, 3, [[0, 0, 1, 1]])["gate"] == "frame"
+      and CP.resolve("probe", 245, [0, 0, 5, 5000], 3, 3, _nat245)["gate"] == "frame",
+      "liveness: the frame gate does not refuse a box that maps elsewhere or lies outside the strip")
+check(CP.decide([0.6, 0.4], 10, [[(0, 20)], [(0, 20)]])[0] == "unresolved"
+      and CP.decide([0.5, 0.5], 10, [[(0, 20)], [(0, 20)]])[0] == "unresolved"
+      and CP.decide([0.8, 0.2], 10, [[(0, 20)], [(0, 20)]])[0] == "unresolved"
+      and CP.decide([0.0, 0.79], 10, [[(0, 20)], [(0, 20)]])[0] == "unresolved"
+      and CP.decide([0.85, 0.15], 10, [[(0, 20)], [(0, 20)]]) == ("resolved", 0, "")
+      and CP.decide([1.0, 0.0], 50, [[(0, 20)], [(0, 20)]])[0] == "unresolved",
+      "liveness: the containment rule does not refuse straddles, ties, a sub-80% winner or an off-range x-centre")
+# 8m. the content witness: reproduces the measured distribution and can see a wrong note
+check(len(CONTENT_AGREE_IDX) + len(CONTENT_DISAGREE_IDX) + len(CONTENT_TIE) == N_EXPECT
+      and len(CONTENT_DISAGREE_IDX) >= 1 and len(CONTENT_TIE) >= 1 and "p245:n1" in CONTENT_DISAGREE_IDX
+      and "p493:n3" in CONTENT_TIE,
+      "liveness: the content witness did not see the known disagreement and the known tie")
+check(CP.content_witness(u"התברכו", _n245)["best"] == _idx_bene[0] and CP.content_witness(u"התברכו", _n245)["best_distance"] == 0,
+      "liveness: the content witness does not pick the 'benedicent se' note for the signed string התברכו")
+check(CP.fold(u"[מַלְךָ]") == u"מלכ" and CP.lev(u"אבג", u"אבד") == 1, "liveness: the fold/lev probes do not behave")
+
 # the .md summary (a class (a) record)
-OUT_STEM = "CONTACT_SHEET_scoring45_%s_c2%s" % (SET_DIGEST, C2_SRC_SHA)
+OUT_STEM = "CONTACT_SHEET_scoring45_%s_c2%s" % (SET_DIGEST, PAYLOAD_SHA16)
 MD = "\n".join([
     "# Scoring-run contact sheet, %d spans (digest `%s`)" % (len(rows), SET_DIGEST), "",
     "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - %d)." % PRINTED_OFFSET, "",
@@ -963,7 +1264,8 @@ MD = "\n".join([
     "- Models: %s" % ", ".join(MODELS),
     "- Channel 1 bare = A2 span crop alone; channel 2 = crop plus Latin note text with Hebrew masked to U+2022. "
     "No note-box crop leaves the network.",
-    "- Calls: %d spans x %d channels x %d models = %d" % (len(rows), len(CHANNELS), len(MODELS), N_CALLS),
+    "- Calls: %d bare-only rows x 1 channel x %d models + %d dual-channel rows x 2 channels x %d models = %d (rev 4: %d)"
+    % (N_BARE_ONLY, len(MODELS), N_DUAL, len(MODELS), N_CALLS, N_CALLS_REV4),
     "- Cost: %s" % (("derived estimate USD %s; %s" % (COST["total_usd"], COST["basis"])) if COST["total_usd"] is not None
                     else "UNKNOWN (no measured per-call cost found)"),
     "- Crop size: width %d-%d px, height %d-%d px; %d under %d px tall" % (min(WS), max(WS), min(HS), max(HS), N_SHORT, SHORT_PX),
@@ -972,13 +1274,26 @@ MD = "\n".join([
     "- Channel 2 mapping rule: %s" % C2_MAP_RULE,
     "- Channel 2 witnesses: %s" % C2_WITNESSES,
     "- Channel 2 normalisation: %s" % C2_NORM_RULE,
-    "- Channel 2 witness result (n_matched/n_comparable): %s" % C2_WIT_TXT,
-    "- rev: 4", "- %s" % REV4_TEXT, "- %s" % BASIS_LINE,
+    "- Same-lineage witness result (n_matched/n_comparable; consistency, not identity): %s" % C2_WIT_TXT,
+    "- Containment rule: %s" % CP.RULE_TEXT,
+    "- Position: %d / %d resolved by position; unresolved by gate %s%s. Region ordinal equals the candidate's note_index-1 on %d." % (
+        len(POS_RESOLVED_IDS), len(rows), json.dumps(POS_GATE_N), (" (%s)" % json.dumps(POS_UNRESOLVED)) if POS_UNRESOLVED else "", len(POS_EQ_INDEX)),
+    "- Content witness: %d agree with the index mapping, %d disagree (%s), %d tie (%s); shift distribution %s." % (
+        len(CONTENT_AGREE_IDX), len(CONTENT_DISAGREE_IDX), ", ".join(CONTENT_DISAGREE_IDX) or "none", len(CONTENT_TIE),
+        ", ".join(CONTENT_TIE) or "none", json.dumps(SHIFT_DIST, sort_keys=True)),
+    "- Combined states: %s." % ", ".join("%s %d" % (k_, COMBINED_N[k_]) for k_ in COMBINED_KINDS),
+    "- **index_self_consistency**: %s" % INDEX_SC_TEXT,
+    "- Channel 2 strings changed from rev 4 (%d of %d): %s" % (len(CHANGED_IDS), len(rows), "; ".join(
+        "%s: old [%s] %r -> new [%s] %r" % (s_, BY[s_]["ch2_rev4"]["state"], BY[s_]["ch2_rev4"]["string"], BY[s_]["ch2_state"], BY[s_]["ch2"])
+        for s_ in CHANGED_IDS) or "none"),
+    "- channel2_payload_sha16: `%s` (%s)" % (PAYLOAD_SHA16, PAYLOAD_RULE),
+    "- rev: 5", "- %s" % REV5_TEXT, "- %s" % BASIS_LINE,
     "- candidate_vs_signed (n=%d, WHOLE-SPAN basis): %s. Substantially different: %s. %s" % (len(rows), CAND_TXT, ", ".join(SUB_IDS), CAND_RULE),
     "- partial_in_crop (orthogonal flag, 4): %s" % "; ".join("%s whole-span d=%d (%s) / in-crop d=%d (%s)" % (
         s_, BY[s_]["cand_dist"], BY[s_]["cand_class"], BY[s_]["cand_dist_incrop"], BY[s_]["cand_class_incrop"]) for s_ in PARTIAL_IDS),
     "- causes: %s. Unexplained: %s." % ("; ".join("%s: %s" % (s_, BY[s_]["cause"]) for s_ in SUB_IDS), ", ".join(UNEXPLAINED_IDS) or "none"),
     "- **Supersedes** `%s`: %s" % (SUPERSEDES, SUPERSEDES_WHY),
+    "- Record of the absent-channel finding: `%s`: %s" % (SUPERSEDES_REV1, SUPERSEDES_REV1_WHY),
     "- Called-out registers: p493:n3 (1 confirmed + 3 corrected; editorial reading; tile 4 restored resh) and p594:n0 "
     "(4 confirmed + 1 sic; printed he in the signature, expected chet beside it; `expected_match` separate from `exact`).",
     "- Changed rows: only %s (re-signed over byte-identical pixels); no other row changed." % ", ".join(ROUND2),
@@ -987,10 +1302,17 @@ MD = "\n".join([
     "- Verdict: %s. %s" % ("PROVISIONAL" if PROV else "clean", WHY_TXT), "",
     "## What this does NOT solve", "",
     "It does not say any crop is legible; Chris reading the pixels does. It does not supply a note text for the "
-    "%d ABSENT rows. The index mapping is licensed by witnesses that share the page's note count and the truth "
-    "set's extractor candidate (not the signed reading; it differs from the signed signature on %d of %d rows); it "
-    "is not a read of the pixels, and the signing exports named for this check carry no "
-    "note text. It does not fix the scoring rule for the two editorial-register rows." % (N_CH2["absent"], len(rows) - CAND_N["identical"], len(rows)), "",
+    "%d BARE-ONLY row(s). POSITION IS NOT INDEPENDENT OF THE INDEX: the stored boxes were placed by "
+    "note_line_region.locate_span inside regions[note_index-1], so the region holding a box is the region the "
+    "candidate's index named, by construction (it matched note_index-1 on %d of %d); position removes the "
+    "dependence on the apparatus list position and supplies the count gate, but only the CONTENT witness can "
+    "contradict the index, and it did so for %d row(s). The note TEXT has no geometry of its own, so region -> text "
+    "is ordinal within the page: a count agreement is not a correspondence. The content witness compares the signed "
+    "string only to each note's opening lemma or its Hebrew; it abstains on a tie (%d row(s)) and cannot adjudicate "
+    "a note whose Hebrew is not the signed word. The truth-set candidate differs from the signed signature on %d of "
+    "%d rows. It does not fix the scoring rule for the two editorial-register rows, and it does not explain WHY the "
+    "box for p245:n1 sits in region 1 while the signed string is note [2]'s lemma." % (
+        N_CH2["absent"], len(POS_EQ_INDEX), len(rows), len(CONTENT_DISAGREE_IDX), len(CONTENT_TIE), len(rows) - CAND_N["identical"], len(rows)), "",
     "## Rows", "", "| span (file page) | printed | pass | px | crop sha16 | signed text | disposition | ch2 |",
     "|---|---|---|---|---|---|---|---|"] +
     ["| %s | %d | %d | %dx%d | `%s` | %s | %s | %s |" % (r["span_id"], r["page_printed"], r["pass"], r["crop_w"],
@@ -999,7 +1321,7 @@ MD = "\n".join([
 
 # EXPECTED_CHECKS is pinned to the count observed on the first full run (3 per row in the build loop, plus the
 # file-level and born-checks above); a check added or removed changes it and this line then refuses to pass.
-EXPECTED_CHECKS = 294   # was 281 before rev 4 (13 new: nikud bracket assertion + liveness, partial exactly 4, both distances, sidecar partials, partial own-element, no dist<=1 sub + liveness, boundary liveness, cause present, cause own-element, rev field, basis statement); was 227 before rev 3 (54 new: 1 candidate-in-truth-set per row x45, plus 9 candidate_vs_signed born-checks); was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
+EXPECTED_CHECKS = 321   # was 294 before rev 5 (27 net: the rev 4 witness-licensing checks replaced by position/content licensing; new: p245:n1 falsifier premise + branch + gloss-absent + old-in-own-element, Hebrew/mask, partition x2, absent-why, present-ordinal, containment text, changed-row pairs (one per changed row), unchanged rows, changed count, rev 4 strings read, index_self_consistency rename, payload recompute, n_calls, five position-gate liveness probes, content witness liveness x3); was 281 before rev 4 (13 new: nikud bracket assertion + liveness, partial exactly 4, both distances, sidecar partials, partial own-element, no dist<=1 sub + liveness, boundary liveness, cause present, cause own-element, rev field, basis statement); was 227 before rev 3 (54 new: 1 candidate-in-truth-set per row x45, plus 9 candidate_vs_signed born-checks); was 217 before the channel-2 rev 2 (10 new: apparatus shape x2, mask liveness, counts, latin-word, non-empty, bullets probe, witnesses x2, supersession)
 if CHECKS != EXPECTED_CHECKS:
     raise AssertionError("ran %d checks, expected %d" % (CHECKS, EXPECTED_CHECKS))
 
