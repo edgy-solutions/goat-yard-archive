@@ -321,6 +321,23 @@ def img_native(im, cls="nat", title=""):
             % (cls, b64(im), esc(title)))
 
 
+def realized_origin(x0, y0):
+    """Where the cutter actually put a crop's top-left, in native page pixels.
+
+    The cutter expands a native rect by PAD on every side and clamps the result to the page, so the
+    pad that was REQUESTED is not always the pad that was applied:
+
+        origin = (max(0, x0 - PAD), max(0, y0 - PAD))
+
+    A crop's offset inside another crop is the difference of their realized origins. Subtracting the
+    raw rects and then applying PAD -- which is what this file did first -- is right only where the
+    outer crop's pad was clamped away, i.e. where its rect starts at 0. See
+    `box_location_witness` for the measurement, and `cut_truth_set_crops.py` for the cutter's own
+    containment assert, which records the same trap.
+    """
+    return max(0, x0 - G.D.PAD), max(0, y0 - G.D.PAD)
+
+
 def locate_in_strip(span, strip):
     """Where the scored crop's pixels actually sit in the note strip, or why that cannot be said.
 
@@ -387,7 +404,8 @@ def strip_with_box(sid, g, nrects):
     np_ = CROPS / (sid.replace(":", "_") + "_notecontext.png")
     span = Image.open(sp).convert("L")
     strip = Image.open(np_).convert("L")
-    pred = g["box_in_note_px"][0] - G.D.PAD
+    pred = realized_origin(*g["span_native_rect"][:2])[0] - realized_origin(*g["note_native_rect"][:2])[0]
+    naive = g["box_in_note_px"][0] - G.D.PAD
     x, note = locate_in_strip(span, strip)
     if nrects != 1:
         note += (" -- and the crop is assembled from %d native rects, so no single-origin "
@@ -398,6 +416,9 @@ def strip_with_box(sid, g, nrects):
     note += ("; the cut record's arithmetic predicts x=%d, which is %s"
              % (pred, "the same" if pred == bx else
                 "off by %+d px (PAD is %d)" % (pred - bx, G.D.PAD)))
+    if naive != pred:
+        note += ("; the unclamped formula this file used first predicts x=%d, short by exactly PAD "
+                 "because this note's left pad was NOT clamped away" % naive)
     out = strip.convert("RGB")
     d = ImageDraw.Draw(out)
     d.rectangle([bx, by, bx + span.width - 1, by + span.height - 1], outline=(220, 38, 38), width=2)
@@ -602,36 +623,102 @@ def main():
     # ---- box-location witness over EVERY wrong row, not just the crop-class ones ----
     # Measured because the arithmetic failed: span rect minus note rect origin reproduced the scored
     # crop on 0 of 19 rows, and the true offset differs from that arithmetic by 0 on some rows and by
-    # exactly PAD on others.  So the cut record's rects cannot be used to draw a rectangle, and that
-    # is a property of the cut record worth recording where someone auditing the cut will see it.
+    # exactly PAD on others.  The CAUSE is the pad clamp (see realized_origin): the rects are
+    # uniform and the first formula here was wrong.  Both formulas are recorded per row, and the
+    # clamped one is ASSERTED against the content-located x below, so the corrected cause is enforced
+    # rather than merely asserted in prose.
     loc = []
     for sid in sorted(rows):
         gg = rows[sid]["geometry"]
         span = Image.open(CROPS / (sid.replace(":", "_") + "_A2_spanbox.png")).convert("L")
         strip = Image.open(CROPS / (sid.replace(":", "_") + "_notecontext.png")).convert("L")
         xy, note = locate_in_strip(span, strip)
-        pred = gg["box_in_note_px"][0] - G.D.PAD
+        naive = gg["box_in_note_px"][0] - G.D.PAD
+        clamped = (realized_origin(*gg["span_native_rect"][:2])[0]
+                   - realized_origin(*gg["note_native_rect"][:2])[0])
         loc.append({"span_id": sid, "located": None if xy is None else list(xy),
-                    "arithmetic_predicts_x": pred,
-                    "delta_arithmetic_minus_located": None if xy is None else pred - xy[0],
+                    "unclamped_predicts_x": naive,
+                    "clamped_predicts_x": clamped,
+                    "note_rect_x0": gg["note_native_rect"][0],
+                    "note_left_pad_was_clamped": gg["note_native_rect"][0] - G.D.PAD < 0,
+                    "delta_unclamped_minus_located": None if xy is None else naive - xy[0],
+                    "delta_clamped_minus_located": None if xy is None else clamped - xy[0],
                     "n_rects": RECTS[sid], "note": note})
-    deltas = [d["delta_arithmetic_minus_located"] for d in loc if d["located"]]
+    deltas = [d["delta_unclamped_minus_located"] for d in loc if d["located"]]
+    cdeltas = [d["delta_clamped_minus_located"] for d in loc if d["located"]]
+    # The corrected cause, ASSERTED.  The located x comes from matching pixels and knows nothing
+    # about either formula, so this is an independent witness and not a restatement.
+    chk(all(d == 0 for d in cdeltas),
+        "the clamped formula reproduces the content-located x on every located row; failures %s"
+        % [d["span_id"] for d in loc if d["located"] and d["delta_clamped_minus_located"]])
+    chk(all((d["delta_unclamped_minus_located"] == 0) == d["note_left_pad_was_clamped"]
+            for d in loc if d["located"]),
+        "the unclamped formula is right exactly where the note's left pad was clamped away")
     witness = {
         "what_it_is": "for every wrong row, where the scored crop's pixels actually sit inside the "
                       "note strip, found by matching the crop byte for byte and required to be "
                       "UNIQUE over the whole strip",
-        "why_not_arithmetic": "span native rect minus note native rect origin reproduced the scored "
-                              "crop on 0 of %d rows; with PAD added the sizes matched but the bytes "
-                              "did not, and the residual error is 0 on some rows and exactly PAD "
-                              "(%d px) on others. A rectangle derived from the cut record is "
-                              "therefore right on most rows and a pad-width wrong on the rest -- the "
-                              "worst shape for a geometry panel, because it looks right."
-                              % (len(rows), G.D.PAD),
+        "why_located_and_not_derived": "the first formula tried here -- span native rect minus note "
+                                       "native rect origin, then PAD -- reproduced the scored crop "
+                                       "on 0 of %d rows, and once PAD was added the sizes matched "
+                                       "but the residual offset was 0 on 13 rows and exactly PAD "
+                                       "(%d px) on 6. The rectangle was therefore located by "
+                                       "content instead, which is independent of any formula and "
+                                       "remains the source for every drawn box."
+                                       % (len(rows), G.D.PAD),
+        "the_cause_corrected": {
+            "what_i_recorded_first": "that the cut record's `native_rects` bookkeeping is not "
+                                     "uniform -- i.e. that the record was at fault.",
+            "what_is_actually_true": "the rects ARE uniform and my formula was wrong. The cutter "
+                                     "expands a rect by PAD on every side and CLAMPS to the page, "
+                                     "so the realized origin is (max(0, x0-PAD), max(0, y0-PAD)) "
+                                     "and a crop's offset inside another is the difference of "
+                                     "realized origins. On the 13 rows whose note rect starts at "
+                                     "x0=0 the note's left pad is clamped away and the unclamped "
+                                     "formula is accidentally right; on the 6 right-column rows "
+                                     "(x0 >= 1597) the full pad applies and it is short by PAD.",
+            "how_it_was_checked": "the clamped formula is compared against the CONTENT-LOCATED x, "
+                                  "which was found by matching pixels and knows nothing about "
+                                  "either formula: it agrees on %d of %d located rows, asserted in "
+                                  "code above. The partition it predicts (unclamped correct exactly "
+                                  "where the note's left pad was clamped) is asserted too."
+                                  % (sum(1 for d in cdeltas if d == 0), len(cdeltas)),
+            "who_corrected_it": "Lane A2, from the manifest alone, who also pointed at the cutter's "
+                                "own pixel-containment assert (cut_truth_set_crops.py:558-575) where "
+                                "the same trap is recorded -- a first probe there called 45 of 74 "
+                                "crops mismatched for this reason. Verified here against the "
+                                "manifest rather than accepted: a causal story is a claim too, and "
+                                "this block already carried one wrong one.",
+            "what_this_does_not_excuse": "two independent consumers have now re-derived the clamp "
+                                         "wrong, so the record is still the thing to fix -- but as "
+                                         "an UNRECORDED REALIZED ORIGIN, not as bad rects.",
+        },
+        "why_the_record_still_misleads": {
+            "pad_native_px_is_the_requested_pad": "`note_context.pad_native_px` reads %d on all %d "
+                                                  "rows, including the 13 where the left pad was "
+                                                  "clamped to 0. The one field that looks like it "
+                                                  "records the applied pad records the asked-for "
+                                                  "one, which is worse than omitting it."
+                                                  % (G.D.PAD, len(rows)),
+            "the_right_edge_clamps_too": "rect width + 2*PAD disagrees with the realized crop width "
+                                         "on %d of %d rows. A2 predicted 4 such rows from the "
+                                         "right-column notes; it is all of them, because a note "
+                                         "ending at x1 = 3582/3583 on a 3584px page loses right pad "
+                                         "as well."
+                                         % (len(rows), len(rows)),
+            "and_it_is_not_derivable": "the left/top clamp needs only max(0, .), but the "
+                                       "right/bottom clamp needs the page dimensions, and this "
+                                       "record carries none. A consumer cannot reproduce the "
+                                       "realized SIZE from the manifest at all -- only the origin.",
+            "measured_by": "this file, while checking A2's correction; not part of their report.",
+        },
         "located": sum(1 for d in loc if d["located"]),
         "abstained": sum(1 for d in loc if not d["located"]),
-        "arithmetic_agrees": sum(1 for d in deltas if d == 0),
-        "arithmetic_disagrees": sum(1 for d in deltas if d != 0),
-        "disagreement_values_px": sorted(set(d for d in deltas if d != 0)),
+        "unclamped_formula_agrees": sum(1 for d in deltas if d == 0),
+        "unclamped_formula_disagrees": sum(1 for d in deltas if d != 0),
+        "unclamped_disagreement_values_px": sorted(set(d for d in deltas if d != 0)),
+        "clamped_formula_agrees": sum(1 for d in cdeltas if d == 0),
+        "clamped_formula_disagrees": sum(1 for d in cdeltas if d != 0),
         "what_this_proves": "the red rectangle on each crop panel is where the scored crop's pixels "
                             "sit in that strip, and nowhere else in that strip",
         "what_this_does_NOT_prove": "that the rectangle is on the right printed note. A correctly "
@@ -998,23 +1085,40 @@ code{font:12px ui-monospace,Consolas,monospace;color:#cbd5e1}
              "impression of that letter**, not that the letter is absent from the volume. A "
              "one-sided card cannot settle a confusable call; it lets the signed letter's shape be "
              "checked against the pixels, and no more.\n")
-    M.append("## The box rectangles are located, not derived\n")
+    M.append("## The box rectangles are located, not derived -- and my first reason was wrong\n")
     M.append("Every crop-class panel carries the scored crop's own rectangle drawn on the note "
-             "strip. It is found by **matching the crop's pixels inside the strip**, required to be "
-             "unique over the whole strip and verified byte for byte -- not computed from the cut "
-             "record. That is because the arithmetic does not work: span native rect minus note "
-             "native rect origin reproduced the scored crop on **0 of %d** rows, and once PAD is "
-             "added the sizes match but the residual offset is **0 on some rows and exactly PAD "
-             "(%dpx) on others**.\n" % (len(rows), G.D.PAD))
-    M.append("Measured over all %d wrong rows: **%d located** (unique, byte-verified), **%d "
-             "abstained**, and the cut record's arithmetic **agrees on %d and disagrees on %d** "
-             "(by %s px). A rectangle derived from the cut record would therefore be correct on most "
-             "rows and a pad-width wrong on the rest -- the worst shape a geometry panel can have, "
-             "because it looks right. **This is a fact about the cut record, and it is the finding "
-             "here that nobody asked for.**\n"
-             % (len(rows), witness["located"], witness["abstained"], witness["arithmetic_agrees"],
-                witness["arithmetic_disagrees"],
-                ", ".join(str(v) for v in witness["disagreement_values_px"])))
+             "strip, found by **matching the crop's pixels inside the strip**, required unique over "
+             "the whole strip and verified byte for byte. Measured over all %d wrong rows: **%d "
+             "located**, **%d abstained**. That route is independent of any arithmetic and is still "
+             "the source of every drawn box.\n"
+             % (len(rows), witness["located"], witness["abstained"]))
+    M.append("The reason it was needed is **not** what this document first said. I recorded that "
+             "the cut record's `native_rects` bookkeeping was not uniform. It is uniform; my "
+             "formula was wrong. The cutter expands a rect by PAD on every side and **clamps to the "
+             "page**, so the realized origin is `(max(0, x0-PAD), max(0, y0-PAD))` and a crop's "
+             "offset inside another crop is the difference of **realized** origins. On the **%d** "
+             "rows whose note rect starts at `x0 = 0` the note's left pad is clamped away and the "
+             "unclamped formula is accidentally right; on the **%d** right-column rows "
+             "(`x0 >= 1597`) the full pad applies and it is short by exactly PAD (%dpx).\n"
+             % (witness["unclamped_formula_agrees"], witness["unclamped_formula_disagrees"],
+                G.D.PAD))
+    M.append("The clamped formula reproduces the **content-located** x on **%d of %d** located rows "
+             "-- an independent witness, since the located x came from pixels and knows nothing "
+             "about either formula -- and both that and the partition it predicts are now asserted "
+             "in code. The correction came from **Lane A2**, who also found the cutter's own "
+             "containment assert recording the same trap; it was re-measured here against the "
+             "manifest rather than accepted, because a causal story is a claim too and this section "
+             "already carried one wrong one.\n"
+             % (witness["clamped_formula_agrees"], witness["located"]))
+    M.append("**The record is still the thing to fix, for a different reason.** Two consumers have "
+             "now re-derived the clamp wrong, and the manifest does not record the realized origin. "
+             "Worse, `note_context.pad_native_px` reads **%d on every row**, including the %d where "
+             "the left pad was clamped to 0 -- the field that looks authoritative is the one that "
+             "misleads. And the clamp bites the right edge too: `rect width + 2*PAD` disagrees with "
+             "the realized crop width on **%d of %d** rows (A2 predicted 4; it is all of them), "
+             "which **cannot** be derived from this manifest at any price, because the record "
+             "carries no page dimensions.\n"
+             % (G.D.PAD, witness["unclamped_formula_agrees"], len(rows), len(rows)))
     M.append("What the located rectangle proves: the crop's pixels sit there and nowhere else in "
              "that strip. What it does **not** prove: that the rectangle is on the right printed "
              "note. A correctly located box can sit on the wrong line.\n")
@@ -1058,10 +1162,17 @@ code{font:12px ui-monospace,Consolas,monospace;color:#cbd5e1}
              "- **The strip-with-box witness is narrow.** A unique byte match proves the drawn "
              "rectangle is where the crop's pixels sit in that strip. It cannot see a correctly "
              "located box sitting on the wrong printed line.\n"
-             "- **The cut record's rect arithmetic is left broken.** This file routes around it by "
-             "locating the crop instead; it does not fix the bookkeeping, and the next consumer to "
-             "trust `native_rects` for a mapping will hit the same pad-width error on the same "
-             "subset of rows. That belongs to the cutter, which is shared substrate.\n"
+             "- **The clamp is understood and still unrecorded.** The cause is known and asserted "
+             "here, but the manifest does not carry the realized origin, `pad_native_px` reports "
+             "the requested pad on rows where it was clamped away, and the realized SIZE is not "
+             "derivable from the record at all for want of page dimensions. Two consumers have "
+             "re-derived it wrong so far. A2 proposes a standoff sidecar carrying "
+             "`native_origin` and per-side `pad_applied` with a born-test, leaving the frozen "
+             "manifest untouched; **that needs a ruling and is not applied.**\n"
+             "- **This document corrected its own causal claim once.** The first version blamed the "
+             "cut record's rects. Anyone citing the earlier sha for that claim is citing a "
+             "retracted one; the retraction is in `the_cause_corrected`, and the measurement that "
+             "forced it is asserted in code.\n"
              "- **Nothing here changes the send path.** The refusing property is stated, not built; "
              "`box_fault` still has no consumer.\n")
     md = "\n".join(M)
