@@ -455,6 +455,23 @@ P(u"Two rules keep it an audit rather than a vote. It reads the **pixels only**,
   u"two passes would stop being a check on the model that produced them, and the alarm would be measuring "
   u"itself.")
 P(u"")
+P(u"## Amendment 2026-10-18: how production channel 2 picks its note text")
+P(u"")
+P(u"The 2026-10-11 instruction to source channel 2 by the crop's **position** on the page is withdrawn "
+  u"as a mechanism, because position *is* the index. `draw_pool.py:88` passes `note_index - 1` into "
+  u"`locate_span`, which selects `regions[note_idx]` and then finds the span inside that region by "
+  u"matching the candidate text, so the region ordinal equals the index on 45 of 45 spans **by "
+  u"construction** and no geometric check can witness a note-identity error. In production, channel 2 "
+  u"therefore selects its note text by **content witness**: the channel-1 bare-crop read is the probe, "
+  u"folded to base consonants and scored by edit distance against each note's opening lemma on that "
+  u"page, lowest distance wins; a tie, or a disagreement with the region index, drops that span to "
+  u"**bare-only** rather than attaching a gloss that may belong to the neighbouring note. One caveat "
+  u"is permanent: on signed data the witness compares a human's read of the crop PIXELS against a "
+  u"model's read of the note STRIP, two genuinely different lineages, whereas in production both sides "
+  u"are model reads \u2014 so the witness is weakest exactly where there is no signature to check it "
+  u"against. It catches the gross mis-attribution an index cannot see (`p245:n1`, where the attached "
+  u"gloss belonged to the next note), not a subtle one.")
+P(u"")
 P(u"## What this does NOT solve")
 P(u"")
 P(u"- **n=%d, and every box in it is already ratified.** Geometry is excluded by construction, so this memo "
