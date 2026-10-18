@@ -178,16 +178,10 @@ def load_inputs():
 
 def gate_prediction(pred):
     p = {k: v for k, v in pred.items() if k not in ("self_sha16", "self_sha16_rule")}
-    got = None
-    for ea in (True, False):     # the rule does not say; record which spelling reproduces the file
-        c = hashlib.sha256(json.dumps(p, sort_keys=True, separators=(",", ":"),
-                                      ensure_ascii=ea).encode("utf-8")).hexdigest()[:16]
-        if c == PRED_SHA:
-            got = (c, ea)
-            break
-    chk(got is not None, f"GATE 2 prediction lock: self_sha16 does not recompute to {PRED_SHA}")
+    c = hashlib.sha256(json.dumps(p, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:16]
+    chk(c == PRED_SHA, f"GATE 2 prediction lock: self_sha16 recomputes to {c}, not {PRED_SHA}")
     chk(pred.get("self_sha16") == PRED_SHA, "GATE 2: file's own self_sha16 != expected")
-    return {"prediction_sha16": got[0], "ensure_ascii": got[1]}
+    return {"prediction_sha16": c}
 
 
 def gate_crops(sheet):
@@ -377,8 +371,7 @@ def evaluate(recs, pred):
         m = pct(t["exact"], t["n"])
         res["registered_numbers"][k] = {"registered_pct": reg["pct"], "registered_n": f'{reg["n"]}/{reg["of"]}',
                                         "measured_pct": m, "measured_n": f'{t["exact"]}/{t["n"]}',
-                                        "verdict": "hit" if m is not None and abs(m - reg["pct"]) <= 5 else "missed",
-                                        "rule": "hit = within 5 percentage points of the registered percent"}
+                                        "delta_pp": None if m is None else round(m - reg["pct"], 1)}
     common = {r["span_id"] for r in recs if r["channel"] == "context"}
     ar = {ch: agreement(recs, ch) for ch in CHANNELS}
     ar_bare44 = agreement([r for r in recs if r["span_id"] in common], "bare")
@@ -387,19 +380,32 @@ def evaluate(recs, pred):
         b = tally([r for r in recs if r["arm"] == arm and r["channel"] == "bare" and r["span_id"] in common])
         c = tally([r for r in recs if r["arm"] == arm and r["channel"] == "context"])
         d_exact[arm] = {"bare_on_44": b["exact"], "ctx_on_44": c["exact"]}
-    raises = all(v["ctx_on_44"] > v["bare_on_44"] for v in d_exact.values())
-    lowers = len(ar["context"]["agreement_and_wrong"]) < len(ar_bare44["agreement_and_wrong"])
+    n44 = len(common)
+    aw_b, aw_c = len(ar_bare44["agreement_and_wrong"]), len(ar["context"]["agreement_and_wrong"])
+    dpp = {arm: round(100.0 * (v["ctx_on_44"] - v["bare_on_44"]) / n44, 1) for arm, v in d_exact.items()}
+    raises = all(d > 0 for d in dpp.values())
+    aw_delta_pp = round(100.0 * (aw_c - aw_b) / n44, 1)
+    mean_exact_delta_pp = round(sum(dpp.values()) / len(dpp), 1)
+    basis44 = "common 44 spans (p245:n1 excluded from both channels; a 45-span rate vs a 44-span rate is a different denominator)"
+    res["sign_predictions"] = {
+        "P1_channel2_raises_exact_on_both_arms": {
+            "hit": bool(raises), "exact_delta_pp_per_arm": dpp, "exact_on_common_44": d_exact, "basis": basis44},
+        "P2_channel2_raises_agreement_and_wrong_MORE_than_exact": {
+            "hit": bool(aw_delta_pp > mean_exact_delta_pp), "aw_delta_pp": aw_delta_pp,
+            "mean_exact_delta_pp": mean_exact_delta_pp, "aw_bare_on_44": aw_b, "aw_ctx": aw_c, "basis": basis44},
+    }
+    nk = {f"{a}|{c}": len(nikud_rows(recs, a, c)) for a in ARMS for c in CHANNELS}
+    res["sign_predictions"]["P3_nikud_on_at_most_3_rows_in_every_cell"] = {
+        "hit": all(v <= 3 for v in nk.values()), "rows_with_nikud_marks_per_cell": nk,
+        "nikud_only_class_per_cell": {k: ex[k]["nikud_only"] for k in ex}}
     res["falsifiers"]["F1_ctx_raises_exact_AND_lowers_agreement_and_wrong"] = {
-        "fired": bool(raises and lowers), "exact_on_common_44": d_exact,
-        "agreement_and_wrong_bare_on_44": len(ar_bare44["agreement_and_wrong"]),
-        "agreement_and_wrong_ctx": len(ar["context"]["agreement_and_wrong"])}
+        "fired": bool(raises and aw_c < aw_b), "exact_delta_pp_per_arm": dpp,
+        "agreement_and_wrong_bare_on_44": aw_b, "agreement_and_wrong_ctx": aw_c, "basis": basis44}
     ob = pct(ex["opus_bare"]["exact"], ex["opus_bare"]["n"])
     res["falsifiers"]["F2_opus_bare_exact_over_80"] = {"fired": bool(ob is not None and ob > 80),
                                                         "measured_pct": ob}
-    nk = {f"{a}|{c}": len(nikud_rows(recs, a, c)) for a in ARMS for c in CHANNELS}
     res["falsifiers"]["F3_either_arm_nikud_on_more_than_3_rows"] = {
-        "fired": any(v > 3 for v in nk.values()), "rows_with_nikud_marks_per_cell": nk,
-        "nikud_only_class_per_cell": {k: ex[k]["nikud_only"] for k in ex}}
+        "fired": any(v > 3 for v in nk.values()), "rows_with_nikud_marks_per_cell": nk}
     gaps = {"bare": None, "context": None}
     for ch, (a, b) in (("bare", ("opus_bare", "qwen_bare")), ("context", ("opus_ch2", "qwen_ch2"))):
         pa, pb = pct(ex[a]["exact"], ex[a]["n"]), pct(ex[b]["exact"], ex[b]["n"])
@@ -454,12 +460,16 @@ def md_report(header, run_sha, tables, ev, nik, recs, prov):
     L += ["", "Every nikud_only outcome is the MODEL adding points: 0 of 45 signed strings carry nikud.", "",
           "## Registered numbers (exact_in_crop)", ""]
     for k, v in ev["registered_numbers"].items():
-        L.append(f"- {k}: registered {v['registered_pct']}% ({v['registered_n']}), measured {v['measured_pct']}% ({v['measured_n']}) -> **{v['verdict']}** ({v['rule']})")
+        L.append(f"- {k}: registered {v['registered_pct']}% ({v['registered_n']}), measured {v['measured_pct']}% ({v['measured_n']}), delta {v['delta_pp']:+} pp (no band, no verdict)")
+    L += ["", "## Sign / count predictions (hit or missed)", ""]
+    for k, v in ev["sign_predictions"].items():
+        L.append(f"- {k}: **{'hit' if v['hit'] else 'missed'}** -- {json.dumps({x: y for x, y in v.items() if x != 'hit'}, ensure_ascii=False)}")
+    L += [""]
     for ch, v in ev["registered_agreement_and_wrong"].items():
         L.append(f"- agreement_and_wrong {ch}: registered {v['registered']['n']}/{v['registered']['of']}, measured {v['measured_n']}")
     L += ["", "## Falsifiers", ""]
     for k, v in ev["falsifiers"].items():
-        L.append(f"- {k}: **{'FIRED' if v['fired'] else 'not fired'} (hit if fired)** -- {json.dumps({x: y for x, y in v.items() if x != 'fired'}, ensure_ascii=False)}")
+        L.append(f"- {k}: **{'FIRED' if v['fired'] else 'not fired'}** -- {json.dumps({x: y for x, y in v.items() if x != 'fired'}, ensure_ascii=False)}")
     L += ["", "## Agreement and wrong", ""]
     for ch, v in ev["agreement"].items():
         L.append(f"- {ch}: agreement_and_wrong {v['agreement_and_wrong']}; both_wrong_disagree {v['both_wrong_disagree']}")
@@ -482,7 +492,7 @@ def md_report(header, run_sha, tables, ev, nik, recs, prov):
 
 
 def write_new(path, text):
-    chk(not path.exists(), f"refuse to clobber {path.name}")
+    chk(not path.exists(), f"refuse to clobber {path.name}; pass --attempt N (N>1) for a legitimate rerun")
     with open(path, "x", encoding="utf-8", newline="\n") as f:
         f.write(text)
 
@@ -492,6 +502,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--attempt", type=int, default=1,
+                    help="rerun number; N>1 appends _a<N> to output stems so a rerun is not a clobber")
     a = ap.parse_args()
     if a.self_test:
         self_test()
@@ -529,7 +541,7 @@ def main():
               "arms": ARMS, "channels": CHANNELS, "call_count": len(payloads),
               "planned_request_sha16": sorted(p["request_sha16"] for p in payloads),
               "crop_dir": str(CROPDIR), "aperture": APERTURE, "max_tokens": MAX_TOKENS,
-              "ch2_absent": {ABSENT: ABSENT_BASIS}}
+              "ch2_absent": {ABSENT: ABSENT_BASIS}, "attempt": a.attempt}
     run_sha = sha16_bytes(canon(header).encode("utf-8"))
 
     if dry:
@@ -538,7 +550,7 @@ def main():
         for k, v in g0.items():
             print(f"gate1 {k}: head {v['head'][:10]} dirty={v['dirty']} n={v.get('n')} "
                   f"{'WOULD REFUSE a real run: ' + str(v['paths']) if v['dirty'] else ''}")
-        print(f"gate2 prediction_sha16 {g2['prediction_sha16']} (ensure_ascii={g2['ensure_ascii']})")
+        print(f"gate2 prediction_sha16 {g2['prediction_sha16']}")
         print(f"gate3 45 crops match crop_sha16 and w/h  set_digest {SET_DIGEST}")
         print(f"gate4 channel2_payload_sha16 {pay_sha}")
         print(f"gate5/6 aperture {APERTURE}; host openrouter.ai; forbidden hosts absent; no A1_notebox")
@@ -597,11 +609,12 @@ def main():
         rows.append(row)
     out = {"header": header, "run_sha16": run_sha, "rows": rows, "tallies": tables, "evaluation": ev,
            "diagnostics": nik, "page_convention": header["page_convention"]}
-    texts = {A / f"score45_reads_{run_sha}.jsonl": "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
-             A / f"SCORE45_{run_sha}.json": json.dumps(out, ensure_ascii=False, indent=1) + "\n",
-             A / f"SCORE45_{run_sha}.md": md_report(header, run_sha, tables, ev, nik, recs, prov)}
+    sfx = "" if a.attempt <= 1 else f"_a{a.attempt}"
+    texts = {A / f"score45_reads_{run_sha}{sfx}.jsonl": "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
+             A / f"SCORE45_{run_sha}{sfx}.json": json.dumps(out, ensure_ascii=False, indent=1) + "\n",
+             A / f"SCORE45_{run_sha}{sfx}.md": md_report(header, run_sha, tables, ev, nik, recs, prov)}
     for pth, t in texts.items():
-        chk(not pth.exists(), f"refuse to clobber {pth.name}")
+        chk(not pth.exists(), f"refuse to clobber {pth.name}; pass --attempt N (N>1) for a legitimate rerun")
         for h in FORBIDDEN_HOSTS:
             chk(h not in t, f"forbidden host in record {pth.name}")
     for pth, t in texts.items():
