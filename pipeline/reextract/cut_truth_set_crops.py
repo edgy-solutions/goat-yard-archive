@@ -98,28 +98,56 @@ TRUTH = HAD.DATA / ("truth_set%d_%s.json" % (SET_N, SET))
 OUTDIR = HAD.DATA / ("truthset%d_crops_%s" % (SET_N, SET))
 OUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
 
-# A SECOND OUTPUT FOLDER, FOR RE-CUTTING (A2 at Lane B's request, 2026-10-18). With no argument the cut
-# goes where it always went: OUTDIR and OUT above, which is the approved crop corpus, so re-running the
-# cut to check it reproduces would write over the very pixels it is checked against. `--out-dir` sends
-# the crops AND the cut manifest to another folder. That folder must not already hold a crop: a re-cut
-# that overwrites PNGs in place cannot be told apart from the cut it overwrote, so the refusal comes
-# before anything is written (exit 2, the folder untouched). The default path is NOT guarded by this.
+# THE TARGET IS ALWAYS NAMED, AND NEVER WRITTEN OVER (A2, 2026-10-18; advisor rulings "cutter closed").
+# OUTDIR and OUT above are the APPROVED crop corpus. A re-cut that overwrites PNGs in place cannot be told
+# apart from the cut it overwrote, so:
+#   - no argument is REFUSED, naming the approved folder. It used to write over it.
+#   - `--out-dir DIR` writes the crops and the cut manifest to DIR, refused if DIR already holds a .png or
+#     the manifest.
+#   - regenerating the approved set means `--out-dir` pointing AT the approved folder, after its crops and
+#     its manifest (which lives beside the folder, at OUT) have been deleted on purpose. The manifest then
+#     goes back to OUT, where the approved one always was.
+# Every refusal comes before anything is written (exit 2, nothing touched). The parsing runs only when the
+# file is run: its body cuts at module level, so an import would cut with no target chosen.
 import argparse                                                            # noqa: E402
 import pathlib                                                             # noqa: E402
-_ap = argparse.ArgumentParser(description="Cut the truth-set A2 span crops (PAD=%d)." % HAD.PAD)
-_ap.add_argument("--out-dir", default=None,
-                 help="write crops and the cut manifest here instead of the approved corpus %s; "
-                      "refused if the folder already holds a .png or the manifest" % OUTDIR)
-_ARGS = _ap.parse_args()
-if _ARGS.out_dir is not None:
-    OUTDIR = pathlib.Path(_ARGS.out_dir)
-    OUT = OUTDIR / OUT.name
-    _held = sorted(p.name for p in OUTDIR.glob("*.png")) if OUTDIR.is_dir() else []
-    _held += [OUT.name] if OUT.exists() else []
-    if _held:
-        sys.stderr.write("REFUSED: --out-dir %s already holds %d crop file(s) (e.g. %s). Nothing was "
-                         "written. Give an empty or new folder.\n" % (OUTDIR, len(_held), _held[0]))
+APPROVED_DIR, APPROVED_OUT = OUTDIR, OUT
+
+
+def resolve_target(argv):
+    """(crop_dir, manifest, is_approved, refusal). An accepted target has refusal "" and the other three
+    set; a refused one has refusal set and the rest None. Reads the target folder, writes nothing."""
+    ap = argparse.ArgumentParser(description="Cut the truth-set A2 span crops (PAD=%d)." % HAD.PAD)
+    ap.add_argument("--out-dir", default=None,
+                    help="write crops and the cut manifest here; refused if the folder already holds a "
+                         ".png or the manifest. The approved corpus is %s" % APPROVED_DIR)
+    a = ap.parse_args(argv)
+    if a.out_dir is None:
+        return None, None, None, (
+            "REFUSED: no --out-dir. The default target is the approved crop corpus %s, and a run with no "
+            "argument would write over it. Nothing was written. To re-cut for comparison, give --out-dir "
+            "NEW_FOLDER. To regenerate the approved set itself, delete its crops and %s on purpose, then "
+            "give --out-dir %s." % (APPROVED_DIR, APPROVED_OUT, APPROVED_DIR))
+    d = pathlib.Path(a.out_dir)
+    approved = d.resolve() == APPROVED_DIR.resolve()
+    man = APPROVED_OUT if approved else d / APPROVED_OUT.name
+    held = sorted(p.name for p in d.glob("*.png")) if d.is_dir() else []
+    held += [str(man)] if man.exists() else []
+    if held:
+        return None, None, None, (
+            "REFUSED: --out-dir %s%s already holds %d crop file(s) (e.g. %s). Nothing was written. Give "
+            "an empty or new folder." % (d, " (the APPROVED corpus)" if approved else "", len(held), held[0]))
+    return d, man, approved, ""
+
+
+if __name__ == "__main__":
+    OUTDIR, OUT, CROP_DIR_IS_APPROVED, _refused = resolve_target(sys.argv[1:])
+    if _refused:
+        sys.stderr.write(_refused + "\n")
         sys.exit(2)
+else:
+    raise ImportError("cut_truth_set_crops is a script, not a module: its body cuts and writes crops at "
+                      "import, with no target chosen. Run it: python cut_truth_set_crops.py --out-dir DIR")
 PAD = HAD.PAD
 
 # THE NOTE THE SPAN SITS IN, AT THE SAME RECIPE. Chris, 2026-10-04: "each span links to its full
@@ -719,7 +747,7 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "clip_validated_against": "p912:n2 hand-built clip (rows 14-72, 2 word runs); this "
                                             "rule keeps 14-78 and resolves the same 2 runs",
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},
-       "crop_dir": str(OUTDIR), "crop_dir_is_default": _ARGS.out_dir is None,
+       "crop_dir": str(OUTDIR), "crop_dir_is_default": CROP_DIR_IS_APPROVED,
        "faults": faults, "clip_faults": clip_faults,
        "floor_margin": floor_margin,
        "note_context": {"written": n_note, "faults": note_faults,
