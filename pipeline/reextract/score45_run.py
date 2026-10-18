@@ -77,7 +77,7 @@ HEB = re.compile("[\u0590-\u05ff]")
 
 # Pinned to the count the first FULL run observes.  None until then: the real run prints the observed
 # count and marks the header checks_pinned=false.  The dry-run has its own pinned count.
-EXPECTED_CHECKS = None
+EXPECTED_CHECKS = 668       # full run, observed 2026-10-18 on run 501ab577a18a6785
 EXPECTED_CHECKS_DRY = 382        # dry-run, verified on 2026-10-18
 
 CHECKS = 0
