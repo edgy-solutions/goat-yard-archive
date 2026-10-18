@@ -20,7 +20,7 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["ExtractedText","ExtractionResult","GillEntity","Metadata","MetadataCore","MetadataVerses","OptimizedQuery","RAGAnalysis","RepairedQuote","ResolvedPronoun","VerseChunk",]
+          ["ExtractedText","ExtractionResult","GillAnswer","GillEntity","GillRefusal","Metadata","MetadataCore","MetadataVerses","OptimizedQuery","RAGAnalysis","RepairedQuote","ResolvedPronoun","VerseChunk","Zone2Phrase",]
         ), enums=set(
           ["BiblicalEra","EntityCategory","FailureCategory",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
@@ -43,7 +43,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 11
+    # Generated classes 14
     # #########################################################################
 
     @property
@@ -55,8 +55,16 @@ class TypeBuilder(type_builder.TypeBuilder):
         return ExtractionResultViewer(self)
 
     @property
+    def GillAnswer(self) -> "GillAnswerViewer":
+        return GillAnswerViewer(self)
+
+    @property
     def GillEntity(self) -> "GillEntityViewer":
         return GillEntityViewer(self)
+
+    @property
+    def GillRefusal(self) -> "GillRefusalViewer":
+        return GillRefusalViewer(self)
 
     @property
     def Metadata(self) -> "MetadataViewer":
@@ -89,6 +97,10 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def VerseChunk(self) -> "VerseChunkViewer":
         return VerseChunkViewer(self)
+
+    @property
+    def Zone2Phrase(self) -> "Zone2PhraseViewer":
+        return Zone2PhraseViewer(self)
 
 
 
@@ -284,7 +296,7 @@ class FailureCategoryValues:
 
 
 # #########################################################################
-# Generated classes 11
+# Generated classes 14
 # #########################################################################
 
 class ExtractedTextAst:
@@ -369,6 +381,61 @@ class ExtractionResultProperties:
     
 
 
+class GillAnswerAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("GillAnswer")
+        self._properties: typing.Set[str] = set([  "reasoning",  "zone1_interpretation",  "phrases",  "refusal",  "zone3_notes",  ])
+        self._props = GillAnswerProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "GillAnswerProperties":
+        return self._props
+
+
+class GillAnswerViewer(GillAnswerAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class GillAnswerProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def reasoning(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("reasoning"))
+    
+    @property
+    def zone1_interpretation(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("zone1_interpretation"))
+    
+    @property
+    def phrases(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("phrases"))
+    
+    @property
+    def refusal(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("refusal"))
+    
+    @property
+    def zone3_notes(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("zone3_notes"))
+    
+    
+
+
 class GillEntityAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb # type: ignore (we know how to use this private attribute)
@@ -420,6 +487,53 @@ class GillEntityProperties:
     @property
     def description(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
+    
+    
+
+
+class GillRefusalAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("GillRefusal")
+        self._properties: typing.Set[str] = set([  "mode",  "gap_statement",  "adjacent_phrases",  ])
+        self._props = GillRefusalProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "GillRefusalProperties":
+        return self._props
+
+
+class GillRefusalViewer(GillRefusalAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class GillRefusalProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def mode(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("mode"))
+    
+    @property
+    def gap_statement(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("gap_statement"))
+    
+    @property
+    def adjacent_phrases(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("adjacent_phrases"))
     
     
 
@@ -780,6 +894,57 @@ class VerseChunkProperties:
     @property
     def end_phrase(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("end_phrase"))
+    
+    
+
+
+class Zone2PhraseAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("Zone2Phrase")
+        self._properties: typing.Set[str] = set([  "framing",  "gill_quote",  "scripture_quote",  "sentence_id",  ])
+        self._props = Zone2PhraseProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "Zone2PhraseProperties":
+        return self._props
+
+
+class Zone2PhraseViewer(Zone2PhraseAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class Zone2PhraseProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def framing(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("framing"))
+    
+    @property
+    def gill_quote(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("gill_quote"))
+    
+    @property
+    def scripture_quote(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("scripture_quote"))
+    
+    @property
+    def sentence_id(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("sentence_id"))
     
     
 
