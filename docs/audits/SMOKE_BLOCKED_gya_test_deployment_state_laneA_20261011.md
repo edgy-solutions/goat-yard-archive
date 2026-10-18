@@ -592,3 +592,198 @@ is opened — but it moves `:latest` like the others.
   as `ac71b00` wrote it — a cherry-pick by path is not the place to change it.
 - Four requests is still not a scored run; the gate's pass rate on that pod remains
   unmeasured.
+
+---
+
+# 2026-10-18 (prod path) — rulings 1–7: re-point, rehearsal, and two things found on the way
+
+## Ruling 7 — DRIFT correction applied
+
+The `GYA_DEBUG_STAGES` row of the DRIFT table above is **withdrawn**: the flag *is*
+in the chart as committed (`values-test.yaml:21`, `0f3fe6d`). The **image** half
+stands — gya-test's chart value is still `backend:latest`, so a `helm upgrade`
+still reverts the digest pin.
+
+## Ruling 6 — `:latest` is never a deploy target again
+
+Accepted that a 0.3.3 build moves `backend:latest` onto code containing `ac71b00`.
+Both environments are pinned to something else (gya-test by digest, prod by tag),
+and the rule from here is that **`:latest` is never a deploy target**. Stated in
+the 0.3.2 release notes.
+
+## Ruling 3 — ancestry of the entity fix in `a88ad6f`
+
+**`5c93b28`: n.** Not an ancestor of `a88ad6f` as a commit object.
+
+The change it carries **is** in the deployed image, and this is now stated in its
+strongest form — not by patch-id alone, but by the deployed tree's own bytes:
+
+| | `5c93b28` | `c9186b1` | `a88ad6f` (deployed) |
+|---|---|---|---|
+| ancestor of `a88ad6f` | **n** | **y** | — |
+| patch-id | `1bfe15d6…2939fa` | `1bfe15d6…2939fa` | — |
+| `backend/gill_search.py` blob | `37b87d2d` | `37b87d2d` | **`37b87d2d`** |
+| `backend/test_entity_lookup_order.py` blob | `f3e715ce` | `f3e715ce` | **`f3e715ce`** |
+
+The deployed tree's blobs for both files are byte-identical to the ones `5c93b28`
+produces. The commit object is absent; **the content is not.** Flagged because the
+ruling said *stop on no*, and the literal answer is no.
+
+## Ruling 2 — re-pointing `:0.3.2` at the smoked digest
+
+**Prerequisite.** Docker on this machine is **not logged in to ghcr.io**
+(`credsStore: desktop`, `auths: []`), and the `gh` token still lacks
+`read:packages`. The re-point needs a token with **`write:packages`**:
+
+```
+docker login ghcr.io -u <user>          # PAT with write:packages
+```
+
+**The command, as ruled:**
+
+```
+docker buildx imagetools create \
+  -t ghcr.io/edgy-solutions/goat-yard-archive/backend:0.3.2 \
+     ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e
+```
+
+No rebuild: this writes a tag that references manifests already in the registry.
+
+**Expected resulting manifest digest — I cannot predict it, and the reason matters.**
+`imagetools create` does not simply bind a name to an existing digest; it
+*constructs* an image index referencing the source's manifests and pushes that.
+If the source is already an index and buildx re-serialises it byte-identically, the
+tag resolves to `sha256:ac37c84f…` unchanged. If buildx normalises ordering or adds
+annotations — or if the source is a single manifest that now gets wrapped in an
+index — **the tag resolves to a different digest that points at the same layers.**
+Which of those happens depends on the source manifest's media type, and the
+registry could not be queried from this lane (the `read:packages` weak link is
+still open). Predicting a digest I cannot check would be a guess dressed as a
+verification.
+
+**If the digests being equal is the requirement, use `crane` instead:**
+
+```
+crane tag ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:ac37c84fed…66d0c7d8e 0.3.2
+```
+
+`crane tag` writes the tag against the **existing** manifest without re-creating it,
+so `:0.3.2` resolves to `sha256:ac37c84f…` by construction. This is the stronger
+form of what ruling 2 asks for.
+
+**Verification, and the part that actually settles it.**
+
+```
+docker buildx imagetools inspect ghcr.io/edgy-solutions/goat-yard-archive/backend:0.3.2
+```
+
+Compare the reported digest to `sha256:ac37c84f…`. **A difference here is not
+automatically a failure** — see above — so the decisive check is a content witness
+rather than a name:
+
+```
+kubectl -n gya-test      get pod -l app.kubernetes.io/name=gya-frontend-api -o jsonpath='{.items[*].status.containerStatuses[*].imageID}'
+kubectl -n gya-frontend  get pod -l app.kubernetes.io/name=gya-frontend-api -o jsonpath='{.items[*].status.containerStatuses[*].imageID}'
+```
+
+Run after the prod upgrade. **The two `imageID`s must be identical strings.**
+`imageID` is what the kubelet actually resolved and pulled, so equality here means
+prod is running the artefact that was smoked on gya-test — which is the claim the
+acceptance is really about, and it holds whether or not the tag's own digest moved.
+
+**Do not push a git tag `0.3.2`.** It would trigger Build Containers, which tags
+`backend:${{ github.ref_name }}` — overwriting the re-pointed tag with a **rebuild**
+of the same source, and a rebuild yields a different artefact than the one smoked.
+Per the ruling, no git tag of that name at all.
+
+## Ruling 4 — prod rehearsal, read-only. **The literal variant would break prod.**
+
+**Prod identified:** release `gya-frontend`, namespace `gya-frontend`, revision 29,
+chart `goat-yard-archive-0.3.0`, last upgraded 2026-08-02. It runs
+`backend:0.3.0` and `frontend:0.3.0`; live values say `tag: 0.3.0`. So prod never
+reached 0.3.1 or 0.3.2 — consistent with neither tag ever having been built.
+(`gya-backend`/`gya-backend` ns, revision 15, is the corpus-side release and is not
+touched by any of this.)
+
+Both variants were rendered with `helm upgrade --dry-run` against the real release
+from the chart at `a88ad6f` (deps resolved with `helm dependency build`; the chart
+does not render without it). Both returned rc=0. Each rendered manifest was diffed
+against `helm get manifest`.
+
+### Variant A — `-f charts/goat-yard-archive/values-frontend.yaml` (the literal reading)
+
+38 changed lines. The image line moves `0.3.0` → `0.3.2` as intended, and
+`GYA_DEBUG_STAGES: "0"` is added — both wanted. **And then it removes seven
+secret-bearing lines:**
+
+- `OPENROUTER_API_KEY`, `OPENROUTER_API_KEY_ANON` — deleted from the configmap
+- `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY` — deleted
+- `VITE_CLERK_PUBLISHABLE_KEY` — deleted
+- the cloudflared tunnel argument `--token=<redacted>` → **`--token=`** (emptied)
+
+The last one takes the public tunnel down; the first five leave the backend with no
+provider credentials. **This variant would break prod, not upgrade it.**
+
+The cause is not a bug in the chart: `values-frontend.yaml` as committed is **not a
+complete prod values file.** Prod's live user-values carry an `api.env` block and a
+tunnel token that the committed file does not contain, and `-f` replaces
+user-supplied values wholesale rather than merging with what is deployed.
+
+### Variant B — `--reuse-values --set api.image.tag=0.3.2` (recommended)
+
+28 changed lines, of which exactly **two** are substantive:
+
+```
+-           image: "ghcr.io/edgy-solutions/goat-yard-archive/backend:0.3.0"
++           image: "ghcr.io/edgy-solutions/goat-yard-archive/backend:0.3.2"
+-             secretName: gya-frontend-minio        (trailing whitespace)
++             secretName: gya-frontend-minio
+```
+
+Everything else is blank-line churn plus the `GYA_DEBUG_STAGES` comment block.
+**Zero secret-bearing lines are removed** (variant A: seven). This is the
+"tag change only" upgrade ruling 3 described:
+
+```
+helm upgrade -n gya-frontend gya-frontend <chart> --reuse-values --set api.image.tag=0.3.2
+```
+
+**One difference to know about, not a defect.** Under `--reuse-values` the
+configmap renders the `GYA_DEBUG_STAGES` *comment* but **not the key** — the live
+values have no such key for the template to emit. Prod therefore gets the debug
+gate off **by absence** rather than by an explicit `"0"`. Functionally identical:
+`debug_gate.stage_debug_allowed()` reads the variable and an unset variable is
+disabled — which is exactly the state gya-test was in when the 403 half of the
+smoke was recorded. If an explicit value is wanted, add
+`--set api.env.GYA_DEBUG_STAGES="0"` to the same upgrade.
+
+## Found on the way: a credential-handling finding, recorded elsewhere
+
+Ruling 4's `helm get values` surfaced a credential-handling problem with the
+production release. **It is deliberately not described in this repository**, which
+is public: naming the weakness here would publish an attack path against a live
+system. The finding, its scope and the options are written up in the private
+handoff (`dr-voluminous`) and were reported to Chris directly. Rotation and any
+change of storage are his call and nothing was acted on.
+
+Two things from it do belong here, because they bear on the upgrade:
+
+- **`values-frontend.yaml` as committed is not a complete production values file.**
+  The live release carries user-supplied values the committed file does not, which
+  is the mechanism behind variant A's damage above. Nothing should ever upgrade
+  production with `-f` against this file.
+- **Variant B touches none of it**, which is a further reason to prefer it.
+
+
+## What this still does NOT solve
+
+- **No prod action was taken.** The re-point, the upgrade and the acceptance are all
+  Chris's, and the re-point is blocked on `write:packages`.
+- The `read:packages` weak link is still open, so the resulting tag digest cannot be
+  predicted from here — hence the `imageID` content witness above.
+- The acceptance (entity manifest ×5 identical + the three smoke items **on prod**)
+  has not been run; only the gya-test smoke has.
+- Rehearsal fidelity: `--dry-run` renders against the live release, but it does not
+  prove the pull succeeds. If `:0.3.2` is absent or unreadable when the real upgrade
+  runs, the failure appears as ImagePullBackOff *after* a successful `helm upgrade`.
+  The `imagetools inspect` above is what rules that out beforehand.
