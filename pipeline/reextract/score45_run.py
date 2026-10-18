@@ -305,7 +305,7 @@ def do_call(p, key):
            "response_raw": None, "hebrew": None, "class_primary": "error", "class_secondary": "error",
            "retries": retries, "cost_usd": None, "out_tokens": None, "finish_reason": None,
            "error": err, "reasoning_applied": applied,
-           "planned_request_sha16": p["request_sha16"],
+           "predicted_request_sha16_before_send": p["request_sha16"],
            "provider": None, "model_returned": None, "gen_id": None}
     if r is not None and r.status_code == 429:
         raise RunFault(f"429 survived {RETRIES} retries on {row['span_id']} {arm} {p['channel']}")
@@ -543,7 +543,8 @@ def main():
               "git_start": g0, "prediction_sha16": g2["prediction_sha16"], "sheet_payload_sha16": pay_sha,
               "set_digest": SET_DIGEST, "crop_sha16_sent": {k: crop_shas[k] for k in sorted(crop_shas)},
               "arms": ARMS, "channels": CHANNELS, "call_count": len(payloads),
-              "planned_request_sha16": sorted(p["request_sha16"] for p in payloads),
+              "predicted_request_sha16_before_send": sorted(p["request_sha16"] for p in payloads),
+              "predicted_request_sha16_note": "A PREDICTION of what would be sent, not a record of it.  The reasoning ladder rebuilds the body at send time, so the authoritative value is each row's request_sha16 (the sha of the bytes actually posted).  Never read this list as sent.",
               "crop_dir": str(CROPDIR), "aperture": APERTURE, "max_tokens": MAX_TOKENS,
               "ch2_absent": {ABSENT: ABSENT_BASIS}, "attempt": a.attempt,
               "provider_policy": {
@@ -570,7 +571,7 @@ def main():
         print(f"gate7 key: {'SET' if key else 'UNSET (expected in a dry-run)'}  [never printed]")
         print(f"gate8 no Hebrew in {sum(p['channel']=='context' for p in payloads)} channel-2 texts")
         print(f"gate9 calls {len(payloads)} = {len(ARMS)} x (45 bare + 44 ctx); p245:n1 bare only")
-        print(f"run_sha16 (planned) {run_sha}")
+        print(f"run_sha16 (of this header, before results) {run_sha}")
         for arm in ARMS:
             for ch in CHANNELS:
                 n = sum(p['arm'] == arm and p['channel'] == ch for p in payloads)
