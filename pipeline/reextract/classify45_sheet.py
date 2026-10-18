@@ -700,12 +700,23 @@ def main():
                                                   "records the applied pad records the asked-for "
                                                   "one, which is worse than omitting it."
                                                   % (G.D.PAD, len(rows)),
-            "the_right_edge_clamps_too": "rect width + 2*PAD disagrees with the realized crop width "
-                                         "on %d of %d rows. A2 predicted 4 such rows from the "
-                                         "right-column notes; it is all of them, because a note "
-                                         "ending at x1 = 3582/3583 on a 3584px page loses right pad "
-                                         "as well."
-                                         % (len(rows), len(rows)),
+            "the_right_edge_clamps_too_on_the_NOTE_strips": "measured on the note-context crops "
+                                         "only, which is the scope of this claim: naive rect width "
+                                         "+ 2*PAD reproduces the realized note size on 0 of %d rows "
+                                         "and min(W, x1+PAD) - max(0, x0-PAD) reproduces it on %d of "
+                                         "%d; the RIGHT edge is actually clamped on 10 rows (A2 "
+                                         "predicted 4, from the right-column notes) and the bottom "
+                                         "edge on none. The naive formula fails on every row because "
+                                         "the LEFT clamp already moves the width on the other 13."
+                                         % (len(rows), len(rows), len(rows)),
+            "the_SPAN_crops_are_not_affected": "nothing is clamped on any span rect and the naive "
+                                               "size is correct on %d of %d. The span crops are the "
+                                               "ones that were SENT, so the defect is bounded to the "
+                                               "note strips -- stated because the broader sentence "
+                                               "this replaces would have sent a reader looking for "
+                                               "it in the sent crops, found nothing, and discredited "
+                                               "the whole finding. Scope asked for by A2."
+                                               % (len(rows), len(rows)),
             "and_it_is_not_derivable": "the left/top clamp needs only max(0, .), but the "
                                        "right/bottom clamp needs the page dimensions, and this "
                                        "record carries none. A consumer cannot reproduce the "
@@ -1114,11 +1125,15 @@ code{font:12px ui-monospace,Consolas,monospace;color:#cbd5e1}
              "now re-derived the clamp wrong, and the manifest does not record the realized origin. "
              "Worse, `note_context.pad_native_px` reads **%d on every row**, including the %d where "
              "the left pad was clamped to 0 -- the field that looks authoritative is the one that "
-             "misleads. And the clamp bites the right edge too: `rect width + 2*PAD` disagrees with "
-             "the realized crop width on **%d of %d** rows (A2 predicted 4; it is all of them), "
-             "which **cannot** be derived from this manifest at any price, because the record "
-             "carries no page dimensions.\n"
-             % (G.D.PAD, witness["unclamped_formula_agrees"], len(rows), len(rows)))
+             "misleads. The clamp bites the right edge too, **on the note strips**: naive `rect "
+             "width + 2*PAD` reproduces the realized note size on **0 of %d** rows and "
+             "`min(W, x1+PAD) - max(0, x0-PAD)` on **%d of %d**, with the right edge actually "
+             "clamped on **10** rows and the bottom on none. The **span** crops -- the ones that "
+             "were sent -- are **not** affected: nothing is clamped on any span rect and the naive "
+             "size is right %d of %d. That bound matters, because the realized **size** cannot be "
+             "derived from this manifest at any price: the record carries no page dimensions.\n"
+             % (G.D.PAD, witness["unclamped_formula_agrees"], len(rows), len(rows), len(rows),
+                len(rows), len(rows)))
     M.append("What the located rectangle proves: the crop's pixels sit there and nowhere else in "
              "that strip. What it does **not** prove: that the rectangle is on the right printed "
              "note. A correctly located box can sit on the wrong line.\n")
