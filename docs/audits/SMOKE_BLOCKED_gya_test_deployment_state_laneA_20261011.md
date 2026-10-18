@@ -442,3 +442,153 @@ digest's provenance — that it is the artefact of run `38181578224` on head
 is a second source but not a registry one.
 
 Which method actually closed it will be recorded here when it runs.
+
+---
+
+# 2026-10-18 (later) — ruling 4: the 0.3.3 candidate, and three findings about the chart
+
+Ruling B4 asked for a 0.3.3 candidate = `release-0.3.2` + `ac71b00`, cherry-picked
+**by path**, deployed to gya-test by digest, then the flag set. The cherry-pick is
+done and committed. **Nothing has been built or deployed**, because building it
+turns out to interact with ruling B3's prod plan in a way that is Chris's call.
+
+## The candidate: `b72c0f8` on `release-0.3.3` (branch NOT pushed)
+
+Worktree `C:\Users\cnogr\git\goatyard-rel033`, branched from `release-0.3.2`
+(`b626576`). The diff against `release-0.3.2` is the same shape as `ac71b00`'s own
+diff against *its* parent — 12 paths, 1188 insertions, 6 deletions, identical
+per-file counts, and the path set compares equal.
+
+**"By path" could not mean `git checkout ac71b00 -- <path>`.** `ac71b00` branches
+from `cc6b1af`, which predates the 0.3.2 citation-pairing fix (`2e2fa41`): its
+`backend/bot.py` still carries the *single*-closer regex. Taking its file wholesale
+would have silently reverted the nested-quote repair smoked on gya-test the same
+morning. A 3-way cherry-pick was used and the surviving regex asserted — the closer
+is still a run.
+
+**The four conflicts were all in generated `baml_client/`, and were not
+hand-merged.** `ac71b00`'s side of the generated client declares `Note` and inlines
+a `gill_apparatus.baml` — Lane A2's config-v2 apparatus seam, which is *not* in
+`ac71b00`'s diff and whose `.baml` source does not exist in this tree. Resolving in
+its favour would have shipped generated types for a source file that isn't here.
+Per AGENTS.md rule 3 the client was regenerated from the merged `baml_src` with the
+pinned `baml-cli 0.211.1`.
+
+**The null was measured before the delta was read.** Regenerating from *pristine*
+`release-0.3.2` sources reproduces that branch's committed client exactly — 0
+differing lines across all 13 files ignoring CR — so nothing in this commit is
+generator-version drift. Three files (`config.py`, `globals.py`, `tracing.py`) come
+back CRLF-modified in the worktree only; git's own diffstat for them is empty and
+they are excluded.
+
+Predicted before regenerating, asserted after: 14 classes (0.3.2's 11 plus
+`GillAnswer`, `GillRefusal`, `Zone2Phrase`), no `Note`, 6 inlined keys with no
+`gill_apparatus.baml`, no conflict markers. Suites green: `baml_retry_policy` 6/6,
+`debug_gate` 12/12, `entity_lookup_order` 10/10, `quote_cite_pairing` 14/14,
+`stage_health` 31/31, `structured_answer` 24/24 — **97 checks**.
+
+## Finding 1 — prod cannot reach the smoked digest by a tag change. **Blocks B3.**
+
+Ruling B3: *"prod goes to this exact digest as 0.3.2 in one helm upgrade (tag change
+only)"*. Three facts make that impossible as the chart stands:
+
+1. **The chart cannot express a digest.**
+   `charts/goat-yard-archive/templates/api-deployment.yaml:29` is
+   `image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"` — the
+   `:` is hard-coded. A digest needs `repository@sha256:…`. There is no digest
+   value anywhere in the templates.
+2. **The prod values already say `0.3.2`.**
+   `charts/goat-yard-archive/values-frontend.yaml:27` is `tag: "0.3.2"`, set by the
+   0.3.2 release commit `88d18b6`, which *is* contained in `a88ad6f`. So the "tag
+   change" B3 describes has already been committed.
+3. **No `0.3.2` image exists.** Every ref Build Containers has ever built:
+   `0.2.1`, `0.2.2`, `0.3.0`, `main`, `vol1-apparatus-frozen-config`. The workflow
+   tags `backend:${{ github.ref_name }}`, and there is no git tag `0.3.1` or
+   `0.3.2` in the repo (tags present: 0.0.1, 0.1.0, 0.1.1, 0.2.0, 0.2.1, 0.3.0,
+   vol1-apparatus-frozen-config).
+
+With `pullPolicy: Always`, a `helm upgrade` of prod against the committed values
+would therefore go to **ImagePullBackOff**, not to 0.3.2.
+
+**This is older than 0.3.2.** `fe8ea83` set the same value to `"0.3.1"`, and
+`backend:0.3.1` was never built either. So the committed prod values have named a
+non-existent tag since the 0.3.1 release — which means the 0.3.1 deploy that is
+first on Chris's list would have hit the same wall. Whether the *live* prod release
+overrides the tag cannot be known from here and prod was not touched: the read-only
+check is `helm -n <prod-ns> get values <release>`.
+
+**Evidence bound:** the registry itself still could not be queried (the `read:packages`
+weak link below is still open). "No 0.3.2 image" rests on the git tag list, the
+workflow's tagging rule and the full run list — three consistent sources, none of
+them the registry.
+
+**Three routes, and a recommendation.**
+
+- **(a) Re-point the tag at the already-built digest, without rebuilding.**
+  `docker buildx imagetools create -t ghcr.io/edgy-solutions/goat-yard-archive/backend:0.3.2 ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:ac37c84fed…66d0c7d8e`
+  (or `crane tag`). This creates a tag pointing at the *same manifest*, server-side:
+  no rebuild, so prod gets **exactly the artefact that was smoked**, the committed
+  values already match, and `:latest` does **not** move. Needs `packages:write`,
+  which this lane does not have and did not improvise. **Recommended.**
+- **(b) Push a git tag `0.3.2`.** CI builds and tags `backend:0.3.2`. But a rebuild
+  of the same source yields a **different digest** — so prod would run an artefact
+  that was never smoked, which is precisely what B3's "this exact digest" forbids.
+  It also moves `:latest`.
+- **(c) Teach the chart a digest value.** Correct long-term, but it is a chart
+  change, and B1/B5 deferred the chart upgrade to its own ticket after the gate run.
+
+## Finding 2 — correction to the DRIFT table accepted on 2026-10-18
+
+The table above says `GYA_DEBUG_STAGES` is *"absent from the gya-test configmap"*
+under the **"chart as committed"** column. **That row is wrong.**
+`charts/goat-yard-archive/values-test.yaml:21` carries `GYA_DEBUG_STAGES: "1"`,
+committed by `0f3fe6d` — a 0.3.2 code commit, present in both `release-0.3.2` and
+`a88ad6f`.
+
+The practical consequence **inverts**: a `helm upgrade` of gya-test would *restore*
+the flag through the chart's configmap, not drop it. The live configmap lacks it
+only because helm revision 26 dates from 2026-06-21, months before `0f3fe6d` — so
+the gap is between the *deployed* release and the chart, not inside the chart.
+
+**The image half of the drift stands unchanged**, and it is the half that bites: the
+chart still says `backend:latest` for gya-test, so an upgrade still reverts the
+digest pin. What is corrected is only the claim that the eval would then abort
+naming `GYA_DEBUG_STAGES`; it would not.
+
+`GILL_STRUCTURED_ANSWER`'s row is correct as written for the release line. The chart
+change that would set it — `b6077f7`, *"GILL_STRUCTURED_ANSWER in the configmap, ON
+for gya-test only"* — exists on **`body-path` only** and is not in `release-0.3.2`,
+`release-0.3.3` or `a88ad6f`. B5's chart-upgrade ticket can cherry-pick it rather
+than re-author it.
+
+## Finding 3 — building the candidate moves `:latest`, and that now matters more
+
+A push of `release-0.3.3` will **not** produce an image: Build Containers triggers
+on `main`, tags `v*` / `*.*.*`, PRs to `main`, and `workflow_dispatch`. Producing a
+digest for the candidate needs a tag, a dispatch, or a PR to `main`.
+
+Whichever is used, the build also pushes `backend:latest`. Combined with finding 2,
+that is sharper than it was this morning: gya-test's chart value is `latest`, so a
+later `helm upgrade` of gya-test — the silent revert already recorded — would land
+**`ac71b00` code** on gya-test rather than the 76-day-old image. Prod does not drift
+from this (its values name a tag, not `latest`), but the constraint *"prod never
+sees `ac71b00` until the ratchet holds"* is then being kept by the fact that prod's
+tag is broken, which is not a safeguard anyone chose.
+
+`workflow_dispatch` is the narrowest of the three — no git tag is created and no PR
+is opened — but it moves `:latest` like the others.
+
+## What this still does NOT solve
+
+- **Nothing is built and nothing is deployed.** `GILL_STRUCTURED_ANSWER` is still
+  unset everywhere and unexercised outside `body-path`. B4 is paused at exactly the
+  point where it would have required a build.
+- **The `read:packages` weak link is still open**, so finding 1 rests on git and CI
+  evidence rather than on the registry.
+- `release-0.3.3` is **unpushed**, by choice: pushing it is harmless on its own, but
+  it is the step before a build, and the build is the decision above.
+- `backend/test_structured_answer.py`'s runner counts its tests dynamically with no
+  `EXPECTED_TESTS` assertion, so a test lost to a rename would pass unnoticed. Left
+  as `ac71b00` wrote it — a cherry-pick by path is not the place to change it.
+- Four requests is still not a scored run; the gate's pass rate on that pod remains
+  unmeasured.
