@@ -26,7 +26,7 @@ spec:
       {{- end }}
       containers:
         - name: api
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          image: {{ include "goat-yard-archive.image" .Values.api.image | quote }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           ports:
             - name: http

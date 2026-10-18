@@ -30,3 +30,5 @@ schedules/
 dagster.db
 dagster.db-journal
 .telemetry
+# Helm subchart tarballs fetched by `helm dependency build` -- not source.
+charts/goat-yard-archive/charts/

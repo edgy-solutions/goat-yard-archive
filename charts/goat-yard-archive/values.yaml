@@ -71,6 +71,11 @@ api:
     repository: ghcr.io/edgy-solutions/goat-yard-archive/backend
     pullPolicy: Always
     tag: "0.0.1"
+    # Pin to an exact artefact. When set, `digest` WINS over `tag` and the image
+    # is rendered as repository@sha256:... A tag can be re-pointed at a different
+    # build after the fact; a digest cannot. Deploy anything that has been smoked
+    # by digest, and record which digest in the release notes.
+    digest: ""
   service:
     type: ClusterIP
     port: 8000
@@ -115,6 +120,11 @@ ui:
     repository: ghcr.io/edgy-solutions/goat-yard-archive/frontend
     pullPolicy: Always
     tag: "0.0.1"
+    # Pin to an exact artefact. When set, `digest` WINS over `tag` and the image
+    # is rendered as repository@sha256:... A tag can be re-pointed at a different
+    # build after the fact; a digest cannot. Deploy anything that has been smoked
+    # by digest, and record which digest in the release notes.
+    digest: ""
   service:
     type: ClusterIP
     port: 3000
