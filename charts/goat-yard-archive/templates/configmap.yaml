@@ -42,6 +42,16 @@ data:
   {{- if .Values.api.env.GYA_DEBUG_STAGES }}
   GYA_DEBUG_STAGES: {{ .Values.api.env.GYA_DEBUG_STAGES | quote }}
   {{- end }}
+  # Feature flags
+  # ADR-0009 typed GillAnswer via BAML. The backend reads this per call
+  # (backend/structured_answer.py:64), but the pod gets it through envFrom at
+  # container start, so changing this value needs a rollout restart -- it is not
+  # a live toggle. Values read as ON: 1, true, yes, on. Anything else is OFF.
+  # Rendered even when "0" so the pod says which way it is set rather than
+  # leaving it to the code's default.
+  {{- if .Values.api.env.GILL_STRUCTURED_ANSWER }}
+  GILL_STRUCTURED_ANSWER: {{ .Values.api.env.GILL_STRUCTURED_ANSWER | quote }}
+  {{- end }}
   {{- if .Values.api.env.LITELLM_PROXY_URL }}
   LITELLM_PROXY_URL: {{ .Values.api.env.LITELLM_PROXY_URL | quote }}
   {{- end }}

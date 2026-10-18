@@ -94,6 +94,11 @@ api:
     # request with debug: true gets a 403 rather than a 200 carrying the bot's
     # unshown work. Set explicitly so the pod says which way it is configured.
     GYA_DEBUG_STAGES: "0"
+    # ADR-0009 structured answer path. OFF in production until the release AFTER
+    # 0.3.2, and only if the paired gate holds (ruling 2026-10-11). values-test.yaml
+    # turns it on for gya-test. Set explicitly rather than omitted: an absent key
+    # and an OFF key look the same in the pod otherwise.
+    GILL_STRUCTURED_ANSWER: "0"
   auth:
     clerkIssuer: "https://<your-app>.clerk.accounts.dev"
     clerkWebhookSecret: ""
