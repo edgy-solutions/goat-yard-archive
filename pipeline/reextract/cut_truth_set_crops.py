@@ -97,6 +97,29 @@ NOT_ATTEMPTED = "withdrawn:band-clip-is-not-a-set-recipe"
 TRUTH = HAD.DATA / ("truth_set%d_%s.json" % (SET_N, SET))
 OUTDIR = HAD.DATA / ("truthset%d_crops_%s" % (SET_N, SET))
 OUT = HAD.DATA / ("truthset%d_cut_%s.json" % (SET_N, SET))
+
+# A SECOND OUTPUT FOLDER, FOR RE-CUTTING (A2 at Lane B's request, 2026-10-18). With no argument the cut
+# goes where it always went: OUTDIR and OUT above, which is the approved crop corpus, so re-running the
+# cut to check it reproduces would write over the very pixels it is checked against. `--out-dir` sends
+# the crops AND the cut manifest to another folder. That folder must not already hold a crop: a re-cut
+# that overwrites PNGs in place cannot be told apart from the cut it overwrote, so the refusal comes
+# before anything is written (exit 2, the folder untouched). The default path is NOT guarded by this.
+import argparse                                                            # noqa: E402
+import pathlib                                                             # noqa: E402
+_ap = argparse.ArgumentParser(description="Cut the truth-set A2 span crops (PAD=%d)." % HAD.PAD)
+_ap.add_argument("--out-dir", default=None,
+                 help="write crops and the cut manifest here instead of the approved corpus %s; "
+                      "refused if the folder already holds a .png or the manifest" % OUTDIR)
+_ARGS = _ap.parse_args()
+if _ARGS.out_dir is not None:
+    OUTDIR = pathlib.Path(_ARGS.out_dir)
+    OUT = OUTDIR / OUT.name
+    _held = sorted(p.name for p in OUTDIR.glob("*.png")) if OUTDIR.is_dir() else []
+    _held += [OUT.name] if OUT.exists() else []
+    if _held:
+        sys.stderr.write("REFUSED: --out-dir %s already holds %d crop file(s) (e.g. %s). Nothing was "
+                         "written. Give an empty or new folder.\n" % (OUTDIR, len(_held), _held[0]))
+        sys.exit(2)
 PAD = HAD.PAD
 
 # THE NOTE THE SPAN SITS IN, AT THE SAME RECIPE. Chris, 2026-10-04: "each span links to its full
@@ -696,7 +719,8 @@ art = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
                   "clip_validated_against": "p912:n2 hand-built clip (rows 14-72, 2 word runs); this "
                                             "rule keeps 14-78 and resolves the same 2 runs",
                   "word_run_convention": {"gap_min": GAP_MIN, "run_min": RUN_MIN, "ink_thr": INK_THR}},
-       "crop_dir": str(OUTDIR), "faults": faults, "clip_faults": clip_faults,
+       "crop_dir": str(OUTDIR), "crop_dir_is_default": _ARGS.out_dir is None,
+       "faults": faults, "clip_faults": clip_faults,
        "floor_margin": floor_margin,
        "note_context": {"written": n_note, "faults": note_faults,
                         "pad_native_px": PAD,
