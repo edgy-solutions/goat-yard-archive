@@ -304,7 +304,9 @@ def do_call(p, key):
            "arm": arm, "channel": p["channel"], "request_sha16": sent_sha, "crop_sha16": row["crop_sha16"],
            "response_raw": None, "hebrew": None, "class_primary": "error", "class_secondary": "error",
            "retries": retries, "cost_usd": None, "out_tokens": None, "finish_reason": None,
-           "error": err, "reasoning_applied": applied}
+           "error": err, "reasoning_applied": applied,
+           "planned_request_sha16": p["request_sha16"],
+           "provider": None, "model_returned": None, "gen_id": None}
     if r is not None and r.status_code == 429:
         raise RunFault(f"429 survived {RETRIES} retries on {row['span_id']} {arm} {p['channel']}")
     if r is not None and r.status_code >= 400:
@@ -317,7 +319,9 @@ def do_call(p, key):
             heb, _how = _parse(raw)
             rec.update(response_raw=raw, hebrew=heb, cost_usd=u.get("cost"),
                        out_tokens=u.get("completion_tokens"),
-                       finish_reason=d["choices"][0].get("finish_reason"))
+                       finish_reason=d["choices"][0].get("finish_reason"),
+                       provider=d.get("provider"), model_returned=d.get("model"),
+                       gen_id=d.get("id"))
             rec["class_primary"] = classify(heb, row["signature"])
             rec["class_secondary"] = classify(heb, row["signature_full"])
         except Exception as e:
@@ -541,7 +545,16 @@ def main():
               "arms": ARMS, "channels": CHANNELS, "call_count": len(payloads),
               "planned_request_sha16": sorted(p["request_sha16"] for p in payloads),
               "crop_dir": str(CROPDIR), "aperture": APERTURE, "max_tokens": MAX_TOKENS,
-              "ch2_absent": {ABSENT: ABSENT_BASIS}, "attempt": a.attempt}
+              "ch2_absent": {ABSENT: ABSENT_BASIS}, "attempt": a.attempt,
+              "provider_policy": {
+                  "no_retention_provider_filter": True,
+                  "byok": "off",
+                  "asserted_by": "Chris, relayed 2026-10-18",
+                  "verifiable_via_api": False,
+                  "basis": "account-level state asserted by Chris; this run neither sets nor "
+                           "verifies it, and no response field can confirm it.  Recorded so a "
+                           "later reader knows the claim and whose it is.",
+              }}
     run_sha = sha16_bytes(canon(header).encode("utf-8"))
 
     if dry:
