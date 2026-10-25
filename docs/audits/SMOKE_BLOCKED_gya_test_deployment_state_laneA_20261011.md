@@ -787,3 +787,101 @@ Two things from it do belong here, because they bear on the upgrade:
   prove the pull succeeds. If `:0.3.2` is absent or unreadable when the real upgrade
   runs, the failure appears as ImagePullBackOff *after* a successful `helm upgrade`.
   The `imagetools inspect` above is what rules that out beforehand.
+
+
+---
+
+# 2026-10-25 — the consolidated 2026-10-18 rulings, resolved
+
+The evening rulings reached this lane on 2026-10-25, a week after they were
+made. Everything below is their disposition.
+
+## Ruling 1 — `5c93b28`: proceed, and how it is recorded
+
+Ruled: content present object-for-object via `c9186b1` — proceed, and record it
+as **absent as commit, present as content via `c9186b1`**. That is now the
+standing description of the entity fix in the deployed tree; the table above
+(blob-for-blob identity on both files) is the evidence, and the **entity
+manifest ×5 identical** item of the prod acceptance is the proof that it
+behaves.
+
+The literal "n" from ruling 3 of the morning set is therefore answered and
+closed: it was a true statement about a commit object, not about the code.
+
+## Ruling 7 — the rehearsal verdict in plain terms
+
+The rule given was: **image line only → go; anything else → stop.** Applied
+honestly to the variant B diff recorded above, the answer is *go*, with one
+thing named rather than swept:
+
+- **Substantive changes: one.** The api image line, `0.3.0` → `0.3.2`.
+- **One further line differs** — `secretName: gya-frontend-minio` loses trailing
+  whitespace. Trailing spaces after a YAML scalar are not part of the value, so
+  the parsed manifest is identical; it is a diff artefact, not a change.
+- Everything else is blank-line churn and a comment block.
+
+So: no second substantive change. The rule's letter says *stop* on anything
+beyond the image line, so the whitespace line is reported rather than filed
+under "churn" — the call on whether a whitespace-only line counts is Chris's,
+not this lane's.
+
+**The recorded diff is pre-rotation, and that matters.** Variant B upgrades with
+`--reuse-values`, which reuses *whatever the live values are at the moment it
+runs*. Rotation changes several of them. The diff above was taken against the
+pre-rotation release, so it is evidence that the *shape* of the upgrade is
+image-only — not evidence about the values prod will hold after rotation. Per
+ruling 7 the dry-run runs **after rotation completes**, and that run is the one
+the go/stop verdict should be read from.
+
+## Correction to the credential section above
+
+One attribution in the earlier write-up is **withdrawn**: the sentence stating
+that those keys render into the **configmap** rather than a Secret is wrong. The
+chart routes them through its Secret template and the api consumes them with
+`envFrom: secretRef`; the configmap carries only the two keys that are
+publishable by design. The live cluster confirms it by key names alone.
+
+The finding itself is unaffected in substance and stays where it is — in the
+private handoff, not here. Recording the correction matters because the
+mis-attribution overstated the problem, and an overstated finding is still a
+wrong finding. Determined from key *names* only; no command that prints a value
+was run (see the standing law below).
+
+## Ruling 5 — the soak, reported as liveness and nothing more
+
+0.3.3 has run on gya-test on the smoked digest since **2026-10-18T21:44:04Z**.
+As of today:
+
+| | |
+|---|---|
+| process restarts | **0** |
+| pod ready | yes, continuously |
+| image actually running | `backend@sha256:2fce1e34…`, by `imageID` |
+| `GILL_STRUCTURED_ANSWER` | still `1` |
+
+That is a **liveness** result: the flag path did not crash, leak or restart over
+a week. It is **not** a quality result, and the n=1 length comparison stays
+refused as ruled. The paired gate run is what can speak to quality, and it has
+not run.
+
+## Ruling 3 (morning set) — closed
+
+`39fed28` is Chris's to push; no permission rule. This lane does not retry it.
+
+## Standing law recorded — secret-printing commands are operator-only
+
+Chris signs: **`helm get values`, `helm get manifest`, `kubectl get secret -o
+yaml` and environment dumps are operator-only.** Agents ask Chris for redacted
+output instead of running them. Anything an agent needs from such a surface is
+answered with names, keys and shapes — never values.
+
+## What this still does NOT solve
+
+- **No prod action has been taken**, and none of the prod acceptance has run.
+- The `crane tag` re-point is Chris's from his own ghcr login; `read:packages`
+  is still missing in this lane, so the resulting tag digest cannot be checked
+  from here. The `imageID` equality check remains the content witness.
+- The post-rotation dry-run — the authoritative one — has not been run.
+- `ui.image` on gya-test is still `tag: "latest"` with no digest, which
+  contradicts ":latest is never a deploy target again". Named in `b9022b9`,
+  unresolved.
