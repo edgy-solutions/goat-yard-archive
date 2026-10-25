@@ -27,6 +27,11 @@ api:
     GILL_STRUCTURED_ANSWER: "1"
 
   image:
+    # Pinned to the exact 0.3.3 artefact smoked here on 2026-10-18
+    # (docs/releases/0.3.3.md). digest WINS over tag, so the tag below is inert
+    # while this is set; it is kept only as the fallback for a deliberate un-pin.
+    # `:latest` is never a deploy target again (ruling, Chris 2026-10-18).
+    digest: "sha256:2fce1e3467d5f53e4f0700cdd51530db86cc85c8ef7231f091c6e69509b11433"
     tag: "latest"
     
 ui:

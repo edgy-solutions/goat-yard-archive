@@ -26,9 +26,19 @@ _CHART = os.path.join(_HERE, "goat-yard-archive")
 API_REPO = "ghcr.io/edgy-solutions/goat-yard-archive/backend"
 UI_REPO = "ghcr.io/edgy-solutions/goat-yard-archive/frontend"
 DIGEST = "sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e"
+# What gya-test is pinned to as committed (release 0.3.3, smoked 2026-10-18).
+PINNED_TEST_DIGEST = "sha256:2fce1e3467d5f53e4f0700cdd51530db86cc85c8ef7231f091c6e69509b11433"
 
 VALUES_FILES = ["values.yaml", "values-test.yaml",
                 "values-frontend.yaml", "values-backend.yaml"]
+
+# The no-digest precondition, stated rather than borrowed. _render() renders a
+# real environment file, and values-test.yaml now legitimately pins a digest
+# (release 0.3.3). A test of the no-digest BRANCH must establish that branch
+# itself: a check whose precondition comes from a deployable config file is not
+# testing the helper, it is testing the config -- and it silently stopped
+# testing anything the day that config changed.
+NO_DIGEST = ["api.image.digest=", "ui.image.digest="]
 
 
 def _render(values="values-test.yaml", sets=(), expect_ok=True):
@@ -47,13 +57,13 @@ def _image_lines(out):
 
 
 def test_no_digest_renders_repository_colon_tag():
-    _, out, _ = _render()
+    _, out, _ = _render(sets=NO_DIGEST)
     assert ('image: "%s:latest"' % API_REPO) in out, _image_lines(out)
 
 
 def test_ui_also_routes_through_the_helper():
     """Not just the backend: the frontend image is pinnable too."""
-    _, out, _ = _render()
+    _, out, _ = _render(sets=NO_DIGEST)
     assert any(l.startswith('image: "%s:' % UI_REPO) for l in _image_lines(out)), \
         _image_lines(out)
 
@@ -87,7 +97,7 @@ def test_malformed_digest_fails_loud():
 
 
 def test_missing_tag_and_digest_fails_loud():
-    rc, _, err = _render(sets=["api.image.tag="], expect_ok=False)
+    rc, _, err = _render(sets=NO_DIGEST + ["api.image.tag="], expect_ok=False)
     assert rc != 0, "an image with neither tag nor digest rendered anyway"
     assert "image.tag is required" in err, err
 
@@ -119,6 +129,17 @@ def test_no_rendered_image_reference_is_malformed():
                 assert ref.split("@", 1)[1].startswith("sha256:"), (v, line)
 
 
+def test_values_test_is_still_pinned_by_digest():
+    """The gya-test pin is itself a check. values-test.yaml must render the
+    smoked 0.3.3 artefact as repository@digest; if someone drops the digest the
+    file goes back to floating on `:latest`, which is no longer a deploy target
+    (ruling, Chris 2026-10-18), and that must fail here rather than at deploy."""
+    _, out, _ = _render(values="values-test.yaml")
+    pinned = [l for l in _image_lines(out) if l.startswith('image: "%s@' % API_REPO)]
+    assert pinned, _image_lines(out)
+    assert PINNED_TEST_DIGEST in pinned[0], pinned
+
+
 if __name__ == "__main__":
     if shutil.which("helm") is None:
         print("UNRUN  helm is not on PATH -- these checks did not run")
@@ -128,7 +149,7 @@ if __name__ == "__main__":
               % _CHART)
         sys.exit(2)
 
-    EXPECTED_TEST_COUNT = 10
+    EXPECTED_TEST_COUNT = 11
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print("FAIL  expected %d tests, collected %d -- a test silently disappeared"
