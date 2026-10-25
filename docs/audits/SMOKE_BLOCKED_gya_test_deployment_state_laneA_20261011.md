@@ -962,3 +962,177 @@ Comparing prod to gya-test would only ever have been a proxy for comparing prod
 to the artefact that was smoked. The digest *is* that artefact, so this is the
 same claim with one fewer hop — and unlike the proxy, it does not expire when a
 test environment moves on.
+
+---
+
+
+
+# 2026-10-25 (evening) — the "go for prod" rulings: ruling 4 done, ruling 1 is a STOP
+
+
+
+## Ruling 4 — the `ui.image` pin, committed not applied
+
+
+
+`values-test.yaml` pinned the api by digest for 0.3.3 and left the ui floating
+
+on `:latest`, which contradicted the rule that `:latest` is never a deploy
+
+target. `ui.image.digest` is now pinned to the digest gya-test is **actually
+
+serving**, labelled in the file as *as-running, not smoked as a release
+
+artefact* — pinning records what runs; the paired 0.3.3 gate run is what
+
+verifies it. Committed only; gya-test is unchanged until someone upgrades it.
+
+
+
+The suite gained the matching check (12 tests) and the check was **falsified
+
+before being trusted**: removing the digest line takes the suite to 11/12 with
+
+exactly that test failing. A pin test that passes whether or not the pin is
+
+there is not a test.
+
+
+
+## Ruling 1 — the post-rotation dry-run: not run here, and the reason is the ruling
+
+
+
+The dry-run needs `helm get manifest` and a render that both materialise
+
+credentials to disk. The 2026-10-18 standing law makes exactly those commands
+
+operator-only, and this lane was denied them. That is the law working, not an
+
+obstacle to it: the redactors were built and born-tested here, and the two
+
+commands are the operator's.
+
+
+
+**And then the rehearsal's own gate turned out to be blind.** This is the part
+
+worth recording publicly, because the lesson is not a secret:
+
+
+
+> The rehearsal compared the rendered manifest against `helm get manifest`.
+
+> That is helm's **stored** manifest. Both sides of the comparison therefore
+
+> come from the same stored values, so the comparison cannot see anything that
+
+> changed in the cluster outside helm. It reported "zero secret-bearing lines
+
+> removed", and that report was **true about the wrong pair of things**.
+
+
+
+A gate must be able to see the failure it is watching for. The comparison that
+
+can see this one is **rendered vs live**, per key — and it can be done without
+
+disclosing a value, by hashing each value under a random per-run salt that is
+
+never printed, so only object names, key names, value lengths and
+
+same/DIFFERENT leave the script. Born-tested against a fixture with planted
+
+drift: both planted changes caught, the intended image change classified
+
+separately, and a grep for the planted canaries found zero in the output.
+
+
+
+**A blocker for the 0.3.2 upgrade was found this way, while answering ruling 5.**
+
+It concerns prod's live state having diverged from its helm release, and the
+
+specifics are a live-system weakness, so they are in the private ticket rather
+
+than here. The verdict is a **STOP**, not a go.
+
+
+
+## Ruling 5 — the prod api pod recreation, answered
+
+
+
+Read-only, and via field projections rather than `describe pod`, which prints
+
+inline env values.
+
+
+
+**Not a node event.** Every node's `Ready` condition last transitioned on
+
+2026-06-07, 08-02, 09-10, 10-01 or 10-21 — none on 10-18 or 10-19 — and
+
+`MemoryPressure`/`DiskPressure`/`PIDPressure` are all `False` with no recent
+
+transition. **My earlier "a node event, most likely" is withdrawn.** It was a
+
+guess offered where a read was available; `managedFields` was the thing to look
+
+at and it named the cause directly.
+
+
+
+The shape of it, which is public-safe:
+
+
+
+- `gya-frontend-cloudflared` got a **new ReplicaSet**, created the same second
+
+  the pods were — so its **pod template changed**.
+
+- `gya-frontend-api` and `gya-frontend-minio` were recreated **inside their
+
+  existing ReplicaSets**, so their templates did not change. Consistent with a
+
+  pod deletion or scale cycle to pick up new `envFrom` values, which do not
+
+  hot-reload.
+
+- `gya-frontend-ui` was **never recreated** — still the original pod from
+
+  2026-08-02, restartCount 2.
+
+
+
+Staggered over two hours across three workloads, with one untouched, is not the
+
+signature of a node event; it is the signature of someone working through a
+
+list. **This is not D-004's first instance after all** — D-004 is a cold-process
+
+health false alarm, and nothing here was a false alarm. The pods really were
+
+replaced, for a real reason.
+
+
+
+## What this does NOT solve
+
+
+
+- The dry-run has still not been run by anyone. Until it is, "go" is unproven
+
+  and "stop" is an inference — a strong one, from read timestamps, but an
+
+  inference.
+
+- The `ui.image` pin is as-running, not gate-verified. It records what the
+
+  kubelet resolved; it does not claim that build passed anything.
+
+- Nothing in prod was changed, and the real `helm upgrade` remains the
+
+  operator's. This lane has the acceptance and the rollback-to-29 ready and has
+
+  run neither.
