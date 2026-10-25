@@ -133,6 +133,8 @@ def resolve_target(argv):
     man = APPROVED_OUT if approved else d / APPROVED_OUT.name
     held = sorted(p.name for p in d.glob("*.png")) if d.is_dir() else []
     held += [str(man)] if man.exists() else []
+    side = man.with_name(man.stem + ".realized.json")
+    held += [str(side)] if side.exists() else []
     if held:
         return None, None, None, (
             "REFUSED: --out-dir %s%s already holds %d crop file(s) (e.g. %s). Nothing was written. Give "
@@ -302,6 +304,7 @@ def clip_rows(im, n_rects):
 
 OUTDIR.mkdir(parents=True, exist_ok=True)
 built, page_cache, faults, clip_faults, region_cache = [], {}, {}, {}, {}
+realized_by_sid = {}     # span_id -> {page_wh, crop: [realize_rects..], note_context: [..] | None}
 for r in rows:
     pg, sid, box = r["page"], r["span_id"], r["box"]
     if pg not in page_cache:
@@ -333,6 +336,9 @@ for r in rows:
         continue
     p = OUTDIR / ("%s_A2_spanbox.png" % sid.replace(":", "_"))
     im.save(str(p))
+    realized_by_sid[sid] = {"page_wh": list(native.size),
+                            "crop": HAD.realize_rects([x["box"] for x in rects], native.size, PAD),
+                            "note_context": None}
     prof = G.row_profile(im)
     # A CROP CAN PASS THE BLANK GATE ON A PRINTED RULE. `crop_quality.crop_has_line()` asks whether
     # there is an inked band, and the footnote rule is one: 14 of these 96 crops are a single 7-13px
@@ -384,6 +390,8 @@ for r in rows:
         else:
             npath = OUTDIR / ("%s_notecontext.png" % sid.replace(":", "_"))
             nim.save(str(npath))
+            realized_by_sid[sid]["note_context"] = HAD.realize_rects(
+                [x["box"] for x in nrects], native.size, PAD)
             rec["note_context"] = {
                 "path": str(npath), "size": list(nim.size),
                 "sha16": hashlib.sha256(npath.read_bytes()).hexdigest()[:16],
@@ -555,9 +563,10 @@ for b in cut:
 # thing asserted. A band-stitched note crop (more than one native rect) cannot be addressed by one
 # offset, so it is located by searching for the span instead, and the search is required to find it
 # exactly once.
-def _origin(rc):
-    """Top-left native pixel a crop of rc actually starts at: PAD, clamped at the page edge."""
-    return max(0, rc[0] - PAD), max(0, rc[1] - PAD)
+def _origin(rc, page_wh):
+    """Top-left native pixel a crop of rc actually starts at, read from realize_rects (the one place the
+    PAD clamp is computed) rather than re-derived here."""
+    return tuple(HAD.realize_rects([rc], page_wh, PAD)[0]["native_origin"])
 
 
 pix_contained, pix_searched = 0, []
@@ -569,8 +578,8 @@ for b in cut:
     S = np.asarray(Image.open(b["crop"]["path"]).convert("L"))
     h, w = S.shape
     if len(nc["native_rects"]) == 1 and len(b["crop"]["native_rects"]) == 1:
-        (nx, ny) = _origin(nc["native_rects"][0])
-        (sx, sy) = _origin(b["crop"]["native_rects"][0])
+        (nx, ny) = _origin(nc["native_rects"][0], realized_by_sid[b["span_id"]]["page_wh"])
+        (sx, sy) = _origin(b["crop"]["native_rects"][0], realized_by_sid[b["span_id"]]["page_wh"])
         sub = N[sy - ny:sy - ny + h, sx - nx:sx - nx + w]
         assert sub.shape == S.shape and np.array_equal(sub, S), \
             ("%s: the span crop is NOT the pixels at (%d,%d) of its note crop, so the two were cut "
@@ -849,4 +858,39 @@ print("resolved runs vs claimed words (single-line crops only, n=%d of %d): more
 print("   NOT MEASURABLE (crop holds >1 line of type; the column profile merges them): %d  %s"
       % (len(blind), [x["span_id"] for x in blind]))
 print(banner(GIT_START, GIT_END))
-print("wrote", OUT.name)
+
+# THE REALIZED-RECT SIDE FILE. The manifest records the unpadded box and the pad REQUESTED; what a crop
+# covers (clamp at the page edge, dropped rects, stacking) is recorded here, from the same realize_rects
+# call that cut it. Refused if it already exists; written after the manifest so manifest_sha256 is of the
+# bytes on disk.
+def write_realized(manifest_path, built_rows, by_sid, git_end, set_sha, pad):
+    side = manifest_path.with_name(manifest_path.stem + ".realized.json")
+    if side.exists():
+        sys.stderr.write("REFUSED: %s already exists. Nothing was written over it.\n" % side)
+        sys.exit(2)
+    rows = []
+    for b in built_rows:
+        if not b.get("crop"):
+            continue
+        r = by_sid[b["span_id"]]
+        nc = b.get("note_context")
+        rows.append({"span_id": b["span_id"], "page": b["page"],
+                     "page_png": str(HAD.IMG / ("page%d_image1.png" % b["page"])),
+                     "page_wh": r["page_wh"],
+                     "crop": {"path": b["crop"]["path"], "size_wh": b["crop"]["size"],
+                              "rects": r["crop"]},
+                     "note_context": ({"path": nc["path"], "size_wh": nc["size"], "rects": r["note_context"]}
+                                      if nc and r["note_context"] else None)})
+    doc = {"kind": "truth_set_cut_realized_rects", "manifest": manifest_path.name,
+           "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+           "set_sha16": set_sha, "page_numbering": "file (printed = file - 88)",
+           "pad_requested": pad, "stack_gap_px": 20, "min_side_px": 4,
+           "generated_by": {"script": "cut_truth_set_crops.py", "mode": "cut",
+                            "git_head": git_end["git_head"], "git_dirty": git_end["git_dirty"]},
+           "rows": rows}
+    json.dump(doc, io.open(str(side), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    return side
+
+
+_side = write_realized(OUT, built, realized_by_sid, GIT_END, SET, PAD)
+print("wrote", OUT.name, "and", _side.name)

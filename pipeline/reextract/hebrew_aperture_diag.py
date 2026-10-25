@@ -452,18 +452,45 @@ def build_set(include_sealed=False):
     return out
 
 
+def realize_rects(boxes, page_wh, pad, stack_gap=20, min_side=4):
+    """What a crop of each native box ACTUALLY covers: the pad clamped at the page edge, whether the rect is
+    dropped (a side <= min_side), and where a kept rect lands in the stacked output image. Pure. One dict per
+    input box, in order. This is the single place the clamp, the drop rule and the stacking are computed;
+    _native_crop cuts from it and the cut record is written from it, so a consumer never re-derives them."""
+    W, H = page_wh
+    out, y = [], 0
+    for b in boxes:
+        x0, y0, x1, y1 = b
+        cx0, cy0 = max(0, x0 - pad), max(0, y0 - pad)
+        cx1, cy1 = min(W, x1 + pad), min(H, y1 + pad)
+        w, h = cx1 - cx0, cy1 - cy0
+        dropped = not (w > min_side and h > min_side)
+        placed = None
+        if not dropped:
+            placed = [0, y]
+            y += h + stack_gap
+        out.append({"native_rect": [x0, y0, x1, y1], "cut_rect": [cx0, cy0, cx1, cy1],
+                    "native_origin": [cx0, cy0],
+                    "pad_applied": {"l": x0 - cx0, "t": y0 - cy0, "r": cx1 - x1, "b": cy1 - y1},
+                    "cut_wh": [w, h], "dropped": dropped, "placed_at": placed})
+    return out
+
+
+def realized_size(realized, stack_gap=20):
+    """[w, h] of the stacked output image for realize_rects() output, or None if every rect was dropped."""
+    kept = [r for r in realized if not r["dropped"]]
+    if not kept:
+        return None
+    return [max(r["cut_wh"][0] for r in kept),
+            sum(r["cut_wh"][1] for r in kept) + stack_gap * (len(kept) - 1)]
+
+
 def _native_crop(page_img, strip_box, info, bands, pad=0):
     """Un-stack a strip box to native rects and cut them. A box straddling the column gap yields TWO rects;
     they are stacked vertically with the same 20px gap presplit uses, never merged into one spanning box."""
     rects = note_region.strip_box_to_native(strip_box, info, bands)
-    W, H = page_img.size
-    ims = []
-    for r in rects:
-        x0, y0, x1, y1 = r["box"]
-        x0, y0 = max(0, x0 - pad), max(0, y0 - pad)
-        x1, y1 = min(W, x1 + pad), min(H, y1 + pad)
-        if x1 - x0 > 4 and y1 - y0 > 4:
-            ims.append(page_img.crop((x0, y0, x1, y1)))
+    real = realize_rects([r["box"] for r in rects], page_img.size, pad)
+    ims = [page_img.crop(tuple(r["cut_rect"])) for r in real if not r["dropped"]]
     if not ims:
         return None, rects
     if len(ims) == 1:
