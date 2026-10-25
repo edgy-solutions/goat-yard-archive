@@ -180,8 +180,10 @@ def build():
                                            "`needs`. Not a weaker `signature`.",
             "not_adjudicated": "the audit did not reach this row. Never an inference.",
         },
-        "hash_rule": "sha256 over the UTF-8 bytes of this record serialised with "
-                     "ensure_ascii=False, sort_keys=True, indent=1, with self_sha16 absent",
+        "hash_rule": "sha256[:16] over the UTF-8 bytes of this record serialised with "
+                     "ensure_ascii=False, sort_keys=True, indent=1, LF newlines, with the "
+                     "self_sha16 field absent. To verify: parse this file, remove "
+                     "self_sha16, re-serialise with those options, hash. Checked at write time.",
         "rows": rows,
         "tallies": dict((v, len([r for r in rows if r["verdict"] == v])) for v in VERDICTS),
     }
@@ -251,8 +253,28 @@ def main():
         return rc
     name = "ADJUDICATION_classify45_20261025_%s.json" % rec["self_sha16"]
     p = os.path.join(DATA, name)
-    with io.open(p, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(rec, ensure_ascii=False, sort_keys=True, indent=1))
+    body = json.dumps(rec, ensure_ascii=False, sort_keys=True, indent=1)
+    # newline="" so the bytes on disk ARE the bytes the hash rule names.  Without it Windows
+    # rewrites every backslash-n as backslash-r backslash-n, and a verifier who hashes the file gets a
+    # digest that does not match the one the record states -- the rule would then be true of a
+    # string that exists nowhere.
+    with io.open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write(body)
+    # ROUND-TRIP the rule as stated, from the file just written.  A self-referential digest can
+    # never equal a hash of the file that carries it -- the field is part of those bytes -- so the
+    # verifier removes the field, re-serialises with the stated options, and hashes that.  Asserting
+    # it here means the rule describes an operation someone can actually perform on this file,
+    # instead of a string that exists only inside the generator.
+    with open(p, "rb") as fh:
+        raw = fh.read()
+    if raw.find((chr(13) + chr(10)).encode("ascii")) != -1:
+        raise IOError("the file carries CRLF, so its bytes are not the serialisation the hash rule "
+                      "names")
+    back = json.loads(raw.decode("utf-8"))
+    claimed = back.pop("self_sha16")
+    if digest(back) != claimed:
+        raise IOError("the written file does not round-trip its own hash rule (%s recomputed vs "
+                      "%s claimed)" % (digest(back), claimed))
     print("")
     for v in VERDICTS:
         print("  %-30s %d" % (v, rec["tallies"][v]))
