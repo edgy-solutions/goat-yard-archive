@@ -86,7 +86,7 @@ DOUBLE_RULE_NEAR_PX = 60          # cluster centre must be within this many px o
 SLIVER_MAX_H_PX = 20
 # Head rule (printed rule under the running head) = furniture, not a body band. Thresholds measured
 # on vol.1 only (207 pages) -- MEASURE_head_rule_20261011.md (dr-voluminous/body_shadow_vol1/verse_regions/).
-HEAD_RULE_MAX_H_FRAC = 0.75       # band h / median_line_h; mode midpoint (rule 0.475 vs text 1.025)
+HEAD_RULE_MAX_H_FRAC = 0.675      # h_DESK / median_line_h; mode midpoint (rule 0.425 vs text 0.925) on h_desk, RESULTS_head_rule_deskew_20261025.md; was 0.75 on axis-aligned h
 HEAD_RULE_MIN_FILL = 0.275        # peak row ink fill over the band's x0:x1; mode midpoint (0.075 vs 0.475)
 HEAD_RULE_LINE_H_MAX_PX = 85      # median_line_h above this = multi-line median -> abstain (single-line
                                   # 49-70 px on 203 pages, multi-line 100-256 on 4; envelope, not a mode midpoint)
@@ -614,6 +614,31 @@ def choose_line_h(column_raw_median, page_line_h):
     return None, "column"
 
 
+def band_tilt(ink, b, bin_px=100, min_fill=0.05):
+    """The band's OWN tilt: slope (rows per px) of the ink-weighted row centroid across x-bins of
+    ink[y0:y1, x0:x1]. A bin counts when its ink >= min_fill * bin area; fewer than 3 bins -> (0.0, n).
+    The column-rule slope is NOT used (on p923 it is 2x the rule's tilt). Returns (k, n_bins)."""
+    y0, y1, x0, x1 = int(b["y0"]), int(b["y1"]), int(b["x0"]), int(b["x1"])
+    seg = ink[y0:y1, x0:x1]
+    rows = np.arange(y0, y1, dtype=float)[:, None]
+    xs, cs, ws = [], [], []
+    for a in range(0, seg.shape[1], bin_px):
+        s = seg[:, a:a + bin_px]
+        n = s.sum()
+        if s.size and n >= min_fill * s.size:
+            xs.append(x0 + a + s.shape[1] / 2)
+            cs.append(float((s * rows).sum() / n))
+            ws.append(float(n))
+    if len(xs) < 3:
+        return 0.0, len(xs)
+    k = float(np.polyfit(xs, cs, 1, w=np.sqrt(ws))[0])
+    return k, len(xs)
+
+
+def deskewed_h(h, k, width):
+    return max(1.0, h - abs(k) * width)
+
+
 def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
     """S1: per-column line bands (vertical rules stripped), sliver quarantine (R2), full-width
     band detection (gutter-ink test per band, classified by the two measured edges
@@ -724,21 +749,26 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
             if not _topmost(col, b):
                 continue
             h = b["y1"] - b["y0"]
-            if not (h < HEAD_RULE_MAX_H_FRAC * median_line_h
-                    and b["y0"] - running_head["y1"] < median_line_h):
+            if not b["y0"] - running_head["y1"] < median_line_h:
+                continue
+            k, n_bins = band_tilt(ink, b)
+            h_desk = deskewed_h(h, k, b["x1"] - b["x0"])
+            if not h_desk < HEAD_RULE_MAX_H_FRAC * median_line_h:
                 continue
             fill_max = float(ink[b["y0"]:b["y1"], b["x0"]:b["x1"]].mean(axis=1).max())
             if fill_max >= HEAD_RULE_MIN_FILL:
-                matched.append((col, b, h, fill_max))
+                matched.append((col, b, h, fill_max, h_desk, k, n_bins))
         if median_line_h > HEAD_RULE_LINE_H_MAX_PX:
             if matched:
                 flags.append("head_rule_abstained:line_h_multi")
         else:
-            for col, b, h, fill_max in matched:
+            for col, b, h, fill_max, h_desk, k, n_bins in matched:
                 head_rules.append({"col": col, "y0": b["y0"], "y1": b["y1"], "x0": b["x0"], "x1": b["x1"],
-                                   "h": h, "h_frac": h / median_line_h, "fill_max": fill_max})
+                                   "h": h, "h_frac": h / median_line_h, "fill_max": fill_max,
+                                   "h_desk": h_desk, "h_desk_frac": h_desk / median_line_h,
+                                   "tilt_k": k, "tilt_bins": n_bins})
                 flags.append(f"head_rule_removed:{col}")
-            rm = {id(b) for _, b, _, _ in matched}
+            rm = {id(m[1]) for m in matched}
             other_full = [b for b in other_full if id(b) not in rm]
             left_rest = [b for b in left_rest if id(b) not in rm]
             right_rest = [b for b in right_rest if id(b) not in rm]

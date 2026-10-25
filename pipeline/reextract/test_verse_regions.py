@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 65
+EXPECTED_TESTS = 71
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -339,6 +339,110 @@ def test_head_rule_multi_line_median_abstains_flagged():
     assert "head_rule_abstained:line_h_multi" in s1["flags"], s1["flags"]
     assert s1["flags"].count("head_rule_abstained:line_h_multi") == 1
     assert _hr_has_band(s1, 125, 150)
+
+
+# 3d. head-rule height clause on the deskewed band height (ruling 3, 2026-10-25) -------------------
+
+def _hr_wide_page(kind, slope=0.03, band_h=35, W=2400, H=1000, y0=125):
+    """Sibling of _hr_page for wide pages (W >= 2000) so a shallow slope still gives the needed
+    height. Running head 20..100; five 50px stripe-text lines in the left column; kind 'tilt' = a
+    10px-thick rule tilted by `slope` rows/px across the column, 'mid' = a stripe-text band of band_h."""
+    xdiv = W // 2
+    ink = np.zeros((H, W), dtype=bool)
+    ink[20:100, 600:1800] = True
+
+    def strokes(a, b, x0=20, x1=xdiv - 20):
+        for x in range(x0, x1, 12):
+            ink[a:b, x:x + 4] = True
+
+    for i in range(5):
+        y = 300 + i * 70
+        strokes(y, y + 50)
+    if kind == "tilt":
+        for x in range(20, xdiv - 20):
+            c = int(y0 + 3 + slope * (x - 20))
+            ink[c:c + 10, x] = True
+    elif kind == "mid":
+        strokes(y0, y0 + band_h)
+    geom = {"file_page": 1, "xdiv": xdiv,
+            "body_regions": [{"col": "left", "box": [0, 0, xdiv, H]},
+                              {"col": "right", "box": [xdiv, 0, W, H]}]}
+    return VR.analyze_page_s1(ink, geom)
+
+
+def test_band_tilt_recovers_known_slope_of_thin_line():
+    H, W, slope = 400, 1400, 0.02
+    ink = np.zeros((H, W), dtype=bool)
+    for x in range(W):
+        c = int(100 + slope * x)
+        ink[c:c + 12, x] = True
+    k, n = VR.band_tilt(ink, {"y0": 80, "y1": 200, "x0": 0, "x1": W})
+    assert n >= 10, n
+    assert abs(k - slope) <= 0.05 * slope, (k, slope)
+
+
+def test_band_tilt_stripe_text_is_untilted():
+    ink = np.zeros((200, 1200), dtype=bool)
+    for x in range(20, 1180, 12):
+        ink[50:100, x:x + 4] = True
+    k, n = VR.band_tilt(ink, {"y0": 50, "y1": 100, "x0": 0, "x1": 1200})
+    assert n >= 10 and abs(k) < 1e-3, (k, n)
+
+
+def test_band_tilt_fewer_than_three_bins_is_zero():
+    ink = np.zeros((200, 1200), dtype=bool)
+    ink[50:100, 0:200] = True            # only two qualifying 100px bins
+    k, n = VR.band_tilt(ink, {"y0": 50, "y1": 100, "x0": 0, "x1": 1200})
+    assert k == 0.0 and n == 2, (k, n)
+
+
+def test_head_rule_tilted_rule_removed_only_by_deskew():
+    s1 = _hr_wide_page("tilt")
+    assert len(s1["head_rules"]) == 1, s1["head_rules"]
+    hr = s1["head_rules"][0]
+    assert hr["h_frac"] >= 0.75, hr                     # the OLD axis-aligned clause rejects it
+    assert hr["h_desk_frac"] < VR.HEAD_RULE_MAX_H_FRAC, hr
+    assert hr["fill_max"] >= 0.275, hr
+    assert "head_rule_removed:left" in s1["flags"]
+    real = VR.band_tilt
+    VR.band_tilt = lambda ink, b, **kw: (0.0, 0)
+    try:
+        s1_off = _hr_wide_page("tilt")
+    finally:
+        VR.band_tilt = real
+    assert s1_off["head_rules"] == [], "without the deskew the tilted rule must NOT be removed"
+
+
+def test_head_rule_untilted_band_between_thresholds_kept():
+    s1 = _hr_wide_page("mid", band_h=35)                # h/mlh = 0.70: old 0.75 removes, 0.675 keeps
+    assert s1["head_rules"] == [], s1["head_rules"]
+    assert _hr_has_band(s1, 125, 160)
+
+
+P923_IMG = "C:/Users/cnogr/git/dr-voluminous/commentary/volume1/page923_image1.png"
+P923_GEOM = "C:/Users/cnogr/git/dr-voluminous/body_shadow_vol1/geometry/volume1_page_geometry.jsonl"
+
+
+def test_head_rule_p923_tilted_rule_removed():
+    import json
+    import os
+    from PIL import Image
+    for path in (P923_IMG, P923_GEOM):
+        assert os.path.exists(path), f"p923 born-test input missing: {path}"
+    ink = VR.page_ink(np.asarray(Image.open(P923_IMG).convert("L")))
+    geom = None
+    with open(P923_GEOM, encoding="utf-8") as f:
+        for line in f:
+            g = json.loads(line)
+            if g["file_page"] == 923:
+                geom = g
+                break
+    assert geom is not None, f"no file_page 923 row in {P923_GEOM}"
+    s1 = VR.analyze_page_s1(ink, geom)
+    hits = [r for r in s1["head_rules"] if r["col"] == "full" and r["y0"] == 677 and r["y1"] == 741]
+    assert len(hits) == 1, s1["head_rules"]
+    assert hits[0]["h_desk_frac"] < 0.675 and hits[0]["h_frac"] > 0.75, hits[0]
+
 
 
 # 3b. full-width classification: two measured edges, abstain zone (FIX3) --------------------------
