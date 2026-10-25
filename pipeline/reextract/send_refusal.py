@@ -198,3 +198,56 @@ def load_span_flags(path):
 # and either way the loader must not silently treat it as non-refusing.
 KNOWN_POPULATIONS = ("box_fault", "partial_in_crop", "editorial_insertion", "corrected_heavy",
                      "sic", "multi_word")
+
+
+# ------------------------------------------------------------------------------- the one entry point
+from collections import namedtuple as _nt
+
+
+class SendPlan(_nt("SendPlan", ["sendable", "refused", "report"])):
+    """What a sender may send (`sendable`, a tuple), what it may not (`refused`, id -> reasons), and
+    the accounting (`report`, with n and n_refused side by side)."""
+    __slots__ = ()
+
+    def refused_records(self):
+        """Per refused span, the record a scorer writes.  It never reached the wire."""
+        for sid, why in sorted(self.refused.items()):
+            yield {"span_id": sid, "class_primary": REFUSAL_CLASS, "refused": list(why),
+                   "reached_wire": False}
+
+
+def refuse_at_send(span_ids, populations_by_span, *, on_refused):
+    """The one law-8 entry point for every sender: call it before building any payload.
+
+    Partitions `span_ids` by `populations_by_span` (span_id -> population names, e.g. from
+    `load_span_flags`; REQUIRED, a span with no record raises FlagsUnavailable), then checks the
+    sendable list against every span the mapping knows to be faulty, derived a second, different way
+    (a gate whose input is derived like the thing it checks cannot witness it).
+
+    `on_refused` is REQUIRED and keyword-only:
+      "fail"   -- for a sender working from an approved sheet: narrowing it silently would leave an
+                  approval that no longer describes what was sent, so any refused span raises
+                  RefusalFault ("rebuild the contact sheet without them").
+      "record" -- for a scorer that must emit `unscorable:input-refused` rows: returns the plan and
+                  the caller writes `plan.refused_records()`.
+    Anything else raises ValueError.  `report["n_refused"]` always sits beside `report["n"]`, and
+    n + n_refused == n_population is asserted."""
+    if on_refused not in ("fail", "record"):
+        raise ValueError("on_refused must be 'fail' or 'record', got %r" % (on_refused,))
+    ids = list(span_ids)
+    sendable, refused = partition(ids, populations_by_span)
+    gate_not_sent(sendable, partition(
+        sorted(k for k, v in populations_by_span.items() if v is not None), populations_by_span)[1])
+    report = {"n": len(sendable), "n_refused": len(refused), "n_population": len(ids),
+              "refusal_class": REFUSAL_CLASS,
+              "refused": {k: list(v) for k, v in sorted(refused.items())}}
+    assert report["n"] + report["n_refused"] == report["n_population"], \
+        "n + n_refused is not the population -- a span was dropped"
+    if on_refused == "fail" and refused:
+        import json as _json
+        raise RefusalFault(
+            "refusing to spend: %d of %d span(s) on this sheet carry a ratified geometry fault and "
+            "are scored `%s`, never read: %s. Law 8 -- rebuild the contact sheet without them."
+            % (len(refused), len(ids), REFUSAL_CLASS,
+               _json.dumps({k: list(v) for k, v in sorted(refused.items())}, ensure_ascii=False)))
+    return SendPlan(sendable=tuple(sendable), refused=dict(refused), report=report)
