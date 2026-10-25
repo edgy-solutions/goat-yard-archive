@@ -36,6 +36,13 @@ api:
     
 ui:
   image:
+    # The frontend digest gya-test is ACTUALLY serving, read 2026-10-25.
+    # Labelled honestly: as-running, NOT smoked as a release artefact.
+    # 0.3.3 smoked the backend; this only records what the ui pod
+    # resolved, so a helm upgrade stops moving it silently. Pinning
+    # records what runs; the paired 0.3.3 gate run is what verifies it.
+    # digest WINS over tag, so the tag below is inert while this is set.
+    digest: "sha256:f386254ee465b77ceee57b3f11ad8f1742e8f6d671e1fa71452aa819c1996da4"
     tag: "latest"
 
 # 2. Postgres Configuration

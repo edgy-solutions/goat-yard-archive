@@ -28,6 +28,10 @@ UI_REPO = "ghcr.io/edgy-solutions/goat-yard-archive/frontend"
 DIGEST = "sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e"
 # What gya-test is pinned to as committed (release 0.3.3, smoked 2026-10-18).
 PINNED_TEST_DIGEST = "sha256:2fce1e3467d5f53e4f0700cdd51530db86cc85c8ef7231f091c6e69509b11433"
+# What gya-test is ACTUALLY serving for the ui, read 2026-10-25. This one is
+# as-running rather than a smoked release artefact, and the pin says so; the
+# test below is still the same check -- that it has not drifted back to a tag.
+PINNED_TEST_UI_DIGEST = "sha256:f386254ee465b77ceee57b3f11ad8f1742e8f6d671e1fa71452aa819c1996da4"
 
 VALUES_FILES = ["values.yaml", "values-test.yaml",
                 "values-frontend.yaml", "values-backend.yaml"]
@@ -140,6 +144,17 @@ def test_values_test_is_still_pinned_by_digest():
     assert PINNED_TEST_DIGEST in pinned[0], pinned
 
 
+def test_values_test_ui_is_still_pinned_by_digest():
+    """Same check for the ui image, which was the half left floating. The
+    digest here is as-running, not a smoked artefact -- but a recorded
+    as-running digest still beats a tag that moves under the release, which
+    is the whole reason `:latest` is no longer a deploy target."""
+    _, out, _ = _render(values="values-test.yaml")
+    pinned = [l for l in _image_lines(out) if l.startswith('image: "%s@' % UI_REPO)]
+    assert pinned, _image_lines(out)
+    assert PINNED_TEST_UI_DIGEST in pinned[0], pinned
+
+
 if __name__ == "__main__":
     if shutil.which("helm") is None:
         print("UNRUN  helm is not on PATH -- these checks did not run")
@@ -149,7 +164,7 @@ if __name__ == "__main__":
               % _CHART)
         sys.exit(2)
 
-    EXPECTED_TEST_COUNT = 11
+    EXPECTED_TEST_COUNT = 12
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print("FAIL  expected %d tests, collected %d -- a test silently disappeared"
