@@ -254,27 +254,52 @@ def main():
     name = "ADJUDICATION_classify45_20261025_%s.json" % rec["self_sha16"]
     p = os.path.join(DATA, name)
     body = json.dumps(rec, ensure_ascii=False, sort_keys=True, indent=1)
+    # Write to a staging name and RENAME only once the round-trip below passes.  The first run of
+    # this script raised on its own verification AFTER placing the file, leaving
+    # ADJUDICATION_..._d13bce15abab1201.json in the audits directory -- a record that failed its own
+    # hash rule, sitting where it could be cited.  A build that refuses must leave nothing behind.
+    staged = p + ".staging"
     # newline="" so the bytes on disk ARE the bytes the hash rule names.  Without it Windows
     # rewrites every backslash-n as backslash-r backslash-n, and a verifier who hashes the file gets a
     # digest that does not match the one the record states -- the rule would then be true of a
     # string that exists nowhere.
-    with io.open(p, "w", encoding="utf-8", newline="") as fh:
+    with io.open(staged, "w", encoding="utf-8", newline="") as fh:
         fh.write(body)
     # ROUND-TRIP the rule as stated, from the file just written.  A self-referential digest can
     # never equal a hash of the file that carries it -- the field is part of those bytes -- so the
     # verifier removes the field, re-serialises with the stated options, and hashes that.  Asserting
     # it here means the rule describes an operation someone can actually perform on this file,
     # instead of a string that exists only inside the generator.
-    with open(p, "rb") as fh:
+    with open(staged, "rb") as fh:
         raw = fh.read()
-    if raw.find((chr(13) + chr(10)).encode("ascii")) != -1:
-        raise IOError("the file carries CRLF, so its bytes are not the serialisation the hash rule "
-                      "names")
-    back = json.loads(raw.decode("utf-8"))
-    claimed = back.pop("self_sha16")
-    if digest(back) != claimed:
-        raise IOError("the written file does not round-trip its own hash rule (%s recomputed vs "
-                      "%s claimed)" % (digest(back), claimed))
+    try:
+        if raw.find((chr(13) + chr(10)).encode("ascii")) != -1:
+            raise IOError("the file carries CRLF, so its bytes are not the serialisation the hash "
+                          "rule names")
+        back = json.loads(raw.decode("utf-8"))
+        claimed = back.pop("self_sha16")
+        # Spell the rule out HERE instead of calling digest().  digest() is what produced the
+        # claimed value, so a check that calls it agrees by construction and witnesses nothing --
+        # the first version of this guard passed a deliberately wrong digest because the test
+        # patched the one function both sides used.  These two spellings can disagree, which is the
+        # only reason either is worth running.
+        recomputed = hashlib.sha256(json.dumps(
+            back, ensure_ascii=False, sort_keys=True, indent=1).encode("utf-8")).hexdigest()[:16]
+        if recomputed != claimed:
+            raise IOError("the written file does not round-trip its own hash rule (%s recomputed "
+                          "vs %s claimed)" % (recomputed, claimed))
+    except Exception:
+        os.remove(staged)
+        raise
+    if os.path.exists(p):
+        with open(p, "rb") as fh:
+            if fh.read() != raw:
+                os.remove(staged)
+                raise IOError("%s already exists with DIFFERENT bytes under the same digest, which "
+                              "is either a collision or a corrupted file; refusing to clobber it"
+                              % p)
+        os.remove(p)
+    os.rename(staged, p)
     print("")
     for v in VERDICTS:
         print("  %-30s %d" % (v, rec["tallies"][v]))
