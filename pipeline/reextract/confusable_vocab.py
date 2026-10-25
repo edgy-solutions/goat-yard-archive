@@ -9,6 +9,9 @@ from two models disagreeing are not the same kind of fact, and merging them woul
 the second register has not earned.
 
   SIGNED_GLYPH_CARD   a human read the glyph cards and confirmed the pair.  Adjudicated pixels.
+  ADJUDICATED_IN_AUDIT a human read the whole-span crop in an audit and named the pair.  Adjudicated
+                      pixels, but no per-letter card -- and on the one entry the recorded cause is a
+                      reading-ORDER fault, not an optical confusion.  See the register's own note.
   ARGUED_SAME_DEFECT  not signed; admitted to the run's working list by the argument that the
                       defect is of the same kind (a short descender, an unresolved corner).
   OBSERVED_IN_READS   derived by counting the differing positions of the 18 reader rows.  This is
@@ -36,6 +39,21 @@ SIGNED_GLYPH_CARD = {
     u"עצ": u"ayin/tsadi",
     u"מפ": u"mem/pe",
     u"בג": u"bet/gimel",
+}
+
+# --- register 1b: adjudicated in Chris's audit, not on a per-letter glyph card ----------------
+# Ruling A(1) 2026-10-25 adjudicated p442:n0 from the classify45 sheet: signed רבך, pixels דבר,
+# *"glyphs signed in visual left-to-right order, dalet taken as final kaf"*.  A human read the crop
+# and named the pair, so this is adjudicated pixels -- but it is NOT register 1: register 1 means a
+# per-letter glyph card was signed, and here the evidence is a whole-span crop.
+#
+# The CAUSE on record is also a different mechanism from the rest of this module.  Every other pair
+# here is an optical confusion between two glyphs of this fount.  This one is a MISIDENTIFICATION
+# MADE WHILE READING THE SPAN BACKWARDS -- the signer was in the wrong reading order, and in that
+# order a dalet falls where a final kaf would be.  It therefore predicts nothing about an
+# in-order read, and signature_reversal is the only consumer that should want it.
+ADJUDICATED_IN_AUDIT = {
+    u"דך": u"dalet/final-kaf",
 }
 
 # --- register 2: admitted by argument, never signed ------------------------------------------
@@ -90,6 +108,7 @@ NOT_OBSERVED = {
 #: zero-count entry.  NOT_OBSERVED is deliberately excluded.
 ALL_WITNESSED = dict(
     [(k, v) for k, v in SIGNED_GLYPH_CARD.items()]
+    + [(k, v) for k, v in ADJUDICATED_IN_AUDIT.items()]
     + [(k, v) for k, v in ARGUED_SAME_DEFECT.items()]
     + [(k, v[1]) for k, v in OBSERVED_IN_READS.items()]
 )
@@ -109,6 +128,8 @@ def registers(a, b):
     out = []
     if k in SIGNED_GLYPH_CARD:
         out.append(u"SIGNED_GLYPH_CARD")
+    if k in ADJUDICATED_IN_AUDIT:
+        out.append(u"ADJUDICATED_IN_AUDIT")
     if k in ARGUED_SAME_DEFECT:
         out.append(u"ARGUED_SAME_DEFECT")
     if k in OBSERVED_IN_READS:

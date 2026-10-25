@@ -102,6 +102,9 @@ chk("ruling B(5)" in V.NOT_OBSERVED[V.key(VAV, RESH)][1],
 # --------------------------------------------------------------------- registers do not get merged
 chk(not (set(V.SIGNED_GLYPH_CARD) & set(V.ARGUED_SAME_DEFECT)),
     "a pair is signed OR argued, never silently both")
+chk(not (set(V.ADJUDICATED_IN_AUDIT) & (set(V.SIGNED_GLYPH_CARD) | set(V.ARGUED_SAME_DEFECT))),
+    "an audit-adjudicated pair does not also sit in the signed or argued register -- the three "
+    "evidence registers are pairwise disjoint, so a pair cannot borrow a grounding it lacks")
 chk(len(V.SIGNED_GLYPH_CARD) == 3, "3 pairs were signed on glyph cards")
 chk(len(V.ARGUED_SAME_DEFECT) == 5, "5 pairs sit in the run's list by argument, unsigned")
 AYIN, TSADI = u"ע", u"צ"
@@ -123,8 +126,25 @@ chk(V.registers(FKAF, BET) == ["ARGUED_SAME_DEFECT"],
 chk(V.registers(VAV, u"י") == ["ARGUED_SAME_DEFECT", "OBSERVED_IN_READS"],
     "vav/yod is REACHABLE in both registers (was an unsorted key)")
 
+# ---------------------------------------------- ruling A(1): dalet/final-kaf, the reversal pair
+# Without this entry the ruling-A(2) rule ("one swap from the confusable list") fires on NOTHING --
+# not even on p442:n0, the case that produced the ruling.  So its reachability is load-bearing.
+FKAF_ = u"ך"
+chk(len(V.ADJUDICATED_IN_AUDIT) == 1, "one pair was adjudicated in the audit, not more")
+chk(V.registers(DALET, FKAF_) == ["ADJUDICATED_IN_AUDIT"],
+    "dalet/final-kaf is REACHABLE and reports its own register only: %s"
+    % V.registers(DALET, FKAF_))
+chk(V.key(DALET, FKAF_) in V.ALL_WITNESSED,
+    "dalet/final-kaf is in ALL_WITNESSED, so signature_reversal can find it")
+chk(V.name(DALET, FKAF_) == u"dalet/final-kaf", "the pair has a human name")
+_src = io.open("confusable_vocab.py", encoding="utf-8").read()
+chk("left-to-right" in _src and "A(1)" in _src,
+    "the register records the RULING and the CAUSE on record (a reading-order fault, not an optical "
+    "confusion), because the cause is what decides whether a consumer may use it")
+
 # ------------------------------------------------------------------------------- the key invariant
-for d in (V.SIGNED_GLYPH_CARD, V.ARGUED_SAME_DEFECT, V.OBSERVED_IN_READS, V.NOT_OBSERVED):
+for d in (V.SIGNED_GLYPH_CARD, V.ADJUDICATED_IN_AUDIT, V.ARGUED_SAME_DEFECT,
+          V.OBSERVED_IN_READS, V.NOT_OBSERVED):
     for k in d:
         chk(len(k) == 2 and list(k) == sorted(k),
             "every key is two letters in sorted order, so lookup cannot depend on argument order: "
@@ -143,7 +163,7 @@ chk(V.name(u"א", u"ט") is None, "name() is None for an unknown pair")
 chk(V.observed_count(u"א", u"ט") == 0, "an unknown pair counts 0, and 0 is not a verdict")
 
 # ------------------------------------------------------------------------------------------ report
-EXPECTED = 54
+EXPECTED = 61
 print("confusable_vocab: %d checks, %d failed" % (N, len(FAILED)))
 for m in FAILED:
     print("  FAIL  %s" % m)
