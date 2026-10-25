@@ -68,6 +68,29 @@ minio:
   enabled: true
   mode: standalone # Force standalone mode
   replicas: 1      # Force 1 replica
+  # Scheduling shape, both lines added 2026-10-25 with the 0.3.2 upgrade.
+  #
+  # resources: minio-5.3.0's own default is `requests.memory: 16Gi` and this
+  # chart has NEVER carried an override, so every helm render since the
+  # dependency was pinned has asked for 16Gi. The live pod has been running on
+  # 4Gi, set out of band by manager `agent` (ReplicaSet dated 2026-09-08) --
+  # which means a hand-edit has been the only reason minio was schedulable, and
+  # the first helm upgrade to touch this Deployment left the new pod Pending
+  # with "Insufficient memory". 4Gi is what has demonstrably served /scans; the
+  # dmz node (k3s-worker5) has 20968Mi allocatable against 10016Mi of requests
+  # including minio's own 4096Mi, so 16Gi does not fit even with minio evicted.
+  resources:
+    requests:
+      memory: 4Gi
+  # deploymentUpdate: the subchart default is RollingUpdate with maxUnavailable
+  # 0 and maxSurge 100%, which asks for a second pod to become Ready before the
+  # first is removed. One replica on a 50Gi ReadWriteOnce local-path volume
+  # cannot do that. Recreate is the only strategy this workload can complete;
+  # the brief /scans outage during it is accepted (ruling 2026-10-25). The
+  # subchart guards `rollingUpdate:` behind `if eq .type "RollingUpdate"`, so
+  # maxSurge/maxUnavailable need no null-ing here.
+  deploymentUpdate:
+    type: Recreate
   rootUser: "minio"
   rootPassword: "minio123"
   # Apply DMZ Isolation to MinIO
