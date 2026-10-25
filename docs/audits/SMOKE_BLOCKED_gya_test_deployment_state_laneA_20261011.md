@@ -921,3 +921,44 @@ Same build's frontend manifest, for completeness:
 `frontend@sha256:baea48e78bfbbf6193925f50d30c307159a7652e2ba5c41f8a1a24b973435e03`.
 Not needed for the 0.3.2 re-point — variant B sets only `api.image.tag`, so
 prod's UI stays on `frontend:0.3.0`.
+
+## 2026-10-25 — the re-point is done, and `crane` was digest-preserving
+
+Chris ran it at 13:48–13:49 local. All three steps as predicted:
+
+| step | result |
+|---|---|
+| `crane digest …backend:0.3.2` (before) | `MANIFEST_UNKNOWN` — the tag did not exist, nothing was overwritten |
+| `crane tag …backend@sha256:ac37c84f… 0.3.2` | `digest: sha256:ac37c84fed…66d0c7d8e  size: 1609` |
+| `crane digest …backend:0.3.2` (after) | `sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e` |
+
+**`:0.3.2` now resolves to the smoked digest exactly.** The earlier worry about
+an unpredictable resulting digest was specific to `imagetools create`, which
+constructs and pushes a new index; `crane tag` binds the name to the **existing**
+manifest, so equality holds by construction rather than by luck. The ruled
+verification (`:0.3.2` == the gya-test digest) is satisfied as a string match,
+not as an inference.
+
+### One correction to the acceptance, because the ground moved
+
+The acceptance was written as *"identical pod `imageID` vs gya-test"*. **That
+comparison is no longer available:** gya-test was rolled onto the 0.3.3 digest
+(`2fce1e34…`) on 2026-10-18 and has run it since, so nothing on gya-test is
+serving `ac37c84f…` any more.
+
+The check should therefore be made against the **digest itself**, which is the
+stronger form anyway — `imageID` is what the kubelet actually resolved and
+pulled:
+
+```
+kubectl -n gya-frontend get pod -l app.kubernetes.io/name=gya-frontend-api \
+  -o jsonpath='{.items[*].status.containerStatuses[*].imageID}'
+```
+
+must print
+`ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e`.
+
+Comparing prod to gya-test would only ever have been a proxy for comparing prod
+to the artefact that was smoked. The digest *is* that artefact, so this is the
+same claim with one fewer hop — and unlike the proxy, it does not expire when a
+test environment moves on.
