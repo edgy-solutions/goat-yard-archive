@@ -77,6 +77,7 @@ from PIL import Image
 
 import hebrew_aperture_diag as diag
 import hebrew_local_arms as L
+import send_refusal as SR
 from run_header import build_header, require_endpoint, RunWriter
 from run_header import _git_head as _git_head0, _git_dirty as _git_dirty0
 from run_header import _git_head as _git_head0, _git_dirty as _git_dirty0
@@ -899,6 +900,33 @@ def run(only=None, spans=None, approved=False, sheet_path=None):
             f"{sheet['sheet']} ({len(cs)} span(s), {sheet.get('calls_if_approved')} calls). "
             "The flag is a RECORDED CLAIM, not a verification -- the sheet gate has already checked "
             "that the crops match; only a human can check that they are the right crops.")
+    # Placed after the approval refusal, not before it: a born test asserts that a missing
+    # --approved is what a bare `run` complains about first, and a new gate does not get to
+    # shadow an asserted contract. Both refusals are free -- neither reaches the catalog.
+    # LAW 8 (advisor ruling B(4), 2026-10-25): a box carrying a ratified `box_fault` or
+    # `partial_in_crop` must never reach a paid arm. The flags are a ratification fact, so they come
+    # from a sidecar beside the signed set, and an ABSENT sidecar refuses the whole population --
+    # an unlooked-up fault is not an absent one. Gated here with the others, before the catalog pull,
+    # so a refusal costs nothing.
+    #
+    # This FAILS the run instead of dropping the refused spans. The sheet Chris approved names a
+    # population; sending a narrower one quietly would leave an approval that no longer describes
+    # what was sent, and the refused spans are owed a recorded `unscorable:input-refused` rather than
+    # a silent absence. Rebuild the sheet without them and have it approved again.
+    _flags = SR.load_span_flags(os.path.join(str(diag.DATA), SR.SIDECAR_NAME))
+    _ids = [s["span_id"] for s, _c, _x in cs]
+    _sendable, _refused = SR.partition(_ids, _flags)
+    if _refused:
+        raise RuntimeError(
+            "refusing to spend: %d of %d span(s) on this sheet carry a ratified geometry fault and "
+            "are scored `%s`, never read: %s. Law 8 -- rebuild the contact sheet without them."
+            % (len(_refused), len(_ids), SR.REFUSAL_CLASS,
+               json.dumps({k: list(v) for k, v in sorted(_refused.items())}, ensure_ascii=False)))
+    # Cross-check by a different derivation: every span the sidecar knows to be faulty, checked
+    # against the ids about to be sent. The partition above reads the flags of the send list; this
+    # reads the send list against the flags. A gate whose input is derived the same way as the thing
+    # it checks cannot witness it.
+    SR.gate_not_sent(_ids, SR.partition(sorted(_flags), _flags)[1])
     # THIRD GATE: archive the pixels before spending on them. Chris's ruling, 2026-09-28.
     #
     # The 26 calls on p912:n2 at 07:32 produced reads whose `crop_sha16` pointed at exactly one file,
