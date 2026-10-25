@@ -885,3 +885,39 @@ answered with names, keys and shapes — never values.
 - `ui.image` on gya-test is still `tag: "latest"` with no digest, which
   contradicts ":latest is never a deploy target again". Named in `b9022b9`,
   unresolved.
+
+## Where `ac37c84f…` comes from — provenance, not a copied string
+
+A digest quoted from a note is only as good as the note. This one is
+re-derivable from two independent places.
+
+**Primary source — the build log.** Run **`38181578224`** (workflow
+`Build Containers`, `ref_name: main`, 2026-10-11T22:43:53Z, source `a88ad6f`):
+
+```
+#26 exporting manifest list sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e done
+#26 pushing manifest for .../backend:latest@sha256:ac37c84fed...66d0c7d8e
+#26 pushing manifest for .../backend:main@sha256:ac37c84fed...66d0c7d8e
+##[group]Digest
+sha256:ac37c84fed147f96fb14c276a8fb51869d6b6d765257959e578bc6366d0c7d8e
+```
+
+Re-read it any time with
+`gh run view 38181578224 --log | grep -i 'containerimage.digest'`.
+
+**Second source — a tag that still points at it.** That build pushed the
+manifest as **both** `:latest` and `:main` (`build-containers.yml:47-48` tags
+`:latest` and `:${{ github.ref_name }}`). `:latest` has since moved to the 0.3.3
+build, but **`:main` has not been republished**: the only build after it was
+`ref_name: 0.3.3`, which pushed `:latest` and `:0.3.3`. So
+`crane digest …/backend:main` should still return `ac37c84f…`, which is an
+independent confirmation of the string above.
+
+**That cross-check has a shelf life.** `:main` is a moving tag — the next push to
+`main` rebuilds and moves it. The build log does not move, so it stays the
+primary source.
+
+Same build's frontend manifest, for completeness:
+`frontend@sha256:baea48e78bfbbf6193925f50d30c307159a7652e2ba5c41f8a1a24b973435e03`.
+Not needed for the 0.3.2 re-point — variant B sets only `api.image.tag`, so
+prod's UI stays on `frontend:0.3.0`.
