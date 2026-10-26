@@ -68,16 +68,113 @@ minio:
   enabled: true
   mode: standalone # Force standalone mode
   replicas: 1      # Force 1 replica
+  # image: pinned explicitly 2026-10-25. Both values are IDENTICAL to
+  # minio-5.3.0's defaults, so this changes no bytes today; it exists to stop a
+  # future dependency bump from moving the reference.
+  #
+  # Why that matters -- and what this pin does NOT do. quay.io/minio/* no
+  # longer serves anonymously. Measured today, anonymous token flow, with
+  # controls that pass:
+  #   quay.io/minio/minio:RELEASE.2024-04-18T19-09-19Z  401
+  #   quay.io/minio/mc:RELEASE.2024-04-18T16-45-29Z     401  (the failing hook)
+  #   docker.io/minio/minio, docker.io/minio/mc         401
+  #   controls: quay.io/coreos/etcd:v3.5.0 200, docker.io/library/alpine 200,
+  #   docker.io/grafana/grafana 200; Docker Hub's repository API answers
+  #   "object not found" for minio/minio.
+  # So the mc tag is not simply "gone": the whole minio namespace is gated on
+  # both public registries, server image included. No tag pin can make these
+  # pullable, and this pin does not protect "the next node that lacks the
+  # cache" -- there is no next node, the volume pins this pod to worker5. What
+  # the pin does buy: the reference stays byte-identical, so worker5's existing
+  # kubelet cache keeps satisfying IfNotPresent across chart changes. A
+  # dependency bump to a newer RELEASE tag would leave prod MinIO unstartable
+  # at its next pod replacement. pullPolicy is explicit for the same reason --
+  # Always would be fatal here.
+  #
+  # The residual this leaves: the only copy of this image is worker5's kubelet
+  # cache, which kubelet garbage-collects under disk pressure and a reimage
+  # destroys. Whether it is cached cannot even be read from node status --
+  # every worker reports exactly 50 images, the --node-status-max-images cap.
+  # Fixing it needs a mirror into ghcr.io/edgy-solutions (where the api image
+  # already comes from) or an imagePullSecret: operator work, not this commit.
+  image:
+    repository: quay.io/minio/minio
+    tag: RELEASE.2024-04-18T19-09-19Z
+    pullPolicy: IfNotPresent
+  # Scheduling shape, both lines added 2026-10-25 with the 0.3.2 upgrade.
+  #
+  # resources: minio-5.3.0's own default is `requests.memory: 16Gi` and this
+  # chart has NEVER carried an override, so every helm render since the
+  # dependency was pinned has asked for 16Gi. The live pod has been running on
+  # 4Gi, set out of band by manager `agent` (ReplicaSet dated 2026-09-08) --
+  # which means a hand-edit has been the only reason minio was schedulable, and
+  # the first helm upgrade to touch this Deployment left the new pod Pending
+  # with "Insufficient memory". 4Gi is what has demonstrably served /scans.
+  #
+  # CORRECTION 2026-10-25 (this commit): as first written the line above read
+  # "the dmz node (k3s-worker5)". k3s-worker5 is NOT the only dmz node --
+  # k3s-worker4 also carries network=dmz, is Ready and schedulable, and has
+  # 30018Mi allocatable, which 16Gi would have fitted. The reason this pod can
+  # only ever land on worker5 is the VOLUME, not the label: PVC
+  # gya-frontend-minio is a local-path PV pinned by nodeAffinity
+  # kubernetes.io/hostname In [k3s-worker5], data on that node's disk under
+  # /var/lib/rancher/k3s/storage/. That is why the scheduler said "1
+  # Insufficient memory" and not 2 -- worker4 was filtered at the volume
+  # predicate before memory was considered. The arithmetic still decides the
+  # value: worker5 has 20968Mi allocatable against 10016Mi of requests
+  # including minio's own 4096Mi, so 16Gi does not fit there even with minio
+  # evicted. The number was right; the cause recorded for it was wrong.
+  resources:
+    requests:
+      memory: 4Gi
+  # deploymentUpdate: the subchart default is RollingUpdate with maxUnavailable
+  # 0 and maxSurge 100%, which asks for a second pod to become Ready before the
+  # first is removed. One replica on a 50Gi ReadWriteOnce local-path volume
+  # cannot do that. Recreate is the only strategy this workload can complete;
+  # the brief /scans outage during it is accepted (ruling 2026-10-25). The
+  # subchart guards `rollingUpdate:` behind `if eq .type "RollingUpdate"`, so
+  # maxSurge/maxUnavailable need no null-ing here.
+  deploymentUpdate:
+    type: Recreate
   rootUser: "minio"
   rootPassword: "minio123"
   # Apply DMZ Isolation to MinIO
   nodeSelector: *dmzNode
   tolerations: *dmzTol
-  buckets:
-     - name: scans
-       policy: public # Official chart text-based policy or just creates bucket? 
-       # Official chart 'buckets' config often creates buckets. 
-       # 'purge: false' to keep data?
+  # buckets: REMOVED 2026-10-25. The subchart creates its post-install/upgrade
+  # job only under
+  #   {{- if or .Values.buckets .Values.users .Values.policies
+  #            .Values.customCommands .Values.svcaccts }}
+  # and `buckets` is NOT the only one of those five that is set. Corrected by
+  # measurement 2026-10-25: minio-5.3.0's OWN values.yaml ships a truthy default
+  #   users: [{accessKey: console, secretKey: console123, policy: consoleAdmin}]
+  # so the job renders from the subchart default even with every parent-level
+  # key removed -- the first two renders here still produced it. The rendered
+  # container is `minio-make-user` running /config/add-user: creating that
+  # console user is what this job is actually FOR, and the bucket was
+  # incidental. That job failed the 0.3.2 upgrade
+  # (revision 31: ImagePullBackOff on the mc image, BackOff x109 over 25m,
+  # helm recorded the release `failed` on hook timeout) and failed the same way
+  # at revision 25 in June. The `scans` bucket and its `public` policy already
+  # exist on the live MinIO, so on prod the job is redundant.
+  #
+  # Deleting the block here is not sufficient on its own, for two reasons found
+  # by rendering rather than by reading: (1) the parent chart's own
+  # values.yaml:145 also sets minio.buckets, and helm's merge keeps a base value
+  # that an overlay merely omits; (2) the subchart's `users` default is truthy on
+  # its own, as above. Both keys are overridden with EMPTY LISTS rather than
+  # null: a list override replaces instead of merging, so this does not lean on
+  # helm's null-deletion semantics for subchart defaults. values.yaml is left
+  # alone deliberately -- editing it would disable the job for the backend
+  # release and for gya-test too, and gya-test may still want it (ruling
+  # 2026-10-25).
+  #
+  # What this costs: bucket and policy creation are now one-time MANUAL
+  # provisioning with no declarative record for this release. A fresh install of
+  # it against an empty MinIO comes up with no `scans` bucket.
+  # Recorded on the prod platform ticket; not solved here.
+  buckets: []
+  users: []
   persistence:
     enabled: true
     size: 50Gi

@@ -86,11 +86,12 @@ client<llm> OpenRouterText {
 // BOUNDED on purpose: 3 retries, so at most 4 attempts. A retry that can loop silently is the
 // same defect under a new name.
 //
-// IN THIS RELEASE THE BOUND IS DECLARED BUT NOT OBSERVED. On the eval lane the attempt count
-// is read back from the BAML collector (len(log.calls) - 1) and a scored-run preflight refuses
-// if any call exhausted the bound; neither exists in 0.3.2, so here a call that burned all four
-// attempts and then failed is indistinguishable in stage_health from one that failed on its
-// first try. What this buys production is the retry itself, not evidence about it.
+// IN THIS RELEASE THE BOUND IS DECLARED BUT NOT OBSERVED. body-path's backend/stage_health.py
+// reads the attempt count off the BAML collector (len(log.calls) - 1) and keeps a
+// bound_exhausted counter; neither that reader nor any consumer of it exists in 0.3.2, so here
+// a call that burned all four attempts and then failed is indistinguishable in stage_health
+// from one that failed on its first try. What this buys production is the retry itself, not
+// evidence about it. Tracked as docs/defects/D-003 for 0.3.3.
 retry_policy BoundedTransport {
   max_retries 3
   strategy {
