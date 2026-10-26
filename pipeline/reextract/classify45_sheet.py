@@ -48,7 +48,11 @@ EXEMPLARS_WANT = 3
 READER = ("confusable", "plene", "substitution", "short", "fabrication")
 CROP = ("edge-cut", "neighbour-ink", "mid-word-start", "wrong-line", "over-full", "index-shift")
 
-NAME = {v: k for k, v in G.LETTER.items()}        # glyph -> letter name; FINAL FORMS ARE ABSENT
+# glyph -> letter name. The five final forms ARE keyed (since the LETTER table gained them for
+# ruling 4), as distinct sorts rather than aliases -- which is what lets exemplar_panel build a
+# card for the 13 of 45 scored rows whose signature carries one. What is still unkeyed is
+# anything that is not a consonant: vowel points, gershayim, punctuation.
+NAME = {v: k for k, v in G.LETTER.items()}
 NIKUD = re.compile(r"[\u0591-\u05c7]")
 
 CHECKS = 0
@@ -436,8 +440,11 @@ def exemplar_panel(sid, signed_ch, read_ch):
     a, b = NAME.get(signed_ch), NAME.get(read_ch)
     if not a or not b:
         miss = [c for c in (signed_ch, read_ch) if c not in NAME]
-        return None, ("no exemplar card: %s has no base-letter name in this module (final forms are "
-                      "not keyed), so the partner-exclusion rule cannot be applied"
+        # Reachable only for a character that is no Hebrew consonant -- a vowel point, a
+        # gershayim, punctuation. Final forms used to land here and no longer do, so naming them
+        # would send an operator after a cause that does not exist.
+        return None, ("no exemplar card: %s is not a keyed Hebrew consonant in this module, so the "
+                      "partner-exclusion rule cannot be applied"
                       % " and ".join("U+%04X" % ord(c) for c in miss))
     ea = G.exemplars(a, b, want=EXEMPLARS_WANT, exclude=(sid,))
     eb = G.exemplars(b, a, want=EXEMPLARS_WANT, exclude=(sid,))

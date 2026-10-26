@@ -123,7 +123,19 @@ LETTER = {"alef": "א", "bet": "ב", "gimel": "ג", "dalet": "ד", "he": "ה",
           "vav": "ו", "zayin": "ז", "het": "ח", "tet": "ט", "yod": "י",
           "kaf": "כ", "lamed": "ל", "mem": "מ", "nun": "נ", "samekh": "ס",
           "ayin": "ע", "pe": "פ", "tsadi": "צ", "kof": "ק", "resh": "ר",
-          "shin": "ש", "tav": "ת"}
+          "shin": "ש", "tav": "ת",
+          # The five final forms, as DISTINCT SORTS rather than aliases of their base letters.
+          # `positions()` locates a glyph by matching a character, so without these a card cannot be
+          # built for four of ruling 4's eight spans: p628:n2 (bet + final nun), p254:n1 (final nun +
+          # yod + final mem), p442:n0 (resh + bet + final kaf) and p831:n2 (... + final mem).
+          #
+          # They have to be separate keys because the disputes ARE the distinction. p442:n0's defect
+          # is a dalet signed as a FINAL KAF; p254:n1's flag is a WORD-INITIAL final nun, which is
+          # orthographically impossible and is the reason that signature is suspect. Folding a final
+          # onto its base letter would erase the very thing those cards ask about -- and would also
+          # let an exemplar of one sort be offered as evidence about the other.
+          "final_kaf": "ך", "final_mem": "ם", "final_nun": "ן",
+          "final_pe": "ף", "final_tsadi": "ץ"}
 
 # What to LOOK AT. Every feature here is a shape statement checkable against a picture without
 # reading Hebrew. The mem/pe pair is Chris's own wording from the p217:n2 ruling.
