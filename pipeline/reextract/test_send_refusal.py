@@ -164,9 +164,25 @@ import hebrew_frontier_or as H
 
 src = inspect.getsource(H.run)
 chk("SR.load_span_flags" in src, "run() loads the send-flag sidecar")
-chk("SR.partition" in src, "run() partitions the send list through the refusal")
-chk("SR.gate_not_sent" in src, "run() calls the law-8 payload gate")
-chk(SR.REFUSAL_CLASS in src, "run() names the refusal class in its refusal message")
+# MODIFIED (3 checks), refusal substrate 2026-10-25: run() no longer calls partition / gate_not_sent /
+# names the class itself; the same intent is asserted in two halves, run() side and entry-point side.
+chk('SR.refuse_at_send(' in src and 'on_refused="fail"' in src,
+    "run() applies the partition AND the cross-derivation gate via refuse_at_send(on_refused='fail')")
+_rsrc = inspect.getsource(SR.refuse_at_send)
+chk("partition(" in _rsrc and "gate_not_sent(" in _rsrc,
+    "refuse_at_send's source partitions the send list AND calls the law-8 payload gate")
+chk("REFUSAL_CLASS" in _rsrc, "refuse_at_send's refusal message names the refusal class")
+# static, with a liveness count: exactly one call, and no direct partition/gate calls left in run()
+chk(src.count("refuse_at_send(") == 1, "hebrew_frontier_or.run() calls refuse_at_send( exactly once")
+chk("SR.partition(" not in src and "SR.gate_not_sent(" not in src,
+    "run() no longer calls SR.partition( or SR.gate_not_sent( directly")
+_fsrc = io.open(H.__file__, encoding="utf-8").read()
+chk(_fsrc.count("refuse_at_send(") == 1 and "SR.partition(" not in _fsrc
+    and "SR.gate_not_sent(" not in _fsrc,
+    "the whole of hebrew_frontier_or.py: one refuse_at_send( call, no direct partition/gate calls")
+_i_ref = src.index("SR.refuse_at_send(")
+chk(src.index("SR.load_span_flags") < _i_ref < src.index("_arch ="),
+    "refuse_at_send comes after load_span_flags and before the archive gate")
 # ordering: the refusal must precede every paid step. `catalog` is the first thing that reaches the
 # network and `call` is the thing that spends; both must come after the gate.
 i_gate = src.index("SR.load_span_flags")
@@ -179,8 +195,69 @@ csrc = inspect.getsource(H.cells)
 chk("SR.load_span_flags" not in csrc and "SR.partition" not in csrc,
     "the refusal is NOT in cells(): score() analyses spent runs through it")
 
+# ------------------------------------------------------------- refuse_at_send: the one entry point
+_P = {"c1:n0": [], "c2:n0": ["sic"], "f1:n0": ["box_fault"], "f2:n0": ["partial_in_crop"]}
+_CLEAN = ["c1:n0", "c2:n0"]
+try:
+    SR.refuse_at_send(["c1:n0", "f1:n0"], _P, on_refused="fail")
+    chk(False, "fail mode: a refused span did not raise")
+except SR.RefusalFault as _e:
+    chk("f1:n0" in str(_e) and SR.REFUSAL_CLASS in str(_e),
+        "fail: RefusalFault names the span and the refusal class")
+    chk(isinstance(_e, RuntimeError), "RefusalFault is still a RuntimeError for old callers")
+except AssertionError as _e:
+    chk(False, "fail: the count assertion fired before the RefusalFault: %s" % _e)
+_pl = SR.refuse_at_send(_CLEAN, _P, on_refused="fail")
+chk(_pl.report["n_refused"] == 0 and _pl.sendable == tuple(_CLEAN),
+    "fail: all clean returns a plan with n_refused 0")
+try:
+    _pl = SR.refuse_at_send(sorted(_P), _P, on_refused="record")
+except AssertionError as _e:                                      # a named failure, not an abort
+    FAILED.append("record: refuse_at_send's own n + n_refused assertion fired: %s" % _e)
+    _pl = SR.SendPlan((), {}, {"n": 0, "n_refused": 0, "n_population": 0})
+chk(_pl.sendable == ("c1:n0", "c2:n0") and sorted(_pl.refused) == ["f1:n0", "f2:n0"],
+    "record: sendable and refused are right")
+chk(_pl.report["n"] == 2 and _pl.report["n_refused"] == 2, "record: report has n and n_refused")
+chk(_pl.report["n"] + _pl.report["n_refused"] == _pl.report["n_population"] == 4,
+    "record: n + n_refused == n_population")
+chk(list(_pl.refused_records()) == [
+    {"span_id": "f1:n0", "class_primary": SR.REFUSAL_CLASS, "refused": ["box_fault"],
+     "reached_wire": False},
+    {"span_id": "f2:n0", "class_primary": SR.REFUSAL_CLASS, "refused": ["partial_in_crop"],
+     "reached_wire": False}], "record: refused_records() yields the exact record shape")
+raises(TypeError, lambda: SR.refuse_at_send(_CLEAN, _P), "a missing on_refused is a TypeError")
+raises(ValueError, lambda: SR.refuse_at_send(_CLEAN, _P, on_refused="drop"),
+       "an unknown on_refused is a ValueError")
+raises(TypeError, lambda: SR.refuse_at_send(_CLEAN, on_refused="fail"),
+       "omitting populations_by_span is a TypeError")
+for _m in ("fail", "record"):
+    raises(SR.FlagsUnavailable, lambda: SR.refuse_at_send(["zz:n0"], _P, on_refused=_m),
+           "a span with no record raises FlagsUnavailable in %s mode" % _m)
+# the cross-derivation gate is INSIDE: a partition that leaks a faulty id as sendable is caught
+_orig = SR.partition
+_calls = []
+
+
+def _leaky(ids, pops):
+    _calls.append(1)
+    s, r = _orig(ids, pops)
+    return (s + ["f1:n0"], r) if len(_calls) == 1 else (s, r)
+
+
+SR.partition = _leaky
+try:
+    SR.refuse_at_send(_CLEAN, _P, on_refused="record")
+    chk(False, "a faulty id leaked into sendable was not caught")
+except SR.RefusalFault as _e:
+    chk("GATE law-8" in str(_e) and "f1:n0" in str(_e),
+        "a faulty id leaked into sendable is caught by the gate inside refuse_at_send")
+except AssertionError as _e:                                      # caught by the count, not the gate
+    chk(False, "a leaked faulty id was caught by the arithmetic assert, not the gate: %s" % _e)
+finally:
+    SR.partition = _orig
+
 # ------------------------------------------------------------------------------------------ report
-EXPECTED = 53
+EXPECTED = 53 + 4 + 13   # 53 old (3 modified) + 4 static + 13 refuse_at_send
 print("send_refusal: %d checks, %d failed" % (N, len(FAILED)))
 for m in FAILED:
     print("  FAIL  %s" % m)
