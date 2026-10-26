@@ -138,6 +138,14 @@ from clean_run import git_state, provisional, banner                      # noqa
 import cv_footnote_presplit as ps                                        # noqa: E402  Lane A's, read-only
 import note_line_region as NLR                                           # noqa: E402  Lane A's, read-only
 import assembler as ASM                                                  # noqa: E402  Lane A's, read-only
+import audit_overlay_20261025 as AUDIT                                   # noqa: E402
+import reversal_guard_js as RGJS                                         # noqa: E402
+
+#: Ruling 4: the audit's basis sentences carry Hebrew, and this page's leak guard allows Hebrew only
+#: inside a data-cand attribute. Each maximal Hebrew run (internal spaces kept, so a two-word
+#: quotation stays one pointer) is replaced by this marker. Stated as a RULE, applied by one sub().
+RESIGN_HEB_RUN = re.compile(u"[\u0590-\u05FF]+(?:[ \u00a0]+[\u0590-\u05FF]+)*")
+RESIGN_HEB_MARK = u"[Hebrew \u2014 read it on the glyph card, against the pixels]"
 
 _ARGP = argparse.ArgumentParser()
 _ARGP.add_argument("--pass2", action="store_true",
@@ -164,9 +172,19 @@ _ARGP.add_argument("--test-console", choices=["pass3"], default=None,
                     help="TEST ONLY, round 2 only, requires --out-dir elsewhere than the audits directory: "
                          "render the round-2 page on the named OLDER console blob, so a born-test can prove it "
                          "FAILS there. Never used to produce a page anyone signs on.")
+_ARGP.add_argument("--resign", action="store_true",
+                    help="RE-SIGN (ruling 4, 2026-10-25): sheet only the spans the 2026-10-25 audit "
+                         "ruled a SIGNATURE error, on the pass-5 console -- tiles right to left with "
+                         "explicit position numbers, the assembly and the candidate both rendered, and "
+                         "a download refused while the assembly is the candidate reversed. Imports "
+                         "nothing: a re-sign must not inherit the verdict it replaces. Mutually "
+                         "exclusive with --pass2/--pass3.")
 ARGS = _ARGP.parse_args()
 if ARGS.pass2 and ARGS.pass3:
     _ARGP.error("--pass2 and --pass3 are mutually exclusive")
+if ARGS.resign and (ARGS.pass2 or ARGS.pass3):
+    _ARGP.error("--resign is mutually exclusive with --pass2 and --pass3")
+RESIGN = ARGS.resign
 PASS2 = ARGS.pass2
 PASS3 = ARGS.pass3
 PASS3_ROUND = ARGS.pass3_round
@@ -185,8 +203,20 @@ TEST_CONSOLE = ARGS.test_console
 # check made by the identity pins and by pass 3's own guards, and the run refuses to finish unless the
 # number equals EXPECTED_CHECKS for its mode. (The older bare asserts below are unchanged and still abort.)
 CHECKS = 0
-EXPECTED_CHECKS_BY_MODE = {"default": 8, "pass2": 8, "pass3": 24, "pass3r2": 28}
-MODE = ("pass3r2" if PASS4 else "pass3") if PASS3 else ("pass2" if PASS2 else "default")
+# Ruling 4 of 2026-10-25 moved all four of these by EXACTLY ONE, and that is the whole of the movement:
+# JS_PASS5 is a fifth blob, and a blob identity pin asserts "nobody edited this blob" -- a claim every
+# mode makes, not just the mode that renders it. So the pin is unconditional, like the four before it,
+# and every mode counts one more check. Gating it on --resign would have kept these numbers still at the
+# price of default mode no longer pinning a blob the file ships: the wrong trade, and it would have
+# hidden the movement instead of stating it. What says the OUTPUT did not move is the byte-identity
+# re-render of all four modes against hashes taken at 48ba06c, not this table.
+EXPECTED_CHECKS_BY_MODE = {"default": 9, "pass2": 9, "pass3": 25, "pass3r2": 29,
+                           # resign: 9 identity pins (the five blobs, the mode selection, the
+                           # one-filled-copy check, the per-blob feature table, the prose probe) + 4 on
+                           # the derived population and its basis rule + 8 in guard 3r.
+                           "resign": 21}
+MODE = "resign" if RESIGN else (("pass3r2" if PASS4 else "pass3") if PASS3
+                                 else ("pass2" if PASS2 else "default"))
 EXPECTED_CHECKS = EXPECTED_CHECKS_BY_MODE[MODE]
 
 
@@ -406,6 +436,43 @@ if PASS3:
     assert not (set(PASS2_SELECTED_IDS) - set(SPAN_IDS)), "a pass-3 span is not in the frozen 74"
     assert not (set(HAD.SEALED_TRUTH) & set(PASS2_SELECTED_IDS)), "a pass-3 span is in HAD.SEALED_TRUTH"
     SKEL_NAME = "glyphsign_%s_pass3%s_%dspan.jsonl" % (SET, _R, len(PASS2_SELECTED_IDS))
+
+# ---- re-sign (ruling 4). The population is DERIVED from the 2026-10-25 audit: every span whose
+# prior signature that audit ruled a signature error. The verdict name is the only literal here, so
+# adding a row to the audit puts that span on the next re-sign sheet with no edit in this file.
+RESIGN_VERDICT = "signature"
+RESIGN_BASIS = {}          # span_id -> [(arm, run_class, reversed, basis_without_hebrew)]
+if RESIGN:
+    _ar = [r for r in AUDIT.AUDIT if r["verdict"] == RESIGN_VERDICT]
+    check(bool(_ar), "no audit row carries verdict %r -- the re-sign population would be empty"
+          % RESIGN_VERDICT)
+    PASS2_SELECTED_IDS = sorted(set(r["span_id"] for r in _ar))
+    check(not (set(PASS2_SELECTED_IDS) - set(SPAN_IDS)),
+          "re-sign span(s) %s are not in the frozen 74"
+          % sorted(set(PASS2_SELECTED_IDS) - set(SPAN_IDS)))
+    check(not (set(HAD.SEALED_TRUTH) & set(PASS2_SELECTED_IDS)),
+          "re-sign span(s) %s are in HAD.SEALED_TRUTH -- sealed pages are SPENT"
+          % sorted(set(HAD.SEALED_TRUTH) & set(PASS2_SELECTED_IDS)))
+    # The audit's basis sentences carry the Hebrew they are about. This document's leak guard allows
+    # Hebrew ONLY inside a data-cand attribute, and that guard is not being relaxed for prose: each
+    # Hebrew run is replaced by a pointer to the glyph card, which is where a reading is read against
+    # pixels. The sentence structure, the arm, the run class and the reversal flag all survive.
+    for _r in _ar:
+        RESIGN_BASIS.setdefault(_r["span_id"], []).append(
+            (_r["arm"], _r["run_class"], bool(_r["reversed"]),
+             RESIGN_HEB_RUN.sub(RESIGN_HEB_MARK, _r["basis"]), len(RESIGN_HEB_RUN.findall(_r["basis"]))))
+    # Three clauses, and the first is the liveness companion: a substitution that matched nothing would
+    # satisfy "no Hebrew is emitted" on every page forever. (Not every basis sentence quotes Hebrew --
+    # p442:n0's qwen row is a cross-reference to its opus row -- so this counts rows, not all of them.)
+    _emitted = [(sid, a, t, n) for sid, rows in RESIGN_BASIS.items() for (a, _c, _v, t, n) in rows]
+    _raw_heb = [(r["span_id"], r["arm"]) for r in _ar if READABLE.search(r["basis"])]
+    _fired = [(sid, a) for (sid, a, _t, n) in _emitted if n > 0]
+    _still = [(sid, a) for (sid, a, t, _n) in _emitted if READABLE.search(t)]
+    check(bool(_raw_heb) and not _still and sorted(_fired) == sorted(_raw_heb),
+          "the audit-basis Hebrew rule did not do what it says: %d raw row(s) carry Hebrew %r, "
+          "%d emitted row(s) got a marker %r, and %d emitted row(s) STILL carry Hebrew %r"
+          % (len(_raw_heb), _raw_heb, len(_fired), _fired, len(_still), _still))
+    SKEL_NAME = "glyphsign_%s_resign_%dspan.jsonl" % (SET, len(PASS2_SELECTED_IDS))
 
 RUN_SPAN_IDS = PASS2_SELECTED_IDS
 RUN_N = len(RUN_SPAN_IDS)
@@ -904,9 +971,12 @@ def _derive_import_expectation(path, allowed_ids=None, text=None):
             "legacy_faults": legacy_faults, "insertions": insertions}
 
 
-IMPORT_EXPECTATION = (_derive_import_expectation(PASS2_EXPORT_PATH, set(RUN_SPAN_IDS),
+# A re-sign imports NOTHING -- not the signature it replaces, not pass 1's. There is no expectation
+# to state because there is no import path: --resign also renders no file input (asserted below).
+IMPORT_EXPECTATION = (None if RESIGN else
+                      (_derive_import_expectation(PASS2_EXPORT_PATH, set(RUN_SPAN_IDS),
                                                   PASS2_EMBED_TEXT if PASS4 else None) if PASS3 else
-                      _derive_import_expectation(PASS1_PATH, set(RUN_SPAN_IDS) if PASS2 else None))
+                       _derive_import_expectation(PASS1_PATH, set(RUN_SPAN_IDS) if PASS2 else None)))
 _EXP_ORDER = ("rows", "tiles", "confirmed", "corrected", "disputed", "notes", "abstains",
               "legacy_faults", "insertions")
 if IMPORT_EXPECTATION is not None:
@@ -2003,6 +2073,365 @@ window.addEventListener("load",function(){var k=restore();
 """
 # end JS_PASS4 -- everything above this line from its label is the pass-4 console.
 
+# JS_PASS5 -- the RE-SIGN console (ruling 4 of 2026-10-25), forked from JS_PASS4 by BYTE COPY plus
+# three named additions: candFor (the candidate assembled from the tiles' own data-cand), rgRecFor
+# (the reversal guard, whose predicate lives in a separate generated script block), and the refusal
+# in upd(). JS_PASS4 is SPENT -- Chris signed round 2 on it -- so it was not edited, not even to add
+# a guard. Everything else in this blob is pass 4's, byte for byte.
+JS_PASS5 = r"""
+var RM=__RM__, SETID=__SETID__, N=__N__, SKEL=__SKEL__, EXP=__EXP__, TYPED_FAULTS=__TYPED_FAULTS__,
+    LEGACY_FAULT=__LEGACY_FAULT__, STOREKEY=__STOREKEY__, AUTOIMPORT=__AUTOIMPORT__,
+    EMBED=__P3_EMBED__, EMBED_NAME=__P3_EMBED_NAME__, UNSIGNABLE=__P3_UNSIGNABLE__,
+    SIG_RULE=__P3_SIG_RULE__, SEEDS=__P3_SEEDS__, SIC_BASES=["prior_grounded","evidence_grounded"],
+    UNSIGNABLE_RX=new RegExp(UNSIGNABLE,"i"),
+    ST={}, CUR_S=null, CUR_I=null, PAL_MODE="tile", CUR_SEQ=null, CUR_AFTER=null;
+function trow(s){if(!ST[s])ST[s]={tv:{},pv:{},unl:{},note:"",fault:"",fault_legacy:"",abst:0,ins:[],insSeq:0,sic:{}};
+ if(!ST[s].pv)ST[s].pv={};if(!ST[s].unl)ST[s].unl={};
+ if(!ST[s].ins)ST[s].ins=[];if(!ST[s].sic)ST[s].sic={};if(ST[s].insSeq===undefined)ST[s].insSeq=0;
+ if(ST[s].fault_legacy===undefined)ST[s].fault_legacy="";
+ return ST[s];}
+function tileDiv(s,i){return document.getElementById("t_"+s+"_"+i);}
+/* ---- pass 4: a re-opened row shows the signer's LAST ANSWER on the tile's own face. r.pv is the prior
+   verdict, set ONLY by importText and never by a click; r.tv is the current one. A tile or chip carrying a
+   prior verdict is inert until its per-item "change" control is clicked (r.unl / it.unl); re-affirming the
+   prior needs no click, because it is already recorded. */
+function vDesc(v){if(!v||!v.verdict)return "unanswered";
+ if(v.verdict==="corrected")return "corrected "+(v.chose||"?");
+ if(v.verdict==="sic")return "sic (expected "+(v.expected||"?")+")";
+ if(v.verdict==="not_in_crop")return "not in crop";
+ return v.verdict;}
+function locked(s,i){var r=trow(s);return !!(r.pv[i]&&r.pv[i].verdict&&!r.unl[i]);}
+function mkSpan(cls,txt){var e=document.createElement("span");e.className=cls;e.textContent=txt;return e;}
+function renderPrior(s,i){var el=tileDiv(s,i);if(!el)return;var r=trow(s),pv=r.pv[i],k,
+ old=el.querySelectorAll(".priorbadge,.nowbadge,.restnote,.tbtn.chg"),bs=el.querySelectorAll(".tbtn");
+ for(k=0;k<old.length;k++)old[k].parentNode.removeChild(old[k]);
+ if(!pv||!pv.verdict){for(k=0;k<bs.length;k++)bs[k].disabled=false;return;}
+ var lk=locked(s,i),kids=[mkSpan("priorbadge","prior: "+vDesc(pv))];
+ if(pv.restored)kids.push(mkSpan("restnote",pv.restored));
+ if(lk){var c=document.createElement("button");c.className="tbtn chg";c.textContent="change";
+  c.setAttribute("data-s",s);c.setAttribute("data-i",i);c.setAttribute("onclick","tChange(this)");kids.push(c);}
+ else kids.push(mkSpan("nowbadge","now: "+vDesc(Object.assign({},r.tv[i]||{},
+  {expected:((r.sic[i]||{}).expected||"")}))));
+ for(k=kids.length-1;k>=0;k--)el.insertBefore(kids[k],el.firstChild);
+ for(k=0;k<bs.length;k++)if(!/\bchg\b/.test(bs[k].className))bs[k].disabled=lk;}
+function tChange(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i");
+ trow(s).unl[i]=true;renderPrior(s,i);renderSic(s,i);upd();}
+function setVerdict(s,i,verdict,chose){
+ if(locked(s,i))return;
+ var r=trow(s);r.tv[i]={verdict:verdict,chose:chose||""};
+ var td=tileDiv(s,i);if(td)td.setAttribute("data-v",verdict);
+ closePalette();renderSic(s,i);renderPrior(s,i);upd();}
+function tOk(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"confirmed","");}
+function tBad(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i"),k=b.getAttribute("data-k");
+ CUR_S=s;CUR_I=i;PAL_MODE="tile";
+ var pal=document.getElementById(k==="gap"?"gpal_gap":"gpal_cons");
+ pal.style.display="block";}
+function tDel(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"deleted","");}
+function tNic(b){setVerdict(b.getAttribute("data-s"),b.getAttribute("data-i"),"not_in_crop","");}
+/* ---- pass 3 (Part D): the sic verdict. The PRINTED letter stays in the signature; the expectation lives
+   beside it (expected / reason / basis), never in it. A sic tile counts as answered only when all three
+   are present and valid. */
+function sicDraft(s,i){var r=trow(s);if(!r.sic[i])r.sic[i]={expected:"",reason:"",basis:""};return r.sic[i];}
+function sicShown(s,i){return tileShown(s,i,"consonant");}
+function sicValid(s,i){var d=trow(s).sic[i];if(!d)return false;
+ var e=d.expected||"",rs=(d.reason||"").replace(/\s+/g,"");
+ return Array.from(e).length===1&&e!==sicShown(s,i)&&rs.length>0&&SIC_BASES.indexOf(d.basis)>=0;}
+function escA(x){return String(x).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
+function sicMsg(s,i){var m=document.getElementById("sm_"+s+"_"+i);if(!m)return;
+ m.textContent=sicValid(s,i)?"sic recorded: complete":
+  "sic needs: one expected letter different from the printed one, a reason, and a basis";}
+function renderSic(s,i){var el=document.querySelector('.sicbox[data-s="'+s+'"][data-i="'+i+'"]');
+ if(!el)return;var r=trow(s),v=r.tv[i];
+ if(!v||v.verdict!=="sic"){el.innerHTML="";return;}
+ var d=sicDraft(s,i),a=' data-s="'+s+'" data-i="'+i+'"'+(locked(s,i)?' disabled':''),j,
+  h='<div class="sicform">printed <b>'+escA(sicShown(s,i))+'</b> stays in the signature; the expectation '+
+  'lives beside it, never in it.<br>expected <input class="sicin" size="2" dir="rtl" data-f="expected"'+a+
+  ' value="'+escA(d.expected)+'" oninput="sicSet(this)"><br>reason <input class="sicin" size="30" '+
+  'data-f="reason"'+a+' value="'+escA(d.reason)+'" oninput="sicSet(this)"><br>basis <select data-f="basis"'+
+  a+' onchange="sicSet(this)"><option value="">-- choose --</option>';
+ for(j=0;j<SIC_BASES.length;j++)h+='<option value="'+SIC_BASES[j]+'"'+(d.basis===SIC_BASES[j]?' selected':'')+
+  '>'+SIC_BASES[j]+'</option>';
+ h+='</select><div class="sicmsg" id="sm_'+s+'_'+i+'"></div></div>';
+ el.innerHTML=h;sicMsg(s,i);}
+function sicSet(inp){var s=inp.getAttribute("data-s"),i=inp.getAttribute("data-i"),f=inp.getAttribute("data-f");
+ sicDraft(s,i)[f]=inp.value;sicMsg(s,i);upd();}
+function tSic(b){var s=b.getAttribute("data-s"),i=b.getAttribute("data-i");
+ sicDraft(s,i);setVerdict(s,i,"sic","");}
+function applySeeds(){var K=Object.keys(SEEDS),k;
+ for(k=0;k<K.length;k++){var s=K[k],sd=SEEDS[s];if(!RM[s])continue;
+  var r=trow(s);if(!r.sic[sd.tile_i])r.sic[sd.tile_i]={expected:sd.expected,reason:sd.reason,basis:""};
+  renderSic(s,sd.tile_i);}}
+/* ---- pass 3 (Part C): insertions carry a verdict, are shown as chips, and are counted by rowComplete. */
+var VLAB={confirmed:"confirmed",not_in_crop:"not in crop",deleted:"deleted"};
+function insLocked(it){return !!(it&&it.pv&&it.pv.verdict&&!it.unl);}
+function insDesc(it,v){var d=vDesc({verdict:v.verdict,chose:v.chose});
+ return (v.chose&&v.verdict!=="corrected")?d+" (added "+(v.chose==="space"?"space":v.chose)+")":d;}
+function insChange(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10),
+ r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){r.ins[i].unl=true;after=r.ins[i].after_i;break;}}
+ renderInsAt(s,after);upd();}
+function insVerdict(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10),
+ vv=b.getAttribute("data-vv"),r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){if(insLocked(r.ins[i]))return;
+  r.ins[i].verdict=vv;after=r.ins[i].after_i;break;}}
+ renderInsAt(s,after);upd();}
+function proseConflict(s){var r=trow(s);return UNSIGNABLE_RX.test(r.note||"")&&!hasNotInCrop(s);}
+function conflictText(s){var m=UNSIGNABLE_RX.exec(trow(s).note||"");
+ return 'Conflict: your note says part of the span is not in the crop ("'+(m?m[0]:"")+'"), but no tile and no '+
+  'insertion is marked not-in-crop. A row cannot be called complete while the two disagree. Mark the '+
+  'out-of-crop tile or insertion "not in crop", or reword the note.';}
+function rowDone(s){var kn=rowComplete(s);return kn[0]===kn[1]&&!proseConflict(s);}
+function closePalette(){var a=document.getElementById("gpal_cons"),b=document.getElementById("gpal_gap");
+ if(a)a.style.display="none";if(b)b.style.display="none";
+ CUR_S=null;CUR_I=null;PAL_MODE="tile";CUR_SEQ=null;CUR_AFTER=null;}
+function chooseLetterGlobal(b){
+ if(PAL_MODE==="ins"){insSetChoice(b.getAttribute("data-letter"),"consonant");return;}
+ if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-letter"));}
+function cantTellGlobal(){if(PAL_MODE==="ins")return;if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"disputed","");}
+function chooseGapGlobal(b){if(CUR_S===null)return;setVerdict(CUR_S,CUR_I,"corrected",b.getAttribute("data-choice"));}
+function insSpaceGlobal(){if(PAL_MODE==="ins")insSetChoice("space","gap");}
+function insKey(a){return a===null?"none":String(a);}
+function insSetChoice(chose,kind){if(CUR_S===null||CUR_SEQ===null)return;
+ var r=trow(CUR_S),i;for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===CUR_SEQ){
+  r.ins[i].kind=kind;r.ins[i].chose=chose;break;}}
+ var after=CUR_AFTER,s0=CUR_S;closePalette();renderInsAt(s0,after);upd();}
+function openIns(b){var s=b.getAttribute("data-s"),a=b.getAttribute("data-after");
+ var after=(a==="none")?null:parseInt(a,10);
+ var r=trow(s),seq=r.insSeq++;
+ r.ins.push({seq:seq,after_i:after,kind:null,chose:"",verdict:"",expected:"",reason:"",basis:""});
+ renderInsAt(s,after);upd();
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function editIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){if(insLocked(r.ins[i]))return;after=r.ins[i].after_i;break;}}
+ CUR_S=s;CUR_SEQ=seq;CUR_AFTER=after;PAL_MODE="ins";
+ document.getElementById("gpal_cons").style.display="block";}
+function removeIns(b){var s=b.getAttribute("data-s"),seq=parseInt(b.getAttribute("data-seq"),10);
+ var r=trow(s),i,after=null;
+ for(i=0;i<r.ins.length;i++){if(r.ins[i].seq===seq){if(insLocked(r.ins[i]))return;
+  after=r.ins[i].after_i;r.ins.splice(i,1);break;}}
+ renderInsAt(s,after);upd();}
+function renderInsAt(s,after){var el=document.querySelector('.insat[data-s="'+s+'"][data-after="'+insKey(after)+'"]');
+ if(!el)return;var r=trow(s),items=(r.ins||[]).filter(function(x){return x.after_i===after;}),h="",i;
+ items.sort(function(x,y){return x.seq-y.seq;});
+ for(i=0;i<items.length;i++){var it=items[i],v=it.verdict||"",
+  shown=it.chose?(it.kind==="gap"?"\u2194":it.chose):"\u2026",
+  st=!it.chose?"no letter chosen yet":(v?VLAB[v]:"unanswered"),
+  a=' data-s="'+s+'" data-seq="'+it.seq+'"',lk=insLocked(it),dz=lk?' disabled':'',
+  pb=(it.pv&&it.pv.verdict)?('<span class="priorbadge">prior: '+escA(insDesc(it,it.pv))+'</span>'+
+   (it.pv.restored?'<span class="restnote">'+escA(it.pv.restored)+'</span>':'')+
+   (lk?'<button class="tbtn chg"'+a+' onclick="insChange(this)">change</button>':
+    '<span class="nowbadge">now: '+escA(insDesc(it,{verdict:v,chose:it.chose}))+'</span>')+' '):'';
+  h+='<span class="inschip" data-v="'+v+'" data-seq="'+it.seq+'"><span class="insword">added</span> <b>'+shown+
+   '</b> <span class="insstate">'+st+'</span> '+pb+
+   '<button class="tbtn ok"'+a+dz+' data-vv="confirmed" onclick="insVerdict(this)">&#10003;</button>'+
+   '<button class="tbtn nic"'+a+dz+' data-vv="not_in_crop" onclick="insVerdict(this)">not in crop</button>'+
+   '<button class="tbtn del"'+a+dz+' data-vv="deleted" onclick="insVerdict(this)">del</button> '+
+   '<button class="tbtn edit"'+a+dz+' onclick="editIns(this)">edit</button> '+
+   '<button class="tbtn rm"'+a+dz+' onclick="removeIns(this)">x</button></span>';}
+ el.innerHTML=h;}
+function setnote(inp){trow(inp.getAttribute("data-s")).note=inp.value;upd();}
+function markFault(b){var s=b.getAttribute("data-s"),t=b.getAttribute("data-ft"),r=trow(s),i;
+ r.fault=(r.fault===t)?"":t;
+ var btns=document.querySelectorAll('.fault[data-s="'+s+'"]');
+ for(i=0;i<btns.length;i++){btns[i].className=(btns[i].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ upd();}
+function absn(b){var s=b.getAttribute("data-s"),r=trow(s);
+ r.abst=r.abst?0:1;b.className=r.abst?"abst on":"abst";upd();}
+function rowComplete(s){var m=RM[s],r=trow(s),n=m.tiles.length,k=0,i;
+ for(i=0;i<n;i++){var tv=r.tv[m.tiles[i].i];
+  if(tv&&tv.verdict&&(tv.verdict!=="sic"||sicValid(s,m.tiles[i].i)))k++;}
+ var ins=r.ins||[],j;
+ for(j=0;j<ins.length;j++){n++;if(ins[j].chose&&ins[j].verdict)k++;}
+ return [k,n];}
+function hasNotInCrop(s){var m=RM[s],r=trow(s),i;
+ for(i=0;i<m.tiles.length;i++){var v=r.tv[m.tiles[i].i];if(v&&v.verdict==="not_in_crop")return true;}
+ var ins=r.ins||[];
+ for(i=0;i<ins.length;i++){if(ins[i].verdict==="not_in_crop")return true;}
+ return false;}
+function pointsText(s){var el=document.querySelector('.points[data-s="'+s+'"]');
+ return el?el.getAttribute("data-cand"):"";}
+function tileShown(s,i,kind){if(kind==="gap")return "space";
+ var el=tileDiv(s,i);return el?el.getAttribute("data-cand"):"";}
+function tileOut(s,td){var r=trow(s),v=r.tv[td.i]||{verdict:"",chose:""},shown=tileShown(s,td.i,td.kind);
+ if(v.verdict==="deleted")return "";
+ if(v.verdict==="not_in_crop")return td.kind==="gap"?"[ ]":("["+shown+"]");
+ if(v.verdict==="confirmed")return td.kind==="gap"?" ":shown;
+ if(v.verdict==="sic")return shown;
+ if(v.verdict==="corrected"){if(td.kind==="gap")return v.chose==="space"?" ":"";return v.chose||"?";}
+ return "?";}
+function insOut(it){var v=it.verdict||"";if(v==="deleted")return "";if(!it.chose)return "?";
+ if(v==="not_in_crop")return it.kind==="gap"?"[ ]":("["+it.chose+"]");
+ return it.kind==="gap"?" ":it.chose;}
+function derivedFor(s){var m=RM[s],r=trow(s),out=[],j,k;
+ var atNone=(r.ins||[]).filter(function(x){return x.after_i===null;}).sort(function(a,b){return a.seq-b.seq;});
+ for(j=0;j<atNone.length;j++)out.push(insOut(atNone[j]));
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j];out.push(tileOut(s,td));
+  var ats=(r.ins||[]).filter(function(x){return x.after_i===td.i;}).sort(function(a,b){return a.seq-b.seq;});
+  for(k=0;k<ats.length;k++)out.push(insOut(ats[k]));}
+ return out.join("");}
+function lines(){
+ /* EVERY span, every time -- empty rows included. A partial download dropped over a full one is how
+    an approval record dies with every byte in it valid. */
+ var K=Object.keys(RM).sort(),L=[],si;
+ for(si=0;si<K.length;si++){var s=K[si],m=RM[s],r=trow(s),tiles=[],j;
+  for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=r.tv[td.i]||{verdict:"",chose:""};
+   var sd=(v.verdict==="sic")?(r.sic[td.i]||{}):{};
+   tiles.push({i:td.i,kind:td.kind,shown:tileShown(s,td.i,td.kind),verdict:v.verdict||"",
+    chose:v.chose||"",expected:sd.expected||"",reason:sd.reason||"",basis:sd.basis||"",
+    prior_verdict:(r.pv[td.i]||{}).verdict||"",prior_chose:(r.pv[td.i]||{}).chose||"",
+    paired_to:td.paired_to});}
+  var kn=rowComplete(s);
+  var ins=(r.ins||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,chose:x.chose,verdict:x.verdict||"",
+   expected:x.expected||"",reason:x.reason||"",basis:x.basis||"",
+   prior_verdict:(x.pv&&x.pv.verdict)||"",prior_chose:(x.pv&&x.pv.chose)||""};});
+  L.push(JSON.stringify({span_id:s,crop_sha16:m.crop16,candidate_sha16:m.cand16,tiles:tiles,
+   insertions:ins,complete:rowDone(s),abstain:!!r.abst,fault:r.fault||"",
+   fault_legacy:r.fault_legacy||"",note:r.note,
+   points_shown_not_adjudicated:{text:pointsText(s),n_points:m.n_points,nikud_flag:m.nikud},
+   paired_at:m.paired_at,letter_rung_would_have_fired:!!m.letter_fired,
+   full_span_pixel_signature:!hasNotInCrop(s),signature_rule:SIG_RULE,
+   derived_consonants:derivedFor(s),derived_from_verdicts:true,
+   signed_from:"pixels, candidate shown as consonant tiles, per-tile verdicts",
+   signed_in:"glyph signer, in the browser",set_sha16:SETID,sheet:SKEL}));}
+ return L.join("\n")+"\n";}
+/* ---- RE-SIGN (pass 5), ruling 4 of 2026-10-25. Three properties, and nothing else moves.
+   The tiles read right-to-left with explicit position numbers -- that is in the HTML, not here.
+   This block adds the other two: the candidate shown as rendered Hebrew beside the assembly, and a
+   save REFUSED while the assembly is the candidate reversed.
+   NEVER EDITS A SIGNATURE. The refusal removes the download's href and writes a message. It does not
+   touch a verdict, an insertion, a note or a tile: a guard that edits the thing it judges to make
+   itself satisfied is not a guard, it is a second author.
+   rgExamine/rgRefuses/rgWarns come from a SEPARATE script block generated by reversal_guard_js.py
+   from signature_reversal.examine, so this console and the offline scan are one rule on two axes. */
+function candFor(s){var m=RM[s],out=[],j;
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j];
+  out.push(td.kind==="gap"?" ":tileShown(s,td.i,td.kind));}
+ return out.join("");}
+function rgRecFor(s){return rgExamine(candFor(s),derivedFor(s));}
+function rgText(rec){
+ var at=rec.swap?(" at reading position "+rec.swap.reading_position+
+  (rec.swap.pair?(", the "+rec.swap.pair+" pair"):"")):"";
+ if(rec.flag==="reversed_exact")
+  return "REFUSED. Your assembly is the candidate REVERSED, consonant for consonant. Position 1 is "+
+   "the RIGHTMOST glyph: the row reads right to left, the way the fount prints it.";
+ if(rec.flag==="reversed_per_word_exact")
+  return "REFUSED. Every word of your assembly is that word of the candidate reversed.";
+ if(rec.flag==="reversed_one_swap"||rec.flag==="reversed_one_swap_unlisted")
+  return "SUSPECT, not refused. Your assembly is ONE glyph away from the candidate reversed"+at+
+   ". That is the exact shape p442:n0 was signed in. Check which end you started from -- then sign "+
+   "what the pixels say, not what this message says.";
+ return "";}
+function upd(){var K=Object.keys(RM).sort(),nc=0,ntouch=0,i,refused=[];
+ for(i=0;i<K.length;i++){var s=K[i],kn=rowComplete(s),r=trow(s),done=rowDone(s),pc=proseConflict(s);
+  var rowEl=document.getElementById("row_"+s);
+  if(rowEl){var lab=document.getElementById("kn_"+s);
+   if(lab)lab.textContent=kn[0]+"/"+kn[1]+" items (tiles + insertions)"+
+    (hasNotInCrop(s)?" \u00b7 NOT a full-span pixel signature (not_in_crop present)":"");
+   var cf=document.getElementById("cf_"+s);
+   if(cf){cf.style.display=pc?"block":"none";cf.textContent=pc?conflictText(s):"";}
+   rowEl.className="row"+(done?" complete":"");}
+  var dtxt=document.getElementById("der_txt_"+s);if(dtxt)dtxt.textContent=derivedFor(s);
+  var ctxt=document.getElementById("cand_txt_"+s);if(ctxt)ctxt.textContent=candFor(s);
+  var rgel=document.getElementById("rg_"+s),rec=rgRecFor(s);
+  if(rgel){rgel.textContent=rgText(rec);
+   rgel.className="rgwarn"+(rgText(rec)?(" on "+(rgRefuses(rec.flag)?"refuse":"warn")):"");}
+  if(rgRefuses(rec.flag))refused.push(s);
+  if(done)nc++;
+  if(kn[0]>0||r.fault||r.abst||r.note||(r.ins&&r.ins.length))ntouch++;}
+ document.getElementById("ncomplete").textContent=nc;
+ document.getElementById("nleft").textContent=(N-ntouch);
+ var a=document.getElementById("dl"),rb=document.getElementById("rgbar");
+ /* The refusal. An <a> with no href is not a link, so there is nothing to click and no
+    partial file to mistake for a record. The verdicts are untouched and still in
+    localStorage: fix the row and the download comes back by itself. */
+ if(refused.length){a.removeAttribute("href");
+  a.textContent="download REFUSED -- "+refused.length+" row(s) assemble to the candidate reversed";
+  if(rb)rb.textContent="REFUSED: "+refused.join(", ")+". Nothing of yours was changed. "+
+   "Position 1 is the rightmost glyph.";}
+ else{a.href="data:text/plain;charset=utf-8,"+encodeURIComponent(lines());
+  a.textContent="download all "+N+" rows";if(rb)rb.textContent="";}
+ try{localStorage.setItem("gs_"+STOREKEY,JSON.stringify(ST));}catch(e){}}
+function applyState(s){var r=ST[s],m=RM[s];if(!r||!m)return;var j;
+ for(j=0;j<m.tiles.length;j++){var td=m.tiles[j],v=(r.tv||{})[td.i];
+  var el=tileDiv(s,td.i);if(el&&v&&v.verdict)el.setAttribute("data-v",v.verdict);renderSic(s,td.i);renderPrior(s,td.i);}
+ var fbtns=document.querySelectorAll('.fault[data-s="'+s+'"]'),fi;
+ for(fi=0;fi<fbtns.length;fi++){
+  fbtns[fi].className=(fbtns[fi].getAttribute("data-ft")===r.fault)?"fault on":"fault";}
+ var lg=document.querySelector('.legfault[data-s="'+s+'"]');
+ if(lg)lg.style.display=r.fault_legacy?"block":"none";
+ var ab=document.querySelector('.abst[data-s="'+s+'"]');if(ab&&r.abst)ab.className="abst on";
+ var nt=document.querySelector('.nt[data-s="'+s+'"]');if(nt)nt.value=r.note||"";
+ var seen={},ij;
+ for(ij=0;ij<(r.ins||[]).length;ij++){var ak=insKey(r.ins[ij].after_i);
+  if(!seen[ak]){seen[ak]=1;renderInsAt(s,r.ins[ij].after_i);}}}
+function restore(){
+ /* BEST EFFORT ONLY -- the download is the record, not this. */
+ var raw=null;try{raw=localStorage.getItem("gs_"+STOREKEY);}catch(e){raw=null;}
+ if(!raw)return 0;var S=null;try{S=JSON.parse(raw);}catch(e){return 0;}
+ var K=Object.keys(S),i,k=0;
+ for(i=0;i<K.length;i++){var s=K[i];if(!RM[s])continue;ST[s]=S[s];k++;applyState(s);}
+ return k;}
+function renderImportCheck(rc){var el=document.getElementById("impcheck");if(!el)return;
+ if(!EXP){el.textContent="no import expectation available (pass-1 file not found at generation time)";
+  return;}
+ var keys=["rows","tiles","confirmed","corrected","disputed","notes","abstains","legacy_faults",
+  "insertions"],h="",i;
+ for(i=0;i<keys.length;i++){var k=keys[i],r=rc[k]||0,e=EXP[k];
+  h+=k+": restored "+r+" vs expected "+e+" -- "+(r===e?"PASS":"MISMATCH")+"<br>";}
+ el.innerHTML=h;}
+function importText(txt,fname){
+ /* The whole of the former doImport body, now shared by the file-input path AND pass 2's auto-import
+    (Change 3) -- ONE importer, same span_id+crop_sha16 matching, same refusal list, same
+    renderImportCheck, whichever path called it. */
+ var ln=(txt||"").split("\n"),i,bad=[],k=0;
+ var rc={rows:0,tiles:0,confirmed:0,corrected:0,disputed:0,notes:0,abstains:0,legacy_faults:0,
+  insertions:0};
+ for(i=0;i<ln.length;i++){var s=ln[i].replace(/^\s+|\s+$/g,"");if(!s)continue;
+  var d=null;try{d=JSON.parse(s);}catch(e){continue;}
+  if(!d.span_id||!RM[d.span_id])continue;
+  if(d.crop_sha16!==RM[d.span_id].crop16){bad.push(d.span_id);continue;}
+  var rr=trow(d.span_id);rr.tv={};rr.sic={};rr.pv={};rr.unl={};var tj,dtiles=d.tiles||[];
+  rc.rows++;rc.tiles+=dtiles.length;
+  for(tj=0;tj<dtiles.length;tj++){var tt=dtiles[tj];
+   if(tt.verdict){rr.tv[tt.i]={verdict:tt.verdict,chose:tt.chose||""};
+    rr.pv[tt.i]={verdict:tt.verdict,chose:tt.chose||"",expected:(tt.verdict==="sic"?(tt.expected||""):""),
+     restored:tt.restored_from||""};
+    if(tt.verdict==="sic")rr.sic[tt.i]={expected:tt.expected||"",reason:tt.reason||"",basis:tt.basis||""};
+    if(tt.verdict==="confirmed")rc.confirmed++;
+    else if(tt.verdict==="corrected")rc.corrected++;
+    else if(tt.verdict==="disputed")rc.disputed++;}}
+  rr.note=d.note||"";if(rr.note)rc.notes++;
+  rr.abst=d.abstain?1:0;if(d.abstain)rc.abstains++;
+  rr.fault=(TYPED_FAULTS.indexOf(d.fault)>=0)?d.fault:"";
+  rr.fault_legacy=d.fault_legacy?d.fault_legacy:((d.fault===LEGACY_FAULT)?LEGACY_FAULT:"");
+  if(rr.fault_legacy)rc.legacy_faults++;
+  rr.ins=(d.insertions||[]).map(function(x){return {seq:x.seq,after_i:x.after_i,kind:x.kind,
+   chose:x.chose||"",verdict:x.verdict||"",expected:x.expected||"",reason:x.reason||"",basis:x.basis||"",
+   pv:(x.verdict?{verdict:x.verdict,chose:x.chose||"",restored:x.restored_from||""}:null)};});
+  rr.insSeq=rr.ins.length?(Math.max.apply(null,rr.ins.map(function(x){return x.seq;}))+1):0;
+  rc.insertions+=rr.ins.length;
+  applyState(d.span_id);k++;}
+ var w=document.getElementById("impwarn");
+ w.textContent=bad.length?("NOT restored (crop_sha16 differs -- a re-cut span must not inherit a "+
+  "verdict): "+bad.join(", ")):"";
+ document.getElementById("impmsg").textContent="imported "+k+" row(s) from "+fname;
+ renderImportCheck(rc);
+ applySeeds();upd();}
+function doImport(inp){
+ var f=inp.files&&inp.files[0];if(!f)return;
+ var rd=new FileReader();
+ rd.onload=function(){importText(rd.result||"",f.name);};
+ rd.readAsText(f,"utf-8");}
+window.addEventListener("load",function(){var k=restore();
+ document.getElementById("rst").textContent=k?("restored "+k+" row(s) from this browser"):
+  "nothing restored from this browser";
+ if(AUTOIMPORT&&k===0){importText(EMBED,EMBED_NAME);}
+ applySeeds();upd();});
+"""
+# end JS_PASS5 -- everything above this line from its label is the re-sign console.
+
 # ---- blob identity, pinned in EVERY mode. JS_V1 renders the console that produced pass 1 and JS_PASS2
 # the one Chris signed pass 2 on: each is a console that is already signed and spent, and an edit to
 # either rewrites the record of what was approved. Length is len(str) of the blob without its
@@ -2029,13 +2458,41 @@ check(_blob_id(JS_PASS4) == (PASS4_LEN, PASS4_SHA16),
       "(pass 3 round 2); it must never be edited -- fork a new blob instead"
       % (_blob_id(JS_PASS4), PASS4_LEN, PASS4_SHA16))
 
-_JS_WANT = ((JS_PASS3 if TEST_CONSOLE else JS_PASS4) if PASS4 else
-            (JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1)))
+# FRESH, not spent: nobody has signed an export on JS_PASS5 yet. The pin is written in the SAME commit
+# as the blob it measures, and is updated only in a commit that also edits the blob -- never after an
+# export has been signed on it, at which point this comment becomes the SPENT one above.
+PASS5_LEN, PASS5_SHA16 = 23995, "4d72b4df0a620042"
+check(_blob_id(JS_PASS5) == (PASS5_LEN, PASS5_SHA16),
+      "JS_PASS5 measures %r, not (%d, %s)" % (_blob_id(JS_PASS5), PASS5_LEN, PASS5_SHA16))
+
+_JS_WANT = (JS_PASS5 if RESIGN else
+            ((JS_PASS3 if TEST_CONSOLE else JS_PASS4) if PASS4 else
+             (JS_PASS3 if PASS3 else (JS_PASS2 if PASS2 else JS_V1))))
 JS = _JS_WANT
-check(JS is _JS_WANT and (PASS3 or JS is not JS_PASS3) and (PASS4 or JS is not JS_PASS4),
+check(JS is _JS_WANT and (PASS3 or JS is not JS_PASS3) and (PASS4 or JS is not JS_PASS4)
+      and ((JS is JS_PASS5) == bool(RESIGN)),
       "the console chosen for this mode is not the one this mode names")
 
-_TITLE_SUFFIX = " (pass 3)" if PASS3 else (" (pass 2)" if PASS2 else "")
+_TITLE_SUFFIX = " (re-sign)" if RESIGN else (" (pass 3)" if PASS3 else (" (pass 2)" if PASS2 else ""))
+RESIGN_CSS = """
+.rtlrow{direction:rtl;margin:8px 0;padding:6px;background:#0a0b0d;border:1px solid #334;border-radius:4px}
+.tpos{display:block;direction:ltr;font:10px/1.2 ui-monospace,SFMono-Regular,monospace;color:#7ab;
+ text-align:center;margin-bottom:3px}
+.rtlnote{font:11px/1.5 system-ui,sans-serif;color:#9ab;margin:4px 0}
+.asmbox{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0;padding:6px 8px;background:#121418;
+ border:1px dashed #445;border-radius:4px}
+.asmbox>div{font:11px/1.5 system-ui,sans-serif;color:#9ab}
+.asmbox code{display:block;font:24px/1.4 "Times New Roman",serif;color:#eef;direction:rtl;
+ unicode-bidi:bidi-override;min-height:30px}
+.rgwarn{display:none;font:12px/1.5 system-ui,sans-serif;border-radius:4px;padding:5px 8px;margin:5px 0}
+.rgwarn.on{display:block}
+.rgwarn.refuse{color:#fbb;background:#2a1212;border:1px solid #a44}
+.rgwarn.warn{color:#fc8;background:#2a2012;border:1px solid #c86}
+#rgbar{color:#fbb;font:12px/1.6 system-ui,sans-serif;margin-top:4px}
+.resignbasis{font:11px/1.6 system-ui,sans-serif;color:#cba;background:#1a1612;border:1px solid #654;
+ border-radius:3px;padding:5px 8px;margin:5px 0}
+.noimport{font:11px/1.5 system-ui,sans-serif;color:#9ab}
+"""
 PASS4_CSS = """
 .priorbadge{display:block;font:11px/1.3 system-ui,sans-serif;color:#fc8;background:#2a2012;border:1px solid #c86;
  border-radius:3px;padding:1px 4px;margin-bottom:3px}
@@ -2047,9 +2504,19 @@ PASS4_CSS = """
 .inschip .priorbadge,.inschip .nowbadge,.inschip .restnote{display:inline-block;margin:0 3px 0 0}
 """
 H = ['<!doctype html><meta charset="utf-8"><title>glyph signer %s%s - %d spans, per-glyph verdicts</title>'
-     % (SET, _TITLE_SUFFIX, RUN_N), "<style>%s</style>" % (CSS + (PASS4_CSS if PASS4 else ""))]
+     % (SET, _TITLE_SUFFIX, RUN_N),
+     "<style>%s</style>" % (CSS + (PASS4_CSS if PASS4 else "") + (RESIGN_CSS if RESIGN else ""))]
 H.append("<h1>Glyph signer <code>%s</code>%s &mdash; %d spans, per-glyph verdicts</h1>"
-         % (SET, " &mdash; PASS 3" if PASS3 else (" &mdash; PASS 2" if PASS2 else ""), RUN_N))
+         % (SET, " &mdash; RE-SIGN" if RESIGN else
+                 (" &mdash; PASS 3" if PASS3 else (" &mdash; PASS 2" if PASS2 else "")), RUN_N))
+if RESIGN:
+    H.append('<div class="sub">RE-SIGN (ruling 4, 2026-10-25). These spans\' prior signatures were ruled '
+             'SIGNATURE ERRORS by the audit of 2026-10-25 &mdash; the reading was wrong, not the pixels '
+             'and not the box. Nothing is imported: a re-sign that inherited the verdict it replaces '
+             'would be the same reading in a new file. The tiles below read <b>right to left</b>, '
+             'position 1 is the <b>rightmost</b> glyph, and the download is REFUSED while an assembly '
+             'is the candidate reversed. The prior signature is not shown here; it is on the glyph '
+             'card, with the audit\'s own reason, where a reading is read against pixels.</div>')
 H.append('<div class="sub">FILE pages throughout; printed = file &minus; %d. A2 span box, PAD=%d native '
          'px, over a clean tree. The candidate is SHOWN here (it was withheld on the signing sheet); '
          'every property of it -- each consonant, each word gap, the pointing -- gets its own verdict. '
@@ -2247,6 +2714,25 @@ for r in ROWS:
                  % (_furl(nci["path"]), nci["native_wh"][0], nci["native_wh"][1],
                     nci["native_wh"][0], nci["native_wh"][1], NOTECROP_BOX_HEX, _badge))
 
+    if RESIGN:
+        for _arm, _cls, _rev, _txt, _nheb in RESIGN_BASIS[sid]:
+            H.append('<div class="resignbasis"><b>audit 2026-10-25, arm %s</b> &mdash; run class %s, '
+                     'reversed=%s<br>%s</div>'
+                     % (html.escape(_arm), html.escape(str(_cls)), "YES" if _rev else "no",
+                        html.escape(_txt)))
+
+    # Ruling 4: explicit position numbers. The number is the glyph's READING position -- its ordinal
+    # among the row's consonants counted from the right, which is storage order -- and a gap is labelled
+    # as a gap rather than given a number it would then share with a letter.
+    _posof, _pk = {}, 0
+    for t in r["tiles"]:
+        if t["kind"] == "consonant":
+            _pk += 1
+            _posof[t["i"]] = str(_pk)
+        else:
+            _posof[t["i"]] = "gap"
+    _tp = ((lambda ti: '<span class="tpos">%s</span>' % _posof[ti]) if RESIGN else (lambda ti: ""))
+
     tiles_meta = []
     if r["paired_at"] == "none":
         H.append('<figure><img src="%s"><figcaption>no pairing offered (ink-run count did not match '
@@ -2264,6 +2750,11 @@ for r in ROWS:
             if run:
                 H.append('<figure><img src="%s"><figcaption>word run %s, &times;%d</figcaption></figure>'
                          % (_crop_slice_uri(im, run[0], run[1], context=0, mag=MAG), run, MAG))
+    if RESIGN:
+        H.append('<div class="rtlnote">%d consonant tile(s), numbered by READING position: '
+                 '<b>1 is the rightmost</b>. The row below lays out right to left, the way the fount '
+                 'prints it.</div>' % _pk)
+        H.append('<div class="rtlrow">')
     H.append(_insert_slot_html(sid, None))
     for t in r["tiles"]:
         if t["kind"] == "consonant":
@@ -2273,6 +2764,7 @@ for r in ROWS:
             if r["paired_at"] == "letter" and run:
                 img_html = ('<img src="%s">'
                             % _crop_slice_uri(im, run[0], run[1], context=LETTER_CONTEXT_PX, mag=MAG))
+            img_html = _tp(t["i"]) + img_html
             _tile_html = ('<div class="tile cons" id="t_%s_%d" data-s="%s" data-i="%d" data-cand="%s">%s'
                       '<button class="tbtn ok" data-s="%s" data-i="%d" onclick="tOk(this)">&#10003;</button>'
                       '<button class="tbtn no" data-s="%s" data-i="%d" data-k="cons" '
@@ -2286,21 +2778,34 @@ for r in ROWS:
             H.append(_sic_wrap(_tile_html, sid, t["i"]) if PASS3 else _tile_html)
             tiles_meta.append({"i": t["i"], "kind": "consonant", "paired_to": list(run) if run else None})
         else:
-            H.append('<div class="tile gap" id="t_%s_%d" data-s="%s" data-i="%d">'
+            H.append('<div class="tile gap" id="t_%s_%d" data-s="%s" data-i="%d">%s'
                       '<button class="tbtn ok" data-s="%s" data-i="%d" onclick="tOk(this)">&#10003;</button>'
                       '<button class="tbtn no" data-s="%s" data-i="%d" data-k="gap" '
                       'onclick="tBad(this)">&#10007;</button>'
                       '<button class="tbtn del" data-s="%s" data-i="%d" onclick="tDel(this)">del</button>'
                       '<button class="tbtn nic" data-s="%s" data-i="%d" onclick="tNic(this)">not in '
                       'crop</button></div>'
-                     % (html.escape(sid), t["i"], html.escape(sid), t["i"],
+                     % (html.escape(sid), t["i"], html.escape(sid), t["i"], _tp(t["i"]),
                         html.escape(sid), t["i"], html.escape(sid), t["i"],
                         html.escape(sid), t["i"], html.escape(sid), t["i"]))
             tiles_meta.append({"i": t["i"], "kind": "gap", "paired_to": None})
         H.append(_insert_slot_html(sid, t["i"]))
+    if RESIGN:
+        H.append("</div>")
 
-    H.append('<div class="derived">derived from your verdicts &mdash; not a candidate, not signable: '
-             '<code id="der_txt_%s"></code></div>' % html.escape(sid))
+    if RESIGN:
+        # Ruling 4: "the assembled string shown as rendered Hebrew beside the tiles". Both strings are
+        # written by the console from the tiles' own data-cand, so neither adds Hebrew to this document
+        # and the leak guard below is unchanged.
+        H.append('<div class="asmbox">'
+                 '<div>candidate, as the tiles carry it<code id="cand_txt_%s"></code></div>'
+                 '<div>your assembly, derived from your verdicts &mdash; not signable on its own'
+                 '<code id="der_txt_%s"></code></div></div>'
+                 '<div class="rgwarn" id="rg_%s"></div>'
+                 % (html.escape(sid), html.escape(sid), html.escape(sid)))
+    else:
+        H.append('<div class="derived">derived from your verdicts &mdash; not a candidate, not signable: '
+                 '<code id="der_txt_%s"></code></div>' % html.escape(sid))
 
     H.append('<div class="points" data-s="%s" data-cand="%s"></div>'
              '<div class="sub">points shown, not adjudicated: n_points=%d, nikud_flag=%s '
@@ -2334,11 +2839,17 @@ for r in ROWS:
 
 H.append('<div id="bar">complete <b id="ncomplete">0</b> of %d &nbsp;&middot;&nbsp; untouched '
          '<b id="nleft">%d</b><br><a id="dl" download="%s" href="#">download all %d rows</a> '
-         '&nbsp;&middot;&nbsp; <input type="file" accept=".jsonl,.txt" onchange="doImport(this)"> '
+         '&nbsp;&middot;&nbsp; %s '
          '<span id="impmsg" style="color:#8aa"></span><div id="impwarn"></div>'
          '&nbsp;&middot;&nbsp; <span id="rst" style="color:#8aa"></span>'
-         '<div class="sub">The downloaded file is the record; the browser is not.</div></div>'
-         % (RUN_N, RUN_N, SKEL_NAME, RUN_N))
+         '<div class="sub">The downloaded file is the record; the browser is not.</div>%s</div>'
+         % (RUN_N, RUN_N, SKEL_NAME, RUN_N,
+            # A re-sign has NO import control, so no signed row can be read back into the console that
+            # is replacing it. The two message ids stay in the document because the importer writes to
+            # them; nothing can reach the importer.
+            ('<span class="noimport">no import &mdash; a re-sign starts blank by construction</span>'
+             if RESIGN else '<input type="file" accept=".jsonl,.txt" onchange="doImport(this)">'),
+            '<div id="rgbar"></div>' if RESIGN else ''))
 
 # Pass 2 (judgment call, see module docstring): its own localStorage key, so a pass-2 draft can never
 # silently intermix with a pass-1 draft for the same span_ids.
@@ -2353,7 +2864,8 @@ for _ssid, _sd in SIC_SEEDS.items():
               % (_ssid, _hits))
         SIC_SEED_META[_ssid] = {"tile_i": _hits[0], "expected": _sd["expected"], "reason": _sd["reason"]}
 SEEDS_JS = json.dumps(SIC_SEED_META)
-STOREKEY = (SET + "_pass3" + _R) if PASS3 else ((SET + "_pass2") if PASS2 else SET)
+STOREKEY = (SET + "_resign") if RESIGN else \
+    ((SET + "_pass3" + _R) if PASS3 else ((SET + "_pass2") if PASS2 else SET))
 
 def _fill(blob):
     return (blob.replace("__RM__", json.dumps(RM, sort_keys=True))
@@ -2374,6 +2886,12 @@ def _fill(blob):
              .replace("__P3_SEEDS__", SEEDS_JS))
 
 
+if RESIGN:
+    # ONE RULE, TWO AXES. This block is GENERATED by reversal_guard_js.py from signature_reversal.examine
+    # and confusable_vocab, and test_reversal_guard_js.py runs it under node against the Python over every
+    # real signature/read pair plus a cross-product. It is pure ASCII (the vocabulary's Hebrew is \uXXXX
+    # escaped), so it adds no Hebrew to this document and the leak guard below is unchanged.
+    H.append("<script>" + RGJS.GUARD_JS + "</script>")
 H.append("<script>" + _fill(JS) + "</script>")
 
 doc = "\n".join(H)
@@ -2446,18 +2964,69 @@ assert not _leak, \
     % (_leak.start() if _leak else -1,
        _doc_wo_cand_p1[max(0, _leak.start() - 40):_leak.start() + 10] if _leak else "")
 
+# The re-sign filename, derived ONCE here so guard 3r can check the name before DIG exists and the
+# writer below can assert it is writing that same name. A check against a name built a second time at
+# the write site would agree with itself.
+OUT_NAME_PREVIEW = ("glyphsign_%s_resign_%dspan_%%s.html" % (SET, RUN_N)) if RESIGN else None
+
+# 3r (re-sign, ruling 4). The three properties, asserted over the RENDERED document rather than over
+# the intention: the tiles are inside an RTL container, every tile carries a position number, every row
+# shows the candidate and the assembly as rendered Hebrew beside them, the guard is present with its two
+# consequences, and there is NO import control.
+if RESIGN:
+    check(doc.count('<div class="rtlrow">') == RUN_N and '.rtlrow{direction:rtl' in doc,
+          "the %d tile row(s) are not each inside a container the shipped stylesheet lays out "
+          "right-to-left (containers found %d, rule present %s)"
+          % (RUN_N, doc.count('<div class="rtlrow">'), '.rtlrow{direction:rtl' in doc))
+    check(doc.count('<span class="tpos">') == TOTAL_TILES,
+          "%d position number(s) for %d tiles -- a tile with no number is a tile whose position the "
+          "signer has to infer, which is the defect this mode exists to fix"
+          % (doc.count('<span class="tpos">'), TOTAL_TILES))
+    check(doc.count('<code id="cand_txt_') == RUN_N and doc.count('<code id="der_txt_') == RUN_N
+          and doc.count('class="asmbox"') == RUN_N,
+          "the candidate/assembly panel does not appear exactly once per row")
+    check(doc.count("<script>" + RGJS.GUARD_JS + "</script>") == 1
+          and all(("function " + f + "(") in doc
+                  for f in ("rgExamine", "rgRefuses", "rgWarns", "rgCons", "rgDiffs")),
+          "the generated reversal guard is not in the document exactly once with its two consequences")
+    check('type="file"' not in doc and "onchange=\"doImport(this)\"" not in doc
+          and 'id="impmsg"' in doc and 'id="rgbar"' in doc,
+          "a re-sign document offers an import control (or lost an id the console writes to): the "
+          "signature being replaced must not be readable back into the console replacing it")
+    check(not READABLE.search("".join(t for _b in RESIGN_BASIS.values()
+                                       for (_a, _c, _v, t, _n) in _b)),
+          "an emitted audit basis still carries Hebrew")
+    check(RUN_N == 4 and sorted(RUN_SPAN_IDS) == ["p254:n1", "p442:n0", "p798:n0", "p831:n2"],
+          "the re-sign population is %r, not the four spans the 2026-10-25 audit ruled signature "
+          "errors -- if the audit grew, this literal is the thing to update, deliberately"
+          % (sorted(RUN_SPAN_IDS),))
+    check("resign" in OUT_NAME_PREVIEW and "resign" in SKEL_NAME and "pass2" not in OUT_NAME_PREVIEW
+          and "pass3" not in OUT_NAME_PREVIEW and ("_%dspan" % SET_N) not in OUT_NAME_PREVIEW,
+          "a re-sign must never write to a pass-1/2/3 filename: %s / %s"
+          % (OUT_NAME_PREVIEW, SKEL_NAME))
+
 # 3d (round identity). The console in the BUILT DOCUMENT is the pinned blob the mode names: the document
 # contains exactly one script element equal to that blob with its placeholders filled, the blob measures
 # its pinned (length, sha16), and the other forks' signature functions are present or absent accordingly.
 _PIN_BY_BLOB = {"JS_V1": (11968, "7fa5fd3fd0d4f9f7"), "JS_PASS2": (12422, "3ccd5adfbb39c5c4"),
-                "JS_PASS3": (17628, "ae889bc9422df5f0"), "JS_PASS4": (PASS4_LEN, PASS4_SHA16)}
+                "JS_PASS3": (17628, "ae889bc9422df5f0"), "JS_PASS4": (PASS4_LEN, PASS4_SHA16),
+                "JS_PASS5": (PASS5_LEN, PASS5_SHA16)}
 _JS_NAME = next(n for n, b in (("JS_V1", JS_V1), ("JS_PASS2", JS_PASS2), ("JS_PASS3", JS_PASS3),
-                                ("JS_PASS4", JS_PASS4)) if b is JS)
+                                ("JS_PASS4", JS_PASS4), ("JS_PASS5", JS_PASS5)) if b is JS)
 check(doc.count("<script>" + _fill(JS) + "</script>") == 1 and _blob_id(JS) == _PIN_BY_BLOB[_JS_NAME],
       "the built document's script is not exactly one filled copy of the pinned %s" % _JS_NAME)
-check(("function tChange(" in doc) == (_JS_NAME == "JS_PASS4"),
-      "tChange (the pass-4 'change' control) is %s in a document built on %s"
-      % ("present" if "function tChange(" in doc else "absent", _JS_NAME))
+# What each blob DEFINES, stated per blob rather than derived from the blob -- a check that reads the
+# answer out of the thing it is checking asserts nothing. One counted check over the whole table, so
+# adding a fork does not move any spent mode's EXPECTED_CHECKS.
+_BLOB_DEFINES = {"JS_V1": (), "JS_PASS2": (), "JS_PASS3": (),
+                 "JS_PASS4": ("function tChange(",),
+                 "JS_PASS5": ("function tChange(", "function candFor(", "function rgRecFor(")}
+_feat_all = sorted(set(f for fs in _BLOB_DEFINES.values() for f in fs))
+_feat_bad = [(f, ("present" if f in doc else "absent")) for f in _feat_all
+             if (f in doc) != (f in _BLOB_DEFINES[_JS_NAME])]
+check(not _feat_bad,
+      "console function(s) %r in a document built on %s, against what that blob is stated to define %r"
+      % (_feat_bad, _JS_NAME, _BLOB_DEFINES[_JS_NAME]))
 
 # 3c (pass 3). The embedded pass-2 signed rows are a round trip too: exactly the selection, each on the
 # pixels this run cut, and the Hebrew they carry is escaped (json.dumps), never raw in the document.
@@ -2607,7 +3176,9 @@ PDIG = hashlib.sha256(PROSE.encode("utf-8")).hexdigest()[:8]
 # Guard list item 1. Without --pass2 the rendered document must be BYTE-IDENTICAL to 5a0a65b's: pass 2
 # must never alter the pass-1 console. Checked against the two numbers the spec itself names, not a
 # locally-recomputed baseline (which could drift with this very file and stop meaning anything).
-if not PASS23:
+# The pass-1 console's own byte pin. A re-sign is a different population on a different blob, so it is
+# excluded by name -- never by loosening the assertion, which is what still holds default mode still.
+if not (PASS23 or RESIGN):
     assert PDIG == "0188f491", \
         "prose digest is %s, not 5a0a65b's 0188f491 -- pass 2's own code has changed the pass-1 console" \
         % PDIG
@@ -2620,7 +3191,9 @@ sig = ";".join("%s:%s:%s" % (sid, RM[sid]["crop16"], RM[sid]["paired_at"]) for s
 DIG = hashlib.sha256(sig.encode("utf-8")).hexdigest()[:8]
 # Output filename and sidecar carry "pass2" and the row count under --pass2, so the two consoles can
 # never be confused; the pass-1 console's own name (this else-branch) must not change.
-if PASS3:
+if RESIGN:
+    OUT = OUT_DIR / (OUT_NAME_PREVIEW % DIG)
+elif PASS3:
     OUT = OUT_DIR / ("glyphsign_%s_pass3%s_%dspan_%s.html" % (SET, _R, RUN_N, DIG))
 elif PASS2:
     OUT = OUT_DIR / ("glyphsign_%s_pass2_%dspan_%s.html" % (SET, RUN_N, DIG))
@@ -2644,7 +3217,18 @@ GIT_END = git_state(_HERE)
 json.dump({"generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "git_start": GIT_START, "git_end": GIT_END,
            "provisional": provisional(GIT_START, GIT_END),
-           "set_sha16": SET, "n": RUN_N, "pass2": PASS2, "pass3": PASS3, "mode": MODE,
+           "set_sha16": SET, "n": RUN_N, "pass2": PASS2, "pass3": PASS3, "resign": RESIGN,
+           "mode": MODE,
+           "resign_population": ({"verdict": RESIGN_VERDICT, "source": "audit_overlay_20261025.AUDIT",
+                                   "span_ids": list(RUN_SPAN_IDS),
+                                   "basis_hebrew_runs_replaced":
+                                       {sid: sum(n for (_a, _c, _v, _t, n) in rows)
+                                        for sid, rows in sorted(RESIGN_BASIS.items())}}
+                                  if RESIGN else None),
+           "reversal_guard": ({"generator": "reversal_guard_js.py",
+                                "blob_id": list(RGJS.guard_id()),
+                                "refusing_flags": list(RGJS.REFUSING_FLAGS),
+                                "warning_flags": list(RGJS.WARNING_FLAGS)} if RESIGN else None),
            "checks_run": CHECKS, "expected_checks": EXPECTED_CHECKS,
            "note_numbering": "FILE pages (printed = file - %d)" % PRINTED_OFFSET,
            "pass2_selection": ({"dispositions": sorted(PASS2_DISPOSITIONS),
@@ -2715,6 +3299,8 @@ print("  tile controls: confirm %d, dispute-open %d, delete %d, not-in-crop %d, 
       % (_n_ok, _n_no, _n_del, _n_nic, _n_ins))
 if IMPORT_EXPECTATION is not None:
     print("  import expectation (from %s): %s" % (EXP_SRC_NAME, EXP_LINE))
+elif RESIGN:
+    print("  import expectation: NONE -- a re-sign imports nothing and renders no import control")
 else:
     print("  import expectation SKIPPED -- %s not found at generation time" % PASS1_NAME)
 print("  word-count disagreement: %d row(s): %s" % (len(WORD_COUNT_DISAGREES), ", ".join(WORD_COUNT_DISAGREES)))
@@ -2728,6 +3314,12 @@ if PASS3:
           % (HELD2_NAME, PASS3_DISPOSITION, ", ".join(RUN_SPAN_IDS)))
     print("  import: %s (sha16 %s), %d signed row(s) embedded" % (PASS2_EXPORT_NAME, PASS2_EXPORT_SHA16, RUN_N))
     print("  note crops in %s" % NOTECROP_DIR)
+if RESIGN:
+    print("  re-sign selection (verdict %r in audit_overlay_20261025): %s"
+          % (RESIGN_VERDICT, ", ".join(RUN_SPAN_IDS)))
+    print("  reversal guard %s (%d chars, sha16 %s); refuses on %s"
+          % ("reversal_guard_js.GUARD_JS", RGJS.guard_id()[0], RGJS.guard_id()[1],
+             ", ".join(RGJS.REFUSING_FLAGS)))
 if PASS2:
     print("  pass 2 selection: %s"
           % ", ".join("%s %d" % (d, _ingest_dispo_counts.get(d, 0)) for d in sorted(PASS2_DISPOSITIONS)))
