@@ -170,6 +170,19 @@ consumer must either act on it or state in its own output that it did not.
    and tight; clipping a tall letter feeds a mutilated crop to the gates) and navigation (loose).
    It is ratified to the strict one. The loose tolerance lives **downstream** as a fallback
    hierarchy — note box → column region → page — and never as an approved sloppy box.
+
+   **"Tight" in pixels, per unit.** Strict is one principle with a measured tolerance per unit, and
+   the tolerance belongs in the record, not in a reader's head.
+
+   | unit | ratified rect | agrees when |
+   |---|---|---|
+   | verse-heading rect | **`ink_box`** — the region's ink extent, including capitals, ascenders and descenders | **top within 5 px**, and **bottom within 5 px OR within one measured descender height**. Top and bottom only; **x is column geometry and is not scored.** |
+
+   The descender height is the **run's own typographic descender mode, derived per run** — 16 px on
+   vol.1 — not a constant. **Basis:** the page-geometry lane's rerun-8 conventions, under Chris's
+   ruling 2 of 2026-10-25, relayed to this lane in writing. Lane B has not re-measured it, and the
+   Hebrew-span tolerance was never stated in these terms, so the two are **not** the same number
+   written twice.
 5. **On segmentation failure, abstain and flag.** Never fall back to reading the whole band: that
    records one note where there were thirteen.
 6. **Count is the gate.** Detected units must equal the extractor's count or the page abstains.
@@ -241,10 +254,11 @@ A consumer that cannot run 1, 2 and 3 has not been handed a truth set; it has be
   the reading, recoverable. The measured error rate in signed vol.1 strings was 6 of 20.
 - **It does not define the drawing of a population.** `limits` and `predictions` are required
   fields, but no schema can tell whether the prediction was registered before the rows were seen.
-- **It says nothing about tolerances for a non-Hebrew unit.** Verse regions and body spans are
-  ratified to the strict extraction tolerance by §6.4, but the pixel meaning of "tight" for a
-  verse-heading rect has not been measured. That is the first thing the verse-region consumer should
-  send back.
+- **Only one non-Hebrew unit has a stated tolerance.** The verse-heading rect now has one (§6.4),
+  measured by the lane that owns the geometry. **Body spans still do not**, and neither does the
+  note box as a unit in its own right. A consumer ratifying one of those is working to a principle
+  without a number, and should send its own measured tolerance back into §6.4 rather than borrow
+  the verse-heading row.
 - **No `rule_kind`-style field records which structural variant was found.** Where a detector can
   accept two shapes (a single and a double printed rule, say) and records nothing that tells them
   apart, this format does not currently carry that distinction. A consumer who needs it should
