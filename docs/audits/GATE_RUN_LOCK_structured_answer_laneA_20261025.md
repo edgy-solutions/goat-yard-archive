@@ -318,3 +318,52 @@ works. Arm 1 is not repaired and not spliced; a repaired arm joined to a void
 one is not a pair. The predictions above stand unamended -- they were written
 before any arm ran and they do not get a second draft because the first attempt
 hit a dead backend.
+
+### 2026-10-26 -- credential patched by the operator, all four arms rerun
+
+**What Chris did** (his words, recorded because it is the precondition for
+every number below): *"gya-test gya-frontend-secrets: OPENROUTER_API_KEY,
+OPENROUTER_API_KEY_ANON, LANGFUSE_SECRET_KEY patched from prod's Secret on
+2026-10-25, out-of-band, no values viewed; api restarted; flag still 1. Rerun
+all four arms from the top."* No credential value was viewed by me at any
+point.
+
+**THE FIX DOES NOT ADJUDICATE THE CAUSE.** Copying prod's key into gya-test
+repairs candidate (a) *and* candidate (b) identically, so a working backend
+discriminates neither. The cause of the original failure stays
+**UNDETERMINED** and this entry is not a retroactive vote for the rotation
+story. A fix working is not evidence for the reason you gave for it.
+
+**Checked before spending 336 requests**, because a repaired backend is a
+claim until a request proves it:
+
+- One live request: HTTP 200, `error=None`, 2329-char answer, 12 citations,
+  8 mapped entities, `expanded_query != query`, and **no abort signature**
+  under the new run-level detector. The backend is answering.
+- **The image digest is unchanged** across the operator's restart
+  (`sha256:2fce1e34...b11433` on the pod's `imageID`). The lock's section-3
+  pin therefore still holds and the rerun is comparable to the image this
+  file declared. Had the restart moved the digest, the flag would no longer
+  have been the only variable and this lock would have needed reopening, not
+  an addendum.
+
+**Arm 1's void output is preserved, not overwritten**, at
+`evals/output/gate_20261025/A1-off-null1-VOID-20261026/` with its `VOID.md`.
+The rerun writes a fresh `A1-off-null1`. Nothing is spliced and the void arm
+remains readable as the record of what a dead backend looks like through this
+harness.
+
+**Residual found while launching, mitigated by procedure not by a code
+change.** The single-pod gate excludes pods carrying a `deletionTimestamp`
+(`paired_gate_run.py:175`), but a terminating pod can still sit in the
+service's endpoints for a moment, which is precisely the two-flags-serving
+state the gate exists to prevent. A `kubectl` snapshot taken mid-termination
+showed a flag-0 and a flag-1 pod both Ready. Mitigation for **every** arm:
+wait for `rollout status` to complete *and* confirm the EndpointSlice lists
+exactly one serving endpoint before launching. Deliberately **not** a
+launcher change: editing the instrument between arms would make the arms
+non-identical, which costs more than the procedure does.
+
+**The predictions in section 4 stand unamended.** They were written before any
+arm ran, and a dead backend on the first attempt does not earn them a second
+draft.
