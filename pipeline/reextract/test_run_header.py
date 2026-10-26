@@ -37,8 +37,12 @@ sys.path.insert(0, str(HERE))
 from run_header import (build_header, require_endpoint, config_sha16, endpoint_id,
                         normalize_hostport, model_digests, HeaderMissingEndpoint)
 
-OWNED = ["born_test.py", "collapse_run.py", "gemma_witness.py", "hebrew_aperture_diag.py",
-         "hebrew_frontier_or.py"]
+OWNED = ["born_test.py", "collapse_run.py", "gemma_witness.py", "hebrew_frontier_or.py"]
+# Scripts that USED to write a header and now write none, because their outbound path was removed.
+# They are asserted in the OPPOSITE direction below: a header-writing import reappearing here means
+# the send path came back. The list is not a way out of section (4) -- an entry only belongs here
+# once the module makes no call at all, which is what the second check measures.
+RETIRED = [("hebrew_aperture_diag.py", "run() retired 2026-10-25, Chris ruling 2")]
 SUBSTRATE = ["run_vol1.py"]
 
 FAKE = lambda hostport, model, timeout=None: "deadbeefcafe0001"
@@ -188,6 +192,21 @@ for script in OWNED:
           'json.dumps({"kind": "config_header"' not in txt.replace(" ", "").replace(
               'json.dumps({"kind":"config_header"', 'json.dumps({"kind": "config_header"'),
           "a literal config_header dict survives")
+
+print("\n(4b) the RETIRED scripts write no header, because they make no call")
+# An absence check needs a companion that the pattern is findable at all, or it passes on nothing.
+# Section (4) above is that companion: it just asserted "from run_header import" IS present in four
+# live modules in this same run.
+for script, why in RETIRED:
+    txt = (HERE / script).read_text(encoding="utf-8", errors="replace") if (HERE / script).exists() else None
+    check(f"{script} exists (an absent file would pass every check below)", txt is not None)
+    txt = txt or ""
+    check(f"{script} imports no header writer   [{why}]", "from run_header import" not in txt)
+    check(f"{script} calls build_header nowhere   [{why}]", "build_header(" not in txt)
+    check(f"{script} posts nowhere   [{why}]",
+          "httpx.post" not in txt and "requests.post" not in txt and "api/generate" not in txt)
+    check(f"{script} records the retirement in the source", "RETIRED" in txt)
+
 
 print("\n(5) shared substrate — NOT wired here, documented so the gap is not silent")
 for script in SUBSTRATE:

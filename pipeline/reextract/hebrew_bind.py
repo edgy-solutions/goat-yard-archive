@@ -3,7 +3,7 @@
 WHY THIS IS NOT THE TEST IT LOOKS LIKE. The obvious form of item 3 is "read every crop locally and
 check the signed text came back." That test is INVALID here, and the reason is measured, not
 supposed: every arm sends TWO images -- the context strip first, then the aperture crop
-(`hebrew_local_arms.read_one`, `hebrew_aperture_diag.read_one`, both
+(`hebrew_local_arms.read_one`, and `hebrew_aperture_diag.read_one` for the arm-C rows -- both
 `"images": [_b64(context_strip), _b64(crop)]`). The strips carry 9.8-16.2% ink. A model that can see
 the strip can return the full signed text no matter what the box contains, so a full recovery is
 evidence about the STRIP, not about the box.
@@ -374,8 +374,14 @@ def selftest():
     # The confound is the whole design, so it is asserted structurally: if an arm ever stops sending
     # the strip, this test must fail and force the docstring to be rewritten rather than quietly
     # becoming a valid confirmation test that still refuses to confirm.
+    # hebrew_aperture_diag's read path was RETIRED on 2026-10-25 (Chris, ruling 2: it posted
+    # ungated, and over the note box). Its arm-C rows stay in the record and are still scored here,
+    # so the confound they carry is now HISTORICAL: witnessed by the code at the commit that
+    # deleted it, not by any live source. That module is therefore checked the other way below --
+    # it must send nothing -- and the live liveness check is hebrew_local_arms, which still sends
+    # the strip first and must still say so in its source.
     _here = _Path(__file__).parent
-    for mod in ("hebrew_local_arms.py", "hebrew_aperture_diag.py"):
+    for mod in ("hebrew_local_arms.py",):
         src = io.open(_here / mod, encoding="utf-8").read()
         # The literal, with no fallback clause. A check with an `or "context_strip" in src` escape
         # hatch passes on a module that merely mentions the word, which is every module here -- and a
@@ -386,6 +392,12 @@ def selftest():
            '"images": [_b64(context_strip), _b64(crop)]' in src, mod)
         ck("%s has exactly one images list, so the check cannot miss a second call path" % mod,
            src.count('"images"') == 1, src.count('"images"'))
+
+    _retired = io.open(_here / "hebrew_aperture_diag.py", encoding="utf-8").read()
+    ck("hebrew_aperture_diag (arm C) now sends NOTHING -- no images list, no post",
+       _retired.count('"images"') == 0 and "httpx.post" not in _retired, _retired.count('"images"'))
+    ck("and it says so, so a reader of arm C's rows learns the confound is historical",
+       "RETIRED" in _retired and "Arm C" in _retired)
 
     ck("a full recovery is never counted as confirmation",
        all(r["verdict"] != "bound" for r in rows) and "bound" not in counts, counts)

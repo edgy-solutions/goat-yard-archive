@@ -13,8 +13,8 @@ The context image (image 1 of the v2 recrop prompt) is held CONSTANT across aper
 is image 2. Scored against SIGNED verdicts only. Page numbers are FILE pages (printed = file - 88).
 
 Usage:  python hebrew_aperture_diag.py crops          # build + save crops, no model calls
-        python hebrew_aperture_diag.py run            # read both models x both apertures
-        python hebrew_aperture_diag.py score          # score what run wrote
+        python hebrew_aperture_diag.py run            # RETIRED 2026-10-25: refuses, makes no call
+        python hebrew_aperture_diag.py score          # score the frozen record in OUT
 """
 import base64, io, json, os, re, sys, time, unicodedata
 from pathlib import Path
@@ -22,11 +22,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from PIL import Image
-import httpx
 import cv_footnote_presplit as ps
-from run_header import build_header, model_digests, normalize_hostport
 import note_region, nikud_gate, script_gate, crop_quality
-from hebrew_recrop import _RECROP_PROMPT
 
 DATA = Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits")
 IMG = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
@@ -35,8 +32,9 @@ IMG = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
 DOWN = DATA
 CROPDIR = DATA / "hebrew_aperture_crops_20260920"
 OUT = DATA / "hebrew_aperture_reads_20260920.jsonl"
-HOST = os.getenv("OLLAMA_HOST", "192.168.1.169")
-MODELS = ["qwen3.6-16k:35b", "gemma4-32k:31b"]
+# HOST, MODELS and the httpx/run_header/_RECROP_PROMPT imports went with the retired run()
+# below: an endpoint and a model list in a module that cannot call out are an invitation.
+# NUM_CTX stays -- hebrew_local_arms imports it as D.NUM_CTX to inherit the frozen v2 option.
 NUM_CTX = 16384
 PAD = 12                       # native px, applied AFTER the strip->native map so padding never straddles
                                # the 20px column gap
@@ -1095,62 +1093,27 @@ def crops(save=True, include_sealed=False, allow_narrow=False):
     return built
 
 
-def _b64(im):
-    b = io.BytesIO()
-    im.save(b, format="PNG")
-    return base64.b64encode(b.getvalue()).decode()
-
-
-def read_one(context_strip, crop, model):
-    """The frozen v2 recrop read: same prompt, same two-image shape, same options. Only image 2 varies."""
-    t0 = time.time()
-    r = httpx.post(f"http://{HOST}:11434/api/generate",
-                   json={"model": model, "prompt": _RECROP_PROMPT,
-                         "images": [_b64(context_strip), _b64(crop)],
-                         "think": False, "stream": False,
-                         "options": {"num_ctx": NUM_CTX, "temperature": 0}}, timeout=900)
-    d = r.json()
-    return (d.get("response", "") or "").strip(), d.get("done_reason"), round(time.time() - t0, 1)
-
-
-def run():
-    built = crops(save=True)
-    done = set()
-    if OUT.exists():
-        done = {(o["span_id"], o["aperture"], o["model"]) for o in _lines(OUT) if "span_id" in o}
-    with io.open(OUT, "a", encoding="utf-8") as f:
-        if not done:
-            # Machine in the header and in the hash (ruling, 2026-09-20). This harness calls TWO models,
-            # so there is no single set of weights: the per-model digest map goes into the hash, since
-            # collapsing it to one model would let a run with a swapped witness hash alike.
-            hp = normalize_hostport(HOST)
-            hdr = build_header(host=HOST, model="+".join(MODELS),
-                               identity_extra={"api_path": "/api/generate", "think": False,
-                                               "temperature": 0, "num_ctx": NUM_CTX, "models": MODELS,
-                                               "model_digests16": model_digests(hp, MODELS),
-                                               "prompt_head": _RECROP_PROMPT[:40], "pad_native_px": PAD},
-                               extra={"prerun": "hebrew_aperture_prerun_20260920.md"})
-            f.write(json.dumps(hdr, ensure_ascii=False) + chr(10))
-        for s in built:
-            ctx = Image.open(s["context_strip"]).convert("L")
-            for ap in ("A1_notebox", "A2_spanbox"):
-                if not s.get(ap):
-                    continue
-                crop = Image.open(s[ap]["path"]).convert("L")
-                for m in MODELS:
-                    if (s["span_id"], ap, m) in done:
-                        continue
-                    raw, dr, secs = read_one(ctx, crop, m)
-                    gated, nik_verdict, dens = nikud_gate.gated_strip(raw, crop)
-                    sv, sr = script_gate.gate(gated, s["latin_context"])
-                    f.write(json.dumps({"span_id": s["span_id"], "aperture": ap, "model": m,
-                                        "raw": raw, "gated": gated, "nikud_verdict": nik_verdict,
-                                        "nikud_density": round(float(dens), 3), "script_verdict": sv,
-                                        "script_reason": sr, "done_reason": dr, "secs": secs,
-                                        "crop_size": s[ap]["size"]}, ensure_ascii=False) + "\n")
-                    f.flush()
-                    print(f"  {s['span_id']:10s} {ap:11s} {m:18s} {secs:6.1f}s  {raw[:48]!r}", flush=True)
-    print("wrote", OUT)
+# -----------------------------------------------------------------------------------------------
+# RETIRED 2026-10-25 (Chris, ruling 2): the outbound read path -- `_b64`, `read_one`, `run()` and
+# the `run` CLI branch -- is DELETED, not gated.
+#
+# WHY DELETED. It posted to the Ollama generate endpoint on {HOST} with no law-8 check, and it
+# looped over BOTH apertures, so A1_notebox crops reached the wire from here. The standing rule
+# is that the note box must be unreachable BY CONSTRUCTION; a gate bolted on here would have been
+# one more thing to keep right. Removing the path removes the construction instead: this module
+# now imports no HTTP client and names no host, no model list and no prompt.
+#
+# WHAT IS UNCHANGED. The reads this path produced are the record and they stay. Arm C's
+# hebrew_aperture_reads_20260920.jsonl (OUT, above) is untouched, score() still scores it, and
+# hebrew_bind still reads it as arm C. Nothing is re-run and no number moves.
+#
+# WHERE READS HAPPEN NOW. hebrew_local_arms (which takes NUM_CTX from here, for exactly this
+# reason) and hebrew_frontier_or, both behind send_refusal.refuse_at_send. `script_gate` is still
+# imported above because those two arms reach it as `diag.script_gate`: it is not dead.
+#
+# WHAT THIS DOES NOT SOLVE. The rows already in OUT were produced ungated, over the aperture pair
+# this lane now refuses to send. Retiring the producer does not re-adjudicate what it produced.
+# -----------------------------------------------------------------------------------------------
 
 
 def _norm(t):
@@ -1256,7 +1219,12 @@ if __name__ == "__main__":
                 if fl:
                     print(f"  {sid:10s} {ap:12s} {fl}")
     elif cmd == "run":
-        run()
+        # Retired, not broken: see the RETIRED block above. The reads live in OUT and are
+        # scored by `score`; new reads go through hebrew_local_arms or hebrew_frontier_or,
+        # which refuse at send.
+        sys.exit("`run` is retired (2026-10-25, ruling 2): this module makes no outbound call. "
+                 "Score the existing record with `score`, or read via hebrew_local_arms / "
+                 "hebrew_frontier_or, which gate with send_refusal.refuse_at_send.")
     elif cmd == "score":
         for o in score():
             print(f"{o['span_id']:10s} {o['aperture']:11s} {o['model']:18s} {o['cls']:11s} "

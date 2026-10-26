@@ -11,9 +11,11 @@ the same signed sitting with its sealed half restored under ruling 2's carve-out
 apertures, scored against SIGNED verdicts only. **No data leaves the network.** Page numbers are FILE pages
 (printed = file - 88).
 
-WHY A SEPARATE MODULE. The n=10 result on C was produced by `hebrew_aperture_diag.read_one`, which posts to
-`/api/generate` on a hardcoded `:11434`. That function produced a recorded artifact, so it is left byte-stable;
-this module owns the D read path and every difference from it is explicit and in the header:
+WHY A SEPARATE MODULE. The n=10 result on C was produced by `hebrew_aperture_diag.read_one` -- RETIRED on
+2026-10-25 (Chris, ruling 2), so the rows remain and the producer does not -- which posted to
+`/api/generate` on a hardcoded `:11434`. The ARTIFACT it produced is left byte-stable;
+the function itself no longer exists. This module owns the D read path and every difference from
+it is explicit and in the header:
 
   - **`/api/chat` with `"think": false`, natively.** Ollama's OpenAI-compatible `/v1` route DROPS the think
     toggle, and prompting `/no_think` leaves qwen3 thinking about 20% of the time. Only the native route
