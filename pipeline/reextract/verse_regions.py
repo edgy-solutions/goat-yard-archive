@@ -119,6 +119,13 @@ TEXT_LINE_MIN_SEP_FRAC = 0.5
 # false-deep row elsewhere in the band can no longer steal a cut from the true (if shallower,
 # within-window) gap near it.
 TEXT_LINE_SNAP = "pitch"
+INK_BOX_TALL_MULT = 1.6  # component height / page median_line_h above this -> excluded from ink_box, flagged (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 2; value carried from rerun 7)
+STROKE_FLOOR_HALF_FRAC = 0.5  # stroke exclusion applies to components h >= this x median_line_h; also the "half" cutoff floor (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
+STROKE_FLOOR_THIRD_FRAC = 1 / 3  # "third" floor of the cutoff derivation, h >= mlh/3 (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
+STROKE_FLOOR_ABS_PX = 20  # "abs20" floor of the cutoff derivation, h >= 20 px (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
+STROKE_MIN_PEAK = 5  # fragment-mode count must be >= this or the derivation abstains (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
+STROKE_VALLEY_FRAC = 0.5  # count(valley) <= this x count(F) (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
+STROKE_SEP_FRAC = 0.5  # F + 0.5 <= this x (L + 0.5), minimum separation (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
 
 # Defect: note_start_detect.text_lines estimates a column's single-line height as the median of
 # that column's OWN raw (pre-split) band heights. On an intact column most raw bands already are
@@ -782,7 +789,256 @@ def analyze_page_s1(ink, geom_record, gutter_window=GUTTER_WINDOW_W):
         "file_page": geom_record.get("file_page"), "W": int(W), "H": int(H), "xdiv": xdiv,
         "left": left_rest, "right": right_rest, "full": other_full, "slivers": slivers,
         "running_head": running_head, "flags": flags, "col_boxes": col_boxes, "line_h": line_h, "head_rules": head_rules,
+        "median_line_h": int(median_line_h),
     }
+
+
+
+# ==============================================================================================
+# Step 3 (rerun 8) -- ink_box standoff with stroke-width fragment exclusion
+# (PREDICTION_step3_inkbox_rerun8_20261025.md, locked before code). `box` is never written.
+# ==============================================================================================
+
+def ink_components(mask):
+    """8-connected components of a 2-D bool array as half-open (x0, y0, x1, y1) boxes in mask
+    coordinates, sorted by (y0, x0, y1, x1). Row runs + union-find; runs [s,e) on row r and
+    [s2,e2) on row r+1 join when s2 <= e and s <= e2 (diagonal touch included)."""
+    m = np.asarray(mask, dtype=bool)
+    if m.ndim != 2 or not m.any():
+        return []
+    H, W = m.shape
+    pad = np.zeros((H, W + 2), dtype=np.int8)
+    pad[:, 1:W + 1] = m
+    d = np.diff(pad, axis=1)
+    rs, cs = np.nonzero(d == 1)
+    _, ce = np.nonzero(d == -1)
+    runs = list(zip(rs.tolist(), cs.tolist(), ce.tolist()))   # (row, start, end), row-major
+    parent = list(range(len(runs)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    by_row = {}
+    for i, (r, s, e) in enumerate(runs):
+        by_row.setdefault(r, []).append(i)
+    for r, idxs in by_row.items():
+        nxt = by_row.get(r + 1)
+        if not nxt:
+            continue
+        j0 = 0
+        for i in idxs:
+            _, s, e = runs[i]
+            while j0 < len(nxt) and runs[nxt[j0]][2] < s:   # next-row run entirely left of s: cannot join this or later runs
+                j0 += 1
+            j = j0
+            while j < len(nxt) and runs[nxt[j]][1] <= e:
+                a, b = find(i), find(nxt[j])
+                if a != b:
+                    parent[b] = a
+                j += 1
+    boxes = {}
+    for i, (r, s, e) in enumerate(runs):
+        k = find(i)
+        b = boxes.get(k)
+        if b is None:
+            boxes[k] = [s, r, e, r + 1]
+        else:
+            b[0] = min(b[0], s); b[1] = min(b[1], r); b[2] = max(b[2], e); b[3] = max(b[3], r + 1)
+    return sorted((tuple(b) for b in boxes.values()), key=lambda b: (b[1], b[0], b[3], b[2]))
+
+
+def stroke_w(ink, x0, y0, x1, y1):
+    """Median, over every row of ink[y0:y1, x0:x1] that has any ink, of the horizontal run lengths
+    of ink in that row (page ink inside the bbox, not only the component's pixels). 0.0 if no runs.
+    Definition of measure_stroke.py / measure_stroke_bands.py."""
+    sub = ink[y0:y1, x0:x1].astype(np.int8)
+    runs = []
+    for row in sub:
+        if not row.any():
+            continue
+        d = np.diff(np.concatenate(([0], row, [0])))
+        starts, ends = np.where(d == 1)[0], np.where(d == -1)[0]
+        runs.extend((ends - starts).tolist())
+    return float(np.median(runs)) if runs else 0.0
+
+
+def stroke_population_page(ink, s1):
+    """Components meeting an S1 text band (left/right/full), labelled within each column's extent
+    (min x0 .. max x1 of that column's bands), h >= min(20, mlh/3), deduped by page-absolute bbox
+    across columns. Returns [(h, stroke_w, mlh)] (measure_stroke_bands.py lines 56-73)."""
+    mlh = s1["median_line_h"]
+    pop, seen = [], set()
+    for col in ("left", "right", "full"):
+        bands = list(s1.get(col) or [])
+        if not bands:
+            continue
+        x0, x1 = min(b["x0"] for b in bands), max(b["x1"] for b in bands)
+        rows = np.zeros(ink.shape[0] + 1, dtype=np.int32)
+        for b in bands:
+            rows[b["y0"]:b["y1"]] = 1
+        cum = np.concatenate(([0], np.cumsum(rows)))
+        for (cx0, cy0, cx1, cy1) in ink_components(ink[:, x0:x1]):
+            if cum[cy1] - cum[cy0] == 0 or (cy1 - cy0) < min(20, mlh / 3):
+                continue
+            key = (cx0 + x0, cy0, cx1 + x0, cy1)
+            if key in seen:
+                continue
+            seen.add(key)
+            pop.append((cy1 - cy0, stroke_w(ink, *key), mlh))
+    return pop
+
+
+def stroke_floors(pop):
+    """Split pooled (h, stroke_w, mlh) triples into the three floors' stroke_w lists."""
+    return {
+        "third": [w for (h, w, m) in pop if h >= STROKE_FLOOR_THIRD_FRAC * m],
+        "half": [w for (h, w, m) in pop if h >= STROKE_FLOOR_HALF_FRAC * m],
+        "abs20": [w for (h, w, m) in pop if h >= STROKE_FLOOR_ABS_PX],
+    }
+
+
+def _stroke_floor_modes(widths):
+    c = Counter(int(math.floor(w)) for w in widths if w >= 1)
+    top = max(c) if c else 0
+    hist = [c.get(i, 0) for i in range(0, top + 1)]
+    rec = {"hist": hist, "F": None, "v": None, "L": None, "bimodal": False, "cutoff": None}
+    if top < 2:
+        return rec
+    L = 1 + int(np.argmax(hist[1:]))
+    rec["L"] = L
+    if L < 2:
+        return rec
+    seg = hist[1:L]
+    v = 1 + seg.index(min(seg))              # FIRST-occurring minimum over bins 1..L-1
+    rec["v"] = v
+    if v <= 1:
+        return rec
+    F = 1 + int(np.argmax(hist[1:v]))
+    rec["F"] = F
+    rec["bimodal"] = bool(hist[F] >= STROKE_MIN_PEAK
+                          and hist[v] <= STROKE_VALLEY_FRAC * hist[F]
+                          and F + 0.5 <= STROKE_SEP_FRAC * (L + 0.5))
+    if rec["bimodal"]:
+        rec["cutoff"] = (F + 0.5 + L + 0.5) / 2
+    return rec
+
+
+def derive_stroke_cutoff(widths_by_floor):
+    """Run-level stroke cutoff from {floor: [stroke_w, ...]} for floors third / half / abs20.
+    status ok iff all three floors are bimodal with identical F and L; cutoff = the half floor's.
+    Otherwise abstain (no cutoff). Returns {"status", "cutoff", "per_floor"}."""
+    per = {name: _stroke_floor_modes(widths_by_floor.get(name, [])) for name in ("third", "half", "abs20")}
+    ok = (all(r["bimodal"] for r in per.values())
+          and len({r["F"] for r in per.values()}) == 1 and len({r["L"] for r in per.values()}) == 1)
+    return {"status": "ok" if ok else "abstain", "cutoff": per["half"]["cutoff"] if ok else None,
+            "per_floor": per}
+
+
+def apply_ink_box_page(regions, file_page, s1, ink, stroke_cutoff):
+    """Step 3: record each rect's ink_box / ink_box_detail on `file_page` (design:
+    PREDICTION_step3_inkbox_rerun8_20261025.md). NEVER writes rect["box"]. ink_box = box grown to
+    the ink of the components owned by the FIRST / LAST S1 band; a tall component (h > 1.6 x mlh)
+    or a thin one (h >= 0.5 x mlh and stroke_w < cutoff) is excluded and listed. If the run's
+    stroke cutoff did not resolve, every rect gets ink_box None and the region ink_box_abstain_stroke.
+    Returns per-page counts."""
+    counts = {"n_rects": 0, "n_top_moved": 0, "n_bottom_moved": 0, "n_excluded_tall": 0,
+              "n_excluded_stroke": 0, "n_tie": 0, "n_no_band": 0, "n_abstain": 0}
+    abstain = stroke_cutoff.get("status") != "ok"
+    cutoff = stroke_cutoff.get("cutoff")
+    extra = []
+    if s1.get("running_head") is not None:
+        extra.append(s1["running_head"])
+    extra.extend(s1.get("head_rules") or [])
+    owners, seen = [], set()
+    for b in (list(s1.get("left") or []) + list(s1.get("right") or []) + list(s1.get("full") or [])
+              + list(s1.get("slivers") or []) + extra):
+        if id(b) not in seen:
+            seen.add(id(b))
+            owners.append(b)
+    mlh = s1["median_line_h"]
+    tall = INK_BOX_TALL_MULT * mlh
+    for region in regions:
+        for rect in region["rects"]:
+            if rect["file_page"] != file_page:
+                continue
+            counts["n_rects"] += 1
+            if abstain:
+                rect["ink_box"] = None
+                rect["ink_box_detail"] = None
+                counts["n_abstain"] += 1
+                fl = region.setdefault("flags", [])
+                if "ink_box_abstain_stroke" not in fl:
+                    fl.append("ink_box_abstain_stroke")
+                continue
+            rx0, ry0, rx1, ry1 = rect["box"]
+            bands = [b for b in (s1.get(rect["col"]) or []) if b["y0"] >= ry0 and b["y1"] <= ry1]
+            if not bands:
+                counts["n_no_band"] += 1
+                fl = region.setdefault("flags", [])
+                if "ink_box_no_band" not in fl:
+                    fl.append("ink_box_no_band")
+                continue
+            first = min(bands, key=lambda b: b["y0"])
+            last = max(bands, key=lambda b: b["y1"])
+            n_first = n_last = n_tie = 0
+            tops, bots, ex_tall, ex_stroke = [], [], [], []
+            for (cx0, cy0, cx1, cy1) in ink_components(ink[:, rx0:rx1]):
+                cx0 += rx0
+                cx1 += rx0
+                h = cy1 - cy0
+                meets = cy0 < ry1 and cy1 > ry0
+                if h > tall:
+                    if meets:
+                        ex_tall.append([int(cx0), int(cy0), int(cx1), int(cy1)])
+                    continue
+                if h >= STROKE_FLOOR_HALF_FRAC * mlh:
+                    sw = stroke_w(ink, cx0, cy0, cx1, cy1)
+                    if sw < cutoff:
+                        if meets:
+                            ex_stroke.append([int(cx0), int(cy0), int(cx1), int(cy1), sw])
+                        continue
+                best, best_owners = 0, []
+                for o in owners:
+                    if not (o["x0"] < cx1 and cx0 < o["x1"]):
+                        continue
+                    sh = min(cy1, o["y1"]) - max(cy0, o["y0"])
+                    if sh <= 0:
+                        continue
+                    if sh > best:
+                        best, best_owners = sh, [o]
+                    elif sh == best:
+                        best_owners.append(o)
+                if not best_owners:
+                    continue
+                if len(best_owners) > 1:
+                    n_tie += 1
+                    continue
+                o = best_owners[0]
+                if o is first:
+                    n_first += 1
+                    tops.append(cy0)
+                if o is last:
+                    n_last += 1
+                    bots.append(cy1)
+            new_top = min([ry0] + tops)
+            new_bottom = max([ry1] + bots)
+            rect["ink_box"] = [int(rx0), int(new_top), int(rx1), int(new_bottom)]
+            rect["ink_box_detail"] = {"n_first": n_first, "n_last": n_last, "n_tie": n_tie,
+                                      "excluded_tall": ex_tall, "excluded_stroke": ex_stroke}
+            for flag, lst in (("ink_box_excluded_tall", ex_tall), ("ink_box_excluded_stroke", ex_stroke)):
+                if lst:
+                    fl = region.setdefault("flags", [])
+                    if flag not in fl:
+                        fl.append(flag)
+            counts["n_top_moved"] += int(new_top < ry0)
+            counts["n_bottom_moved"] += int(new_bottom > ry1)
+            counts["n_excluded_tall"] += len(ex_tall)
+            counts["n_excluded_stroke"] += len(ex_stroke)
+            counts["n_tie"] += n_tie
+    return counts
 
 
 # ==============================================================================================

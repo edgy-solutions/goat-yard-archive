@@ -137,6 +137,13 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "inset_mode_min_sep_pitch_frac": VR.INSET_MODE_MIN_SEP_PITCH_FRAC,
         "inset_mode_valley_frac": VR.INSET_MODE_VALLEY_FRAC,
         "text_line_snap": VR.TEXT_LINE_SNAP,
+        "ink_box_tall_mult": VR.INK_BOX_TALL_MULT,
+        "stroke_floor_half_frac": VR.STROKE_FLOOR_HALF_FRAC,
+        "stroke_floor_third_frac": VR.STROKE_FLOOR_THIRD_FRAC,
+        "stroke_floor_abs_px": VR.STROKE_FLOOR_ABS_PX,
+        "stroke_min_peak": VR.STROKE_MIN_PEAK,
+        "stroke_valley_frac": VR.STROKE_VALLEY_FRAC,
+        "stroke_sep_frac": VR.STROKE_SEP_FRAC,
         "rule_col_frac": VR.RULE_COL_FRAC,
         "rule_merge_gap_px": VR.RULE_MERGE_GAP_PX,
         "rule_min_strip_frac": VR.RULE_MIN_STRIP_FRAC,
@@ -506,6 +513,20 @@ def main(argv=None):
     regions, page_summaries = VR.assemble_regions(
         page_records_ordered, s1_by_page, confirmed_by_page, rejected_by_page,
         witness_by_page, config, abstained=head_abstained)
+
+    # Step 3 (rerun 8): pass A pools the stroke population over ALL usable pages and derives the
+    # run-level cutoff; pass B computes each rect's ink_box with it. `box` is never written.
+    pop = []
+    for fp in usable_pages:
+        pop.extend(VR.stroke_population_page(VR.page_ink(gray_by_page[fp]), s1_by_page[fp]))
+    stroke_cutoff = VR.derive_stroke_cutoff(VR.stroke_floors(pop))
+    stroke_cutoff["n_pop"] = len(pop)
+    records[0]["stroke_cutoff"] = stroke_cutoff
+    ink_box_counts = Counter()
+    for fp in usable_pages:
+        ink_box_counts.update(VR.apply_ink_box_page(regions, fp, s1_by_page[fp], VR.page_ink(gray_by_page[fp]),
+                                                    stroke_cutoff))
+    records[0]["ink_box_counts"] = dict(ink_box_counts)
 
     VR.assert_numbering_invariant(regions)
     VR.check_region_rects(regions, geom_by_page)

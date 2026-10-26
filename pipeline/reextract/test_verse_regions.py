@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 71
+EXPECTED_TESTS = 94
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -1573,6 +1573,363 @@ def test_col_split_band_x_edges_tight_to_slanted_split():
     for b in top_right:
         re_ = min(VR.right_edge(sp, b["y0"]), VR.right_edge(sp, b["y1"] - 1))
         assert b["x0"] >= re_ - 1 and b["x0"] > rbox[0] + 30, (b["y0"], b["x0"], re_, rbox)
+
+
+# 99. Step 3 (rerun 8): ink_box standoff with stroke-width fragment exclusion --------------------
+# PREDICTION_step3_inkbox_rerun8_20261025.md. Synthetic page: H=500, W=400, median_line_h=60
+# (tall limit 1.6*60 = 96 rows), a left-column rect box [0, y0, 200, y1]. Synthetic components are
+# 10 px wide blocks (stroke_w 10), above the 4.5 cutoff used here.
+
+STROKE_OK = {"status": "ok", "cutoff": 4.5}
+
+
+def _bfs_components(m):
+    H, W = m.shape
+    seen = np.zeros_like(m, dtype=bool)
+    out = []
+    for y in range(H):
+        for x in range(W):
+            if m[y, x] and not seen[y, x]:
+                stack = [(y, x)]
+                seen[y, x] = True
+                x0, y0, x1, y1 = x, y, x + 1, y + 1
+                while stack:
+                    cy, cx = stack.pop()
+                    x0, y0, x1, y1 = min(x0, cx), min(y0, cy), max(x1, cx + 1), max(y1, cy + 1)
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = cy + dy, cx + dx
+                            if 0 <= ny < H and 0 <= nx < W and m[ny, nx] and not seen[ny, nx]:
+                                seen[ny, nx] = True
+                                stack.append((ny, nx))
+                out.append((x0, y0, x1, y1))
+    return sorted(out, key=lambda b: (b[1], b[0], b[3], b[2]))
+
+
+def test_ink_components_is_8_connected():
+    """Guards the connectivity: diagonal touch joins (8-connected), a 1-px gap does not."""
+    m = np.zeros((10, 10), dtype=bool)
+    m[2, 2] = True
+    m[3, 3] = True
+    assert VR.ink_components(m) == [(2, 2, 4, 4)], VR.ink_components(m)
+    m = np.zeros((10, 10), dtype=bool)
+    m[2, 2] = True
+    m[2, 4] = True
+    assert len(VR.ink_components(m)) == 2
+    m = np.zeros((10, 10), dtype=bool)
+    m[2, 2] = True
+    m[4, 4] = True
+    assert len(VR.ink_components(m)) == 2
+
+
+def test_ink_components_matches_bfs_reference_on_random_masks():
+    """Guards the union-find against a brute-force 8-connected BFS on 20 seeded random masks."""
+    for seed in range(20):
+        m = np.random.RandomState(seed).rand(30, 40) < 0.3
+        assert VR.ink_components(m) == _bfs_components(m), seed
+
+
+def _ib_band(y0, y1, x0=0, x1=400, col="left"):
+    return {"col": col, "x0": x0, "x1": x1, "y0": y0, "y1": y1}
+
+
+def _ib_s1(left=(), full=(), running_head=None, head_rules=(), mlh=60):
+    return {"left": list(left), "right": [], "full": list(full), "slivers": [],
+            "running_head": running_head, "head_rules": list(head_rules), "median_line_h": mlh}
+
+
+def _ib_run(s1, comps, box, col="left", cutoff=STROKE_OK):
+    ink = np.zeros((500, 400), dtype=bool)
+    for (x0, y0, x1, y1) in comps:
+        ink[y0:y1, x0:x1] = True
+    region = {"flags": [], "rects": [{"file_page": 7, "col": col, "box": list(box)}]}
+    counts = VR.apply_ink_box_page([region], 7, s1, ink, cutoff)
+    return region, region["rects"][0], counts
+
+
+def test_ink_box_capital_raises_top_and_box_untouched():
+    """Guards the purpose and the box law: a tall initial capital owned by the first band lifts
+    ink_box top to 70 while rect["box"] stays exactly the input."""
+    first = _ib_band(100, 150)
+    _, rect, _ = _ib_run(_ib_s1(left=[first]), [(50, 70, 60, 150)], [0, 100, 200, 150])
+    assert rect["box"] == [0, 100, 200, 150], rect
+    assert rect["ink_box"] == [0, 70, 200, 150] and rect["ink_box_detail"]["n_first"] >= 1, rect
+
+
+def test_ink_box_neighbour_descender_owned_by_neighbour():
+    """Guards ownership: a component sharing 35 rows with the previous band and 4 with the first
+    band belongs to the neighbour and must not move the top."""
+    s1 = _ib_s1(left=[_ib_band(40, 95), _ib_band(100, 150)])
+    _, rect, _ = _ib_run(s1, [(50, 60, 60, 104)], [0, 100, 200, 150])
+    assert rect["ink_box"][1] == 100 and rect["ink_box_detail"]["n_first"] == 0, rect
+
+
+def test_ink_box_running_head_owns_its_ink():
+    """Guards the owner set: running head and head rules own their ink."""
+    s1 = _ib_s1(left=[_ib_band(100, 150)], running_head=_ib_band(40, 95, col="full"))
+    _, rect, _ = _ib_run(s1, [(50, 60, 60, 104)], [0, 100, 200, 150])
+    assert rect["ink_box"][1] == 100, rect
+    s1 = _ib_s1(left=[_ib_band(100, 150)], head_rules=[_ib_band(40, 95, col="left")])
+    _, rect, _ = _ib_run(s1, [(50, 60, 60, 104)], [0, 100, 200, 150])
+    assert rect["ink_box"][1] == 100, rect
+
+
+def test_ink_box_tall_component_excluded_and_flagged():
+    """Guards the tall exclusion (h > 1.6 x mlh): listed in excluded_tall, flagged, moves nothing."""
+    first = _ib_band(100, 150)
+    region, rect, counts = _ib_run(_ib_s1(left=[first]), [(50, 60, 60, 240)], [0, 100, 200, 150])
+    assert rect["ink_box"] == [0, 100, 200, 150], rect
+    assert rect["ink_box_detail"]["excluded_tall"] == [[50, 60, 60, 240]], rect["ink_box_detail"]
+    assert rect["ink_box_detail"]["excluded_stroke"] == []
+    assert "ink_box_excluded_tall" in region["flags"] and counts["n_excluded_tall"] == 1
+
+
+def test_ink_box_thin_fragment_excluded_by_stroke_and_flagged():
+    """Guards the stroke exclusion: a 2 px wide, 50 row (>= 0.5 x mlh) fragment crossing the first
+    band's top is excluded (listed with its stroke_w), moves nothing, and flags the region; a 10 px
+    wide twin is a letter and moves the top. Tall is tested first: a 2 px x 100 row stroke goes to
+    excluded_tall only."""
+    first = _ib_band(100, 150)
+    region, rect, counts = _ib_run(_ib_s1(left=[first]), [(50, 70, 52, 120)], [0, 100, 200, 150])
+    assert rect["ink_box"] == [0, 100, 200, 150], rect
+    assert rect["ink_box_detail"]["excluded_stroke"] == [[50, 70, 52, 120, 2.0]], rect["ink_box_detail"]
+    assert "ink_box_excluded_stroke" in region["flags"] and counts["n_excluded_stroke"] == 1
+    _, rect, _ = _ib_run(_ib_s1(left=[first]), [(50, 70, 60, 120)], [0, 100, 200, 150])
+    assert rect["ink_box"][1] == 70, rect
+    region, rect, _ = _ib_run(_ib_s1(left=[first]), [(50, 70, 52, 170)], [0, 100, 200, 150])
+    assert rect["ink_box_detail"]["excluded_tall"] == [[50, 70, 52, 170]]
+    assert rect["ink_box_detail"]["excluded_stroke"] == []
+
+
+def test_ink_box_edges_only_grow():
+    """Guards grow-only: components strictly inside the bands leave ink_box equal to box."""
+    first, last = _ib_band(100, 150), _ib_band(200, 250)
+    _, rect, counts = _ib_run(_ib_s1(left=[first, last]), [(50, 110, 60, 140), (50, 210, 60, 240)],
+                              [0, 100, 200, 250])
+    assert rect["ink_box"] == [0, 100, 200, 250], rect
+    assert counts["n_top_moved"] == 0 and counts["n_bottom_moved"] == 0
+
+
+def test_ink_box_descender_lowers_bottom():
+    """Guards the bottom edge: last band 300-350, component 320-362 -> ink_box bottom 362."""
+    _, rect, counts = _ib_run(_ib_s1(left=[_ib_band(300, 350)]), [(50, 320, 60, 362)], [0, 300, 200, 350])
+    assert rect["ink_box"][3] == 362 and rect["box"][3] == 350, rect
+    assert rect["ink_box_detail"]["n_last"] == 1 and counts["n_bottom_moved"] == 1
+
+
+def test_ink_box_tie_between_owners_moves_nothing():
+    """Guards the tie rule: equal shared rows with two bands -> unassigned and counted."""
+    s1 = _ib_s1(left=[_ib_band(60, 100), _ib_band(100, 150)])
+    _, rect, _ = _ib_run(s1, [(50, 90, 60, 110)], [0, 100, 200, 150])
+    assert rect["ink_box"][1] == 100 and rect["ink_box_detail"]["n_tie"] == 1, rect
+
+
+def test_ink_box_x_equals_box_and_other_column_ignored():
+    """Guards x and the rect x-range: ink_box x equals box x; a component outside the x-range has no effect."""
+    first = _ib_band(100, 150, x0=0, x1=400)
+    _, rect, _ = _ib_run(_ib_s1(left=[first]), [(250, 60, 260, 150)], [0, 100, 200, 150])
+    assert rect["ink_box"] == [0, 100, 200, 150], rect
+    _, rect, _ = _ib_run(_ib_s1(left=[first]), [(50, 70, 60, 150)], [0, 100, 200, 150])
+    assert rect["ink_box"][0] == 0 and rect["ink_box"][2] == 200 and rect["ink_box"][1] == 70, rect
+
+
+def test_ink_box_no_band_flagged():
+    """Guards the no-band path: a rect containing no S1 band gets no ink_box and the region is
+    flagged ink_box_no_band."""
+    region, rect, counts = _ib_run(_ib_s1(left=[_ib_band(300, 350)]), [(50, 70, 60, 150)], [0, 100, 200, 150])
+    assert rect["box"] == [0, 100, 200, 150] and "ink_box" not in rect
+    assert "ink_box_no_band" in region["flags"] and counts["n_no_band"] == 1
+
+
+# --- derive_stroke_cutoff (B5, synthetic) ---------------------------------------------------------
+
+def _widths(counts):
+    """{bin: count} -> list of stroke widths (bin + 0.5)."""
+    return [b + 0.5 for b, n in counts.items() for _ in range(n)]
+
+
+BIMODAL = {1: 50, 2: 2, 3: 10, 4: 10, 5: 10, 6: 10, 7: 1000, 8: 300}
+
+
+def _floors(h3, h, a20):
+    return {"third": _widths(h3), "half": _widths(h), "abs20": _widths(a20)}
+
+
+def test_derive_stroke_cutoff_bimodal_gives_4_5():
+    r = VR.derive_stroke_cutoff(_floors(BIMODAL, BIMODAL, BIMODAL))
+    assert r["status"] == "ok" and r["cutoff"] == 4.5, r
+    for rec in r["per_floor"].values():
+        assert (rec["F"], rec["v"], rec["L"], rec["bimodal"], rec["cutoff"]) == (1, 2, 7, True, 4.5), rec
+        assert rec["hist"][1:9] == [50, 2, 10, 10, 10, 10, 1000, 300]
+
+
+def test_derive_stroke_cutoff_unimodal_abstains():
+    uni = {1: 5, 2: 20, 3: 100, 4: 400, 5: 1000, 6: 400, 7: 100}
+    r = VR.derive_stroke_cutoff(_floors(uni, uni, uni))
+    assert r["status"] == "abstain" and r["cutoff"] is None, r
+
+
+def test_derive_stroke_cutoff_floors_disagree_on_F_abstains():
+    other = {1: 30, 2: 50, 3: 3, 4: 10, 5: 10, 6: 10, 7: 1000}
+    r = VR.derive_stroke_cutoff(_floors(BIMODAL, other, BIMODAL))
+    assert r["per_floor"]["half"]["bimodal"] and r["per_floor"]["half"]["F"] == 2, r["per_floor"]["half"]
+    assert r["per_floor"]["third"]["F"] == 1
+    assert r["status"] == "abstain" and r["cutoff"] is None, r
+
+
+def test_derive_stroke_cutoff_fragment_peak_below_5_abstains():
+    low = dict(BIMODAL)
+    low[1] = 4
+    r = VR.derive_stroke_cutoff(_floors(low, low, low))
+    assert r["per_floor"]["half"]["F"] == 1 and not r["per_floor"]["half"]["bimodal"], r
+    assert r["status"] == "abstain"
+
+
+def test_derive_stroke_cutoff_failed_separation_abstains():
+    sep = {1: 100, 2: 100, 3: 100, 4: 100, 5: 101, 6: 10, 7: 1000}     # F=5, v=6, L=7: 5.5 > 0.5*7.5
+    r = VR.derive_stroke_cutoff(_floors(sep, sep, sep))
+    rec = r["per_floor"]["half"]
+    assert (rec["F"], rec["v"], rec["L"]) == (5, 6, 7) and not rec["bimodal"], rec
+    assert r["status"] == "abstain"
+
+
+def test_ink_box_abstain_sets_null_and_flag_on_every_rect():
+    """Guards the abstain path (proved live by mutation): status abstain -> ink_box and
+    ink_box_detail None on every rect, region flagged ink_box_abstain_stroke, nothing computed."""
+    first = _ib_band(100, 150)
+    region, rect, counts = _ib_run(_ib_s1(left=[first]), [(50, 70, 60, 150)], [0, 100, 200, 150],
+                                   cutoff={"status": "abstain", "cutoff": None})
+    assert rect["ink_box"] is None and rect["ink_box_detail"] is None, rect
+    assert rect["box"] == [0, 100, 200, 150]
+    assert "ink_box_abstain_stroke" in region["flags"] and counts["n_abstain"] == 1
+
+
+# --- real pages (private data referenced by path, never copied; inputs asserted, never skipped) ---
+
+IB_VOL = "C:/Users/cnogr/git/dr-voluminous/commentary/volume1"
+IB_GEOM = "C:/Users/cnogr/git/dr-voluminous/body_shadow_vol1/geometry/volume1_page_geometry.jsonl"
+IB_RUN7 = ("C:/Users/cnogr/git/dr-voluminous/body_shadow_vol1/verse_regions/"
+           "run_step3_rerun7_inkextent_d_20p_20261025.jsonl")
+IB_PAGES = [90, 91, 92, 126, 127, 128, 129, 130, 151, 197, 198, 199, 200, 402, 403, 404, 745, 923, 924, 925]
+
+
+def _ib_page_geom(fp):
+    import json
+    import os
+    assert os.path.exists(IB_GEOM), IB_GEOM
+    with open(IB_GEOM, encoding="utf-8") as f:
+        for line in f:
+            g = json.loads(line)
+            if g["file_page"] == fp:
+                return g
+    raise AssertionError(f"no file_page {fp} row in {IB_GEOM}")
+
+
+def _ib_page_ink(fp):
+    import os
+    from PIL import Image
+    path = f"{IB_VOL}/page{fp}_image1.png"
+    assert os.path.exists(path), path
+    return VR.page_ink(np.asarray(Image.open(path).convert("L")))
+
+
+def _ib_fixture(fp):
+    """Rerun-7 records with box y reset to the line geometry (ink_extent top/bottom_detected),
+    ink_extent deleted. Returns (regions, rerun7_ink_extent_by_rect_id, s1, ink)."""
+    import copy
+    import json
+    import os
+    assert os.path.exists(IB_RUN7), IB_RUN7
+    regs, ie_by = [], {}
+    with open(IB_RUN7, encoding="utf-8") as f:
+        for line in f:
+            r = json.loads(line)
+            if r.get("rects") is None or r.get("kind") not in ("verse", "chapter_intro", "continuation_unanchored"):
+                continue
+            r = copy.deepcopy(r)
+            for x in r["rects"]:
+                ie = x.pop("ink_extent", None)
+                if ie:
+                    x["box"][1], x["box"][3] = ie["top_detected"], ie["bottom_detected"]
+                ie_by[id(x)] = ie
+            regs.append(r)
+    ink = _ib_page_ink(fp)
+    s1 = VR.analyze_page_s1(ink, _ib_page_geom(fp))
+    return regs, ie_by, s1, ink
+
+
+def _ib_target(regs, ie_by, fp, col, key, val):
+    hits = [x for r in regs for x in r["rects"]
+            if x["file_page"] == fp and x["col"] == col and ie_by[id(x)] and ie_by[id(x)][key] == val]
+    assert len(hits) == 1, (fp, col, key, val, len(hits))
+    return hits[0]
+
+
+def test_ib_p197_stroke_fragment_does_not_set_bottom():
+    regs, ie_by, s1, ink = _ib_fixture(197)
+    t = _ib_target(regs, ie_by, 197, "left", "bottom", 2203)
+    VR.apply_ink_box_page(regs, 197, s1, ink, STROKE_OK)
+    assert [1634, 2109, 1636, 2203] in [e[:4] for e in t["ink_box_detail"]["excluded_stroke"]], t["ink_box_detail"]
+    assert t["ink_box"][3] < 2203, t["ink_box"]
+    assert t["ink_box"][3] - t["box"][3] <= 20, (t["ink_box"], t["box"])
+    below = [x for r in regs for x in r["rects"]
+             if x["file_page"] == 197 and x["col"] == "left" and x["box"][1] > t["box"][1]]
+    nxt = min(below, key=lambda x: x["box"][1])
+    assert nxt["ink_box"] is not None
+    overlap = max(0, t["ink_box"][3] - nxt["ink_box"][1])
+    assert overlap <= 16, (overlap, t["ink_box"], nxt["ink_box"])
+
+
+def test_ib_p925_stroke_fragment_does_not_set_top():
+    regs, ie_by, s1, ink = _ib_fixture(925)
+    t = _ib_target(regs, ie_by, 925, "right", "top", 2575)
+    VR.apply_ink_box_page(regs, 925, s1, ink, STROKE_OK)
+    assert [1724, 2575, 1726, 2617] in [e[:4] for e in t["ink_box_detail"]["excluded_stroke"]], t["ink_box_detail"]
+    assert abs(t["ink_box"][1] - t["box"][1]) <= 5, (t["ink_box"], t["box"])
+
+
+def test_ib_p127_stroke_fragment_does_not_set_top():
+    regs, ie_by, s1, ink = _ib_fixture(127)
+    t = _ib_target(regs, ie_by, 127, "right", "top", 4318)
+    VR.apply_ink_box_page(regs, 127, s1, ink, STROKE_OK)
+    assert [1618, 4318, 1621, 4363] in [e[:4] for e in t["ink_box_detail"]["excluded_stroke"]], t["ink_box_detail"]
+    assert abs(t["ink_box"][1] - t["box"][1]) <= 5, (t["ink_box"], t["box"])
+
+
+def test_ib_p197_box_byte_identical_with_exclusion_on():
+    """B6: apply_ink_box_page never writes rect["box"] (deep comparison against the input)."""
+    import copy
+    regs, _, s1, ink = _ib_fixture(197)
+    before = copy.deepcopy([[x["box"] for x in r["rects"]] for r in regs])
+    VR.apply_ink_box_page(regs, 197, s1, ink, STROKE_OK)
+    assert [[x["box"] for x in r["rects"]] for r in regs] == before
+    VR.apply_ink_box_page(regs, 197, s1, ink, {"status": "abstain", "cutoff": None})
+    assert [[x["box"] for x in r["rects"]] for r in regs] == before
+
+
+B4_EXPECT = {
+    "third": [79, 21, 21, 149, 1426, 13873, 47189, 30502, 5434, 997, 296, 105],
+    "half": [47, 16, 14, 69, 923, 11624, 43614, 28798, 4656, 788, 246, 79],
+    "abs20": [73, 20, 20, 121, 1331, 13736, 46871, 29990, 5152, 954, 292, 101],
+}
+
+
+def test_ib_b4_stroke_range_over_20_pages_slow():
+    """B4 (slow): run-level derivation over the 20 rerun pages returns ok, F=1, L=7, cutoff 4.5 at
+    every floor, and the floors' histograms (bins 1..12) equal the measured values."""
+    pop = []
+    for fp in IB_PAGES:
+        ink = _ib_page_ink(fp)
+        s1 = VR.analyze_page_s1(ink, _ib_page_geom(fp))
+        pop.extend(VR.stroke_population_page(ink, s1))
+    r = VR.derive_stroke_cutoff(VR.stroke_floors(pop))
+    for name, rec in r["per_floor"].items():
+        print(name, "F", rec["F"], "v", rec["v"], "L", rec["L"], "cutoff", rec["cutoff"], "hist[1:13]", rec["hist"][1:13])
+    print("status", r["status"], "cutoff", r["cutoff"], "n_pop", len(pop))
+    assert r["status"] == "ok" and r["cutoff"] == 4.5, r
+    for name, rec in r["per_floor"].items():
+        assert (rec["F"], rec["L"], rec["cutoff"]) == (1, 7, 4.5), (name, rec)
+        assert rec["hist"][1:13] == B4_EXPECT[name], (name, rec["hist"][1:13], B4_EXPECT[name])
 
 
 if __name__ == "__main__":
