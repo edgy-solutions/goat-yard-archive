@@ -1450,7 +1450,7 @@ def parse_ver_head(text):
         old_rule = len(prefix) <= 3 and not any(c.isalnum() for c in prefix)
         furniture = (len(toks) <= 3 and all(len(k) <= 2 for k in toks)
                      and not any(len(k) == 2 and k[0].isalpha() and k[1].isalpha() for k in toks))
-        if old_rule:
+        if old_rule or furniture:
             rest = s[j:]
             m = _VER_HEAD_RE.match(rest)
     if m is None:
