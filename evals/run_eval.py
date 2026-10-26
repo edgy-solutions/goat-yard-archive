@@ -411,6 +411,50 @@ def compare_to_baseline(current: dict, baseline_path: Path, regression_threshold
     return 1 if fail else 0
 
 
+def expansion_observation(question: str, response: dict) -> dict:
+    """What the PLAIN response says about which expansion branch ran.
+
+    Not a debug field and not a log read. `expanded_query` in the response is
+    the string retrieval actually ran on -- `backend/main.py:1132` sets it
+    from `search_text` -- and `mapped_entities` is the entity anchor list. The
+    branch that discards a successful expansion sets `search_text = req.query`
+    and `mapped_entities = []`, so it leaves a signature in those two fields
+    together.
+
+    What this CANNOT see, stated here because the number is useless without
+    it: `raw_query_no_entities` is the union of two causes. BAML succeeded and
+    its output was discarded, AND BAML errored and retrieval fell to the
+    deterministic floor, both set `search_text = req.query`. Separating them
+    needs `baml_fallback`, which lives in `stages_capture` and is gated on
+    `req.debug` (`backend/main.py:420`). The gate arms run the product path
+    with debug off, so attribution is a separate targeted pass over the ids
+    this field names -- not something to infer from this field alone.
+
+    Three outcomes, not two. A response that does not report `expanded_query`
+    at all is `unreported`: neither a hit nor a miss. A measurement with no
+    "cannot tell" state turns a silent exit into a claim.
+    """
+    eq = response.get("expanded_query")
+    ents = response.get("mapped_entities")
+    if eq is None or ents is None:
+        return {
+            "state": "unreported",
+            "missing": [k for k, v in (("expanded_query", eq),
+                                       ("mapped_entities", ents)) if v is None],
+        }
+    same = eq.strip() == question.strip()
+    n = len(ents)
+    if same and n == 0:
+        state = "raw_query_no_entities"
+    elif same:
+        state = "raw_query_with_entities"
+    elif n == 0:
+        state = "expanded_no_entities"
+    else:
+        state = "expanded_with_entities"
+    return {"state": state, "n_mapped_entities": n, "expanded_query_chars": len(eq)}
+
+
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--endpoint", default=os.getenv("EVAL_ENDPOINT", DEFAULT_ENDPOINT),
@@ -453,6 +497,7 @@ def main(argv: Optional[list] = None) -> int:
     for i, q in enumerate(questions, 1):
         print(f"[{i:2d}/{len(questions)}] {q['id']}: {q['question'][:70]}...", flush=True)
         run_passes: List[bool] = []
+        run_observations: List[dict] = []
         last_r = None
         last_response = None
         for run_idx in range(n_runs):
@@ -461,6 +506,7 @@ def main(argv: Optional[list] = None) -> int:
             elapsed = time.perf_counter() - t0
             r = score(q, response, elapsed)
             run_passes.append(bool(r.overall_pass))
+            run_observations.append(expansion_observation(q["question"], response))
             last_r, last_response = r, response
             if n_runs > 1:
                 print(f"     run {run_idx+1}/{n_runs}: {'PASS' if r.overall_pass else 'FAIL'}"
@@ -473,7 +519,11 @@ def main(argv: Optional[list] = None) -> int:
         # Per-question raw response (for debugging) — last run.
         (out_dir / f"{q['id']}.json").write_text(
             json.dumps({"question": q, "response": last_response, "score": asdict(last_r),
-                        "run_passes": run_passes}, indent=2, ensure_ascii=False),
+                        "run_passes": run_passes,
+                        # One entry per DRAW, so a branch count is not a
+                        # one-draw-per-item estimate like the summary rows.
+                        "expansion_observations": run_observations},
+                       indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
