@@ -455,6 +455,54 @@ def expansion_observation(question: str, response: dict) -> dict:
     return {"state": state, "n_mapped_entities": n, "expanded_query_chars": len(eq)}
 
 
+# Signatures of "the backend did not produce an answer". The first group is
+# the backend's own failure FORMAT (`backend/bot.py` wraps provider failures
+# this way); the second is the provider exception classes that reach the
+# answer field through it.
+BACKEND_ERROR_PREFIXES = (
+    "error generating answer:",
+    "error:",
+)
+PROVIDER_ERROR_SIGNATURES = (
+    "authenticationerror",
+    "ratelimiterror",
+    "openaiexception",
+    "apiconnectionerror",
+    "internalservererror",
+    "litellm.",
+    # The typed-answer path reaches the same provider through BAML, so the
+    # same revoked key surfaces under a different client name and status.
+    # Observed 2026-10-26: flag OFF gave litellm.AuthenticationError, flag ON
+    # gave BamlClientHttpError 401 -- one credential, two clients. Listing
+    # both is what lets the abort NAME the cause instead of reporting a bare
+    # prefix match.
+    "bamlclienthttperror",
+    "401 unauthorized",
+    "unauthorized",
+)
+
+
+def backend_error_signature(answer: str) -> Optional[str]:
+    """Return the signature that makes this answer not an answer, or None.
+
+    Deliberately NOT a general "looks like an error" heuristic. Gill discusses
+    error, sin and judgement at length, and a scorer that read the word
+    "error" in a theological answer as a dead backend would throw away real
+    data. This matches the backend's own failure format at the START of the
+    answer, and names the provider exception class when one is present.
+    """
+    if not answer:
+        return None
+    low = answer.strip().lower()
+    for p in BACKEND_ERROR_PREFIXES:
+        if low.startswith(p):
+            for sig in PROVIDER_ERROR_SIGNATURES:
+                if sig in low:
+                    return "%s + %s" % (p.rstrip(":"), sig)
+            return p.rstrip(":")
+    return None
+
+
 def main(argv: Optional[list] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--endpoint", default=os.getenv("EVAL_ENDPOINT", DEFAULT_ENDPOINT),
@@ -491,6 +539,10 @@ def main(argv: Optional[list] = None) -> int:
     print(f"Output dir: {out_dir}\n")
 
     n_runs = max(1, args.runs)
+    # Files this run wrote, so an abort can leave nothing scorable behind. A
+    # half-written run directory is worse than none: a later reader cannot
+    # tell it from a complete one.
+    written_by_this_run: List[Path] = []
     results: List[QuestionResult] = []
     # Per-question pass ledger across runs, for stability classification.
     pass_ledger: Dict[str, List[bool]] = {}
@@ -507,6 +559,45 @@ def main(argv: Optional[list] = None) -> int:
             r = score(q, response, elapsed)
             run_passes.append(bool(r.overall_pass))
             run_observations.append(expansion_observation(q["question"], response))
+            sig = backend_error_signature(response.get("answer") or "")
+            if sig:
+                # Run-level fault. Not this question's failure: the system
+                # under test is not answering, so no score over any question
+                # is meaningful. Rerun from the top once it is fixed; never
+                # splice a repaired arm onto this one.
+                print("\n" + "=" * 70, flush=True)
+                print("RUN ABORTED -- the backend is not producing answers.", flush=True)
+                print("  first seen : %s, draw %d/%d" % (q["id"], run_idx + 1, n_runs),
+                      flush=True)
+                print("  signature  : %s" % sig, flush=True)
+                print("  answer[:160]: %r" % (response.get("answer") or "")[:160],
+                      flush=True)
+                print("  HTTP status was not an error and the transport did not "
+                      "fail, so this would otherwise have scored as a content "
+                      "failure on every question.", flush=True)
+                for p_written in written_by_this_run:
+                    try:
+                        p_written.unlink()
+                    except OSError:
+                        pass
+                abort_path = out_dir / "RUN_ABORTED.json"
+                abort_path.write_text(json.dumps({
+                    "aborted": True,
+                    "reason": "backend returned an error in the answer field",
+                    "signature": sig,
+                    "first_seen_question": q["id"],
+                    "draw": "%d/%d" % (run_idx + 1, n_runs),
+                    "answer_excerpt": (response.get("answer") or "")[:400],
+                    "questions_attempted": i,
+                    "questions_total": len(questions),
+                    "per_question_files_removed": len(written_by_this_run),
+                    "note": "No summary.json or report.md was written. A pass "
+                            "rate over absent answers is not a measurement.",
+                }, indent=2, ensure_ascii=False), encoding="utf-8")
+                print("  wrote      : %s (no summary, no report)" % abort_path,
+                      flush=True)
+                print("=" * 70, flush=True)
+                return 4
             last_r, last_response = r, response
             if n_runs > 1:
                 print(f"     run {run_idx+1}/{n_runs}: {'PASS' if r.overall_pass else 'FAIL'}"
@@ -517,6 +608,7 @@ def main(argv: Optional[list] = None) -> int:
         results.append(last_r)
 
         # Per-question raw response (for debugging) — last run.
+        written_by_this_run.append(out_dir / f"{q['id']}.json")
         (out_dir / f"{q['id']}.json").write_text(
             json.dumps({"question": q, "response": last_response, "score": asdict(last_r),
                         "run_passes": run_passes,

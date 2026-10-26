@@ -14,9 +14,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run_eval import expansion_observation  # noqa: E402
+from run_eval import expansion_observation, backend_error_signature  # noqa: E402
 
-EXPECTED_CHECKS = 15
+EXPECTED_CHECKS = 21
 checks = []
 
 
@@ -98,6 +98,34 @@ check("...absent is not reported as a value", realized, None)
 
 fault, realized = pod_flag_fault({"spec": {"containers": []}}, "0")
 check("no containers is a fault, not a crash", fault is not None, True)
+
+# --- a backend error string is not an answer ------------------------------
+# Arm 1 of the gate run scored this as 28 content failures and reported a
+# 0/28 pass rate with "0 errors". A pass rate over absent answers is not a
+# measurement, so this signature has to stop the run.
+ARM1 = ("Error generating answer: litellm.AuthenticationError: "
+        "AuthenticationError: OpenAIException - User not found.")
+sig = backend_error_signature(ARM1)
+check("the arm-1 string is caught", sig is not None, True)
+check("...and it names the provider class", "authenticationerror" in (sig or ""), True)
+check("rate limit shape is caught",
+      backend_error_signature("Error generating answer: litellm.RateLimitError: 429")
+      is not None, True)
+
+# The negative that matters most. Gill writes about error, sin and judgement
+# constantly; a word-match heuristic here would discard real data on the
+# questions most worth scoring.
+check("Gill on error is NOT a backend fault",
+      backend_error_signature(
+          "Gill argues that the error of the Arminians lies in supposing the "
+          "will to be free; see also his remarks on error in doctrine."),
+      None)
+check("an answer merely STARTING with the word error is not a fault",
+      backend_error_signature(
+          "Error is the fruit of ignorance, as Gill observes on Romans 1."),
+      None)
+check("empty answer is not a backend fault signature",
+      backend_error_signature(""), None)
 
 failed = [c for c in checks if not c[1]]
 for name, ok, got, want in checks:

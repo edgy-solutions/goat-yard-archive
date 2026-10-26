@@ -231,4 +231,90 @@ records the pod, digest, flag and boot time instead -- facts, not a flag.
 
 ## Addenda after the first arm starts
 
-*(Nothing yet. Anything added here is dated and is not a prediction.)*
+### 2026-10-26 -- arm 1 VOID, the run is BLOCKED, arms 2-4 not run
+
+**What happened.** Arm `A1-off-null1` ran as locked: flag `0`, fresh pod
+`gya-frontend-api-7c7b7c74f5-jjc4l`, digest asserted, 0 restarts, same pod
+before and after. It returned `0/28 pass, 28 STABLE-FAIL, 0 FLAKY, 0 errors`
+after 84 live requests. That summary is **not a measurement** and has been
+deleted; see `evals/output/gate_20261025/A1-off-null1/VOID.md`.
+
+Every one of the 28 "failures" carried the same string in the `answer` field:
+
+    Error generating answer: litellm.AuthenticationError: AuthenticationError:
+    OpenAIException - User not found.
+
+HTTP 200, `error=None`. The answer provider was rejecting every call and the
+scorer read that as 28 independent content failures.
+
+**Prediction 1 fired as written.** The clause was *"If the null comes back at 0
+I will distrust the run before I trust the cleanliness."* It came back at 0
+flips because both halves would have been uniformly dead. The distrust clause
+is the only reason this was not filed as a clean null.
+
+**The ratchet had nothing to measure, independent of the credential.** A
+regression is a STABLE-PASS -> STABLE-FAIL flip. With zero STABLE-PASS in the
+baseline the estimator is undefined -- not "no effect", undefined. Had the run
+continued, arms 2-4 would have produced three more 0/28 summaries and a
+confident "no regression under ON".
+
+**The fault is flag-independent, witnessed, not inferred.** With
+`GILL_STRUCTURED_ANSWER` restored to its found value `1` and a fresh pod, one
+request failed on the same credential through a *different client*:
+
+    Error generating answer: BamlClientHttpError(client_name=GillAnswerLM,
+    message=Request failed with status code: 401 Unauthorized.
+    {"error":{"message":"User not found...
+
+One credential, two clients, both answer paths dead. This is a cross-path
+witness, not a repeat of the same arm, which is why it settles the flag.
+
+**Cause: UNDETERMINED, deliberately.** The answer path is
+`openrouter/deepseek/deepseek-chat` reading `OPENROUTER_API_KEY` from secret
+`gya-frontend-secrets` (`backend/bot.py:1356`), and `"User not found."` is
+OpenRouter's reply to a revoked or invalid key. Ruled out: the flag (above),
+and the in-cluster litellm proxy (zero `user not found` in its logs over
+360h). Two candidates remain and I am claiming **neither**:
+
+- (a) the key was revoked upstream and was already failing before my restart;
+- (b) the secret was rotated after Oct 18 and the 7-day-old pod masked it until
+  my rollout exposed it.
+
+`gya-frontend-secrets` carries no `managedFields`, so its last-change date is
+not available to me. Credentials are operator-only by standing law: I read key
+**names** and object metadata, never values, and attempted no fix. Recording
+no cause is the correct output here -- the causal story is a claim too, and
+either candidate would have been a guess wearing a finding's clothes.
+
+**Predictions 1 and 4 are unreadable from this arm, and 4 for a second
+reason.** Expansion only *looked* healthy in arm 1 (12 citations, 8 entities,
+`expanded_query != query`). But expansion and the answer both call OpenRouter,
+and expansion has fallbacks that still emit an expanded string and entities
+while the answer path has none. So `expanded_with_entities` does **not** prove
+the expansion model call succeeded. This is exactly the union limitation
+section 6 named before the run -- it just bit harder than written, because a
+dead provider is a third member of the union.
+
+**Predictions 2, 3 and 5 were never tested.** Arms 2, 3 and 4 did not run. The
+remaining 252 requests were not spent.
+
+**Harness defect, fixed and proven live.** A backend error string scoring as a
+legitimate answer is a run-level fault, not an item error
+(`run-level-fault-vs-item-error`). `run_eval.py` now detects the backend's own
+failure format with the provider class named, aborts on first detection,
+deletes every per-question file the run wrote, writes only
+`RUN_ABORTED.json`, and exits 4. Proven against the real live fault: exit 4,
+nothing left behind but the abort record. Born-tested at 21/21 including the
+two negatives that matter -- Gill writes about "error" constantly, and a
+word-match heuristic here would discard real data on the questions most worth
+scoring.
+
+**Product defect, filed separately from this run.** When the answer model
+fails, the product puts the provider's raw error string into the `answer` field
+a user reads, presenting an internal failure as an answer.
+
+**How this resumes.** All four arms rerun **from the top** once the credential
+works. Arm 1 is not repaired and not spliced; a repaired arm joined to a void
+one is not a pair. The predictions above stand unamended -- they were written
+before any arm ran and they do not get a second draft because the first attempt
+hit a dead backend.
