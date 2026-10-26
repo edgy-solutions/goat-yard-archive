@@ -3,6 +3,7 @@
 **Status**: open. Scheduled for 0.3.4 by ruling (Chris, 2026-10-18 consolidated,
 item 5).
 **Found**: 2026-10-18, during the 0.3.3 smoke on gya-test.
+**Observed on production**: 2026-10-25, during the 0.3.2 acceptance (see below).
 **Affects**: 0.3.2 and 0.3.3 identically — `backend/stage_health.py` is
 byte-identical across them, so this is **pre-existing, not a 0.3.3 regression**.
 It was simply first witnessed on a pod young enough to be read before its first
@@ -79,6 +80,38 @@ test has to run against a genuinely cold process — a suite that calls
 `_reset_for_tests()` after an import that already served traffic is not cold,
 and a check that cannot see the cold window has not tested it.
 
+## Observed on production, 2026-10-25
+
+The 0.3.2 acceptance on prod was run twice against the same pod, and the two
+runs disagreed:
+
+| run | pod state | `/health/stages` |
+|---|---|---|
+| 1 | cold -- no request served yet | every stage `false` |
+| 2 | after one served request | `{"entity_lookup": true, "expansion": false}`, `not_observable: [answer, verifier]` |
+
+Nothing was fixed between the two runs and nothing was deployed between them.
+The only difference is that a request had been served. **This is the defect,
+witnessed on production rather than inferred from gya-test** -- and it is worth
+recording that the two environments behaved identically, which is what the
+`stage_health.py`-is-byte-identical claim above predicted.
+
+Two consequences, both now concrete:
+
+1. **The acceptance has an undocumented precondition.** "Serve one request
+   first" was not written down anywhere; a cold run reads as a failed release.
+   It is now stated in `docs/releases/RELEASE_0.3.2.md` for 0.3.2, but the
+   general fix is this defect, not a line of prose in each release's notes.
+2. **`expansion: false` in run 2 is NOT an instance of this defect**, and the
+   distinction matters for anyone triaging from the same output. That flag was
+   false because the structural sentinel at `backend/main.py:518` raised on a
+   legitimate model outcome (`entities_given_none_returned`) and
+   `record_request` counted an `expansion_error`. Expansion ran and succeeded.
+   D-004 is the zero-observation window; that is a boolean conflating "the
+   stage faulted" with "a designed suppression fired". Two different problems
+   producing the same `false`, which is itself the argument for giving this
+   endpoint more than two states.
+
 ## What this does NOT cover
 
 - The real fault verdicts are unaffected: a faulted stage still reports `false`
@@ -88,4 +121,8 @@ and a check that cannot see the cold window has not tested it.
   closed by pretending otherwise.
 - No monitor is known to be polling `/health/stages` today, so the live impact
   is a latent one. That is a reason to fix it before something starts polling,
-  not a reason to downgrade it.
+  not a reason to downgrade it. **Amended 2026-10-25: it is no longer purely
+  latent.** It did not page a monitor, but it misinformed a human reading the
+  endpoint during a production acceptance, which is the consumer this release
+  built the endpoint for. A false alarm that only a person reads is still a
+  false alarm.
