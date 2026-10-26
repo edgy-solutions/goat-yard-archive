@@ -1341,11 +1341,11 @@ _CHAP_RE = re.compile(r'(?m)^\s*#\s*Chapter\b.*$')
 # One code-owned verse-number parser, shared by parse_ver_head (the model-read / canary path) and
 # parse_witness (the old vol.1 .md). The old _VER_RE (`([0-9][0-9, ]*)`) stopped at a dash, so
 # witness "Ver. 12--14" parsed as [12] and "Ver. 28-34" as [28] -- this replaced it.
-_VER_HEAD_RE = re.compile(r'Ver[.,]?')
+_VER_HEAD_RE = re.compile(r'Ver[.,:]?')
 # Lowercase "ver" is only treated as a head with REQUIRED punctuation (unlike the capital form,
 # where the '.'/',' is optional) -- "ver 3" reads as prose ("ver" is a common word fragment/OCR
 # noise), "ver. 3"/"ver, 3" reads as a head. See parse_ver_head.
-_VER_HEAD_LOWER_RE = re.compile(r'ver[.,]')
+_VER_HEAD_LOWER_RE = re.compile(r'ver[.,:]')
 _DASHES = "-–—"  # hyphen, en dash, em dash
 _NUM_ITEM_RE = re.compile(r'\s*([0-9]+)(?:\s*[' + _DASHES + r']\s*([0-9]+))?')
 RANGE_SPAN_MAX = 20  # a "Ver. N-M" range wider than this is implausible, never silently trusted
@@ -1407,8 +1407,8 @@ def parse_ver_head(text):
       status "empty"            -- text is empty/whitespace-only; ver=None, numbers=None,
                                     ver_case=None.
       status "no_ver"           -- does not start (after up to 3 leading non-alnum chars) with
-                                    capital "Ver" + optional '.'/',' , NOR with lowercase "ver" +
-                                    REQUIRED '.'/','; ver=False, numbers=None, ver_case=None.
+                                    capital "Ver" + optional '.'/','/':' , NOR with lowercase "ver" +
+                                    REQUIRED '.'/','/':'; ver=False, numbers=None, ver_case=None.
       status "unparsed"         -- "Ver" present but no number spec follows; ver=True, numbers=None
                                     (capital only -- see below); ver_case="upper".
       status "range_implausible"-- a number spec parsed but failed plausibility (see
@@ -1418,6 +1418,14 @@ def parse_ver_head(text):
                                     ver_case="upper" or "lower".
     raw_head is the matched "Ver..."/"ver..." prefix string (through the parsed number spec, when
     any).
+
+    Capital "Ver" is found at its FIRST occurrence; the text before it (the prefix) is accepted iff
+    EITHER it is the old rule (<=3 chars, none alphanumeric) OR it is edge furniture: <=3
+    whitespace-separated tokens, each <=2 chars, none a two-letter word (so "| _ Ver. 24", "7 Ver. 1",
+    "| =6Ver. 8" parse; "of Ver. 3", "see Ver. 3", "1 2 3 4 Ver. 5" do not). Numbers are NEVER taken
+    from the prefix and no character is rewritten into a digit; nothing between the Ver token and
+    the number is skipped. raw_head still starts at "Ver". The lowercase form gets no furniture
+    prefix.
 
     Lowercase "ver" (punctuation REQUIRED: "ver." / "ver,", never bare "ver") is tried only when the
     capital form does not match at the same position. A lowercase match without a plausible number
@@ -1430,7 +1438,23 @@ def parse_ver_head(text):
     while i < min(3, len(s)) and not s[i].isalnum():
         i += 1
     rest = s[i:]
-    m = _VER_HEAD_RE.match(rest)
+    # Run-2 Tesseract reads edge furniture before the head ("7 Ver. 1.", "| _ Ver. 26, 27."). The
+    # prefix is accepted only under the furniture invariant; anything between Ver and the number is
+    # NOT skipped: skipping "]" in "Ver. ] 3." (truth 13) would turn an abstention into a confident
+    # wrong 3.
+    m = None
+    j = s.find("Ver")
+    if j >= 0:
+        prefix = s[:j]
+        toks = prefix.split()
+        old_rule = len(prefix) <= 3 and not any(c.isalnum() for c in prefix)
+        furniture = (len(toks) <= 3 and all(len(k) <= 2 for k in toks)
+                     and not any(len(k) == 2 and k[0].isalpha() and k[1].isalpha() for k in toks))
+        if old_rule:
+            rest = s[j:]
+            m = _VER_HEAD_RE.match(rest)
+    if m is None:
+        m = _VER_HEAD_RE.match(rest)
     if m:
         after = rest[m.end():]
         items, consumed = _parse_number_items(after)

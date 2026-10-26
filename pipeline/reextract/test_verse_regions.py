@@ -763,6 +763,23 @@ def test_parse_ver_head_cases():
     r = VR.parse_ver_head("And God said, Let there be light")  # no "Ver" at all
     assert r["status"] == "no_ver" and r["ver"] is False, r
 
+    # 3a: colon + leading edge-furniture prefix (lock cad897a0)
+    for txt, want in (("Ver: 12. And", [12]), ("| _ Ver. 24. If", [24]), ("7 Ver. 1. Now", [1]),
+                      ("| =6Ver. 8. And", [8]), ("I _ Ver. 3. And", [3]), ("l Ver. 53. Unto", [53]),
+                      ("7 Ver. 35—37. These", [35, 36, 37]), ("| _ Ver. 26, 27. Of", [26, 27]),
+                      ("_-_Ver. 3", [3])):
+        r = VR.parse_ver_head(txt)
+        assert r["status"] == "ok" and r["numbers"] == want and r["raw_head"].startswith("Ver"), (txt, r)
+    r = VR.parse_ver_head("ver: 4. and")
+    assert r["status"] == "ok" and r["numbers"] == [4] and r["ver_case"] == "lower", r
+    for txt in ("Ver. ] 3. And", "Ver. %. And"):
+        r = VR.parse_ver_head(txt)
+        assert r["status"] == "unparsed" and r["numbers"] is None, (txt, r)
+    for txt in ("see Ver. 3", "of Ver. 3", "And Ver. 3", "1 2 3 4 Ver. 5", "abc Ver. 5", "ver 3",
+                "7 ver. 3", "_-_ Ver. 3"):
+        r = VR.parse_ver_head(txt)
+        assert r["status"] == "no_ver" and r["numbers"] is None, (txt, r)
+
 
 def test_parse_witness_multiline_ranges_and_chapters():
     md = (
