@@ -85,20 +85,32 @@ def parse_ts(value: str) -> datetime:
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
-def git_state() -> dict:
+def git_state(allow_untracked: list) -> dict:
+    """What produced this arm, recorded rather than assumed.
+
+    A run over a dirty tree is provisional and may not be cited in an ADR or a
+    tier change. The point of that rule is that the code which produced a
+    result is identified -- so a path may be excluded from it only by being
+    NAMED on the command line and recorded in the header beside the full dirty
+    list. A silent default would quietly widen the rule every time something
+    new appeared in the tree, which is how a guard stops guarding.
+    """
     def g(*args: str) -> str:
         p = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True)
         return p.stdout.strip() if p.returncode == 0 else "unknown"
 
+    # git already knows about autocrlf; never hand-roll a CR check.
     porcelain = g("status", "--porcelain")
+    dirty = sorted(line[2:].strip().strip('"') for line in porcelain.splitlines() if line)
+    allowed = sorted(set(allow_untracked))
+    unexplained = [p for p in dirty if p not in allowed]
     return {
         "git_head": g("rev-parse", "HEAD"),
         "git_branch": g("rev-parse", "--abbrev-ref", "HEAD"),
-        # git already knows about autocrlf; never hand-roll a CR check.
-        "git_dirty": "dirty" if porcelain else "clean",
-        "git_dirty_paths": sorted(
-            line[3:] for line in porcelain.splitlines() if line
-        )[:20],
+        "git_dirty": "dirty" if dirty else "clean",
+        "git_dirty_paths": dirty[:20],
+        "git_dirty_allowed": allowed,
+        "git_dirty_unexplained": unexplained[:20],
     }
 
 
@@ -246,6 +258,11 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("--deployment", default=DEFAULT_DEPLOY)
     ap.add_argument("--endpoint", default="http://test.chart-example.local/api/search")
     ap.add_argument("--output-root", default=str(REPO_ROOT / "evals" / "output" / "gate_20261025"))
+    ap.add_argument("--allow-untracked", nargs="*", default=[],
+                    help="Paths excluded from the dirty-tree check, named "
+                         "explicitly. Recorded in the header beside the full "
+                         "dirty list; anything dirty and not named here makes "
+                         "the arm provisional.")
     ap.add_argument("--verify-only", action="store_true",
                     help="Run every assertion and write no results. Use this to "
                          "prove the refusals fire before trusting a pass.")
@@ -269,9 +286,12 @@ def main(argv: list | None = None) -> int:
         "deployment": args.deployment,
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "realized": realized,
-        **git_state(),
+        **git_state(args.allow_untracked or []),
     }
-    header["provisional"] = header["git_dirty"] == "dirty"
+    # Provisional on UNEXPLAINED dirt only, with the excluded paths on the
+    # record. An excluded path that is not actually dirty is harmless; a
+    # dirty path nobody named makes the arm uncitable, as it should.
+    header["provisional"] = bool(header["git_dirty_unexplained"])
 
     print("=" * 72)
     print("ARM %s  flag %s=%s  runs=%d" % (args.arm, FLAG, args.flag, args.runs))
@@ -282,7 +302,10 @@ def main(argv: list | None = None) -> int:
     if header["provisional"]:
         print("  PROVISIONAL: dirty tree -- this arm may not be cited in an ADR "
               "or a tier change.")
-        print("               dirty paths: %s" % header["git_dirty_paths"])
+        print("               unexplained: %s" % header["git_dirty_unexplained"])
+    elif header["git_dirty"] == "dirty":
+        print("  %-16s dirty, all of it named: %s"
+              % ("tree", header["git_dirty_allowed"]))
     print("=" * 72)
 
     if args.verify_only:
