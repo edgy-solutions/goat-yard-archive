@@ -110,7 +110,11 @@ Two consequences, both now concrete:
    D-004 is the zero-observation window; that is a boolean conflating "the
    stage faulted" with "a designed suppression fired". Two different problems
    producing the same `false`, which is itself the argument for giving this
-   endpoint more than two states.
+   endpoint more than two states. **Filed separately as
+   [D-005](D-005-stage-health-conflates-suppression-with-fault.md)** by ruling
+   (Chris, 2026-10-25): a designed suppression and a stage fault must not share
+   a value, and both entries' buckets are to be derived from the build rather
+   than from the last request, in one pass.
 
 ## What this does NOT cover
 
@@ -119,6 +123,11 @@ Two consequences, both now concrete:
 - It does not make `answer` or `verifier` observable. That is a separate piece
   of work on the 0.3.x line's generation path, and this defect must not be
   closed by pretending otherwise.
+- **Nothing alerts on `/health/stages` until this and D-005 are both fixed.**
+  That is a standing rule, stated in `docs/releases/0.3.3.md` and in
+  `docs/releases/RELEASE_0.3.2.md` on `release-0.3.2`, because an operator
+  wiring a monitor does not read defect files. It lifts when both born-tests
+  are green against a genuinely cold process, not when one of them is.
 - No monitor is known to be polling `/health/stages` today, so the live impact
   is a latent one. That is a reason to fix it before something starts polling,
   not a reason to downgrade it. **Amended 2026-10-25: it is no longer purely
