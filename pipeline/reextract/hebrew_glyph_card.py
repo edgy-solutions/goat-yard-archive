@@ -60,6 +60,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 import hebrew_aperture_diag as D
+import signature_attestation as SA
 import note_region
 import cv_footnote_presplit as ps
 
@@ -984,9 +985,177 @@ word-break:break-all;margin:6px 0}
 """
 
 
+# --- THE POPULATION BRIDGE ------------------------------------------------------------------
+# `D.build_set` reaches 21 spans and reads their signed string from the TRUTH / SEALED_TRUTH table.
+# Seven of ruling 4's eight owed spans are not in it; they live in the frozen 74-span signer set.
+# That set's `hebrew` column is the CANDIDATE -- the machine's proposal, the signer's INPUT -- and it
+# is not the signature. On the two spans the ruling puts first they differ in LENGTH, because pass 2
+# is the insertion pass: p233:n4's candidate is 4 consonants and its signature is 6 (two inserted
+# vavs), p831:n2's candidate is 6 and its signature is 7 (one inserted resh). A card's `pos` is
+# counted in the SIGNED string, so a card built from the candidate points at the wrong glyph.
+#
+# So the signature is DERIVED from the signed verdicts. The derivation is not re-ported here: it is
+# `signature_attestation.derive_in_crop`, already shipped and already checked against the console's
+# own `derived_consonants` (a cross-lineage witness -- the console computes it in JavaScript). I
+# measured the three existing derivations against each other over all 74 latest rows: they disagree
+# on 4, every one of them a row carrying a `disputed`, `deleted` or `not_in_crop` verdict, and two of
+# those four also disagree with the console. The gate below refuses exactly that population, so the
+# bridge only ever runs where all three agree -- which is measured, not assumed.
+#
+# BOX PROVENANCE IS NOT THE SAME IN THE TWO POPULATIONS, and the page must not pretend it is. A
+# build_set box is a HUMAN-RATIFIED rect from `span_box_verdicts_20260906.jsonl`. A frozen-set box is
+# machine-drawn by the draw pool. The two populations are very nearly disjoint -- one span of 74 is in
+# both, and it has no ratified box -- so there is no cross-check available and no span whose two boxes
+# could be compared. `card_spans` stamps the provenance on every record it returns, so the caption can
+# state which kind of box the signer is looking at rather than calling a drawn rect ratified.
+#
+# THE FROZEN RECORDS CARRY NO NOTE BOX. That is the state of the evidence, not a shortcut: of the
+# eight owed pages only p596 (the sealed one, which build_set already reaches) has a ratified note box
+# at all. Deriving one from `note_line_regions(...)[note_index - 1]` was available and is refused --
+# that is the geometry the draw pool used to place the span box in the first place, so it could not
+# witness it, and this lane has already shipped one wrong-line crop that way. The note cell simply
+# does not render for these seven, and the card is the span crop plus its magnified line.
+
+FROZEN_SET = D.DATA / "truth_set74_0401b636ffa7bf1a.json"
+
+# Later file wins: a re-sign supersedes the signature it replaces. The tag is what lands in
+# `truth_basis`, so a reader can name the export a card's string came from without opening this file.
+FROZEN_EXPORTS = (
+    ("glyphsign_signed_0401b636ffa7bf1a_20261004_pass1.jsonl", "pass1:20261004"),
+    ("glyphsign_0401b636ffa7bf1a_pass2_26span_signed_3285d39a.jsonl", "pass2:3285d39a"),
+    ("glyphsign_0401b636ffa7bf1a_pass3_r2_3span_signed_70fc08e1.jsonl", "pass3r2:70fc08e1"),
+)
+
+
+# The verdicts all three shipped derivations render identically. Measured over the 74 latest signed
+# rows: `ingest_pass2.derive`, `signature_attestation.derive_in_crop` and the console's own
+# `derivedFor` agree on every row carrying only these, and disagree on all 4 that carry anything else
+# -- two of those 4 disagreeing with the console itself. `confirmed` and `corrected` cover both tile
+# kinds: a gap tile is a WORD SPACE, emitted as a space by every port, and it is what `words()` splits
+# on and what a card's per-word `pos` counts within.
+AGREED_VERDICTS = ("confirmed", "corrected")
+
+
+def _derivable(r):
+    """Why this signed row may NOT be derived into a card signature, or None when it may.
+
+    One rule: the row must be complete and unfaulted, and every verdict on it must be one the three
+    shipped derivations render the same way. That is the stated rule -- "an unfilled verdict emits
+    nothing and is reported, never guessed" -- with the same treatment extended to the verdicts where
+    the ports diverge, and it is not defensive padding. A glyph the signer marked `not_in_crop` is BY
+    HIS OWN VERDICT not in the picture, so there is no glyph on the card to count to; `deleted` and
+    `disputed` have no single character to put in a string at all.
+
+    It refuses nothing else. An earlier draft also refused gap tiles and insertions anchored before
+    the first tile; both are rendered identically by all three ports, so refusing them asserted a
+    disagreement the measurement did not find -- and the gap clause would have refused every
+    multi-word span, which is the population `words()` and `where()` exist to serve.
+    """
+    if not r.get("complete"):
+        return "the row is not complete"
+    if r.get("fault"):
+        return "the row carries fault %r" % r["fault"]
+    for t in r["tiles"]:
+        v = t.get("verdict") or ""
+        if v not in AGREED_VERDICTS:
+            # A claim about the VERDICT, not about this row. Of the four rows where the ports
+            # actually produce different strings, one lands here and three are caught by the
+            # `complete` clause above; the other three rows refused here carry a `deleted` or
+            # `disputed` tile that the ports happen to agree on. Saying "the derivations disagree on
+            # this row" would be false on three of four refusals, and an operator chasing it would
+            # find nothing.
+            return ("tile %s is %s, which is outside the set of verdicts all three shipped "
+                    "derivations render identically" % (t["i"], v or "unfilled"))
+        if v == "corrected" and t["kind"] == "consonant" and not t.get("chose"):
+            return "tile %s is corrected with nothing chosen" % t["i"]
+    for x in (r.get("insertions") or []):
+        if x.get("verdict"):
+            return "insertion %s carries verdict %r" % (x.get("seq"), x["verdict"])
+        if not x.get("chose"):
+            return "insertion %s has nothing chosen" % x.get("seq")
+    return None
+
+
+def frozen_spans():
+    """Card-shaped records for the frozen 74-span set, with the DERIVED signature as `truth`.
+
+    Returns (records_by_span_id, refusals). A refusal is shown on the page, never swallowed: a
+    capture surface that drops a span in silence leaves the signer believing a card is there.
+    """
+    d = json.loads(io.open(str(FROZEN_SET), encoding="utf-8").read())
+    rows = {r["span_id"]: r for r in d["rows"]}
+    signed, tag = {}, {}
+    for fn, t in FROZEN_EXPORTS:
+        p = D.DATA / fn
+        if not p.exists():
+            continue
+        for ln in io.open(str(p), encoding="utf-8"):
+            ln = ln.strip()
+            if not ln:
+                continue
+            o = json.loads(ln)
+            if "span_id" in o and "tiles" in o:
+                signed[o["span_id"]], tag[o["span_id"]] = o, t
+    out, refused = {}, []
+    for sid, r in sorted(rows.items()):
+        sg = signed.get(sid)
+        if sg is None:
+            refused.append({"span_id": sid, "_refused": "absent from every signed export",
+                            "set": FROZEN_SET.name})
+            continue
+        why = _derivable(sg)
+        if why:
+            refused.append({"span_id": sid, "_refused": why, "export": tag[sid]})
+            continue
+        truth = SA.derive_in_crop(sg)
+        if not truth:
+            refused.append({"span_id": sid, "_refused": "the derivation is empty",
+                            "export": tag[sid]})
+            continue
+        out[sid] = dict(
+            span_id=sid, page=r["page"], note_idx=r["note_index"],
+            signed=sg.get("chosen"), latin_context="",
+            truth=truth, truth_basis="derived-from-signed-verdicts:" + tag[sid],
+            unscorable=None, sealed=(r["page"] in D.SEALED),
+            # No ratified note box exists for these pages, and an index-derived one is refused
+            # above. `cut` is never called with None, so the note cell does not render.
+            note_box=None, note_box_status=None,
+            a1_idx_declared=r["note_index"], a1_idx_used=None, a1_span_overlap=None,
+            a1_clips_span_frac=None,
+            # Strip coords, as `glyph_signer` cuts them (`_box_strip`); `cut` maps strip -> native.
+            span_box=list(r["box"]),
+            # None makes `cut` recompute the bands from the page, which is what the runner does.
+            column_bands=None, n_ratified=None,
+            crop_unmeasured=True)
+    return out, refused
+
+
+def card_spans():
+    """Every span a card can be built from: build_set where it reaches, the frozen set elsewhere.
+
+    build_set is authoritative where it reaches -- its string is a table a human signed and its box is
+    a human-ratified rect, which is strictly more than a derivation over verdicts. The frozen set
+    fills in the rest. `box_provenance` is stamped on EVERY record, so the caption can never be
+    rendered without knowing which kind of box it is describing.
+    """
+    out = {}
+    for s in D.build_set(include_sealed=True):
+        s = dict(s)
+        s["box_provenance"] = "human-ratified"
+        out[s["span_id"]] = s
+    fz, refused = frozen_spans()
+    overlap = sorted(set(fz) & set(out))
+    for sid, s in fz.items():
+        if sid in out:
+            continue
+        s["box_provenance"] = "draw-pool"
+        out[sid] = s
+    return out, refused, overlap
+
+
 def build(out=None):
     out = out or OUTHTML
-    spans = {s["span_id"]: s for s in D.build_set(include_sealed=True)}
+    spans, _bridge_refused, _bridge_overlap = card_spans()
     h = ['<!doctype html><meta charset="utf-8"><title>Hebrew glyph cards</title>',
          "<style>%s</style><div class=\"wrap\">" % CSS,
          "<h1>Hebrew glyph cards &mdash; shape verdicts</h1>",
@@ -1008,10 +1177,24 @@ def build(out=None):
     _rg, _rb = rerat_load()
     h.append('<div class="sub">Signed records loaded: %d exemplar signature(s) from the volume, %d '
              'box re-ratification(s).</div>' % (len(_sg), len(_rg)))
-    for src, refused in (("exemplar signature", _sb), ("box re-ratification", _rb)):
+    h.append('<div class="sub">Spans reachable for a card: %d &mdash; %d with a human-ratified '
+             'box from the signed sitting, %d from the frozen 74-span signer set whose signature is '
+             'DERIVED from the signed verdicts and whose box is drawn, not ratified. %d frozen row(s) '
+             'refused. %d span(s) in both populations, where the ratified record wins.</div>'
+             % (len(spans), sum(1 for x in spans.values() if x["box_provenance"] == "human-ratified"),
+                sum(1 for x in spans.values() if x["box_provenance"] == "draw-pool"),
+                len(_bridge_refused), len(_bridge_overlap)))
+    for src, refused in (("exemplar signature", _sb), ("box re-ratification", _rb),
+                         ("frozen-set span", _bridge_refused)):
         for r in refused:
-            h.append('<div class="warnbox">REFUSED %s, line %s: %s<br><span class="prov">%s</span>'
-                     '</div>' % (src, r.get("_line"), r.get("_refused"),
+            # The line number is printed only when there is one. A JSONL refusal has one; a
+            # frozen-set refusal is about a span and has nothing to put there, and "line None" on a
+            # signing surface invites a reader to go looking for a line that does not exist.
+            # NOT `where` -- that is a module-level function this very function calls further
+            # down, and shadowing it crashed the whole render while the selftest stayed green.
+            at = "" if r.get("_line") is None else ", line %s" % r["_line"]
+            h.append('<div class="warnbox">REFUSED %s%s: %s<br><span class="prov">%s</span>'
+                     '</div>' % (src, at, r.get("_refused"),
                                  json.dumps({k: v for k, v in r.items()
                                              if not k.startswith("_")}, ensure_ascii=False)[:400]))
 
@@ -1086,12 +1269,15 @@ def build(out=None):
                          'it carries no claim to be.</div></div>'
                          % img_comp(cim, unratified=True))
         else:
-            h.append('<div class="cell">%s<div class="cap">the ratified span box at NATIVE size, '
+            prov = ('the <b>ratified</b> span box' if s["box_provenance"] == "human-ratified"
+                    else 'the span box as the <b>draw pool drew it</b> &mdash; machine-drawn, never '
+                         'ratified by anyone, so judge the letter and not the rect')
+            h.append('<div class="cell">%s<div class="cap">%s at NATIVE size, '
                      'cut as the runner cuts it (A2, pad %dpx) &mdash; exactly what a reader was '
                      'shown. It holds <b>%d text line(s)</b>: the neighbours come with the box, and '
                      'they are why an arm that transcribes the whole crop returns more than the '
                      'signature and is scored <code>contains</code>.</div></div>'
-                     % (img_ctx(a2), D.PAD, n_lines(a2)))
+                     % (img_ctx(a2), prov, D.PAD, n_lines(a2)))
             h.append('<div class="cell">%s<div class="cap"><b>the line, magnified.</b> Cropped to the '
                      'text line the box sits on (a horizontal slice &mdash; no letter is cut) and '
                      'scaled so the line is %dpx tall. Every comparison image below is at this same '
@@ -1244,8 +1430,11 @@ def build(out=None):
              'and is recorded as <code>disputed</code> with both candidates and their witnesses '
              '&mdash; scoring then holds the span unscorable rather than forcing a truth. A forced '
              'verdict would be a fifth inherited property.</div></div>')
-    OUTHTML.write_text("\n".join(h), encoding="utf-8")
-    return OUTHTML
+    # `out` used to be accepted, defaulted, and then IGNORED: the write went to OUTHTML and
+    # OUTHTML came back, so a caller rendering into a scratch directory silently overwrote the
+    # shipped page and was told its own path had been written. Found by doing exactly that.
+    out.write_text("\n".join(h), encoding="utf-8")
+    return out
 
 
 def selftest():
@@ -1535,6 +1724,103 @@ def selftest():
         ck("signed exemplars carry provenance when any exist",
            (not sig_exemplars("bet") and not sig_exemplars("gimel"))
            or ("signed exemplar" in t2 and "printed p" in t2))
+
+    print("(8) the population bridge")
+    _b0 = n[0]
+    _bspans, _bref, _bov = card_spans()
+    _owed = ("p233:n4", "p628:n2", "p910:n3", "p596:n2", "p442:n0", "p798:n0", "p254:n1", "p831:n2")
+    _missing = [x for x in _owed if x not in _bspans]
+    ck("all eight spans ruling 4 owes a card are reachable", not _missing, _missing)
+    ck("every reachable record states its box provenance",
+       all(x.get("box_provenance") in ("human-ratified", "draw-pool") for x in _bspans.values()),
+       sorted({str(x.get("box_provenance")) for x in _bspans.values()}))
+
+    # THE DEFECT THE BRIDGE EXISTS TO PREVENT. Pass 2 is the insertion pass, so on these two spans the
+    # signature is LONGER than the candidate -- a card built from the frozen set's `hebrew` column
+    # would count to a glyph that is not the one in dispute. Stated as the property (longer, and the
+    # candidate is a prefix-with-a-hole, not equal), never as a pinned pair of strings.
+    _fz = json.loads(io.open(str(FROZEN_SET), encoding="utf-8").read())
+    _cand = {r["span_id"]: strip_nikud(r["hebrew"]) for r in _fz["rows"]}
+    _grew = [x for x in ("p233:n4", "p831:n2")
+             if x in _bspans and len(_bspans[x]["truth"]) > len(_cand.get(x, ""))]
+    ck("the two insertion-pass signatures are longer than their candidates",
+       sorted(_grew) == ["p233:n4", "p831:n2"],
+       [(x, _cand.get(x), _bspans[x]["truth"] if x in _bspans else None)
+        for x in ("p233:n4", "p831:n2")])
+    ck("no card signature is the frozen set's candidate where the two differ",
+       all(_bspans[x]["truth"] != _cand[x] for x in _cand
+           if x in _bspans and _bspans[x]["box_provenance"] == "draw-pool"
+           and len(_bspans[x]["truth"]) != len(_cand[x])))
+
+    # The accept path, re-derived rather than trusted: nothing admitted may carry a verdict outside
+    # the set all three shipped derivations render identically.
+    _signed = {}
+    for _fn, _tg in FROZEN_EXPORTS:
+        _p = D.DATA / _fn
+        if not _p.exists():
+            continue
+        for _ln in io.open(str(_p), encoding="utf-8"):
+            _ln = _ln.strip()
+            if _ln:
+                _o = json.loads(_ln)
+                if "span_id" in _o and "tiles" in _o:
+                    _signed[_o["span_id"]] = _o
+    _leak = [sid for sid, x in _bspans.items()
+             if x["box_provenance"] == "draw-pool" and sid in _signed
+             and any((t.get("verdict") or "") not in AGREED_VERDICTS for t in _signed[sid]["tiles"])]
+    ck("no admitted row carries a verdict the derivations render differently", not _leak, _leak)
+
+    # CROSS-LINEAGE WITNESS. `derived_consonants` is computed by the console in JavaScript, so an
+    # agreement with the Python port is a witness and not a construction. The liveness count is
+    # printed: a check that compares nothing would otherwise pass on nothing.
+    _n_wit = _n_bad = 0
+    for sid, x in _bspans.items():
+        _c = (_signed.get(sid) or {}).get("derived_consonants")
+        if x["box_provenance"] == "draw-pool" and _c:
+            _n_wit += 1
+            if _c != x["truth"]:
+                _n_bad += 1
+    print("      the console's own JavaScript string exists on %d admitted row(s)" % _n_wit)
+    ck("the derivation agrees with the console on every admitted row that carries its string",
+       _n_wit > 0 and _n_bad == 0, "%d witness(es), %d mismatch(es)" % (_n_wit, _n_bad))
+
+    ck("the frozen records carry no note box, because no ratified one exists for those pages",
+       all(x["note_box"] is None for x in _bspans.values() if x["box_provenance"] == "draw-pool"))
+
+    # The gap clause that over-refused. A gap tile is a word space, so refusing it refused every
+    # multi-word span -- the population `words()` and `where()` exist to serve.
+    _mw = [sid for sid, x in _bspans.items() if " " in (x["truth"] or "")]
+    print("      multi-word signatures admitted: %d" % len(_mw))
+    ck("a word space does not get a span refused", len(_mw) > 0, len(_mw))
+
+    if OUTHTML.exists():
+        # LIVENESS, stated rather than assumed: until the eight CARDS entries land, no card sits on a
+        # drawn box and this branch is checking nothing. The count is printed so a zero is visible.
+        _dp = [c for c in CARDS if _bspans.get(c["span_id"], {}).get("box_provenance") == "draw-pool"]
+        print("      cards sitting on a draw-pool box: %d" % len(_dp))
+        ck("a card on a drawn box never calls it ratified",
+           not _dp or "machine-drawn, never " in t2, len(_dp))
+    else:
+        ck("a card on a drawn box never calls it ratified", True, "no rendered page to scan")
+
+    # 9, not 10: the caption check is one `ck` reached through an if/else, not two. The first run of
+    # this line said 10 and went red, which is what the line is for.
+    # WHAT THE HTML CHECKS ARE ACTUALLY SCANNING. Nothing in this suite renders; every check that
+    # reads `t2` reads a page some earlier run left on disk. When `build()` crashed on a shadowed
+    # name it wrote nothing, and all of those checks passed anyway against the previous version's
+    # page. Comparing mtimes is derived from the filesystem, not matched against a string this same
+    # code emits, so it cannot pass by construction.
+    if OUTHTML.exists():
+        _fresh = OUTHTML.stat().st_mtime >= Path(__file__).stat().st_mtime
+        ck("the page the HTML checks scan was rendered by THIS code, not an earlier one",
+           _fresh, "page is older than the module -- re-run `build` before trusting section 7")
+    else:
+        ck("the page the HTML checks scan was rendered by THIS code, not an earlier one",
+           True, "no rendered page on disk, so no HTML check ran")
+
+    # 10, not 9: the staleness guard above is one `ck` reached through an if/else. The first version
+    # of this line said 10 when there were 9 and went red, which is what the line is for.
+    ck("section 8 ran every one of its checks", n[0] - _b0 == 10, n[0] - _b0)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
