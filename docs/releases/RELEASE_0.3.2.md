@@ -237,10 +237,23 @@ Three things follow, none of which is a bug in 0.3.2:
   false by way of `errored > 0` or `fallbacks > 0`. It cannot report a skip. If
   you see false, something ran.
 - **Three of the four fallback kinds are deliberate design decisions, not
-  faults** (`anchored_manifest_trusted`, `poisoned_manifest_suppressed`,
-  `vector_tier_degraded_suppressed`), and two of them are set on the
-  BAML-*success* path. A boolean cannot distinguish "the stage broke" from "a
-  designed suppression fired", and this flag does not try to.
+  faults.** `anchored_manifest_trusted` (ADR-0013 Part D) means the system
+  *recovered* -- it kept an anchored manifest despite the punt -- and still
+  turns the flag false. `poisoned_manifest_suppressed` (ADR-0012) and
+  `vector_tier_degraded_suppressed` (ADR-0014) are deliberate suppressions.
+  Only `dedup_only` is routine. A boolean cannot distinguish "the stage broke"
+  from "a designed suppression fired", or from "a designed recovery worked",
+  and this flag does not try to.
+- **Correction to an earlier version of this line**, which said two fallback
+  kinds are set on the BAML-*success* path. Only one can:
+  `vector_tier_degraded_suppressed` is assigned at `backend/main.py:709`,
+  outside the `except`, and its own comment says it "can fire on the
+  BAML-success path too". The other three are assigned inside the `except`
+  (`:647`, `:656`, `:676`), so they always arrive with an `expansion_error`.
+  `backend/stage_health.py`'s comment at the expansion computation claims
+  fallback-without-error is impossible; that is the claim this correction
+  falsifies, and the guard it justifies is right anyway. Filed as part of
+  D-005.
 - **`vector_tier_degraded_suppressed` is ruled out here** by the same response:
   `entity_lookup` reads `true`, which it could not if that gate had fired.
 
@@ -274,6 +287,30 @@ Until that is fixed, two rules for anyone reading this endpoint on prod:
    restart opens a window in which it alarms with no underlying fault — and
    prod's api process restarted around 2026-10-19 with nothing reporting it, so
    that window is not hypothetical.
+
+---
+
+## The monitoring rule from here on
+
+**Nothing alerts on `/health/stages` until D-004 is fixed.** Not a paging rule,
+not a dashboard panel that turns red, not a synthetic check. A human may read
+the endpoint, with the cold-pod caveat above in hand.
+
+This is a standing rule, not a note about this release, and it is stated here
+rather than only in the platform ticket because the ticket is not what an
+operator reads before wiring a monitor. Two independent reasons, each sufficient
+on its own:
+
+1. **The zero-observation window** (D-004). Every api pod restart produces an
+   all-false read with no fault behind it, and it clears only when a request is
+   served. A restart at 03:00 on a quiet namespace pages for nothing.
+2. **`false` does not mean "faulted"** (D-005). It also covers a designed
+   suppression and a designed recovery. An alert on this flag would fire on
+   `poisoned_manifest_suppressed`, which is the system working as specified.
+
+The rule lifts when **both** defects are fixed and the born-tests in each are
+green against a genuinely cold process -- not when one of them is. Until then
+the endpoint's audience is a person who has read this paragraph.
 
 ---
 
