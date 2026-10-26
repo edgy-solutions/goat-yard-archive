@@ -19,7 +19,10 @@ What it asserts before spending a cent, each one able to fail:
      claims. Read by jsonpath for that ONE named non-secret key -- never an
      env dump, which is operator-only (standing law, 2026-10-18).
   2. Exactly one api pod is Running and Ready.
-  3. That pod booted after --flag-written-at, so the process read this value.
+  3. The POD's own spec declares that flag value. The pod spec is immutable
+     after creation and is what the container read its environment from, so
+     this is the direct witness; the deployment spec can be edited under a
+     running pod, and a timestamp is only a proxy for both.
   4. The pod's imageID digest equals --digest. Both arms of a pair must run
      the same build; the flag is meant to be the only variable, and a digest
      that moved underneath an arm invalidates the comparison rather than
@@ -99,6 +102,33 @@ def git_state() -> dict:
     }
 
 
+def pod_flag_fault(pod: dict, want_flag: str):
+    """Does this pod's OWN spec declare the flag value the arm claims?
+
+    Pure so it can be proven without a cluster. Returns (fault_or_None,
+    realized_value). The pod spec is immutable after creation and is what the
+    container read its environment from, which makes it the witness; the
+    deployment spec can be edited under a running pod, and that is not a
+    hypothetical -- it is the normal state for the seconds between a
+    `kubectl set env` and the new pod being Ready.
+    """
+    containers = pod.get("spec", {}).get("containers") or []
+    if not containers:
+        return "pod spec declares no containers", None
+    env = {e.get("name"): e.get("value") for e in (containers[0].get("env") or [])}
+    if FLAG not in env:
+        return ("no %s in its own spec, so this process booted with the code "
+                "default rather than a declared value -- a THIRD state, not 0."
+                % FLAG), None
+    realized = env[FLAG]
+    if realized != want_flag:
+        return ("booted with %s=%r; this arm claims %r. The deployment spec "
+                "agreeing is not enough: it can be edited under a running pod, "
+                "and the flag is read at container start."
+                % (FLAG, realized, want_flag)), realized
+    return None, realized
+
+
 def verify_arm(ns: str, deploy: str, want_flag: str, written_at: datetime,
                want_digest: str) -> dict:
     """Every claim this arm's header will make, checked against the cluster."""
@@ -159,20 +189,37 @@ def verify_arm(ns: str, deploy: str, want_flag: str, written_at: datetime,
             "run the same build or the flag is not the only variable."
             % (name, digest, want_digest))
 
+    # The authoritative witness that this process booted with this flag value
+    # is the POD's own spec, which is immutable after creation and is what the
+    # container read its environment from. Not the deployment's spec (which can
+    # be edited under a running pod) and not a timestamp.
+    #
+    # This replaced a timestamp comparison, and the reason is worth keeping:
+    # the first arm's pod was created BY the env patch and its startTime landed
+    # in the same second as the write, so `started <= written_at` refused a pod
+    # that demonstrably had the new value. The fix is not a looser comparison --
+    # that would still be a proxy, just a proxy with a tolerance on it. A check
+    # on the thing itself has no tolerance to argue about.
+    fault, realized_flag = pod_flag_fault(pod, want_flag)
+    if fault:
+        raise Refused("pod %s: %s" % (name, fault))
+
     started = parse_ts(pod["status"]["startTime"])
-    if started <= written_at:
-        raise Refused(
-            "pod %s booted at %s, which is NOT after the flag was written at %s. "
-            "The flag is read at container start, so this process may be running "
-            "the previous value. Restart the deployment and rerun."
-            % (name, started.strftime("%Y-%m-%dT%H:%M:%SZ"),
-               written_at.strftime("%Y-%m-%dT%H:%M:%SZ")))
+    # Recorded, and reported when it looks odd, but NOT a gate: the pod-spec
+    # check above is the stronger statement and two gates on one fact only
+    # produce arguments about which one is right.
+    boot_vs_write = (
+        "after" if started > written_at
+        else "same second as" if started == written_at
+        else "BEFORE (benign only because the pod spec above matched)")
 
     return {
         "pod": name,
         "pod_selector": selector,
         "image_id": digest,
         "pod_started": started.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "pod_spec_flag": realized_flag,
+        "boot_vs_flag_write": boot_vs_write,
         "flag_written_at": written_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "flag": {FLAG: live_flag},
         "restart_count": cs.get("restartCount", 0),
@@ -228,7 +275,8 @@ def main(argv: list | None = None) -> int:
 
     print("=" * 72)
     print("ARM %s  flag %s=%s  runs=%d" % (args.arm, FLAG, args.flag, args.runs))
-    for k in ("pod", "image_id", "pod_started", "flag_written_at", "restart_count"):
+    for k in ("pod", "image_id", "pod_spec_flag", "pod_started",
+              "boot_vs_flag_write", "restart_count"):
         print("  %-16s %s" % (k, realized[k]))
     print("  %-16s %s (%s)" % ("git", header["git_head"][:12], header["git_dirty"]))
     if header["provisional"]:

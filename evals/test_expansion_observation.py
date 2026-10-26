@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_eval import expansion_observation  # noqa: E402
 
-EXPECTED_CHECKS = 9
+EXPECTED_CHECKS = 15
 checks = []
 
 
@@ -72,6 +72,32 @@ check("empty response is unreported",
 check("unreported names the missing fields",
       sorted(expansion_observation(Q, {})["missing"]),
       ["expanded_query", "mapped_entities"])
+
+# --- the arm's pod-flag witness -------------------------------------------
+# The dangerous state this discriminates is real and routine: between a
+# `kubectl set env` and the new pod being Ready, the deployment says one value
+# and the running pod says the other. A check against the deployment alone
+# would call that arm valid.
+from paired_gate_run import pod_flag_fault  # noqa: E402
+
+
+def mkpod(env):
+    return {"spec": {"containers": [{"env": env}]}}
+
+
+fault, realized = pod_flag_fault(mkpod([{"name": "GILL_STRUCTURED_ANSWER", "value": "0"}]), "0")
+check("pod agrees with the arm", (fault, realized), (None, "0"))
+
+fault, realized = pod_flag_fault(mkpod([{"name": "GILL_STRUCTURED_ANSWER", "value": "0"}]), "1")
+check("pod booted with the OTHER value is a fault", fault is not None, True)
+check("...and the realized value is reported, not the claim", realized, "0")
+
+fault, realized = pod_flag_fault(mkpod([{"name": "SOMETHING_ELSE", "value": "1"}]), "0")
+check("flag absent from the pod spec is a fault", fault is not None, True)
+check("...absent is not reported as a value", realized, None)
+
+fault, realized = pod_flag_fault({"spec": {"containers": []}}, "0")
+check("no containers is a fault, not a crash", fault is not None, True)
 
 failed = [c for c in checks if not c[1]]
 for name, ok, got, want in checks:
