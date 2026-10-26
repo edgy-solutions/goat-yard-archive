@@ -2172,14 +2172,52 @@ def selftest():
            [(sid, o) for sid, _s, _p, o in ex if set(o) & set(DISPUTED.get(sid, []))])
 
     print("")
-    print("(2b) the circular exemplar that the first run actually produced")
-    # p217:n2 disputes mem-vs-pe and its truth row still SAYS mem, so the unguarded rule offered the
-    # disputed glyph as the reference shape for one of its own candidates. An invariant nobody can
-    # watch fail is not tested, so the guard is demonstrated against that real case.
-    ck("p217:n2 IS picked as a mem exemplar without the guard",
-       "p217:n2" in [sid for sid, _s, _p, _o in _unguarded_exemplars("mem", "pe")])
+    print("(2b) the circular exemplars rule 2b removes -- DERIVED over every pair, then named")
+    # This guard was demonstrated on p217:n2 as a MEM exemplar, and that check went red when the
+    # batch landed Chris's 2026-09-27 verdict: the truth row is now `היפלא`,
+    # which holds NO mem at all and a pe at the disputed position. I recorded that as "the case
+    # evaporated, so pin a synthetic one". MEASURED, THAT WAS WRONG. The witness did not disappear,
+    # it CHANGED LETTERS: the unguarded rule still offers p217:n2 at exactly the disputed glyph, now
+    # as a PE exemplar, and p895:n0 is a second live witness on the ayin/tsadi pair. No synthetic
+    # case is needed, and a hand-named letter is what went stale -- so the witnesses are DERIVED
+    # from DISPUTED against every pair, and the one I expect is then named so that its silent
+    # disappearance is a failure rather than a shorter list.
+    _pairs = (("mem", "pe"), ("pe", "mem"), ("bet", "gimel"), ("gimel", "bet"),
+              ("ayin", "tsadi"), ("tsadi", "ayin"))
+    _wit = []
+    for _a, _b in _pairs:
+        _un = [x[0] for x in _unguarded_exemplars(_a, _b)]
+        _gu = [x[0] for x in exemplars(_a, _b)]
+        _wit += [(sid, _a, _b) for sid in _un if sid in DISPUTED and sid not in _gu]
+    ck("rule 2b has at least one LIVE witness, derived over every pair", len(_wit) >= 1, _wit)
+    # BOTH expected witnesses are named, not just one. A red here does not mean a bug: it means a
+    # dispute was ruled and its batch landed, which is exactly the event that taught me the letter
+    # had moved rather than the case vanishing. Pinning the COUNT instead would go red on the same
+    # legitimate event while saying less about what changed.
+    for _sid, _a, _b in (("p217:n2", "pe", "mem"), ("p895:n0", "tsadi", "ayin")):
+        ck("the witness I expect is still there: %s as a %s exemplar" % (_sid, _a.upper()),
+           (_sid, _a, _b) in _wit, _wit)
+    # A span leaves the list only when EVERY impression of the letter in it is disputed. Without
+    # this, rule 2b could be discarding a clean second impression -- and a clean second impression
+    # on the same line is the best exemplar there is, which is the method Chris ruled p217:n2 with.
+    # p423:n3 is the standing proof in the other direction: its word-2 gimel is disputed, its word-1
+    # gimel is not, and the span correctly STAYS a gimel exemplar pointing at the undisputed one.
+    _rows = {x["span_id"]: x for x in D.build_set(include_sealed=True)}
+    for _sid, _a, _b in _wit:
+        _occ = positions(_rows[_sid]["truth"], LETTER[_a])
+        ck("%s loses its %s only because EVERY impression of it is disputed" % (_sid, _a),
+           bool(_occ) and all(x in DISPUTED.get(_sid, []) for x in _occ),
+           (_occ, DISPUTED.get(_sid)))
+    ck("p423:n3 KEEPS its undisputed word-1 gimel while its word-2 gimel is disputed",
+       "p423:n3" in [x[0] for x in exemplars("gimel", "bet")]
+       and [x for x in exemplars("gimel", "bet") if x[0] == "p423:n3"][0][3] == [(1, 3)],
+       [x[3] for x in exemplars("gimel", "bet") if x[0] == "p423:n3"])
+    # The own-card exclusion is a DIFFERENT clause of rule 2b and gets its own check. Note what it
+    # can and cannot witness: `exclude` removes the span by NAME, so this pair would stay green with
+    # the disputed-glyph half of the rule deleted. That is why the witnesses above pass no exclude.
     for cand, partner in (("mem", "pe"), ("pe", "mem")):
-        ck("p217:n2 is NOT a %s exemplar on its own card" % cand,
+        ck("own-card clause: p217:n2 is not a %s exemplar on its own card "
+           "(by name -- blind to the disputed-glyph clause)" % cand,
            "p217:n2" not in [sid for sid, _s, _p, _o in
                              exemplars(cand, partner, exclude=("p217:n2",))])
     # The floor of three is a target the CORPUS decides, not an invariant this code can hold: mem
