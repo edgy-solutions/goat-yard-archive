@@ -47,6 +47,7 @@ from PIL import Image  # noqa: E402
 
 import hebrew_aperture_diag as diag  # noqa: E402
 import hebrew_frontier_or as H  # noqa: E402
+import send_refusal as SR  # noqa: E402
 from hebrew_frontier_or import (APERTURE, BACKOFF, KEY_ENV, MAX_TOKENS, OUT_TOKEN_FLAG,  # noqa: E402
                                 RETRIES, _ctx, _no_hebrew_outbound, _parse, _prompt_text,
                                 REASONING_LADDER)
@@ -68,7 +69,9 @@ ABSENT = "p245:n1"
 ABSENT_BASIS = ("the content witness disagrees with the region index; p245 is on A2's known "
                 "two-notes-one-region list (p107, p245, p306, p377, p677)")
 FORBIDDEN_HOSTS = ("192.168.1.179", "192.168.1.188", "192.168.1.169")
-EXPECTED_CALLS = 178
+SIDECAR = Path(str(diag.DATA)) / SR.SIDECAR_NAME
+UNGATED_CALLS = 178       # the population BEFORE law-8 refusal: 2 arms x (45 bare + 44 ctx)
+EXPECTED_CALLS = None     # derived from the send plan at run time; see gate_counts
 CLASSES = ("exact", "nikud_only", "wrong", "abstain", "error")
 CONSECUTIVE_FAIL_ABORT = 4
 RETRY_CODES = (429, 500, 502, 503, 504)
@@ -77,8 +80,14 @@ HEB = re.compile("[\u0590-\u05ff]")
 
 # Pinned to the count the first FULL run observes.  None until then: the real run prints the observed
 # count and marks the header checks_pinned=false.  The dry-run has its own pinned count.
-EXPECTED_CHECKS = 668       # full run, observed 2026-10-18 on run 501ab577a18a6785
-EXPECTED_CHECKS_DRY = 382        # dry-run, verified on 2026-10-18
+EXPECTED_CHECKS = None      # UNPINNED 2026-10-25: the law-8 send gate changed the call count,
+                            # so 668 (run 501ab577a18a6785, 178 calls) no longer describes this
+                            # path.  A guessed total coerces reality; the next full run prints
+                            # the observed count and this gets pinned to what it measured.
+EXPECTED_CHECKS_DRY = 356        # dry-run, re-measured 2026-10-25 after the law-8 send gate: 16
+                                 # fewer payloads (4 refused spans x 2 arms x 2 channels, less the
+                                 # ctx call p245:n1 never had) means 32 fewer per-payload checks,
+                                 # and the gate itself adds 6
 
 CHECKS = 0
 
@@ -220,11 +229,17 @@ def build_body(arm, row, channel, img_b64):
     return H._body(arm, ctx, img_b64, structured=False, reasoning=REASONING_LADDER[0][0]), ctx
 
 
-def plan_calls(sheet):
+def plan_calls(sheet, sendable):
+    """Only `sendable` spans are planned.  A span law 8 refused is never built into a payload, so it
+    cannot reach the wire by a later bug in the posting loop -- the refusal is in the PLAN, not a
+    skip inside the sender."""
+    allow = set(sendable)
     calls = []
     for arm in ARMS:
         for channel in CHANNELS:
             for r in sheet["rows"]:
+                if r["span_id"] not in allow:
+                    continue
                 if channel == "context" and r["ch2_state"] != "present":
                     continue
                 calls.append((arm, channel, r))
@@ -257,11 +272,34 @@ def gates_endpoint_aperture(payloads):
     chk(all(p["row"]["crop_file"].endswith("_A2_spanbox.png") for p in payloads), "all crops A2")
 
 
-def gate_counts(payloads, sheet):
-    chk(len(payloads) == EXPECTED_CALLS, f"GATE 9 call count {len(payloads)}")
+def gate_counts(payloads, sheet, plan):
+    """The call count is DERIVED from the sheet and the send plan, not pinned to a number.
+
+    It was pinned to 178 when nothing was refused.  A pinned total and a live refusal gate fight each
+    other, and the pin wins by aborting the run -- so the expected counts are computed from the same
+    two inputs the plan was built from, and `UNGATED_CALLS` is asserted as the population the gate
+    reduced, which keeps the 178 honest instead of stale."""
+    send = set(plan.sendable)
+    n_bare = sum(1 for r in sheet["rows"] if r["span_id"] in send)
+    n_ctx = sum(1 for r in sheet["rows"] if r["span_id"] in send and r["ch2_state"] == "present")
+    n_bare_all = len(sheet["rows"])
+    n_ctx_all = sum(1 for r in sheet["rows"] if r["ch2_state"] == "present")
+    chk(len(ARMS) * (n_bare_all + n_ctx_all) == UNGATED_CALLS,
+        f"GATE 9: the ungated population is {len(ARMS) * (n_bare_all + n_ctx_all)}, not {UNGATED_CALLS}")
+    chk(len(payloads) == len(ARMS) * (n_bare + n_ctx),
+        f"GATE 9 call count {len(payloads)} != {len(ARMS)} x ({n_bare} bare + {n_ctx} ctx)")
     for arm in ARMS:
-        chk(sum(p["arm"] == arm and p["channel"] == "bare" for p in payloads) == 45, "45 bare per arm")
-        chk(sum(p["arm"] == arm and p["channel"] == "context" for p in payloads) == 44, "44 ctx per arm")
+        chk(sum(p["arm"] == arm and p["channel"] == "bare" for p in payloads) == n_bare,
+            f"{n_bare} bare per arm")
+        chk(sum(p["arm"] == arm and p["channel"] == "context" for p in payloads) == n_ctx,
+            f"{n_ctx} ctx per arm")
+    # LAW 8, the half that is not a count: no refused span may appear in a built payload, checked
+    # against the refusal report rather than against the list plan_calls filtered on.
+    built = {p["row"]["span_id"] for p in payloads}
+    leaked = sorted(built & set(plan.report["refused"]))
+    chk(not leaked, f"GATE 9/law 8: refused span(s) built into a payload: {leaked}")
+    chk(len(built) == n_bare, f"payloads cover {len(built)} spans, expected {n_bare}")
+    chk(ABSENT not in plan.report["refused"], f"{ABSENT} is refused, so the bare/ctx asymmetry below is not the recorded one")
     chk(any(p["row"]["span_id"] == ABSENT and p["channel"] == "bare" for p in payloads), "p245:n1 bare")
     chk(not any(p["row"]["span_id"] == ABSENT and p["channel"] == "context" for p in payloads),
         "p245:n1 has no channel-2 call")
@@ -373,9 +411,17 @@ def evaluate(recs, pred):
         ex[k] = t
         reg = P["exact_in_crop"][k]
         m = pct(t["exact"], t["n"])
+        same_of = (t["n"] == reg["of"])
         res["registered_numbers"][k] = {"registered_pct": reg["pct"], "registered_n": f'{reg["n"]}/{reg["of"]}',
                                         "measured_pct": m, "measured_n": f'{t["exact"]}/{t["n"]}',
-                                        "delta_pp": None if m is None else round(m - reg["pct"], 1)}
+                                        "same_denominator": same_of,
+                                        "delta_pp": None if m is None else round(m - reg["pct"], 1),
+                                        "delta_comparable": same_of,
+                                        "denominator_note": None if same_of else (
+                                            "the prediction was registered over %d spans and this "
+                                            "run read %d: the law-8 send gate refused the "
+                                            "difference, so delta_pp is NOT a hit-or-miss on the "
+                                            "registered number." % (reg["of"], t["n"]))}
     common = {r["span_id"] for r in recs if r["channel"] == "context"}
     ar = {ch: agreement(recs, ch) for ch in CHANNELS}
     ar_bare44 = agreement([r for r in recs if r["span_id"] in common], "bare")
@@ -390,7 +436,12 @@ def evaluate(recs, pred):
     raises = all(d > 0 for d in dpp.values())
     aw_delta_pp = round(100.0 * (aw_c - aw_b) / n44, 1)
     mean_exact_delta_pp = round(sum(dpp.values()) / len(dpp), 1)
-    basis44 = "common 44 spans (p245:n1 excluded from both channels; a 45-span rate vs a 44-span rate is a different denominator)"
+    # Derived, not the literal "44": the law-8 send gate removes refused spans from both channels,
+    # so the common denominator is whatever actually got read.  A label that says 44 over 40 rows is
+    # the stale-precondition failure in miniature.
+    basis44 = (f"common {n44} span(s) read in both channels ({ABSENT} has no channel-2 call; spans "
+               f"refused at send are in neither). A rate over one denominator is not comparable to "
+               f"a rate over another.")
     res["sign_predictions"] = {
         "P1_channel2_raises_exact_on_both_arms": {
             "hit": bool(raises), "exact_delta_pp_per_arm": dpp, "exact_on_common_44": d_exact, "basis": basis44},
@@ -525,14 +576,32 @@ def main():
         chk(not dirty0, f"GATE 1: tree dirty at start: {dirty0}")
 
     sheet, pred = load_inputs()
+
+    # GATE 0 (law 8, ruling B(4); wired 2026-10-25 on A2's substrate commit 6243756).
+    #
+    # BEFORE any payload is built.  `on_refused="record"` rather than `"fail"`: this is a scorer, and
+    # the four refused spans are owed a recorded `unscorable:input-refused` row.  Dropping them with
+    # no record would make an absence that a later reader cannot tell from "never drawn".
+    #
+    # The sidecar is built by span_send_flags_build.py from the three signing records.  Read its
+    # `basis_counts` before reading this gate as a clean bill: partial_in_crop is MEASURED on 20 of
+    # the 74 spans and DEFAULTED on 54, and box_fault is unverified on 63.  The refused set is a
+    # FLOOR over the spans somebody adjudicated, not a count over the population.
+    _side = json.loads(SIDECAR.read_text(encoding="utf-8")) if SIDECAR.exists() else None
+    _flags = SR.load_span_flags(str(SIDECAR))
+    plan = SR.refuse_at_send([r["span_id"] for r in sheet["rows"]], _flags, on_refused="record")
+    chk(plan.report["n"] + plan.report["n_refused"] == len(sheet["rows"]),
+        "GATE 0: the send plan does not account for every sheet row")
+    chk(all(r["reached_wire"] is False for r in plan.refused_records()),
+        "GATE 0: a refused record claims it reached the wire")
     g2 = gate_prediction(pred)
     crop_shas = gate_crops(sheet)
     pay_sha = gate_payload_identity(sheet)
     chk(pred["scored_over"]["set_digest"] == SET_DIGEST, "prediction scored_over set_digest")
-    calls = plan_calls(sheet)
+    calls = plan_calls(sheet, plan.sendable)
     payloads = build_payloads(calls)
     gates_endpoint_aperture(payloads)
-    gate_counts(payloads, sheet)
+    gate_counts(payloads, sheet, plan)
     key = os.getenv(KEY_ENV)
     if dry:
         chk(True, "GATE 7 skipped in dry-run")
@@ -545,6 +614,15 @@ def main():
               "arms": ARMS, "channels": CHANNELS, "call_count": len(payloads),
               "predicted_request_sha16_before_send": sorted(p["request_sha16"] for p in payloads),
               "predicted_request_sha16_note": "A PREDICTION of what would be sent, not a record of it.  The reasoning ladder rebuilds the body at send time, so the authoritative value is each row's request_sha16 (the sha of the bytes actually posted).  Never read this list as sent.",
+              "refusal": plan.report,
+              "refusal_law": ("law 8 / ruling B(4): a span with a ratified geometry fault is never "
+                              "read. Refused spans are recorded `%s` with reached_wire false and "
+                              "are absent from every payload." % SR.REFUSAL_CLASS),
+              "refusal_sidecar": {"path": str(SIDECAR), "self_sha16": (_side or {}).get("self_sha16"),
+                                  "basis_counts": (_side or {}).get("basis_counts"),
+                                  "basis_warning": ("partial_in_crop is defaulted, not measured, on "
+                                                    "the pass-1 spans; the refused set is a floor")},
+              "ungated_call_count": UNGATED_CALLS,
               "crop_dir": str(CROPDIR), "aperture": APERTURE, "max_tokens": MAX_TOKENS,
               "ch2_absent": {ABSENT: ABSENT_BASIS}, "attempt": a.attempt,
               "provider_policy": {
@@ -570,7 +648,14 @@ def main():
         print(f"gate5/6 aperture {APERTURE}; host openrouter.ai; forbidden hosts absent; no A1_notebox")
         print(f"gate7 key: {'SET' if key else 'UNSET (expected in a dry-run)'}  [never printed]")
         print(f"gate8 no Hebrew in {sum(p['channel']=='context' for p in payloads)} channel-2 texts")
-        print(f"gate9 calls {len(payloads)} = {len(ARMS)} x (45 bare + 44 ctx); p245:n1 bare only")
+        print(f"gate0 law-8 refusal: n={plan.report['n']} n_refused={plan.report['n_refused']} "
+              f"of {plan.report['n_population']}  refused={sorted(plan.report['refused'])}")
+        print(f"gate0 sidecar basis (read this before trusting the gate): "
+              f"{json.dumps((_side or {}).get('basis_counts'), ensure_ascii=False)}")
+        print(f"gate9 calls {len(payloads)} = {len(ARMS)} x "
+              f"({sum(p['channel'] == 'bare' for p in payloads) // len(ARMS)} bare + "
+              f"{sum(p['channel'] == 'context' for p in payloads) // len(ARMS)} ctx); "
+              f"ungated population {UNGATED_CALLS}; p245:n1 bare only")
         print(f"run_sha16 (of this header, before results) {run_sha}")
         for arm in ARMS:
             for ch in CHANNELS:
@@ -594,7 +679,7 @@ def main():
         if consec >= CONSECUTIVE_FAIL_ABORT:
             raise RunFault(f"{CONSECUTIVE_FAIL_ABORT} consecutive failed items ending at {rec['span_id']}: {rec['error']}")
         print(f"[{i + 1}/{len(payloads)}] {rec['span_id']} {rec['arm']} {rec['channel']} {rec['class_primary']}", flush=True)
-    chk(len(recs) == EXPECTED_CALLS, "178 calls attempted")
+    chk(len(recs) == len(payloads), f"{len(payloads)} calls attempted (the gated plan), got {len(recs)}")
     chk(not any(r["span_id"] == ABSENT and r["channel"] == "context" for r in recs), "no p245:n1 ctx call")
 
     g1 = {"goatyard-laneB": git_state(REPO_B), "dr-voluminous": git_state(REPO_DR)}
@@ -620,11 +705,27 @@ def main():
                            for x in recs if x["span_id"] == sid}}
         if sid == ABSENT:
             row["ch2_absent_basis"] = ABSENT_BASIS
+        if sid in plan.report["refused"]:
+            # An empty `results` must not read as "no data, cause unknown".  The row says who
+            # refused it and why, and that no call was made -- the record of a non-event.
+            row["refused"] = plan.report["refused"][sid]
+            row["class_primary"] = SR.REFUSAL_CLASS
+            row["reached_wire"] = False
+            row["refusal_basis"] = ((_side or {}).get("flags_by_span", {}).get(sid) or {}).get("basis")
+            chk(not row["results"], f"{sid} is refused but carries read results")
         rows.append(row)
     out = {"header": header, "run_sha16": run_sha, "rows": rows, "tallies": tables, "evaluation": ev,
            "diagnostics": nik, "page_convention": header["page_convention"]}
     sfx = "" if a.attempt <= 1 else f"_a{a.attempt}"
+    refused_rows = list(plan.refused_records())
+    chk(len(refused_rows) == plan.report["n_refused"], "refused record count != n_refused")
+    chk(not ({r["span_id"] for r in refused_rows} & {r["span_id"] for r in recs}),
+        "a span is both refused and read")
     texts = {A / f"score45_reads_{run_sha}{sfx}.jsonl": "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
+             # Beside the read rows, never among them: these never reached the wire, and
+             # folding them into the reads file would put never-sent rows in a scorer
+             # denominator.
+             A / f"score45_refused_{run_sha}{sfx}.jsonl": "\n".join(json.dumps(r, ensure_ascii=False) for r in refused_rows) + "\n",
              A / f"SCORE45_{run_sha}{sfx}.json": json.dumps(out, ensure_ascii=False, indent=1) + "\n",
              A / f"SCORE45_{run_sha}{sfx}.md": md_report(header, run_sha, tables, ev, nik, recs, prov)}
     for pth, t in texts.items():
