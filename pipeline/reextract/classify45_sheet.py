@@ -244,7 +244,16 @@ CLASSES = {
         "reader/short: rejected -- a letter was added at the fragment boundary, not lost."),
     ("p831:n2", "opus"): (
         "reader", "confusable", "reading",
-        "resh -> dalet at position 3, 6 of 7 exact. FLAGGED: the canonical spelling of this word is "
+        "resh -> dalet, 6 of 7 exact, and TWO BASES NAME DIFFERENT GLYPHS. Counting in the "
+        "7-letter derived signed signature: positional alignment against the recorded "
+        "extraction puts the single difference at POSITION 2, while insertion provenance "
+        "names POSITION 3 -- that is the resh pass 2 inserted (seq 0 after tile 1, a 0-based "
+        "tile index). Both positions hold a resh, so no number discriminates them; the "
+        "discriminator is the picture, which is why the glyph card cuts the PAIR rather than "
+        "picking. The frozen candidate is 6 letters with ONE resh, and the extra resh in the "
+        "signature is exactly that recorded insertion -- so a bare position number is "
+        "ambiguous across the two strings as well as across the two bases. FLAGGED: the "
+        "canonical spelling of this word is "
         "what opus read, and the signed signature has the resh. dalet/resh is one of the pairs "
         "ALREADY FOUND WRONG in three signed truths. So this may be a correct read scored against a "
         "wrong signature; it is classified reader/confusable because that is what the pixels-vs-"
@@ -293,7 +302,10 @@ CLASSES = {
 # Rows whose SIGNED SIGNATURE I am flagging, separately from the class.  The standard is a claim too.
 SIGNATURE_FLAGS = {
     "p254:n1": "Word-initial FINAL nun: orthographically impossible. Class WITHHELD on both arms.",
-    "p831:n2": "dalet/resh at position 3, and the canonical spelling is what opus read. dalet/resh "
+    # Stated with both bases, which is the separate named change the glyph card asked for.
+    "p831:n2": "dalet/resh at position 2 by positional alignment and position 3 by insertion "
+               "provenance -- both hold a resh, so neither number discriminates and only the "
+               "picture can. The canonical spelling is what opus read. dalet/resh "
                "is a measured confusable pair of this fount and three signed truths have already "
                "been found wrong in a pair like this. Classified, but queue the signature.",
     "p594:n0": "Signed `sic` (he where canonical has het). NOT suspect -- the sic is the point, and "
