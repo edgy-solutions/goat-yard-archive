@@ -152,7 +152,40 @@ FEATURES = {
     "bet": "a SQUARE top, and a base that extends PAST the right-hand stroke -- a little heel "
            "sticking out at the bottom right.",
     "gimel": "NARROWER than bet, with NO heel; the foot kicks out to the LEFT at the bottom.",
+    # THE NEW PAIRS NAME A LOCUS, NOT A SHAPE. The four entries above are Chris's own wording from
+    # his rulings. For the pairs ruling 4 adds, the only authority available is the 2026-10-25
+    # audit, and what it supplies is WHERE to look -- the head, the descender -- not a description
+    # of either letterform. So that is all these say. Inventing "the zayin head is wider" would be
+    # shape prose with no signer behind it, dressed in the same voice as a ruling: grounding-theater
+    # in the one place a reader is entitled to assume every sentence was signed by someone.
+    "zayin": "LOOK AT THE HEAD. The audit's basis for p233:n4, verbatim: \u201cposition 2 differs "
+             "from an in-word vav at the head\u201d. It offers nothing about the rest of the "
+             "letter, and neither does this card. No zayin exemplar exists anywhere in the signed "
+             "corpus -- see the exemplar count below, which is a measured zero.",
+    "vav": "LOOK AT THE HEAD (against zayin) or AT THE DESCENDER (against final nun). Both loci "
+           "come from the 2026-10-25 audit; it describes neither letterform, so neither does this.",
+    "final_nun": "LOOK AT THE DESCENDER, below the baseline. The audit's basis for p628:n2, "
+                 "verbatim: \u201cposition 2 final nun (signed) vs vav (read); the crop is tight "
+                 "and the descender cannot be judged\u201d. That is a statement that THIS CROP "
+                 "cannot answer the question -- the baseline strip the audit asks for is renderer "
+                 "item 5 and is NOT on this page yet.",
 }
+
+# What a card prints when FEATURES has nothing. The empty string the old code fell back to rendered
+# an empty box, which reads as "no distinguishing feature" rather than "nobody has stated one".
+# VERDICT-ONLY, and these cards broke it before the suite caught them. Section (5) of the selftest
+# forbids arm tokens on this page; what it cannot see is a TALLY, and the first draft of the eight
+# cards carried both. A read shown to a signer is a prior, not evidence -- so a card names where a
+# dispute is recorded and which letters are in question, and nothing about which arm, what string,
+# or how many. The unredacted evidence lives in the report, which nobody signs from.
+READS_WITHHELD = ("The reading itself is <b>withheld here</b>: this console is verdict-only, "
+                  "because a read put in front of a signer is a prior and not evidence. The "
+                  "per-arm record is in the report.")
+
+NO_FEATURE = ("<b>No distinguishing feature is offered for this letter.</b> Nobody has signed a "
+              "shape statement for it, and this console will not invent one. Compare the exemplars "
+              "below, and if they settle it, the record to make is a point-and-name -- which carries "
+              "the same authority as a signature and makes the feature available to every later card.")
 
 # A span cannot be an exemplar for the letter it is DISPUTING. This is not hygiene, it is the
 # difference between a comparison and a circular argument: the first run of this console offered
@@ -181,6 +214,34 @@ PENDING_RESIGN = {
     "p138:n6": "being signed for the first time in the 2026-09-27 batch",
     "p596:n2": "being signed for the first time in the 2026-09-27 batch",
 }
+
+# THE BATCH LANDED AND THIS TABLE DID NOT NOTICE. Read off the live page on 2026-10-25: every one
+# of the five rows above now carries a `truth_basis` stamped with the batch date, so the strings the
+# cards print ARE that batch's output -- and three cards were printing "The string above is
+# SUPERSEDED" over the CORRECTED string. On a signing surface that is worse than printing nothing: it
+# tells a signer to disregard the one string that was actually ruled.
+#
+# So the frame is DERIVED from the row rather than read from this table. The rule, stated: a
+# `truth_basis` bearing the batch tag was written BY that batch, so for that row the batch has landed
+# and the sentence above is history. A row listed here whose basis does NOT bear the tag is still
+# pending and still gets the warning. The sentences are not edited to match the data -- they are kept
+# verbatim as the history they now are, which is also what keeps the staleness visible instead of
+# erasable.
+BATCH_TAG = "20260927"
+
+
+def resign_state(sid, basis):
+    """("landed"|"pending"|"none", claim) for a span's pending-batch claim.
+
+    `basis` is the span's own `truth_basis`, and the caller must pass the basis of the string it is
+    ABOUT TO PRINT -- a state derived from any other row would be a statement about a different
+    string. No third source is consulted, so this cannot drift from the two things it reads.
+    """
+    claim = PENDING_RESIGN.get(sid)
+    if not claim:
+        return "none", ""
+    return ("landed" if BATCH_TAG in (basis or "") else "pending"), claim
+
 
 DISPUTED = {
     "p217:n2": [(1, 3)],        # mem vs pe -- barred as an exemplar for mem AND for pe
@@ -249,7 +310,214 @@ CARDS = [
                  "arms that returned the second word alone turn out to have read the crop they were "
                  "given correctly. Re-running this span under the new box is then a real (and small) "
                  "spend, and it is NOT run here."),
+
+    # ---------------------------------------------------------------------------------------------
+    # RULING 4's EIGHT. None of these is decided; every one of them is a question with its evidence
+    # on the face. They differ from the four cards above in one way that matters: those sit on boxes
+    # a human ratified, and seven of these sit on boxes the DRAW POOL drew and nobody ever looked at,
+    # which the box caption says in those words.
+    #
+    # `pos` is counted in the derived SIGNED signature, where character N is glyph N from the right.
+    # It is NOT counted in the frozen set's candidate: pass 2 is the insertion pass, so on p233:n4
+    # and p831:n2 the two strings are different lengths and the candidate's numbering points at the
+    # wrong glyph. The signature is the thing a signer is being asked to confirm, so it is also the
+    # thing the counting is done in.
+
+    dict(span_id="p233:n4", kind="letter",
+         status="OPEN -- signature suspect, unsettled (audit 2026-10-25)",
+         question="Is glyph 2 a vav, as signed, or a zayin?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=2, candidates=("vav", "zayin"),
+                    basis="Position 2 is an <b>inserted</b> vav &mdash; not a tile anyone confirmed "
+                          "against a glyph. Pass 1 left all four tiles unfilled with the note "
+                          "<i>2 letters missing</i>; pass 2 confirmed the four and added two vavs, "
+                          "insertion seq 1 after tile 0 (this one) and seq 0 after tile 3 (position "
+                          "6, not disputed). A disagreement with the signature at this glyph is "
+                          "on record in the 2026-10-25 audit. " + READS_WITHHELD,
+                    note="There is <b>no zayin exemplar anywhere in the signed corpus</b>. The "
+                         "count in the zayin panel below is a measured zero, and the audit says as "
+                         "much in its own words: <i>no zayin exemplar on the card, so it cannot be "
+                         "settled</i>. What it asks for is <i>zayin exemplars from this fount</i>, "
+                         "and the route to those is a point-and-name sitting on any page in the "
+                         "volume &mdash; not a model, and not this card.")],
+         verdict="NO VERDICT, and this card cannot reach one as it stands. The audit's recorded "
+                 "verdict is <code>signature_suspect_unsettled</code>. Note what it also says: "
+                 "<i>the signed string is not a word</i> &mdash; that is an argument from context, "
+                 "not from the pixels, and it is exactly the kind of reasoning a signature is "
+                 "supposed to be protected from. Confirm or correct this glyph on what the "
+                 "impression shows."),
+
+    dict(span_id="p628:n2", kind="letter",
+         status="OPEN -- signature suspect, unsettled (audit 2026-10-25)",
+         question="Is glyph 2 a final nun, as signed, or a vav?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=2, candidates=("final_nun", "vav"),
+                    basis="Both tiles were <b>confirmed</b> in pass 1 and the candidate and the "
+                          "signature are the same two characters, so nothing here was corrected: "
+                          "the signature confirms the extraction rather than correcting it. "
+                          "A disagreement at this glyph is on record in the 2026-10-25 audit. "
+                          + READS_WITHHELD,
+                    note="The audit refuses to decide this one on these pixels: <i>the crop is "
+                         "tight and the descender cannot be judged</i>. The <b>baseline strip</b> "
+                         "it asks for is renderer item 5 and is NOT on this page yet, so a verdict "
+                         "signed here would be signed on the same crop the audit already called "
+                         "insufficient. The other two things it asks for &mdash; final-nun and vav "
+                         "exemplars, and the Latin gloss &mdash; are on this card.")],
+         verdict="NO VERDICT. Of the three things the audit names as needed, this card supplies "
+                 "two. Until the baseline is drawn, the honest action on this span is to leave it "
+                 "open: an ascender-versus-descender question asked on a crop with no baseline is "
+                 "not a question about the print."),
+
+    dict(span_id="p910:n3", kind="letter",
+         status="CANDIDATE -- not adjudicated; the weakest dispute in the set",
+         question="Is glyph 1 a lamed, as signed, or a final kaf?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=1, candidates=("lamed", "final_kaf"),
+                    basis="<b>This pair is not a positional alignment, and the card will not "
+                          "pretend otherwise.</b> No glyph-for-glyph disagreement puts a final kaf "
+                          "at this position: the "
+                          "lamed/final-kaf pairing comes from Lane B's reversal scan &mdash; one "
+                          "swap from the reverse of the signature &mdash; which the audit records "
+                          "as <i>a pair in no register &mdash; a candidate, not a verdict</i>. "
+                          "Both tiles were confirmed in pass 1.",
+                    note="The note's own Latin, printed above, is consistent with the signature "
+                         "as signed. This card is here to be <b>refused as "
+                         "easily as confirmed</b>; a candidate that survives a look is not thereby "
+                         "promoted. It is also an ascender-versus-descender question, so the "
+                         "baseline caveat on p628:n2 applies here too.")],
+         verdict="NO VERDICT, and no arm's verdict either: the audit lists this span as "
+                 "<code>not_adjudicated</code>. The reason it is on the page at all is that the "
+                 "reversal scan named it, and a named candidate that never gets looked at is the "
+                 "same as an unnamed one."),
+
+    dict(span_id="p596:n2", kind="letter",
+         status="CANDIDATE -- never signed in any export; first signing is owed",
+         question="Is glyph 1 a samekh or a dalet?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=1, candidates=("samekh", "dalet"),
+                    basis="This span is in <b>no signed export at all</b>. Its string comes from "
+                          "the ratified truth table, and its basis field says what that means: "
+                          "<code>signed-post-sitting:agent-row-verbatim-supplied</code>. It is "
+                          "also absent from the 45-span scoring population, so there are <b>no "
+                          "model reads</b> for it and no note text was ever resolved &mdash; which "
+                          "is why the Latin panel above says ABSENT rather than showing something.",
+                    note="Its box is the one <b>human-ratified</b> box among ruling 4's eight. It "
+                         "is on a SEALED page, opened here for a read only under ruling 2's "
+                         "carve-out: no alignment evidence is re-scored and the gate stays frozen. "
+                         "The only samekh in the signed corpus is this span itself, which is "
+                         "excluded as its own exemplar &mdash; so the samekh count below is zero, "
+                         "and that is the corpus, not a bug.")],
+         verdict="NO VERDICT. This is the one span of the eight where there is nothing to disagree "
+                 "with: no signature, no reads, no Latin. The dalet candidate comes from the "
+                 "confusable vocabulary, not from any reader. Sign it from the picture or leave it."),
+
+    dict(span_id="p442:n0", kind="letter",
+         status="OPEN -- reversal candidate; a disagreement is on record at this glyph",
+         question="Is glyph 3 a final kaf, as signed, or a dalet?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=3, candidates=("final_kaf", "dalet"),
+                    basis="Glyph 3 is the <b>one tile a signer corrected</b> on this span: the "
+                          "candidate had a bet there and pass 1 chose a final kaf. The rival now "
+                          "offered is a dalet, which was <b>not among that tile's choices</b>, so "
+                          "the correction already made is not evidence against it. A "
+                          "disagreement with the signature is on record at this glyph, and the "
+                          "reversal scan's one-swap neighbour of the signature differs from it at "
+                          "<b>this glyph only</b>. " + READS_WITHHELD,
+                    note="THE POSITION IS COUNTED IN THE SIGNATURE, NOT IN THE REVERSAL. Under "
+                          "reversal this glyph lands first, and the audit's note describes it that "
+                          "way; here it is glyph <b>3</b>, because that is where it sits in the "
+                          "string a signer is being asked to confirm. The glyph printed beside the "
+                          "number above is the check on that.")],
+         verdict="NO VERDICT. This is the clearest reversal candidate in the set, and the limit is "
+                 "worth stating on the card: the signer-half guard refuses a save only when the "
+                 "assembly EQUALS the reverse of the candidate. A one-swap reversal is not "
+                 "equality, so on this span the guard would <b>warn and let the save through</b>. "
+                 "That limit is named in the signer-half report and is not fixed by this card."),
+
+    dict(span_id="p798:n0", kind="letter",
+         status="OPEN -- a confusable set is on record against the signature",
+         question="Is glyph 4 a he, as signed, or a tav, or a het?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=4, candidates=("he", "tav", "het"),
+                    basis="<b>Three candidates at one position</b>, which is why the exemplar rule "
+                          "below had to be generalised: a word containing ANY rival candidate begs "
+                          "the question, not just one named partner. Both rivals are on "
+                          "record against the signature at this glyph. " + READS_WITHHELD,
+                    note="A correction to the audit's own wording, not to its verdict: its basis "
+                         "line for this span says <i>against the corrected signature</i>, but all "
+                         "four tiles were <b>confirmed</b> in pass 1 and the candidate equals the "
+                         "signature &mdash; nothing on this span was corrected. The verdict "
+                         "(<i>agree reader/confusable</i>) is untouched by that.")],
+         verdict="NO VERDICT. What makes this span interesting is that agreement among the "
+                 "recorded reads would not settle it either way: he/tav/het are a confusable set "
+                 "in this fount, and agreement across arms that share a prior is the thing "
+                 "cross-arm consensus cannot see past. Two of the three candidates have four "
+                 "exemplars; het has one."),
+
+    dict(span_id="p254:n1", kind="letter",
+         status="OPEN -- TWO disputed positions; the signature is orthographically impossible",
+         question="Two questions on one span: glyph 1, and glyph 2. Answer them separately.",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=1, candidates=("final_nun", "nun", "yod"),
+                    basis="Glyph 1 is signed as a <b>word-initial final nun</b>, which is "
+                          "orthographically impossible &mdash; a final form cannot open a word. "
+                          "That is already flagged in <code>classify45_sheet</code>'s signature "
+                          "flags, and it is the reason this signature is suspect at all. Tiles 0 "
+                          "and 1 were confirmed in pass 1. Both rivals above are on record against "
+                          "the signature at this glyph. " + READS_WITHHELD,
+                    note=None),
+               dict(word=1, pos=2, candidates=("yod", "zayin", "vav"),
+                    basis="A <b>zayin</b> is on record against the signature at this position, "
+                          "and so is a vav. " + READS_WITHHELD + " "
+                          "Zayin is the same letter in dispute on p233:n4 glyph 2, which is why "
+                          "the ruling asks for zayin exemplars first &mdash; one point-and-name "
+                          "record would serve both cards.",
+                    note="The zayin panel below is empty for this ask too, and for the same "
+                         "measured reason: the corpus holds no zayin.")],
+         verdict="NO VERDICT on either position. Glyph 3 is deliberately NOT asked about: it is the "
+                 "one tile the signer corrected (candidate mem to final mem) and nothing on "
+                 "record disputes the corrected form, so it is settled and a card that re-opened it "
+                 "would "
+                 "be inviting a signer to re-decide something already answered."),
+
+    dict(span_id="p831:n2", kind="letter",
+         status="OPEN -- two bases name different glyphs; this card cuts the PAIR",
+         question="One of the two adjacent reshes may be a dalet. Which, if either?",
+         word=1, pos=None, candidates=(),
+         asks=[dict(word=1, pos=(2, 3), candidates=("resh", "dalet"),
+                    basis="TWO BASES, BOTH STATED, NEITHER CHOSEN. <b>Positional alignment names "
+                          "glyph 2</b>: aligned character by character against the recorded "
+                          "extraction, six of the seven glyphs match the signature and the single "
+                          "difference falls at position 2 (<code>audit_overlay_20261025</code>; "
+                          "the arm and its string are withheld, as everywhere on this page). "
+                          "<b>Insertion provenance names glyph 3</b>: position 3 "
+                          "is the resh that pass 2 <b>inserted</b> (insertion seq 0 after tile 1 "
+                          "&mdash; <code>after_i</code> is the 0-based tile index, measured, not "
+                          "assumed), on a span whose pass-1 note reads <i>Hebrew is missing a "
+                          "glyph and one glyph is not in crop but is in hebrew</i>. All six tiles "
+                          "were confirmed. <b>Both positions hold the same character</b>, so no "
+                          "number can discriminate them &mdash; the discriminator is the picture, "
+                          "which is why this card cuts the pair and declines to pick.",
+                    note="A third source disagrees with the first: "
+                         "<code>classify45_sheet.py:292</code> states <i>position 3</i> while "
+                         "arguing from positional alignment, where the arithmetic gives 2. That is "
+                         "named here and <b>deliberately not silently changed</b> &mdash; it should "
+                         "state both numbers with their bases, and that is a separate change with "
+                         "its own name. Until then, a reader who trusts that table alone gets the "
+                         "insertion position for the alignment reason.")],
+         verdict="NO VERDICT, and the conflict is the finding. Carried debt this span exposes, "
+                 "recorded and not fixed here: pass 1's note matches "
+                 "<code>apparatus_signature_rule.UNSIGNABLE_PATTERN</code> (<i>not in crop</i>), "
+                 "but the <b>pass-2 note is empty</b> and <code>full_span_pixel_signature</code> "
+                 "is true &mdash; so the prose refusal that exists to catch exactly this span "
+                 "cannot fire on it. A guard whose input was cleared by a later pass is not a "
+                 "guard."),
 ]
+
+
+def esc(t):
+    """HTML-escape. The Latin note text goes on the page verbatim, so it is escaped verbatim too."""
+    return (t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def strip_nikud(t):
@@ -274,6 +542,95 @@ def where(truth, occ):
     the count checkable against the picture instead of trusted."""
     ws = words(truth)
     return ", ".join("word %d (%s), glyph %d from the right" % (w, ws[w - 1], g) for w, g in occ)
+
+
+# THE NOTE'S OWN LATIN. Ruling 4 asks for the Latin gloss on p628:n2, and the obvious source is the
+# wrong one: `build_set`'s `latin_context` comes from the 2026-09-06 sitting records, which cover the
+# OLD ~21-span population, so it is absent for 44 of the 45 frozen spans. `contact_sheet_scoring45`
+# already hit that and fixed it, and its fix is the thing worth reusing -- not the file path, the
+# WITNESSED MAPPING. It resolves note text by POSITION (the span's own box inside the page's note
+# regions), not by the span id's N, and records five witnesses per row plus a content witness.
+#
+# So this reads that artifact's finished rows. It does not re-derive the mapping: a second port of a
+# witnessed rule is a second rule. The contact-sheet module cannot be imported -- it runs its whole
+# pipeline at module scope, reading crops and checking hashes -- which is also why the artifact, not
+# the code, is the dependency.
+#
+# AND THE CONSOLE DOES NOT TRANSLATE IT. On three of these spans the Latin bears hard on the answer
+# (p442:n0's note reads `pestis`; p254:n1's reads `monile aureum`). Printing my translation beside
+# the glyph would be me adjudicating the span in the signer's chair. The Latin goes up verbatim,
+# labelled as the note's own words, and the inference is the signer's to draw or refuse.
+C2SHEET = D.DATA / "CONTACT_SHEET_scoring45_adb9a26835533dbc_c26745f4be489471bd.json"
+_C2CACHE = {}
+
+
+def latin_gloss(span_id):
+    """(text, state, why) for the note's Latin. state is present | absent."""
+    if "rows" not in _C2CACHE:
+        try:
+            _o = json.loads(io.open(str(C2SHEET), encoding="utf-8").read())
+            _C2CACHE["rows"] = {r["span_id"]: r for r in _o["rows"]}
+            _C2CACHE["src"] = _o.get("channel2_source") or {}
+        except Exception as e:
+            _C2CACHE["rows"], _C2CACHE["src"] = {}, {}
+            _C2CACHE["err"] = "%s: %s" % (type(e).__name__, e)
+    if _C2CACHE.get("err"):
+        return "", "absent", "the contact-sheet artifact could not be read (%s)" % _C2CACHE["err"]
+    r = _C2CACHE["rows"].get(span_id)
+    if not r:
+        return "", "absent", ("this span is not in the 45-span scoring population, so no note text "
+                              "was ever resolved for it")
+    if r.get("ch2_state") != "present":
+        return "", "absent", r.get("ch2_why") or "the contact sheet records no note text"
+    pos = r.get("pos") or {}
+    if pos.get("state") != "resolved":
+        return "", "absent", ("the note position did not resolve (%s), and an unresolved position "
+                              "means the text cannot be attributed to this span"
+                              % (pos.get("why") or pos.get("state")))
+    w = r.get("ch2_witness") or {}
+    bad = sorted(k for k, v in w.items() if v is False)
+    if bad:
+        return "", "absent", "witness(es) %s do not match, so the mapping is not established" % bad
+    return r["ch2"], "present", ""
+
+
+def card_asks(c):
+    """A card's questions as a list, one per disputed position.
+
+    A card used to carry exactly one (word, pos, candidates). Two of ruling 4's spans break that:
+    p254:n1 has TWO disputed positions with different candidate sets, and a card asking one of them
+    would leave the other signed as-is with nothing on the page saying so. So `asks` is the general
+    form and the single-question fields are the shorthand -- not the reverse, because the shorthand
+    is what silently drops the second question.
+
+    `pos` may be a tuple. p831:n2's two candidate positions are BOTH resh, so no single number can
+    discriminate them and the card must cut the pair; see its entry."""
+    if c.get("asks"):
+        return c["asks"]
+    if not c.get("pos"):
+        return []
+    return [dict(word=c.get("word"), pos=c["pos"], candidates=c.get("candidates") or (),
+                 basis=None, note=None)]
+
+
+def ask_positions(ask):
+    """`pos` as a tuple, whether it was written as an int or a tuple."""
+    p = ask["pos"]
+    return tuple(p) if isinstance(p, (tuple, list)) else (p,)
+
+
+def glyphs_at(truth, ask):
+    """The characters the SIGNATURE holds at this ask's positions, or None where out of range.
+
+    This is the card's own statement of what it is pointing at, derived from the signed string every
+    time the page is built. It is what makes an off-by-one `pos` visible to a reader instead of
+    being a wrong instruction delivered confidently."""
+    ws = words(truth)
+    wi = ask.get("word") or 1
+    if wi > len(ws):
+        return [None for _ in ask_positions(ask)]
+    w = ws[wi - 1]
+    return [w[p - 1] if 1 <= p <= len(w) else None for p in ask_positions(ask)]
 
 
 def positions(truth, letter):
@@ -822,6 +1179,16 @@ def one_band_report(include_sealed=True):
     return len(rows) - len(bad), len(rows), bad
 
 
+def partner_prose(partners):
+    """`partners` as prose, for a message that used to assume exactly one rival."""
+    ps = [p for p in partners or ()]
+    if not ps:
+        return "any rival candidate"
+    if len(ps) == 1:
+        return ps[0]
+    return ", ".join(ps[:-1]) + " or " + ps[-1]
+
+
 def exemplars(letter, partner, want=4, exclude=()):
     """Signed spans whose print shows `letter` unambiguously, best first. The rule, stated:
 
@@ -841,14 +1208,19 @@ def exemplars(letter, partner, want=4, exclude=()):
     are not subject to rule 2 (a named index cannot beg the question), and the card shows them
     first -- they were signed for this purpose, and a truth span merely happens to contain the
     letter."""
+    # `partner` was one letter name. p798:n0 has THREE candidates at one position (he, tav, het)
+    # and p254:n1 has three at each of two positions, and rule 2 has to hold against EVERY rival or
+    # it does not hold at all: a word containing any other candidate can still beg the question.
+    # A bare string is still accepted, so the two decided cards call this exactly as before.
     ch = LETTER[letter]
-    pch = LETTER[partner] if partner else None
+    partners = (partner,) if isinstance(partner, str) and partner else tuple(partner or ())
+    pch = [LETTER[p] for p in partners]
     rows = []
     for s in D.build_set(include_sealed=True):
         t = strip_nikud(s["truth"])
         if not t or s["truth"] == D.NOT_HEBREW or ch not in t:
             continue
-        if pch and pch in t:
+        if any(p in t for p in pch):
             continue
         if s["span_id"] in exclude:
             continue
@@ -1209,18 +1581,54 @@ def build(out=None):
         h.append('<div class="q">%s</div>' % c["question"])
         h.append('<div>signed: <span class="heb" dir="auto">%s</span> <span class="mut">&nbsp;basis '
                  '<code>%s</code></span></div>' % (s["truth"], s["truth_basis"]))
-        if c["span_id"] in PENDING_RESIGN:
-            # The truth table still holds the superseded string, because the batch rule is one batch
-            # then one re-tally. Printing it unlabelled on a signing surface is the small version of
-            # the defect this file exists to catch.
-            h.append('<div class="warnbox">The string above is SUPERSEDED: %s.</div>'
-                     % PENDING_RESIGN[c["span_id"]])
-        if c["pos"]:
+        _lat, _lstate, _lwhy = latin_gloss(c["span_id"])
+        if _lstate == "present":
+            h.append('<div class="lbl">the note\'s own Latin</div>'
+                     '<div class="feat"><i>%s</i><br><span class="prov">From '
+                     '<code>vol1_apparatus.jsonl</code> via the scoring-45 contact sheet, which '
+                     'resolves note text by the span box\'s POSITION among the page\'s note '
+                     'regions &mdash; not by the <code>n</code> in the span id &mdash; and records '
+                     'five witnesses, all matched for this span. Hebrew runs in the note are masked '
+                     'to &bull;. <b>This console does not translate it and draws no inference from '
+                     'it.</b> It is the note\'s own words, put beside the picture so a signer can '
+                     'use them or set them aside.</span></div>' % esc(_lat))
+        else:
+            h.append('<div class="lbl">the note\'s own Latin</div>'
+                     '<div class="warnbox">ABSENT: %s.</div>' % esc(_lwhy))
+        # Derived from the row being printed, never from PENDING_RESIGN alone -- see `resign_state`.
+        # Until 2026-10-25 this branch labelled three strings SUPERSEDED that were the batch's own
+        # corrected output, because the table was consulted and the basis beside it was not.
+        _rstate, _rclaim = resign_state(c["span_id"], s["truth_basis"])
+        if _rstate == "pending":
+            h.append('<div class="warnbox">The string above is SUPERSEDED: %s.</div>' % _rclaim)
+        elif _rstate == "landed":
+            h.append('<div class="feat"><b>History, not a warning.</b> %s. <b>That batch has since '
+                     'LANDED in this row</b> &mdash; the basis above, <code>%s</code>, carries the '
+                     'batch\'s own stamp, so the string printed above is the batch\'s OUTPUT and '
+                     'not the string it replaced. This console called it SUPERSEDED until '
+                     '2026-10-25, on three cards, over the corrected strings.</div>'
+                     % (_rclaim, esc(s["truth_basis"] or "")))
+        for _ask in card_asks(c):
             ws = words(s["truth"])
             w = (' in word %d, <span class="heb" dir="auto">%s</span> (word 1 is the rightmost)'
-                 % (c["word"], ws[c["word"] - 1])) if c["word"] else ""
-            h.append('<div class="mut">Count glyph <b>%d</b> from the right%s.</div>'
-                     % (c["pos"], w))
+                 % (_ask["word"], ws[_ask["word"] - 1])) if _ask.get("word") else ""
+            _ps = ask_positions(_ask)
+            _gs = glyphs_at(s["truth"], _ask)
+            # The card SHOWS the glyph it is counting to. A `pos` is an instruction to cut a
+            # particular letter, so printing the character the signature holds there turns a wrong
+            # number into something a reader can see rather than something they act on.
+            _shown = ", ".join('<b>%d</b> (<span class="heb" dir="auto">%s</span>)'
+                               % (p, g if g else "&mdash;") for p, g in zip(_ps, _gs))
+            h.append('<div class="mut">Count glyph %s from the right%s.</div>'
+                     % (_shown, w))
+            if len(_ps) > 1:
+                h.append('<div class="warnbox">This card points at <b>%d adjacent positions</b> '
+                         'because no single number discriminates them &mdash; see the two bases '
+                         'below. Cut the <b>pair</b>, not one glyph.</div>' % len(_ps))
+            if _ask.get("basis"):
+                h.append('<div class="feat"><b>Why this position.</b> %s</div>' % _ask["basis"])
+            if _ask.get("note"):
+                h.append('<div class="warnbox">%s</div>' % _ask["note"])
 
         bands = s["column_bands"]
         a2, r2 = cut(pg, s["span_box"], D.PAD, bands) if s["span_box"] else (None, [])
@@ -1307,7 +1715,6 @@ def build(out=None):
                          % paste_rerat(c["span_id"], pg, cand, "blank-no-ink"))
 
         if c["kind"] == "letter":
-            a, b = c["candidates"]
             # Chris's method on p423:n3, 2026-09-27, promoted to a standing instruction because it
             # beats the exemplar machinery it sits above: a second impression of the same sort on
             # the SAME LINE holds fount, wear, inking and scan geometry constant, which no
@@ -1318,13 +1725,31 @@ def build(out=None):
                      'inking, same wear, same scan. p423:n3 was settled that way in one look &mdash; '
                      'the third letter of word 1 is the same type as the third letter of word 2. '
                      'The exemplars below are for when the line does not give you one.</div>')
-            for cand, partner in ((a, b), (b, a)):
+            # One panel per (ask, candidate). A card with two disputed positions gets two sets of
+            # panels, each headed with the position it answers, so neither question can be read as
+            # evidence about the other.
+            panels, _seenask = [], []
+            for _a in card_asks(c):
+                for _cand in _a["candidates"]:
+                    _hdr = ""
+                    if id(_a) not in _seenask:
+                        _seenask.append(id(_a))
+                        _gl = ", ".join(str(p) for p in ask_positions(_a))
+                        _hdr = ('<div class="q">Glyph %s: %s</div>'
+                                % (_gl, " vs ".join(_a["candidates"])))
+                    panels.append((_hdr, _cand,
+                                   tuple(x for x in _a["candidates"] if x != _cand)))
+            for _hdr, cand, partner in panels:
+                if _hdr:
+                    h.append(_hdr)
                 sg = sig_exemplars(cand)
                 ex = exemplars(cand, partner, exclude=(c["span_id"],))
                 h.append('<div class="lbl">%s &mdash; %s &mdash; %d exemplar(s): %d signed from the '
                          'volume, %d from signed spans</div>'
                          % (cand, LETTER[cand], len(sg) + len(ex), len(sg), len(ex)))
-                h.append('<div class="feat">%s</div>' % FEATURES.get(cand, ""))
+                # NO_FEATURE, not "": an empty box reads as "no distinguishing feature", which
+                # is a claim about the letterforms. The truth is that nobody has stated one.
+                h.append('<div class="feat">%s</div>' % (FEATURES.get(cand) or NO_FEATURE))
                 if len(sg) + len(ex) < 3:
                     h.append('<div class="warnbox">Only %d exemplar(s) of %s are available. The '
                              'signed spans give %d, and that is a measured corpus limit, not a bug: '
@@ -1335,7 +1760,7 @@ def build(out=None):
                              'point at any word on any page, name the letter and its index, and '
                              'that record has the same authority as a signature. Use '
                              '<code>hebrew_point_and_name.html</code>.</div>'
-                             % (len(sg) + len(ex), cand, len(ex), partner))
+                             % (len(sg) + len(ex), cand, len(ex), partner_prose(partner)))
                 h.append('<div class="row wrap">')
                 for r in sg:
                     # A signed volume exemplar carries its own provenance, and it is shown: a record
@@ -1351,8 +1776,17 @@ def build(out=None):
                                 r["date"],
                                 ("<br>" + r["note"]) if r.get("note") else ""))
                 for sid, es, p, occ in ex:
-                    pend = ("<br><b>note:</b> %s" % PENDING_RESIGN[sid]) if sid in PENDING_RESIGN \
-                        else ""
+                    # Same derivation as the card frame. p895:n0 reaches this loop as a pe exemplar
+                    # and its claim says the shown glyph is a DIFFERENT letter and unaffected; that
+                    # sentence is what licenses the exemplar, so it is printed in either state.
+                    _es, _ec = resign_state(sid, es.get("truth_basis"))
+                    pend = ""
+                    if _es == "pending":
+                        pend = "<br><b>note:</b> %s" % _ec
+                    elif _es == "landed":
+                        pend = ("<br><b>history:</b> %s &mdash; and that batch has landed in this "
+                                "row (<code>%s</code>), so the string shown is its output."
+                                % (_ec, esc(es.get("truth_basis") or "")))
                     h.append('<div class="cell">%s<div class="cap"><code>%s</code> <span class="heb"'
                              ' dir="auto">%s</span><br>%s%s</div></div>'
                              % (img_comp(Image.open(p)), sid, es["truth"],
@@ -1510,8 +1944,20 @@ def selftest():
             said = ("exemplar(s) of %s are available" % cand) in t0
             ck("a thin %s comparison is never shown silently" % cand, said or not thin,
                (thin, said))
-        ck("a superseded signature is never printed unlabelled",
-           all(("p895" not in t0) or (PENDING_RESIGN["p895:n0"][:40] in t0) for _ in [0]))
+        # DERIVED, and RED on the page this replaced: the old form asked only that p895's claim
+        # text appear somewhere on the page, which it did -- beside a string the batch had already
+        # corrected. What has to hold is that the LABEL matches the state of the row's own basis.
+        _cs0 = card_spans()[0]
+        _pend0 = [x for x in PENDING_RESIGN
+                  if x in _cs0 and resign_state(x, _cs0[x].get("truth_basis"))[0] == "pending"]
+        ck("the SUPERSEDED frame appears only while some row's batch has not landed",
+           ("is SUPERSEDED" in t0) == bool(_pend0), (_pend0, "is SUPERSEDED" in t0))
+        for _sid in [c_["span_id"] for c_ in CARDS if c_["span_id"] in PENDING_RESIGN]:
+            _st0, _cl0 = resign_state(_sid, _cs0[_sid].get("truth_basis"))
+            ck("%s's batch claim is printed, framed as %s" % (_sid, _st0), _cl0[:40] in t0, _st0)
+        _s895, _c895 = resign_state("p895:n0", _cs0["p895:n0"].get("truth_basis"))
+        ck("p895:n0 carries its claim wherever it is shown",
+           ("p895" not in t0) or (_c895[:40] in t0), _s895)
 
     print("")
     print("(2c) locators name the word, not just its number")
@@ -1548,8 +1994,13 @@ def selftest():
 
     print("")
     print("(3b) a context image is never shrunk below native")
+    # `card_spans()`, not `build_set`: seven of the twelve cards are frozen-set spans that
+    # build_set does not reach, and indexing it by their span_id raised KeyError and ABORTED the
+    # whole suite -- zero assertions printed, exit 1, no FAIL line to read. A check must iterate the
+    # population the renderer iterates, or it is a check about a different console.
+    _cs3b = card_spans()[0]
     for c in CARDS:
-        s_ = {x["span_id"]: x for x in D.build_set(include_sealed=True)}[c["span_id"]]
+        s_ = _cs3b[c["span_id"]]
         if not s_["span_box"]:
             continue
         a2_, r2_ = cut(s_["page"], s_["span_box"], D.PAD, s_["column_bands"])
@@ -1625,8 +2076,12 @@ def selftest():
 
         print("")
         print("(5) verdict-only: no model reading reaches a signing surface")
+        # `opus`, `gemma` and `astra` were missing, and they are the arms THIS lane's records
+        # actually name -- so five card bases quoted the arm by name and the probe saw none of them.
+        # A probe that omits the model in use passes on nothing.
         for arm in ("gpt-", "claude-", "gemini", "qwen", "glm-", "deepseek", "kimi", "grok",
-                    "minimax", "mimo", "nemotron", "ling-", "step-", "abstain"):
+                    "minimax", "mimo", "nemotron", "ling-", "step-", "abstain",
+                    "opus", "gemma", "astra", "sonnet"):
             ck("no arm/read token '%s' in the page text" % arm, arm not in t)
 
     print("")
@@ -1718,14 +2173,29 @@ def selftest():
            "dots and dashes under the letters" in t2)
         ck("the repeated-sort method is on every letter card",
            t2.count("look for the letter twice on the same line") >= 2)
-        ck("a superseded signature is labelled on its own card",
-           all(("superseded" in t2) for sid in PENDING_RESIGN
-               if sid in [c_["span_id"] for c_ in CARDS]))
+        # The old form asked for the lowercase word "superseded" ONCE anywhere on the page, for
+        # any card in the table -- and the page's only lowercase occurrence was inside p423:n3's own
+        # claim sentence, never the label. It was a probe matching on something else, and it stayed
+        # green while all three labels were wrong.
+        _cs7 = card_spans()[0]
+        # `t2` is LOWERCASED (line ~2121), so every needle here is too -- and the label needle
+        # is the whole phrase, because "superseded" alone appears inside p423:n3's claim sentence
+        # and that is what the check this replaced was matching.
+        _LBL = "string above is superseded"
+        for _sid in [c_["span_id"] for c_ in CARDS if c_["span_id"] in PENDING_RESIGN]:
+            _st7, _cl7 = resign_state(_sid, _cs7[_sid].get("truth_basis"))
+            ck("%s's card frames its batch claim as %s" % (_sid, _st7),
+               _cl7[:40].lower() in t2 and ((_LBL in t2) if _st7 == "pending" else True), _st7)
+        ck("no landed correction is called superseded anywhere on the page",
+           (_LBL not in t2)
+           or any(resign_state(x, _cs7[x].get("truth_basis"))[0] == "pending"
+                  for x in PENDING_RESIGN if x in _cs7))
         ck("signed exemplars carry provenance when any exist",
            (not sig_exemplars("bet") and not sig_exemplars("gimel"))
            or ("signed exemplar" in t2 and "printed p" in t2))
 
-    print("(8) the population bridge")
+    # (10): "(8)" collided with "(8) ruling 3" above and printed after "(9)".
+    print("(10) the population bridge")
     _b0 = n[0]
     _bspans, _bref, _bov = card_spans()
     _owed = ("p233:n4", "p628:n2", "p910:n3", "p596:n2", "p442:n0", "p798:n0", "p254:n1", "p831:n2")
@@ -1820,7 +2290,128 @@ def selftest():
 
     # 10, not 9: the staleness guard above is one `ck` reached through an if/else. The first version
     # of this line said 10 when there were 9 and went red, which is what the line is for.
-    ck("section 8 ran every one of its checks", n[0] - _b0 == 10, n[0] - _b0)
+    ck("section 10 ran every one of its checks", n[0] - _b0 == 10, n[0] - _b0)
+
+    print("")
+    print("(11) the eight new cards -- what items 3 and 4 claim")
+    _c0 = n[0]
+    _s9 = card_spans()[0]
+    OWED9 = ("p233:n4", "p628:n2", "p910:n3", "p596:n2",
+             "p442:n0", "p798:n0", "p254:n1", "p831:n2")
+
+    # THE POS INVARIANT, SCOPED. The glyph the signature holds at a card's `pos` must be one of that
+    # ask's candidates ALWAYS -- a card pointing at a letter nobody is disputing is a wrong number
+    # and sends a signer to the wrong glyph. It equals candidates[0] only while the card is open: the
+    # two DECIDED cards have had their rulings LAND in the truth table, so their signatures now hold
+    # the ruled letter, which is candidates[1]. Scoping this is why the check exists at all -- the
+    # unscoped form reported those two landings as mismatches.
+    for c in CARDS:
+        for a in card_asks(c):
+            gs = glyphs_at(_s9[c["span_id"]]["truth"], a)
+            names = [k for k in a["candidates"]]
+            chars = [LETTER[k] for k in names]
+            ck("%s glyph %s is one of the candidates it disputes"
+               % (c["span_id"], ",".join(str(p) for p in ask_positions(a))),
+               all(g in chars for g in gs), (gs, names))
+            if not c["status"].startswith("DECIDED"):
+                ck("%s still holds its first-named candidate" % c["span_id"],
+                   all(g == chars[0] for g in gs), (gs, names[0]))
+
+    ck("every candidate a card names is a letter this file can draw",
+       all(k in LETTER for c in CARDS for a in card_asks(c) for k in a["candidates"]),
+       sorted({k for c in CARDS for a in card_asks(c) for k in a["candidates"]
+               if k not in LETTER}))
+
+    # CROSS-LINEAGE, not by construction: `cut()` un-stacks a frozen span's STRIP coordinates into
+    # native page rects, and the scoring-45 contact sheet stored native rects for the same spans from
+    # a different run. Agreement on all seven is a witness that the un-stacking is right; nothing in
+    # this file produced the number it is compared against. p596:n2 is excluded because it is not in
+    # the 45-span population -- its box is human-ratified and never passed through a strip.
+    _agree, _seen = [], []
+    if C2SHEET.exists():
+        _c2 = {r["span_id"]: r for r in json.loads(
+            C2SHEET.read_text(encoding="utf-8"))["rows"]}
+        for sid in OWED9:
+            r = _c2.get(sid)
+            if not r or sid not in _s9 or not _s9[sid]["span_box"]:
+                continue
+            theirs = (((r.get("pos") or {}).get("frame") or {})
+                      .get("native_rects_stored"))
+            if theirs is None:
+                continue
+            _seen.append(sid)
+            _im, rects = cut(_s9[sid]["page"], _s9[sid]["span_box"], 0,
+                             _s9[sid]["column_bands"])
+            mine = [[int(v) for v in rr["box"]] for rr in rects]
+            _agree.append(mine == [[int(v) for v in rr] for rr in theirs])
+        ck("cut() lands on the contact sheet's native rects for every owed frozen span",
+           len(_seen) == 7 and all(_agree), (len(_seen), _agree))
+    else:
+        ck("cut() lands on the contact sheet's native rects for every owed frozen span",
+           False, "the scoring-45 contact sheet is missing, so nothing witnesses the un-stacking")
+
+    # The Latin panel's state is asserted PER SPAN, because an ABSENT that goes quietly is the shape
+    # of the first contact-sheet build: it took `latin_context` from build_set and came out absent
+    # for 44 of 45 without saying so.
+    for sid in OWED9:
+        _lt, _ls, _lw = latin_gloss(sid)
+        want = "absent" if sid == "p596:n2" else "present"
+        ck("%s's Latin gloss is %s" % (sid, want), _ls == want, (_ls, (_lw or _lt)[:60]))
+
+    # THE FIRST OUTPUT RULING 4 ASKED FOR DOES NOT EXIST IN THE CORPUS. Zayin exemplars were the
+    # named first deliverable; there are none, from either source, and no code can make one. The
+    # count is asserted so that the day one is pointed and named this check goes red and the card's
+    # refusal comes off the page.
+    ck("the zayin exemplar count is still a measured zero from both sources",
+       len(sig_exemplars("zayin")) == 0 and len(exemplars("zayin", None)) == 0,
+       (len(sig_exemplars("zayin")), len(exemplars("zayin", None))))
+    if OUTHTML.exists():
+        ck("the zayin card says so on its face",
+           "only 0 exemplar(s) of zayin are available" in t2)
+    else:
+        ck("the zayin card says so on its face", True, "no rendered page to scan")
+
+    # Section 8's draw-pool caption check was live-counting ZERO before these cards landed, which it
+    # printed. Pinning the number here is what turns that printed zero into something that cannot
+    # quietly return.
+    _dp9 = [c["span_id"] for c in CARDS
+            if _s9.get(c["span_id"], {}).get("box_provenance") == "draw-pool"]
+    ck("seven cards now sit on a machine-drawn box, so section 10's caption check is live",
+       len(_dp9) == 7, sorted(_dp9))
+    ck("p596:n2 is the one owed span with a human-ratified box",
+       [x for x in OWED9 if _s9[x]["box_provenance"] == "human-ratified"] == ["p596:n2"],
+       [(x, _s9[x]["box_provenance"]) for x in OWED9])
+
+    # NO READING ON THE SIGNING SURFACE, checked over the CARD DATA and not the page text.
+    # Section (5) scans the rendered page for arm names; it cannot see a tally, and it cannot see a
+    # card at all until the card renders. Both of those let the first draft of these eight through.
+    # The phrases below are the shapes the leak actually took, plus the generic ones.
+    _fields = []
+    for c in CARDS:
+        _fields.append((c["span_id"], "status", c.get("status") or ""))
+        _fields.append((c["span_id"], "question", c.get("question") or ""))
+        _fields.append((c["span_id"], "verdict", str(c.get("verdict") or "")))
+        for a in card_asks(c):
+            _fields.append((c["span_id"], "basis", a.get("basis") or ""))
+            _fields.append((c["span_id"], "note", a.get("note") or ""))
+    _ARMS = ("opus", "qwen", "gemma", "astra", "sonnet", "gpt-", "claude-", "gemini", "deepseek")
+    _armhit = [(sid, k, t_) for sid, k, v in _fields for t_ in _ARMS if t_ in v.lower()]
+    ck("no card names the arm that produced a reading (%d field(s) scanned)" % len(_fields),
+       not _armhit and len(_fields) > 40, _armhit[:4])
+    # A TALLY is the same leak in the form the token list is blind to.
+    _TALLY = ("reads put", "reads return", "read it", "arms agree", "all four reads",
+              "three reads", "two of the four", "both qwen", "returns the signature",
+              "reads agree", "arms agreeing")
+    _tally = [(sid, k, t_) for sid, k, v in _fields for t_ in _TALLY if t_ in v.lower()]
+    ck("no card reports how many reads said what", not _tally, _tally[:4])
+
+    # 36: eleven asks give 11 candidate checks plus 9 first-named checks (the two DECIDED cards are
+    # skipped there), then 1 candidate-name, 1 rect, 8 Latin, 2 zayin, 2 provenance, 2 no-reading.
+    # This line is NOT
+    # in its own total -- `ck`'s condition is evaluated before `ck` increments -- which is also how
+    # section (10)'s count works. Written out because a count recomputed from the loops it counts
+    # asserts nothing; it went red at 35 and that is what the line is for.
+    ck("section 11 ran every one of its checks", n[0] - _c0 == 36, n[0] - _c0)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
@@ -1828,7 +2419,12 @@ def selftest():
 
 
 def spans_of(sid):
-    return {x["span_id"]: x for x in D.build_set(include_sealed=True)}[sid]
+    """One span record from the CARD population -- build_set where it reaches, frozen set elsewhere.
+
+    Not `build_set` alone. Both callers iterate CARDS, seven of which are frozen-set spans, and the
+    KeyError aborted the suite from inside a list comprehension in section (7).
+    """
+    return card_spans()[0][sid]
 
 
 def _blank_span(s):
