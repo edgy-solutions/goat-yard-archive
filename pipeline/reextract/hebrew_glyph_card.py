@@ -57,7 +57,7 @@ invented curl, and the whole question on p217:n2 was whether a curl is present o
 import base64, io, json, re, sys, unicodedata
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 import hebrew_aperture_diag as D
 import signature_attestation as SA
@@ -73,6 +73,19 @@ RERAT = D.DATA / "hebrew_box_reratify.jsonl"
 INK = 160            # a pixel darker than this is ink
 TARGET_BAND = 150    # every COMPARISON image is scaled so its text line is this tall
 BAND_FRAC = 0.12     # a row belongs to the line band if its ink reaches this fraction of the peak
+
+# THE LETTERS WHOSE IDENTITY IS A QUESTION ABOUT THE LINE. Those four finals and kof hang below the
+# baseline; lamed rises above the ceiling. A card gets a baseline strip when its own candidates meet
+# this set -- derived, not hand-picked, which is how p254:n1 (final nun vs nun) came to have one
+# although ruling 4's spec names only p628:n2.
+VERTICAL = ("final_kaf", "final_nun", "final_pe", "final_tsadi", "kof", "lamed")
+STRIP_NBIN = 16        # bins of 1/16 of the strip's OWN peak, so a bin means the same on every strip
+STRIP_MIN_SEP = 8      # half of full scale: the FORM of Chris's threshold rule, not a number tuned here
+STRIP_WIN_LINES = 4    # window either side of the span, in the line's own heights, so it scales with the fount
+STRIP_MIN_COVER = 0.90  # the rect must cover this much of the run it picks (measured: 1.00 on all 8)
+GUIDE_BASE = (14, 165, 233)   # the derived baseline
+GUIDE_TOP = (120, 130, 150)   # the top of the dense zone -- NOT a letter-class boundary
+GUIDE_SPAN = (217, 119, 6)    # the span's own x-extent
 MIN_BAND_PX = 20     # an ink run thinner than this is not a text line
 MAX_BAND_PX = 50     # a single band thicker than this is two lines merged
 SPLIT_FRAC = 0.28    # the threshold a top-edge merge is re-profiled at; see band_geometry
@@ -857,6 +870,172 @@ def find_ink(pg, rects, grow=260, tries=4):
     return win.convert("RGB"), "+/-%dpx" % (grow * tries), False, [wx0, wy0, wx1, wy1]
 
 
+# --- THE LINE STRIP AND ITS DERIVED BASELINE ------------------------------------------------
+# An ascender/descender question is not answerable on a tight crop: the 2026-10-25 audit said so of
+# p628:n2 in those words, "the crop is tight and the descender cannot be judged". A tight crop holds
+# no reference for BELOW THE LINE. The reference comes from the span's own line, where the Latin is
+# plentiful and legible -- the reliable things are counted to place the unreliable one. Nothing in
+# here reads a letter, and nothing here decides anything: it draws a guide a signer may refuse.
+
+
+def line_strip(pg, span_box, bands):
+    """The span's own line of type at full band width, as a dict -- or one carrying `why` instead.
+
+    Regionalized BEFORE anything is measured: the presplit's own band (one column, or one band it
+    declares full width), then the inked run the span's rect actually covers. The strip then reaches
+    to the MIDPOINT of the interline gap on each side. That last part is the whole point -- the
+    ascender and descender rows ARE the low-ink rows, and `ink_runs` cuts at a fraction of the peak,
+    so a strip cut at the run's own bounds has already discarded the evidence the question needs.
+
+    Every refusal is named and returned. A silent fallback here would put a plausible line on a
+    picture with nothing able to say which line it came from.
+    """
+    out = {"why": None}
+    rects = cut(pg, span_box, 0, bands)[1] if span_box else []
+    if not rects:
+        out["why"] = "the span box yields no native rect"
+        return out
+    r = rects[0]["box"]
+    native, _st, info = page_bits(pg)
+    cx, cy = (r[0] + r[2]) // 2, (r[1] + r[3]) // 2
+    hit = None
+    for b in (info.get("bands") or []):
+        bx, by = b["native"]
+        bw, bh = b["size"]
+        if bx <= cx < bx + bw and by <= cy < by + bh:
+            hit = b
+    if hit is None:
+        out["why"] = "the rect's centre lies in no presplit band"
+        return out
+    bx, by = hit["native"]
+    bw, bh = hit["size"]
+    # A strip across the column gutter would average TWO lines' baselines into one guide, and the
+    # guide would look perfectly plausible. The presplit declares each band's column; a band that
+    # does not declare itself full width and yet spans most of the page is refused, not trusted.
+    if hit.get("col") != "full_width" and bw > 0.75 * native.width:
+        out["why"] = ("the band is %r yet spans %.0f%% of the page width, so the strip could cross "
+                      "the gutter" % (hit.get("col"), 100.0 * bw / native.width))
+        return out
+    band = native.crop((bx, by, bx + bw, by + bh))
+    runs = ink_runs(band)
+    ry0, ry1 = r[1] - by, r[3] - by
+    ov = sorted(((max(0, min(ry1, z + 1) - max(ry0, a)), i) for i, (a, z) in enumerate(runs)),
+                reverse=True)
+    if not ov or ov[0][0] <= 0:
+        out["why"] = "the rect overlaps no inked run in its band"
+        return out
+    i = ov[0][1]
+    a, z = runs[i]
+    cover = ov[0][0] / float(z - a + 1)
+    if cover < STRIP_MIN_COVER:
+        out["why"] = ("the rect covers only %.0f%% of the run it selects, so the line it sits on is "
+                      "not established" % (100.0 * cover))
+        return out
+    nl = n_lines(band.crop((0, a, bw, z + 1)))
+    if nl != 1:
+        out["why"] = "the run the rect selects holds %d text lines, not one" % nl
+        return out
+    up = runs[i - 1][1] if i > 0 else None
+    dn = runs[i + 1][0] if i + 1 < len(runs) else None
+    top = (up + 1 + a) // 2 if up is not None else max(0, a - (z - a))
+    bot = (z + dn) // 2 + 1 if dn is not None else min(band.height, z + (z - a))
+    out.update(strip=band.crop((0, top, bw, bot)), top=top, run=(a, z), run_h=z - a + 1,
+               cover=cover, col=hit.get("col"), band_box=[bx, by, bx + bw, by + bh],
+               native_rect=list(r),
+               # In STRIP coordinates: x from the band's own x0, y from the strip's top row.
+               rect=[r[0] - bx, r[1] - by - top, r[2] - bx, r[3] - by - top])
+    return out
+
+
+def baseline_guides(prof):
+    """(baseline, dense_top, detail) as strip rows from a row profile -- or (None, None, detail).
+
+    Chris's threshold rule, 2026-10-04: the threshold is the MIDPOINT of the two modes, it needs a
+    minimum separation, it ABSTAINS when there is no second mode, and it is never the first gap.
+    Here the two modes are the paper floor and the body of the type; the midpoint between them cuts
+    the x-height mass, whose lowest row is the baseline and whose highest is the top of the dense
+    zone. Binning is on 1/16 of the strip's own peak so a bin means the same thing on a 140-peak
+    strip and a 1194-peak one, and the histogram is padded with ZERO rather than clamped: clamping
+    re-uses the end bin as its own neighbour and manufactures a mode there.
+
+    The two modes are the two most POPULATED ones. Taking the lowest and the highest instead let a
+    2-row bin set a threshold while the 16-row body mode sat unused.
+    """
+    pk = max(prof) if prof else 0
+    h = [0] * STRIP_NBIN
+    for v in prof:
+        h[min(STRIP_NBIN - 1, v * STRIP_NBIN // (pk + 1))] += 1
+    sm = [(h[i - 1] if i > 0 else 0) + h[i] + (h[i + 1] if i < STRIP_NBIN - 1 else 0)
+          for i in range(STRIP_NBIN)]
+    # `sm[i] > 0` is load-bearing: without it a bin holding ZERO rows beat the -1 sentinel on the
+    # left and tied an equally empty neighbour on the right, so an EMPTY bin 0 was a mode. A uniform
+    # strip then reported two modes 14 bins apart, was accepted, and drew a baseline on its last
+    # row. The live strips hid it because their lowest bin is populated.
+    loc = [i for i in range(STRIP_NBIN)
+           if sm[i] > 0
+           and sm[i] > (sm[i - 1] if i > 0 else -1)
+           and sm[i] >= (sm[i + 1] if i < STRIP_NBIN - 1 else -1)]
+    d = {"peak": pk, "hist": h, "smooth": sm, "modes": loc, "why": None}
+    if len(loc) < 2:
+        d["why"] = ("the profile has %d mode, so there is nothing to take a midpoint between"
+                    % len(loc))
+        return None, None, d
+    two = sorted(sorted(loc, key=lambda i: -sm[i])[:2])
+    d["two"], d["sep"] = two, two[1] - two[0]
+    if d["sep"] < STRIP_MIN_SEP:
+        d["why"] = ("the two modes are %d bins apart, under the %d the rule requires (half of full "
+                    "scale), so the paper floor and the type are not separated here"
+                    % (d["sep"], STRIP_MIN_SEP))
+        return None, None, d
+    d["thr"] = ((two[0] + two[1]) / 2.0 + 0.5) * (pk + 1) / STRIP_NBIN
+    rows = [i for i, v in enumerate(prof) if v >= d["thr"]]
+    return rows[-1], rows[0], d
+
+
+def strip_image(sp):
+    """The span's line as one image, with the derived guides painted on PAPER PIXELS ONLY.
+
+    No mark ever overwrites ink. That keeps the image the page's own pixels rather than a picture
+    this console drew, and it makes the guide BREAK exactly where a glyph crosses it -- which is the
+    signal a signer is looking for, not a decoration. The scale is an integer NEAREST factor, so no
+    row is duplicated unevenly and a one-native-row guide stays one native row thick.
+
+    Returns a dict carrying `clean` (the same window, unmarked) so a check can compare the two.
+    """
+    st, rect, rh = sp["strip"], sp["rect"], sp["run_h"]
+    base, dtop, d = baseline_guides(row_profile(st))
+    f = max(1, int(round(TARGET_BAND / float(rh))))
+    wx0 = max(0, rect[0] - STRIP_WIN_LINES * rh)
+    wx1 = min(st.width, rect[2] + STRIP_WIN_LINES * rh)
+    win = st.crop((wx0, 0, wx1, st.height))
+    big = win.resize((win.width * f, win.height * f), Image.NEAREST).convert("RGB")
+    out = {"f": f, "win": [wx0, wx1], "baseline": base, "dense_top": dtop, "detail": d,
+           "clean": big.copy(), "img": big}
+    if base is None:
+        return out
+    px = big.load()
+    # The paper test reads the UNMARKED copy. Read it off the image being painted instead and the
+    # invariant becomes draw-order dependent, because GUIDE_BASE's own green channel is above INK
+    # and a later mark would see an earlier guide as paper.
+    clean_px = out["clean"].load()
+
+    def paper_row(row, colour, step):
+        for y in range(row * f, min(big.height, row * f + f)):
+            for x in range(0, big.width, step):
+                if clean_px[x, y][1] >= INK:
+                    px[x, y] = colour
+
+    paper_row(base, GUIDE_BASE, 1)
+    paper_row(dtop, GUIDE_TOP, 2)
+    for ex in (rect[0] - wx0, rect[2] - wx0 - 1):
+        if 0 <= ex < win.width:
+            for x in range(ex * f, min(big.width, ex * f + f)):
+                for y in range(0, big.height, 3):
+                    if clean_px[x, y][1] >= INK:
+                        px[x, y] = GUIDE_SPAN
+    return out
+
+
 # --- SIGNED RECORDS FROM THE WHOLE VOLUME ---------------------------------------------------
 # Every record is validated before it can reach a card. The refusals are printed, never swallowed:
 # a capture surface that drops a mis-drawn box in silence would put the signer back where the four
@@ -1316,6 +1495,13 @@ def img_ctx(im, up=1):
             % (b64(g), f))
 
 
+def img_strip(im, f):
+    """A strip image: never width-capped. It is for judging a vertical extent, not for locating."""
+    return ('<img class="strip" src="data:image/png;base64,%s" title="the span\'s own line of type, '
+            'native pixels at NEAREST x%d; every mark is painted on paper pixels only, so no ink is '
+            'hidden">' % (b64(im), f))
+
+
 CSS = """
 :root{--bg:#0e1116;--fg:#e6e6e6;--mut:#9aa4b2;--acc:#7dd3fc;--warn:#fbbf24;--bad:#f87171;
 --ok:#4ade80;--card:#161b22;--line:#2d333b}
@@ -1343,6 +1529,8 @@ img{display:block;image-rendering:pixelated;background:#fff;border-radius:3px}
 /* .comp is NEVER constrained: a browser-downscaled comparison image is a lie about scale. Wide ones
    overflow into the scrolling strip at true size. .ctx may be fitted -- it is for locating, not judging. */
 img.comp{max-width:none}
+/* .strip answers "does this glyph cross the line", which a browser-downscaled image cannot. */
+img.strip{max-width:none;image-rendering:pixelated}
 img.ctx{max-width:100%}
 .cell{flex:0 0 auto}
 .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:16px 0 4px}
@@ -1714,6 +1902,75 @@ def build(out=None):
                 h.append('<pre class="paste">%s</pre>'
                          % paste_rerat(c["span_id"], pg, cand, "blank-no-ink"))
 
+        # THE LINE, AND WHERE ITS BASELINE FALLS. Only for a card whose candidates differ above or
+        # below the line. The eligible set is DERIVED from the card's own candidates against
+        # VERTICAL, which is how p254:n1 (final nun vs nun) came to have a strip although ruling 4's
+        # spec names only p628:n2 -- a hand-picked list would have missed it.
+        _vc = sorted({x for _a in card_asks(c) for x in _a["candidates"]} & set(VERTICAL))
+        if _vc:
+            h.append('<div class="lbl">the line, and where its baseline falls</div>')
+            h.append('<div class="mut">This card has a strip because <b>%s</b> %s above or below '
+                     'the line, so the question is a vertical one &mdash; and the 2026-10-25 audit '
+                     'said of p628:n2, in these words, that <i>the crop is tight and the descender '
+                     'cannot be judged</i>.</div>'
+                     % (", ".join(_vc), "differ" if len(_vc) > 1 else "differs"))
+            _sp = line_strip(pg, s["span_box"], bands)
+            if _sp.get("why"):
+                h.append('<div class="warnbox"><b>NO STRIP, and no guide:</b> %s. Nothing is drawn, '
+                         'rather than drawn from a line this console cannot establish.</div>'
+                         % esc(_sp["why"]))
+            else:
+                _si = strip_image(_sp)
+                _d = _si["detail"]
+                _mk = ('The <span style="color:%s">solid line is the derived baseline</span>, the '
+                       '<span style="color:%s">dotted one is the top of the dense zone</span> '
+                       '(which is not a letter-class boundary), and the '
+                       '<span style="color:%s">vertical ticks are the span box\'s own edges</span>. '
+                       'Every mark is painted on <b>paper pixels only</b>: no ink is hidden '
+                       'anywhere, which is why the baseline BREAKS where a glyph crosses it. That '
+                       'break is the signal.'
+                       % tuple('#%02x%02x%02x' % g
+                               for g in (GUIDE_BASE, GUIDE_TOP, GUIDE_SPAN))
+                       ) if _si["baseline"] is not None else 'No guide is drawn on it.'
+                h.append('<div class="row"><div class="cell">%s<div class="cap">The span\'s own '
+                         'line of type, the full width of its <code>%s</code> band, cut to the '
+                         '<b>midpoint of the interline gap</b> on each side &mdash; the ascender '
+                         'and descender rows are the LOW-ink rows, so a strip cut at the line\'s '
+                         'own bounds throws away the evidence this question needs. The window is '
+                         'the span plus %d line-heights either side (%dpx here), so it scales with '
+                         'the fount, at NEAREST x%d. <b>This is not the scale of the comparison '
+                         'images above:</b> those take the line height from the span crop\'s own '
+                         'peak, which differs from the band\'s own run in both directions. %s'
+                         '</div></div></div>'
+                         % (img_strip(_si["img"], _si["f"]), esc(str(_sp["col"])),
+                            STRIP_WIN_LINES, STRIP_WIN_LINES * _sp["run_h"], _si["f"], _mk))
+                if _si["baseline"] is None:
+                    h.append('<div class="warnbox"><b>NO BASELINE IS DRAWN.</b> %s. The rule is '
+                             'Chris\'s, 2026-10-04: the midpoint of the two modes, with a minimum '
+                             'separation, and <b>abstain when there is no second mode</b> &mdash; '
+                             'never the first gap. It abstained here, so the strip carries no line '
+                             'rather than one it cannot justify.</div>' % esc(_d["why"]))
+                else:
+                    h.append('<div class="feat"><b>How that line was derived, in numbers.</b> The '
+                             'row-ink profile of this strip, binned on 1/16 of its own peak (peak '
+                             '%d ink pixels in a row). Modes at bins %s; the two most populated are '
+                             '<b>%d</b> (the paper floor) and <b>%d</b> (the body of the type), '
+                             '<b>%d bins apart</b> where the rule requires %d. The threshold is '
+                             'their midpoint, %.0f ink pixels per row; the baseline is the LOWEST '
+                             'row at or above it (strip row %d of %d, row %d of the band) and the '
+                             'dense-zone top is the highest (strip row %d). The threshold rule '
+                             'is Chris&rsquo;s, 2026-10-04: <i>the midpoint of the two modes</i> '
+                             'with a minimum separation, abstaining when there is no second mode, '
+                             'never the first gap &mdash; and it does abstain, printing why, when '
+                             'a strip gives it nothing to work with. <b>It is a derived '
+                             'guide and you may refuse it.</b> It is taken from this line\'s '
+                             'Latin, which is plentiful and legible, so that the glyph in question '
+                             'is judged against something other than itself.</div>'
+                             % (_d["peak"], ", ".join(str(x) for x in _d["modes"]),
+                                _d["two"][0], _d["two"][1], _d["sep"], STRIP_MIN_SEP, _d["thr"],
+                                _si["baseline"], _sp["strip"].height,
+                                _sp["top"] + _si["baseline"], _si["dense_top"]))
+
         if c["kind"] == "letter":
             # Chris's method on p423:n3, 2026-09-27, promoted to a standing instruction because it
             # beats the exemplar machinery it sits above: a second impression of the same sort on
@@ -2079,8 +2336,14 @@ def selftest():
         # `opus`, `gemma` and `astra` were missing, and they are the arms THIS lane's records
         # actually name -- so five card bases quoted the arm by name and the probe saw none of them.
         # A probe that omits the model in use passes on nothing.
+        #
+        # THIS LIST IS ARM NAMES ONLY. `abstain` was here too, and on 2026-10-25 it fired on a
+        # correct page: the threshold rule of the baseline strip abstains, in Chris's own words, and
+        # the card says so. A model's abstention is still a read and is still forbidden -- it is
+        # checked in section (11) against the CARD DATA, which is where a reported read lives and
+        # where the rule's prose does not. A name can never be legitimate here; a verb can.
         for arm in ("gpt-", "claude-", "gemini", "qwen", "glm-", "deepseek", "kimi", "grok",
-                    "minimax", "mimo", "nemotron", "ling-", "step-", "abstain",
+                    "minimax", "mimo", "nemotron", "ling-", "step-",
                     "opus", "gemma", "astra", "sonnet"):
             ck("no arm/read token '%s' in the page text" % arm, arm not in t)
 
@@ -2401,9 +2664,17 @@ def selftest():
     # A TALLY is the same leak in the form the token list is blind to.
     _TALLY = ("reads put", "reads return", "read it", "arms agree", "all four reads",
               "three reads", "two of the four", "both qwen", "returns the signature",
-              "reads agree", "arms agreeing")
+              "reads agree", "arms agreeing",
+              # An abstention reported as a read is a read. These phrasings came out of section (5)
+              # when the baseline strip's own rule needed the bare word `abstain` back.
+              # `no read` was tried and REMOVED: it matched "no signature, no reads, no Latin"
+              # on p596:n2 -- a card ASSERTING that no arm read the span, which is the
+              # opposite of reporting one. A needle for "a read happened" must not match a
+              # denial that any did.
+              "abstained", "abstention", "abstains", "arm declined")
     _tally = [(sid, k, t_) for sid, k, v in _fields for t_ in _TALLY if t_ in v.lower()]
-    ck("no card reports how many reads said what", not _tally, _tally[:4])
+    ck("no card reports how many reads said what, or that one abstained", not _tally,
+       _tally[:4])
 
     # 36: eleven asks give 11 candidate checks plus 9 first-named checks (the two DECIDED cards are
     # skipped there), then 1 candidate-name, 1 rect, 8 Latin, 2 zayin, 2 provenance, 2 no-reading.
@@ -2412,6 +2683,115 @@ def selftest():
     # section (10)'s count works. Written out because a count recomputed from the loops it counts
     # asserts nothing; it went red at 35 and that is what the line is for.
     ck("section 11 ran every one of its checks", n[0] - _c0 == 36, n[0] - _c0)
+
+    print("")
+    print("(12) item 5: the line strip and its derived baseline")
+    _d0 = n[0]
+    _cs12 = card_spans()[0]
+    _elig = [c["span_id"] for c in CARDS
+             if {x for a in card_asks(c) for x in a["candidates"]} & set(VERTICAL)]
+    # A biconditional, so a card that silently lost its strip fails and so does one that gained a
+    # strip without a vertical candidate. The count is checked too: an empty eligible set would
+    # satisfy the biconditional on nothing.
+    _LBL12 = "the line, and where its baseline falls"
+    ck("every card with a vertical candidate has a strip, and no other card does (%d of %d)"
+       % (len(_elig), len(CARDS)),
+       t0.count(_LBL12) == len(_elig) and len(_elig) >= 1, (len(_elig), t0.count(_LBL12)))
+    ck("the eligible set is derived, and it reaches a span ruling 4 does not name",
+       "p254:n1" in _elig and "p628:n2" in _elig, _elig)
+    for _sid in _elig:
+        _s12 = _cs12[_sid]
+        _sp12 = line_strip(_s12["page"], _s12["span_box"], _s12["column_bands"])
+        ck("%s: the strip is established, not refused" % _sid, not _sp12.get("why"),
+           _sp12.get("why"))
+        if _sp12.get("why"):
+            continue
+        # The run the rect selected must really be a line of type, and the band must really be one
+        # column. A strip that crossed the gutter would average two baselines into a plausible one.
+        ck("%s: the rect covers the run it selects (%.0f%%, floor %.0f%%)"
+           % (_sid, 100.0 * _sp12["cover"], 100.0 * STRIP_MIN_COVER),
+           _sp12["cover"] >= STRIP_MIN_COVER)
+        ck("%s: that run holds exactly one text line" % _sid,
+           n_lines(_sp12["strip"].crop((0, _sp12["run"][0] - _sp12["top"], _sp12["strip"].width,
+                                       _sp12["run"][1] - _sp12["top"] + 1))) == 1)
+        ck("%s: the band declares its column (%r) and does not straddle the gutter"
+           % (_sid, _sp12["col"]),
+           _sp12["col"] in ("left", "right", "full_width")
+           and (_sp12["col"] == "full_width"
+                or (_sp12["band_box"][2] - _sp12["band_box"][0])
+                <= 0.75 * page_bits(_s12["page"])[0].width))
+        # The strip must be TALLER than the run it was taken from, or the low-ink rows the rule
+        # needs are not in it -- the defect that made every profile look unimodal in probe2.
+        ck("%s: the strip reaches past the line's own ink (%dpx strip, %dpx run)"
+           % (_sid, _sp12["strip"].height, _sp12["run_h"]),
+           _sp12["strip"].height > _sp12["run_h"])
+        _si12 = strip_image(_sp12)
+        ck("%s: a baseline was derived" % _sid, _si12["baseline"] is not None,
+           _si12["detail"].get("why"))
+        if _si12["baseline"] is None:
+            continue
+        _bb = _sp12["top"] + _si12["baseline"]
+        ck("%s: the baseline falls inside the line it was derived from (band row %d in run %r)"
+           % (_sid, _bb, _sp12["run"]),
+           _sp12["run"][0] <= _bb <= _sp12["run"][1])
+        ck("%s: the dense zone's top is above the baseline (%d < %d)"
+           % (_sid, _si12["dense_top"], _si12["baseline"]),
+           0 <= _si12["dense_top"] < _si12["baseline"])
+        ck("%s: the two modes are at least %d bins apart (%d)"
+           % (_sid, STRIP_MIN_SEP, _si12["detail"]["sep"]),
+           _si12["detail"]["sep"] >= STRIP_MIN_SEP)
+        ck("%s: the window holds the whole span box plus %d line-heights"
+           % (_sid, STRIP_WIN_LINES),
+           _si12["win"][0] <= _sp12["rect"][0] and _si12["win"][1] >= _sp12["rect"][2]
+           and (_si12["win"][1] - _si12["win"][0])
+           <= (_sp12["rect"][2] - _sp12["rect"][0]) + 2 * STRIP_WIN_LINES * _sp12["run_h"])
+        # BOTH HALVES of the paper-only claim. "No mark landed on ink" passes on an image with no
+        # marks at all, so the liveness half has to be here beside it.
+        _msk = _si12["clean"].convert("L").point(lambda v: 255 if v < INK else 0)
+        _dif = ImageChops.difference(_si12["img"], _si12["clean"]).convert("L")
+        ck("%s: marks were actually drawn on the strip" % _sid, _dif.getbbox() is not None)
+        ck("%s: not one mark landed on ink" % _sid,
+           ImageChops.multiply(_dif, _msk).getbbox() is None)
+        ck("%s: the scale is the stated integer factor" % _sid,
+           _si12["f"] == max(1, int(round(TARGET_BAND / float(_sp12["run_h"])))), _si12["f"])
+    # The caption may not claim the comparison scale, because it is not that scale: `comparison()`
+    # takes the line height from the span crop's own peak and that differs from the band's run in
+    # both directions (33/48/32/31 against 38/23/35/35 on these four).
+    ck("the strip caption says it is NOT the comparison scale",
+       "this is not the scale of the comparison images above" in t2)
+    ck("the strip card states whose rule the threshold is, and names the abstention",
+       "the midpoint of the two modes" in t2 and "2026-10-04" in t2
+       and "abstaining when there is no second mode" in t2)
+
+    # ABSTENTION, PROVEN LIVE. Every eligible span accepts, so the abstaining branch has no natural
+    # case on this page -- and a guard nobody has seen work is not a guard. The third profile is the
+    # control: without it, both abstention checks would pass on a function that always abstains.
+    _uni = [40] * 60
+    _b, _t, _du = baseline_guides(_uni)
+    ck("a uniform profile abstains: no second mode", _b is None and "mode" in (_du["why"] or ""),
+       _du.get("why"))
+    # For a separation UNDER half scale the low mode must sit above half the peak, because the
+    # peak itself always lands in the top bin: 60 against 100 puts the modes 6 bins apart. The first
+    # draft of this case was [12] vs [95], whose modes are 13 bins apart -- it tested nothing.
+    _near = [60] * 30 + [100] * 24
+    _b, _t, _dn = baseline_guides(_near)
+    ck("two modes under half scale apart abstain", _b is None and "apart" in (_dn["why"] or ""),
+       (_dn.get("two"), _dn.get("sep"), _dn.get("why")))
+    _far = [8] * 30 + [400] * 24
+    _b, _t, _df = baseline_guides(_far)
+    ck("CONTROL: two modes far apart are ACCEPTED, so the two checks above are not vacuous",
+       _b == 53 and _t == 30 and _df["sep"] >= STRIP_MIN_SEP,
+       (_b, _t, _df.get("two"), _df.get("sep")))
+    # The zero padding, as a case rather than as a comment: a profile whose only mass is in the top
+    # bin must not grow a second mode out of the end of the histogram.
+    _top = [0] * 40 + [100] * 20
+    _b, _t, _dz = baseline_guides(_top)
+    ck("the histogram is padded with zero, not clamped (no mode manufactured at the top bin)",
+       _dz["smooth"][STRIP_NBIN - 1] == _dz["hist"][STRIP_NBIN - 2] + _dz["hist"][STRIP_NBIN - 1],
+       _dz["smooth"][-3:])
+    # 1 biconditional, 1 derivation, 4 spans x 13, 2 caption, 4 synthetic = 60. This line is NOT
+    # in its own total: `ck` evaluates the condition before it increments `n`.
+    ck("section 12 ran every one of its checks", n[0] - _d0 == 60, n[0] - _d0)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
