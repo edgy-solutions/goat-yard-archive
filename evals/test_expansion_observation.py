@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_eval import expansion_observation, backend_error_signature  # noqa: E402
 
-EXPECTED_CHECKS = 21
+EXPECTED_CHECKS = 35
 checks = []
 
 
@@ -98,6 +98,87 @@ check("...absent is not reported as a value", realized, None)
 
 fault, realized = pod_flag_fault({"spec": {"containers": []}}, "0")
 check("no containers is a fault, not a crash", fault is not None, True)
+
+# --- the arm's TRAFFIC witness --------------------------------------------
+# The state these discriminate was witnessed, not imagined: during arm 1 a
+# flag-0 and a flag-1 pod were both Ready while --verify-only passed, because
+# the pod scan drops anything with a deletionTimestamp and a terminating pod
+# keeps serving (and keeps `serving: true`) until its grace period ends.
+from paired_gate_run import serving_pods_fault  # noqa: E402
+
+D = "gya-frontend-api"
+
+
+def mkslice(eps, svc="gya-frontend-api"):
+    return {"items": [{"metadata": {"labels": {"kubernetes.io/service-name": svc}},
+                       "endpoints": eps}]}
+
+
+def ep(pod, serving=True, key="serving"):
+    return {"targetRef": {"kind": "Pod", "name": pod},
+            "conditions": {key: serving}, "addresses": ["10.0.0.1"]}
+
+
+ONE = D + "-aaa"
+TWO = D + "-bbb"
+
+fault, serving = serving_pods_fault(mkslice([ep(ONE)]), D, ONE)
+check("one serving pod, as expected", (fault, serving), (None, {ONE}))
+
+# THE witnessed defect: the old check saw "exactly 1 Running pod" here.
+fault, serving = serving_pods_fault(mkslice([ep(ONE), ep(TWO)]), D, ONE)
+check("a second SERVING pod is a fault", fault is not None, True)
+check("...and the fault names the extra pod", TWO in (fault or ""), True)
+check("...and both are reported, not just the expected one", serving, {ONE, TWO})
+
+# A terminating pod that has actually stopped serving is NOT a fault: the gate
+# must not refuse a clean rollout that finished, or it will be relaxed.
+fault, serving = serving_pods_fault(
+    mkslice([ep(ONE), ep(TWO, serving=False)]), D, ONE)
+check("a terminating pod no longer serving is not a fault", (fault, serving),
+      (None, {ONE}))
+
+# Pods of some OTHER deployment sharing the namespace are not this gate's
+# business -- otherwise the gate fails for a reason the operator cannot act on.
+fault, serving = serving_pods_fault(
+    mkslice([ep(ONE), ep("gya-frontend-ui-xyz")]), D, ONE)
+check("another deployment's serving pod is ignored", (fault, serving), (None, {ONE}))
+
+# An empty read is a refusal, never a pass: something has to be routing the
+# arm's requests.
+fault, serving = serving_pods_fault({"items": []}, D, ONE)
+check("no endpoints at all is a fault, not a pass", fault is not None, True)
+check("...and it says the check did not run", "did not run" in (fault or ""), True)
+
+# An endpoint this function cannot attribute could BE the terminating pod.
+fault, _ = serving_pods_fault(
+    {"items": [{"metadata": {"labels": {}},
+                "endpoints": [{"conditions": {"serving": True},
+                               "addresses": ["10.0.0.9"]}]}]}, D, ONE)
+check("an unattributable serving endpoint is a fault", fault is not None, True)
+
+# ...but one that is explicitly NOT serving is not worth refusing over.
+fault, _ = serving_pods_fault(
+    {"items": [{"metadata": {"labels": {}},
+                "endpoints": [{"conditions": {"serving": False},
+                               "addresses": ["10.0.0.9"]}]},
+               {"metadata": {"labels": {"kubernetes.io/service-name": "s"}},
+                "endpoints": [ep(ONE)]}]}, D, ONE)
+check("an unattributable NON-serving endpoint is not a fault", fault, None)
+
+# Degraded basis: the right answer read off the wrong field still gets said
+# out loud. Fix the reading, do not relax the gate.
+fault, serving = serving_pods_fault(
+    mkslice([ep(ONE, key="ready")]), D, ONE)
+check("correct set on a degraded basis is still a fault", fault is not None, True)
+check("...and it names the field it actually read", "ready" in (fault or ""), True)
+
+fault, serving = serving_pods_fault(
+    {"items": [{"metadata": {"labels": {}},
+                "endpoints": [{"targetRef": {"name": ONE}, "conditions": {}}]}]},
+    D, ONE)
+check("no condition at all is assumed SERVING", serving, {ONE})
+check("...and that assumption is reported", fault is not None, True)
 
 # --- a backend error string is not an answer ------------------------------
 # Arm 1 of the gate run scored this as 28 content failures and reported a

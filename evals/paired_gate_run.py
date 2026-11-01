@@ -114,6 +114,90 @@ def git_state(allow_untracked: list) -> dict:
     }
 
 
+def serving_pods_fault(slices: dict, deploy: str, expected_pod: str):
+    """Which of this deployment's pods are still RECEIVING traffic?
+
+    Pure so it can be proven without a cluster. Returns (fault_or_None,
+    serving_set).
+
+    This exists because of a witnessed defect in the check it stands beside.
+    The pod scan excludes any pod carrying a `deletionTimestamp`, on the
+    reasoning that a terminating pod is on its way out. That reasoning is
+    wrong about the thing the gate is for. A terminating pod keeps serving
+    until its grace period expires, and the EndpointSlice keeps it with
+    `serving: true` the whole time -- so during a rollout the service fans
+    requests across BOTH processes while this script reports "exactly 1
+    Running pod" and lets the arm start. The gate existed to prevent two
+    flag values answering one arm, and it could not see that state.
+
+    It was caught by looking at the cluster during arm 1 and seeing a flag-0
+    and a flag-1 pod both Ready while `--verify-only` passed. Arm 1 turned out
+    to be clean on a ~21 second margin that nothing enforced; the margin is
+    what this function replaces.
+
+    Attribution is by `targetRef`, and an endpoint this function cannot
+    attribute is a FAULT rather than a skip: an unattributable endpoint could
+    be exactly the terminating pod, so shrugging at it would reintroduce the
+    blindness. Likewise an empty result is a fault -- the arm's requests have
+    to be routed by something, so finding nothing means the check did not run,
+    and a check that did not run has not passed.
+    """
+    serving, unattributable, basis_degraded = set(), [], []
+    for sl in (slices.get("items") or []):
+        svc = (sl.get("metadata", {}).get("labels", {})
+               .get("kubernetes.io/service-name", "?"))
+        for ep in (sl.get("endpoints") or []):
+            ref = ep.get("targetRef") or {}
+            name = ref.get("name")
+            cond = ep.get("conditions") or {}
+            if name is None:
+                # Only a fault if it could plausibly be ours; an unattributed
+                # endpoint on some other service is not this gate's business.
+                if cond.get("serving") is not False:
+                    unattributable.append("%s/%s" % (svc, ep.get("addresses")))
+                continue
+            if not name.startswith(deploy + "-"):
+                continue
+            if "serving" in cond:
+                is_serving = bool(cond["serving"])
+            elif "ready" in cond:
+                # Older API shape. Recorded, because a check reading a
+                # different field than it claims to read is worth saying out
+                # loud rather than silently tolerating.
+                is_serving = bool(cond["ready"])
+                basis_degraded.append("%s (read `ready`, no `serving`)" % name)
+            else:
+                # Neither condition present: assume it IS serving. The
+                # conservative direction here is the one that refuses.
+                is_serving = True
+                basis_degraded.append("%s (no serving/ready condition)" % name)
+            if is_serving:
+                serving.add(name)
+
+    if unattributable:
+        return ("endpoint(s) with no targetRef are serving in this namespace: "
+                "%s. One of them could be the terminating pod this check exists "
+                "to find, so this is a refusal, not a skip." % unattributable), serving
+    if not serving:
+        return ("no EndpointSlice endpoint serves any %s-* pod. The arm's "
+                "requests have to be routed by something, so this means the "
+                "check did not run -- and a check that did not run has not "
+                "passed." % deploy), serving
+    if serving != {expected_pod}:
+        extra = sorted(serving - {expected_pod})
+        return ("%d pod(s) are SERVING traffic for %s: %s. Expected only %s. A "
+                "terminating pod keeps serving until its grace period ends and "
+                "stays `serving: true` in the EndpointSlice the whole time, so "
+                "the Running-pod count cannot see this. Requests in this arm "
+                "would be split across processes%s."
+                % (len(serving), deploy, sorted(serving), expected_pod,
+                   " -- possibly at different flag values" if extra else "")), serving
+    if basis_degraded:
+        return ("serving set is correct but was read on a degraded basis: %s. "
+                "Fix the reading, do not relax the gate." % basis_degraded), serving
+    return None, serving
+
+
 def pod_flag_fault(pod: dict, want_flag: str):
     """Does this pod's OWN spec declare the flag value the arm claims?
 
@@ -187,6 +271,15 @@ def verify_arm(ns: str, deploy: str, want_flag: str, written_at: datetime,
     if not ready:
         raise Refused("pod %s is Running but not Ready" % name)
 
+    # The pod scan above cannot see a terminating pod that is still in the
+    # service's EndpointSlice with `serving: true`. That is the exact state
+    # this gate exists to prevent, and it was witnessed during arm 1. Ask the
+    # routing layer, not the pod list.
+    es_fault, serving_set = serving_pods_fault(
+        json.loads(kubectl(ns, "get", "endpointslices", "-o", "json")), deploy, name)
+    if es_fault:
+        raise Refused(es_fault)
+
     cs = pod["status"]["containerStatuses"][0]
     if cs.get("restartCount", 0) != 0:
         raise Refused(
@@ -235,6 +328,10 @@ def verify_arm(ns: str, deploy: str, want_flag: str, written_at: datetime,
         "flag_written_at": written_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "flag": {FLAG: live_flag},
         "restart_count": cs.get("restartCount", 0),
+        # Recorded, not just checked: a later reader asking "could two
+        # processes have answered this arm?" should find the answer in the
+        # header rather than having to trust that a gate ran.
+        "serving_pods": sorted(serving_set),
     }
 
 
