@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 94
+EXPECTED_TESTS = 104
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -1947,6 +1947,172 @@ def test_ib_b4_stroke_range_over_20_pages_slow():
     for name, rec in r["per_floor"].items():
         assert (rec["F"], rec["L"], rec["cutoff"]) == (1, 7, 4.5), (name, rec)
         assert rec["hist"][1:13] == B4_EXPECT[name], (name, rec["hist"][1:13], B4_EXPECT[name])
+
+
+# 9. ink_box overlap guard (substrate-v1.1; PREDICTION_inkbox_overlap_guard_v1_1_20261101.md) ---
+
+def test_two_modes_bimodal_returns_upper_mode():
+    r = VR.two_modes({2: 60, 3: 4, 4: 1, 15: 5, 16: 20, 17: 3})
+    assert r is not None and (r["lower"], r["upper"]) == (2, 16), r
+    assert r["counts"] == [60, 0, 20] and r["valley"] == 5, r
+
+
+def test_two_modes_unimodal_abstains():
+    assert VR.two_modes({2: 60, 3: 30, 4: 5}) is None
+    assert VR.two_modes({16: 9}) is None
+
+
+def test_two_modes_empty_abstains():
+    assert VR.two_modes({}) is None
+
+
+def _ig_synth(dds, upper_ib_bottom, lower_ib_top):
+    """Upper rect box [0,80,1200,100] (one S1 band 80..100) with one descender setter per entry of
+    `dds` (3 px wide, rows 90..100+dd); lower rect box [0,110,1200,130]. ink_boxes are set by hand:
+    upper [0,80,1200,upper_ib_bottom], lower [0,lower_ib_top,1200,130]. Returns
+    (regions, s1_by_page, ink_fn, stroke_cutoff)."""
+    ink = np.zeros((200, 1200), dtype=np.uint8)
+    for k in range(0, 600, 40):
+        ink[82:100, k:k + 30] = 1
+    for n, dd in enumerate(dds):
+        x = 700 + 20 * n
+        ink[90:100 + dd, x:x + 3] = 1
+    band = {"x0": 0, "x1": 1200, "y0": 80, "y1": 100}
+    s1 = {"left": [band], "right": [], "full": [], "slivers": [], "head_rules": [], "running_head": None,
+          "median_line_h": 20}
+
+    def rect(box, ib):
+        return {"file_page": 1, "col": "left", "box": box, "ink_box": ib}
+    regions = [{"kind": "verse", "rects": [rect([0, 80, 1200, 100], [0, 80, 1200, upper_ib_bottom])]},
+               {"kind": "verse", "rects": [rect([0, 110, 1200, 130], [0, lower_ib_top, 1200, 130])]}]
+    return regions, {1: s1}, (lambda fp: ink), {"status": "ok", "cutoff": 2.0}
+
+
+_IG_BIMODAL = [2] * 6 + [16] * 6
+
+
+def test_ig_good_record_passes_helper_and_records_floor_T():
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 105)
+    rec = VR.ink_box_overlap(regions, s1, fn, sc)
+    assert rec["status"] == "ok" and rec["d"] == 16 and rec["d_status"] == "ok", rec
+    assert rec["n_pairs"] == 1 and rec["n_rects_excluded"] == 0, rec
+    p = rec["pairs"][0]
+    assert (p["overlap_px"], p["measured_descender"], p["T"], p["T_source"]) == (11, 16, 16, "floor"), p
+    assert VR.assert_ink_box_overlap_bounded({"ink_box_overlap": rec}, regions) == 1
+
+
+def test_ig_helper_accepts_the_whole_written_record_list():
+    # a consumer passes every jsonl record (header, page records, then regions): indices differ from
+    # the producer's regions list, and the helper must still match the recorded pairs
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 105)
+    rec = VR.ink_box_overlap(regions, s1, fn, sc)
+    header = {"kind": "run_header", "ink_box_overlap": rec}
+    written = [header, {"kind": "page", "file_page": 1}] + regions
+    assert VR.assert_ink_box_overlap_bounded(header, written) == 1
+    assert VR.assert_ink_box_overlap_bounded(header, list(reversed(regions))) == 1
+
+
+def test_ig_pair_over_T_refuses_and_leaves_header_only_file():
+    import json
+    import tempfile
+    from pathlib import Path
+    import build_verse_regions as B
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 90)  # overlap 26 > T 16
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "run.jsonl"
+        header = {"kind": "run_header", "status": "running"}
+        out.write_text(json.dumps(header) + "\n" + json.dumps({"kind": "page"}) + "\n", encoding="utf-8")
+        records = [dict(header), {"kind": "page"}]
+        try:
+            B.guard_ink_box_overlap(records, regions, s1, fn, sc, out)
+            raise RuntimeError("expected InkBoxOverlapRefused")
+        except VR.InkBoxOverlapRefused as e:
+            assert "overlap 26 > T 16" in str(e), str(e)
+        lines = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+        assert len(lines) == 1 and lines[0]["kind"] == "run_header", lines
+        ibo = lines[0]["ink_box_overlap"]
+        assert ibo["status"] == "refused" and lines[0]["status"] == "refused", lines[0]
+        assert [(p["overlap_px"], p["T"]) for p in ibo["refused_pairs"]] == [(26, 16)], ibo
+        try:
+            VR.assert_ink_box_overlap_bounded(lines[0], regions)
+            raise RuntimeError("helper must raise on a refused header")
+        except AssertionError as e:
+            assert "status" in str(e), str(e)
+
+
+def test_ig_d_abstain_gives_T_none_and_does_not_refuse():
+    import tempfile
+    from pathlib import Path
+    import build_verse_regions as B
+    # all setters 16 px (unimodal -> d abstains); upper ink_box bottom 112 matches no setter bottom
+    regions, s1, fn, sc = _ig_synth([16] * 6, 112, 90)
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "run.jsonl"
+        records = [{"kind": "run_header"}, {"kind": "page"}]
+        B.guard_ink_box_overlap(records, regions, s1, fn, sc, out)  # must not raise
+        assert not out.exists(), "no refusal -> nothing rewritten"
+    ibo = records[0]["ink_box_overlap"]
+    assert ibo["status"] == "abstain_d" and ibo["d"] is None and ibo["d_status"] == "abstain", ibo
+    p = ibo["pairs"][0]
+    assert p["T"] is None and p["T_source"] == "undetermined" and p["overlap_px"] == 22, p
+    try:
+        VR.assert_ink_box_overlap_bounded({"ink_box_overlap": ibo}, regions)
+        raise RuntimeError("helper must raise on abstain_d / T None")
+    except AssertionError as e:
+        assert "status" in str(e), str(e)
+
+
+def test_ig_helper_raises_on_each_condition():
+    import copy
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 105)
+    rec = VR.ink_box_overlap(regions, s1, fn, sc)
+    ok = {"ink_box_overlap": rec}
+    assert VR.assert_ink_box_overlap_bounded(ok, regions) == 1
+
+    def raises(hdr, regs, frag):
+        try:
+            VR.assert_ink_box_overlap_bounded(hdr, regs)
+        except AssertionError as e:
+            assert frag in str(e), (frag, str(e))
+            return
+        raise RuntimeError(f"helper did not raise ({frag})")  # not an AssertionError: aborts the suite loudly
+    raises({}, regions, "no ink_box_overlap")
+    h = copy.deepcopy(ok)
+    h["ink_box_overlap"]["status"] = "abstain_d"
+    raises(h, regions, "status")
+    regs2 = copy.deepcopy(regions)
+    regs2[1]["rects"][0]["ink_box"][1] = 117  # overlap gone: recomputed set is empty, recorded has 1
+    raises(ok, regs2, "pair set")
+    h = copy.deepcopy(ok)
+    h["ink_box_overlap"]["pairs"][0]["T"] = None
+    raises(h, regions, "T None")
+    h = copy.deepcopy(ok)
+    h["ink_box_overlap"]["pairs"][0]["T"] = 5  # same pair set, recomputed overlap 11 > recorded T 5
+    raises(h, regions, "exceeds T")
+
+
+def test_ig_helper_docstring_carries_both_limits_verbatim():
+    doc = VR.assert_ink_box_overlap_bounded.__doc__
+    for s in ("Shared lineage: T and ink_box both come from the producer's own component analysis, by different "
+              "instruments (P12 clipped descender vs component bbox growth). The guard can catch a growth "
+              "regression. It cannot independently witness that T is right.",
+              "Bounded, not disjoint: the guard bounds the overlap; it does not remove it. A consumer that needs "
+              "disjoint rects uses `box`, or resolves the overlap itself."):
+        assert s in doc, s
+
+
+def test_ig_p925_pair_overlap_18_measured_20_reproduces():
+    import os
+    if not (os.path.exists(IB_RUN7) and os.path.exists(f"{IB_VOL}/page925_image1.png") and os.path.exists(IB_GEOM)):
+        print("  SKIP test_ig_p925 (page PNG / geometry / rerun-7 run unavailable)")
+        return
+    regs, _, s1, ink = _ib_fixture(925)
+    VR.apply_ink_box_page(regs, 925, s1, ink, {"status": "ok", "cutoff": 4.5})
+    rec = VR.ink_box_overlap(regs, {925: s1}, lambda fp: ink, {"status": "ok", "cutoff": 4.5})
+    hit = [p for p in rec["pairs"] if p["overlap_px"] == 18]
+    assert len(hit) == 1, rec["pairs"]
+    p = hit[0]
+    assert p["measured_descender"] == 20 and p["T"] == 20 and p["T_source"] == "measured", p
 
 
 if __name__ == "__main__":

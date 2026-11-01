@@ -126,6 +126,9 @@ STROKE_FLOOR_ABS_PX = 20  # "abs20" floor of the cutoff derivation, h >= 20 px (
 STROKE_MIN_PEAK = 5  # fragment-mode count must be >= this or the derivation abstains (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
 STROKE_VALLEY_FRAC = 0.5  # count(valley) <= this x count(F) (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
 STROKE_SEP_FRAC = 0.5  # F + 0.5 <= this x (L + 0.5), minimum separation (PREDICTION_step3_inkbox_rerun8_20261025.md, Design 4)
+INK_BOX_DESC_CLIP_PX = 400  # seam-descender baseline window: setter x +- this, clipped to the rect (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md, Design 2)
+INK_BOX_DESC_BASELINE_FRAC = 0.5  # baseline = lowest row with ink >= this x peak (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md, Design 2)
+INK_BOX_DESC_VALLEY_FRAC = 0.5  # two_modes: min between the two peaks must be <= this x the smaller peak, else d abstains (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md, Design 2)
 
 # Defect: note_start_detect.text_lines estimates a column's single-line height as the median of
 # that column's OWN raw (pre-split) band heights. On an intact column most raw bands already are
@@ -1039,6 +1042,205 @@ def apply_ink_box_page(regions, file_page, s1, ink, stroke_cutoff):
             counts["n_excluded_stroke"] += len(ex_stroke)
             counts["n_tie"] += n_tie
     return counts
+
+
+# ==============================================================================================
+# Step 3 guard (substrate-v1.1): bound the overlap between adjacent ink_boxes
+# (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md; a port of score_rerun9.py P12 + P13)
+# ==============================================================================================
+
+class InkBoxOverlapRefused(Exception):
+    """An adjacent-ink_box overlap exceeds its measured descender bound T (lock design 5)."""
+
+
+def two_modes(hist):
+    """Ported verbatim in logic from score_rerun9.py. hist {value: count} -> {"lower","valley","upper",
+    "counts"} or None. The two highest local maxima (ties to the lower value); the minimum between
+    them must be <= INK_BOX_DESC_VALLEY_FRAC x the smaller peak, else None (abstain). None also for
+    an empty or unimodal histogram."""
+    if not hist:
+        return None
+    lo_k, hi_k = min(hist), max(hist)
+    full = {k: hist.get(k, 0) for k in range(lo_k, hi_k + 1)}
+    peaks = [k for k in full if full[k] > 0 and full[k] >= full.get(k - 1, 0) and full[k] >= full.get(k + 1, 0)
+             and (full[k] > full.get(k - 1, 0) or full[k] > full.get(k + 1, 0))]
+    if len(peaks) < 2:
+        return None
+    a, b = sorted(sorted(peaks, key=lambda k: (-full[k], k))[:2])
+    v = min(range(a, b + 1), key=lambda k: (full[k], k))
+    if v in (a, b) or full[v] > INK_BOX_DESC_VALLEY_FRAC * min(full[a], full[b]):
+        return None
+    return {"lower": a, "valley": v, "upper": b, "counts": [full[a], full[v], full[b]]}
+
+
+def seam_descenders(regions, s1_by_page, ink_by_page_fn, stroke_cutoff):
+    """P12 setters (lock design 2). For each rect (box = line geometry): components that fall below
+    box bottom, are not tall (h > INK_BOX_TALL_MULT x mlh skipped), are owned (max shared rows over
+    all S1 owners, ties to none) by the rect's LAST S1 band; stroke fragments (sw < the run's
+    stroke cutoff) dropped. descender_px = component bottom minus the baseline, the baseline being
+    the lowest row of [box bottom - last line h, box bottom) with ink >= INK_BOX_DESC_BASELINE_FRAC
+    x peak over setter x +- INK_BOX_DESC_CLIP_PX clipped to the rect. Rects on pages absent from
+    s1_by_page are skipped. If the run's stroke cutoff did not resolve there is no cutoff to drop
+    fragments by and the result is [] (no fallback cutoff). Returns rows
+    {"fp","col","box","setter","sw","status"[,"descender_px"]}."""
+    if stroke_cutoff.get("status") != "ok":
+        return []
+    cutoff = stroke_cutoff["cutoff"]
+    rects_by_fp = {}
+    for r in regions:
+        if not isinstance(r, dict) or r.get("rects") is None:
+            continue
+        for x in r["rects"]:
+            if int(x["file_page"]) in s1_by_page:
+                rects_by_fp.setdefault(int(x["file_page"]), []).append(x)
+    desc = []
+    for fp in sorted(rects_by_fp):
+        s1 = s1_by_page[fp]
+        ink = ink_by_page_fn(fp)
+        mlh = s1["median_line_h"]
+        owners, seen = [], set()
+        extra = ([s1["running_head"]] if s1.get("running_head") is not None else []) + list(s1.get("head_rules") or [])
+        for b in (list(s1.get("left") or []) + list(s1.get("right") or []) + list(s1.get("full") or [])
+                  + list(s1.get("slivers") or []) + extra):
+            if id(b) not in seen:
+                seen.add(id(b))
+                owners.append(b)
+        for x in rects_by_fp[fp]:
+            rx0, ry0, rx1, ry1 = x["box"]
+            bands = [b for b in (s1.get(x["col"]) or []) if b["y0"] >= ry0 and b["y1"] <= ry1]
+            if not bands:
+                continue
+            last = max(bands, key=lambda b: b["y1"])
+            lh = last["y1"] - last["y0"]
+            for (cx0, cy0, cx1, cy1) in ink_components(ink[:, rx0:rx1]):
+                cx0 += rx0
+                cx1 += rx0
+                if cy1 - cy0 > INK_BOX_TALL_MULT * mlh or cy1 <= ry1:
+                    continue
+                best, bo = 0, []
+                for o in owners:
+                    if not (o["x0"] < cx1 and cx0 < o["x1"]):
+                        continue
+                    sh = min(cy1, o["y1"]) - max(cy0, o["y0"])
+                    if sh > best:
+                        best, bo = sh, [o]
+                    elif sh == best and sh > 0:
+                        bo.append(o)
+                if len(bo) != 1 or bo[0] is not last:
+                    continue
+                sw = stroke_w(ink, cx0, cy0, cx1, cy1)
+                row = {"fp": fp, "col": x["col"], "box": list(x["box"]),
+                       "setter": [int(cx0), int(cy0), int(cx1), int(cy1)], "sw": sw}
+                if sw < cutoff:
+                    desc.append({**row, "status": "stroke_fragment"})
+                    continue
+                y0 = ry1 - lh
+                wx0, wx1 = max(rx0, cx0 - INK_BOX_DESC_CLIP_PX), min(rx1, cx1 + INK_BOX_DESC_CLIP_PX)
+                prof = ink[y0:ry1, wx0:wx1].sum(axis=1)
+                if prof.max() == 0:
+                    desc.append({**row, "status": "empty_band"})
+                    continue
+                base = y0 + int(np.where(prof >= INK_BOX_DESC_BASELINE_FRAC * prof.max())[0].max()) + 1
+                desc.append({**row, "status": "ok", "descender_px": int(cy1 - base)})
+    return desc
+
+
+def _ink_box_pairs(regions):
+    """Adjacent ink_box overlaps (lock design 1): box_sanity.overlap_pairs over copies whose box is
+    the ink_box; a rect with ink_box None/absent is excluded. Returns (pairs, rects_ab, n_excluded):
+    each pair carries overlap_px; rects_ab[k] = (rect_a, rect_b) are the ORIGINAL rects."""
+    shadow, kept, n_ex = [], [], 0
+    for r in regions:
+        rs = r.get("rects") if isinstance(r, dict) else None
+        if rs is None:
+            shadow.append({})
+            kept.append([])
+            continue
+        ks = [x for x in rs if x.get("ink_box") is not None]
+        n_ex += len(rs) - len(ks)
+        shadow.append({"rects": [{"file_page": x["file_page"], "col": x["col"], "box": list(x["ink_box"])}
+                                 for x in ks]})
+        kept.append(ks)
+    pairs, ab = [], []
+    for v in box_sanity.overlap_pairs(shadow):
+        ca = [k for k, x in enumerate(shadow[v["a_idx"]]["rects"]) if x["file_page"] == v["file_page"]
+              and x["col"] == v["a_col"] and [x["box"][1], x["box"][3]] == v["a_y"]]
+        cb = [k for k, x in enumerate(shadow[v["b_idx"]]["rects"]) if x["file_page"] == v["file_page"]
+              and x["col"] == v["b_col"] and [x["box"][1], x["box"][3]] == v["b_y"]]
+        assert len(ca) == 1 and len(cb) == 1, (v, ca, cb)
+        pairs.append({**v, "overlap_px": min(v["a_y"][1], v["b_y"][1]) - max(v["a_y"][0], v["b_y"][0])})
+        ab.append((kept[v["a_idx"]][ca[0]], kept[v["b_idx"]][cb[0]]))
+    return pairs, ab, n_ex
+
+
+def ink_box_overlap(regions, s1_by_page, ink_by_page_fn, stroke_cutoff):
+    """The run-header `ink_box_overlap` dict (lock design 2-4, 6):
+    {status, d, d_status, n_pairs, n_rects_excluded, pairs: [{file_page, a_idx, b_idx, a_col, b_col,
+    a_y, b_y, overlap_px, measured_descender, T, T_source}]}. d = the upper mode of two_modes over
+    the pooled clipped descender histogram. T per pair = max(d, measured) where measured is the max
+    descender_px of the UPPER rect's seam setters (bottom == its ink_box bottom, > its box bottom),
+    T_source "measured" when measured > d else "floor". When d abstains a floor pair gets T None,
+    T_source "undetermined", and status is "abstain_d" (a measured pair keeps T = measured);
+    otherwise "ok". This function never refuses; the builder compares overlap_px to T."""
+    desc = seam_descenders(regions, s1_by_page, ink_by_page_fn, stroke_cutoff)
+    hist = Counter(q["descender_px"] for q in desc if q["status"] == "ok")
+    modes = two_modes(dict(hist))
+    d, d_status = (modes["upper"], "ok") if modes else (None, "abstain")
+    seam = {}
+    for q in desc:
+        if q["status"] == "ok":
+            seam.setdefault((q["fp"], q["col"], tuple(q["box"])), []).append(q)
+    pairs, ab, n_ex = _ink_box_pairs(regions)
+    for p, (ra, rb) in zip(pairs, ab):
+        up = ra if ra["ink_box"][1] <= rb["ink_box"][1] else rb
+        ss = [q for q in seam.get((int(up["file_page"]), up["col"], tuple(up["box"])), [])
+              if q["setter"][3] == up["ink_box"][3] and q["setter"][3] > up["box"][3]]
+        meas = max(q["descender_px"] for q in ss) if ss else None
+        if d is None:
+            t, src = (meas, "measured") if meas is not None else (None, "undetermined")
+        else:
+            t = max(d, meas) if meas is not None else d
+            src = "measured" if meas is not None and meas > d else "floor"
+        p.update({"measured_descender": meas, "T": t, "T_source": src})
+    return {"status": "ok" if d_status == "ok" else "abstain_d", "d": d, "d_status": d_status,
+            "n_pairs": len(pairs), "n_rects_excluded": n_ex, "pairs": pairs}
+
+
+def _pair_key(p):
+    # index-free: a consumer's list (every jsonl record, or the region records only) need not index
+    # like the producer's regions, so a pair is its two (page, col, ink_box y) sides, unordered
+    return frozenset({(p["file_page"], p["a_col"], tuple(p["a_y"])), (p["file_page"], p["b_col"], tuple(p["b_y"]))})
+
+
+def assert_ink_box_overlap_bounded(run_header, regions):
+    """Consumer guard for substrate-v1.1 (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md, item 7).
+    RECOMPUTES the adjacent-ink_box pairs and overlap_px from `regions`' ink_boxes (it does not trust
+    the recorded overlap_px) and raises AssertionError if: the header has no `ink_box_overlap`; its
+    status != "ok"; the recomputed pair set != the recorded pair set; any recorded T is None; or any
+    recomputed overlap exceeds its recorded T. Returns the pair count.
+
+    Two limits, stated verbatim:
+    1. Shared lineage: T and ink_box both come from the producer's own component analysis, by different instruments (P12 clipped descender vs component bbox growth). The guard can catch a growth regression. It cannot independently witness that T is right.
+    The independent check of this port is the frozen score_rerun9.json, which was produced before the code existed.
+    2. Bounded, not disjoint: the guard bounds the overlap; it does not remove it. A consumer that needs disjoint rects uses `box`, or resolves the overlap itself."""
+    rec = run_header.get("ink_box_overlap")
+    if rec is None:
+        raise AssertionError("run header has no ink_box_overlap")
+    if rec.get("status") != "ok":
+        raise AssertionError(f"ink_box_overlap status {rec.get('status')!r} != 'ok'")
+    pairs, _, _ = _ink_box_pairs(regions)
+    got = Counter(_pair_key(p) for p in pairs)
+    want = Counter(_pair_key(p) for p in rec["pairs"])
+    if got != want or max(want.values(), default=1) > 1:
+        raise AssertionError(f"recomputed ink_box pair set differs from the recorded one: "
+                             f"{len(got)} recomputed, {len(want)} recorded")
+    t_by = {_pair_key(p): p["T"] for p in rec["pairs"]}
+    if any(t is None for t in t_by.values()):
+        raise AssertionError("a recorded pair has T None (undetermined bound)")
+    bad = [(_pair_key(p), p["overlap_px"], t_by[_pair_key(p)]) for p in pairs if p["overlap_px"] > t_by[_pair_key(p)]]
+    if bad:
+        raise AssertionError(f"ink_box overlap exceeds T: {bad}")
+    return len(pairs)
 
 
 # ==============================================================================================
