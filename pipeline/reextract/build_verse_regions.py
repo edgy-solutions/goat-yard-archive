@@ -144,6 +144,9 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "stroke_min_peak": VR.STROKE_MIN_PEAK,
         "stroke_valley_frac": VR.STROKE_VALLEY_FRAC,
         "stroke_sep_frac": VR.STROKE_SEP_FRAC,
+        "ink_box_desc_clip_px": VR.INK_BOX_DESC_CLIP_PX,  # PREDICTION_inkbox_overlap_guard_v1_1_20261101.md
+        "ink_box_desc_baseline_frac": VR.INK_BOX_DESC_BASELINE_FRAC,  # same lock
+        "ink_box_desc_valley_frac": VR.INK_BOX_DESC_VALLEY_FRAC,  # same lock
         "rule_col_frac": VR.RULE_COL_FRAC,
         "rule_merge_gap_px": VR.RULE_MERGE_GAP_PX,
         "rule_min_strip_frac": VR.RULE_MIN_STRIP_FRAC,
@@ -339,6 +342,28 @@ def build_arg_parser():
     return ap
 
 
+def guard_ink_box_overlap(records, regions, s1_by_page, ink_by_page_fn, stroke_cutoff, out_path):
+    """substrate-v1.1 guard (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md): record every adjacent
+    ink_box pair's overlap and T in records[0]["ink_box_overlap"]; if any overlap exceeds a determined
+    T, rewrite out_path as the header ONLY (the header is already on disk before the first call;
+    no page or region record), status "refused", then raise VR.InkBoxOverlapRefused. An undetermined
+    T (d abstained) never refuses."""
+    records[0]["ink_box_overlap"] = VR.ink_box_overlap(regions, s1_by_page, ink_by_page_fn, stroke_cutoff)
+    over = [p for p in records[0]["ink_box_overlap"]["pairs"]
+            if p["T"] is not None and p["overlap_px"] > p["T"]]
+    if over:
+        records[0]["ink_box_overlap"]["status"] = "refused"
+        records[0]["ink_box_overlap"]["refused_pairs"] = over
+        records[0]["status"] = "refused"
+        records[0]["abort_reason"] = f"ink_box_overlap_exceeds_T: {len(over)} pair(s)"
+        records[0]["finished_utc"] = now_utc_iso()
+        _write(out_path, records[:1])
+        raise VR.InkBoxOverlapRefused(
+            "ink_box overlap exceeds T: " + "; ".join(
+                f"p{p['file_page']} {p['a_col']}/{p['b_col']} y{p['a_y']}/{p['b_y']} "
+                f"overlap {p['overlap_px']} > T {p['T']}" for p in over))
+
+
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
 
@@ -527,6 +552,9 @@ def main(argv=None):
         ink_box_counts.update(VR.apply_ink_box_page(regions, fp, s1_by_page[fp], VR.page_ink(gray_by_page[fp]),
                                                     stroke_cutoff))
     records[0]["ink_box_counts"] = dict(ink_box_counts)
+
+    guard_ink_box_overlap(records, regions, s1_by_page, lambda fp: VR.page_ink(gray_by_page[fp]),
+                          stroke_cutoff, out_path)
 
     VR.assert_numbering_invariant(regions)
     VR.check_region_rects(regions, geom_by_page)
