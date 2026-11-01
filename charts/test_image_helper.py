@@ -155,6 +155,81 @@ def test_values_test_ui_is_still_pinned_by_digest():
     assert PINNED_TEST_UI_DIGEST in pinned[0], pinned
 
 
+def _flag_lines(out):
+    """Every rendered GILL_STRUCTURED_ANSWER line, whichever ConfigMap it is in.
+
+    Deliberately not scoped to one ConfigMap: if a second object ever starts
+    rendering this key, the callers below fail loudly instead of asserting
+    about the first one they happen to find."""
+    return [l.strip() for l in out.splitlines()
+            if l.strip().startswith("GILL_STRUCTURED_ANSWER:")]
+
+
+def test_values_frontend_is_still_pinned_by_digest():
+    """Production carries a pin too, and until now nothing checked it.
+
+    values-test.yaml had pin assertions from the day it was pinned; prod did
+    not, so the prod pin added for 0.3.3 (ruling, Chris 2026-11-01) could have
+    been dropped back to a floating tag with a green suite. A guard on one
+    environment and not the other is the asymmetry, not the coverage."""
+    _, out, _ = _render(values="values-frontend.yaml")
+    pinned = [l for l in _image_lines(out) if l.startswith('image: "%s@' % API_REPO)]
+    assert pinned, _image_lines(out)
+    assert PINNED_TEST_DIGEST in pinned[0], pinned
+
+
+def test_values_frontend_ui_is_still_pinned_by_digest():
+    """Same guard for the prod ui image. This digest's build provenance is
+    unverified (it is recorded as-running from gya-test), which is a reason to
+    label it honestly in the values file -- not a reason to leave it floating
+    on a tag that can be re-pointed under the release."""
+    _, out, _ = _render(values="values-frontend.yaml")
+    pinned = [l for l in _image_lines(out) if l.startswith('image: "%s@' % UI_REPO)]
+    assert pinned, _image_lines(out)
+    assert PINNED_TEST_UI_DIGEST in pinned[0], pinned
+
+
+def test_prod_ships_the_pairing_the_gate_actually_scored():
+    """Prod and gya-test must render the SAME two digests.
+
+    Ruling 2026-11-01 item 2 ships "the gya-test pairing" -- the evidence for
+    the flag flip is a gate run against that exact pair of images. Bumping one
+    side and not the other would put prod on a pairing no gate has scored while
+    every other check in this file still passed, because each of those checks
+    only ever looks at one file. The claim being guarded is the correspondence,
+    so it needs its own assertion."""
+    _, prod, _ = _render(values="values-frontend.yaml")
+    _, test, _ = _render(values="values-test.yaml")
+    for repo in (API_REPO, UI_REPO):
+        p = [l for l in _image_lines(prod) if l.startswith('image: "%s@' % repo)]
+        t = [l for l in _image_lines(test) if l.startswith('image: "%s@' % repo)]
+        assert p and t, (repo, p, t)
+        assert p[0] == t[0], (repo, "prod=%s test=%s" % (p[0], t[0]))
+
+
+def test_values_frontend_ships_the_flag_on():
+    """The flip itself, asserted on the RENDER rather than on the values file.
+
+    A file-scoped read cannot see the merge: values.yaml defaults this key to
+    "0" and values-frontend.yaml overlays it, so grepping either file alone
+    answers a different question than "what does prod deploy". Only the render
+    knows. (Written after predicting this key would be ABSENT from the
+    before-render and finding it already there at "0" -- the miss that
+    motivates asserting here.)"""
+    _, out, _ = _render(values="values-frontend.yaml")
+    flags = _flag_lines(out)
+    assert flags == ['GILL_STRUCTURED_ANSWER: "1"'], flags
+
+
+def test_values_yaml_default_stays_off():
+    """The chart DEFAULT stays "0": a fresh install without the prod overlay
+    must not silently inherit the flip. Prod is on because values-frontend.yaml
+    says so, not because the default moved under everyone."""
+    _, out, _ = _render(values="values.yaml")
+    flags = _flag_lines(out)
+    assert flags == ['GILL_STRUCTURED_ANSWER: "0"'], flags
+
+
 if __name__ == "__main__":
     if shutil.which("helm") is None:
         print("UNRUN  helm is not on PATH -- these checks did not run")
@@ -164,7 +239,7 @@ if __name__ == "__main__":
               % _CHART)
         sys.exit(2)
 
-    EXPECTED_TEST_COUNT = 12
+    EXPECTED_TEST_COUNT = 17
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print("FAIL  expected %d tests, collected %d -- a test silently disappeared"

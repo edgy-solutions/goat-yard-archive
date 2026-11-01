@@ -24,6 +24,12 @@ api:
     # ghcr.io/<USERNAME>/<REPO_NAME>/backend
     repository: ghcr.io/edgy-solutions/goat-yard-archive/backend
     pullPolicy: Always
+    # The 0.3.3 backend artefact: CI run 39168013081 (docs/releases/0.3.3.md),
+    # the exact image the paired gate run scored on gya-test, flag ON arm
+    # included. digest WINS over tag, so the tag below is inert while this is
+    # set and cannot defeat the pin; it is kept only as the fallback for a
+    # deliberate un-pin. `:latest` is never a deploy target (ruling 2026-10-18).
+    digest: "sha256:2fce1e3467d5f53e4f0700cdd51530db86cc85c8ef7231f091c6e69509b11433"
     tag: "0.3.2"
   service:
     type: ClusterIP
@@ -51,6 +57,19 @@ api:
     LANGFUSE_BASE_URL: "https://cloud.langfuse.com"
     LANGFUSE_SECRET_KEY: ""
     LANGFUSE_PUBLIC_KEY: ""
+
+    # ADR-0009 typed GillAnswer ON in production (ruling, Chris 2026-11-01).
+    # Flip evidence is the paired gate run, docs/audits/
+    # GATE_RUN_RESULTS_structured_answer_laneA_20261026.md: PASS by the
+    # pre-registered RATCHET (0 STABLE-PASS -> STABLE-FAIL, 0 must_not_cite),
+    # NOT by a measured quality gain -- the effect clause abstained and that
+    # report's "not a win" decomposition stands.
+    #
+    # NOT a live toggle: envFrom is read at container start, and
+    # templates/api-deployment.yaml carries no checksum/config annotation, so a
+    # config-only upgrade updates this key WITHOUT restarting the api pod. The
+    # flag lands only when the pod spec also changes (here: the digest above).
+    GILL_STRUCTURED_ANSWER: "1"
   
   auth:
     # Clerk configuration (Now mapped to ConfigMap and Secret)
@@ -99,6 +118,13 @@ ui:
     # ghcr.io/<USERNAME>/<REPO_NAME>/frontend
     repository: ghcr.io/edgy-solutions/goat-yard-archive/frontend
     pullPolicy: Always
+    # The frontend half of the gya-test pairing (values-test.yaml:46), recorded
+    # there as the digest gya-test IS SERVING. Labelled honestly: as-running,
+    # and this lane has NOT established it is CI-built, so it does not yet meet
+    # ruling 2's CI-built-images-only clause as a verified claim. Pinning it is
+    # still strictly better than the floating tag it replaces -- a pin records
+    # what runs, where a tag can be re-pointed afterwards.
+    digest: "sha256:f386254ee465b77ceee57b3f11ad8f1742e8f6d671e1fa71452aa819c1996da4"
     tag: "0.3.0"
   service:
     type: ClusterIP

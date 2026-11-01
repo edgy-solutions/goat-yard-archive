@@ -112,3 +112,82 @@ In order, after `helm upgrade --wait --timeout 10m`:
   still `serving=true` in the EndpointSlice (witnessed defect,
   `evals/paired_gate_run.py`). Ruling 4 fixes it before the **next** gate run;
   it does not block this ship, and nothing in this deploy path depends on it.
+
+---
+
+# MEASURED — the edit, 2026-11-01
+
+`helm template gya-frontend . -f values-frontend.yaml`, before (`a012c7d`'s
+tree) vs after. Six changed lines, three hunks, nothing else:
+
+    @@ -484 +484 @@
+    -  GILL_STRUCTURED_ANSWER: "0"
+    +  GILL_STRUCTURED_ANSWER: "1"
+    @@ -803 +803 @@
+    -          image: ".../backend:0.3.2"
+    +          image: ".../backend@sha256:2fce1e34...b11433"
+    @@ -921 +921 @@
+    -          image: ".../frontend:0.3.0"
+    +          image: ".../frontend@sha256:f386254e...96da4"
+
+**Prediction A held on what it was for.** Exactly three places changed, and the
+three `checksum/…` annotations did **not** move — confirming the mechanical
+point above: this upgrade rolls the api pod because the *image* line changed,
+not because the config did.
+
+## Prediction A was wrong in one detail, and the error is the instructive part
+
+I predicted the ConfigMap would **gain** `GILL_STRUCTURED_ANSWER`. It did not:
+the key was **already rendering at `"0"`**, inherited from `values.yaml:101`,
+which is the chart default and is always merged under the overlay. My edit
+*changed* a value; it did not add a key.
+
+The cause is not a typo. I asserted "absent" from a **file-scoped read** of
+`values-frontend.yaml` and `templates/configmap.yaml`, and a file-scoped
+assertion cannot see a two-file merge — only the render can. I had the render in
+hand (I had already produced `render_before.yaml` to check the checksum
+annotations) and did not grep it for the key I was making a claim about.
+
+Chris's own wording — "flag line **DIFFERENT**" — is the correct description and
+mine was not. Two consequences, both real:
+
+1. **Prod's live ConfigMap very likely already carries `GILL_STRUCTURED_ANSWER: "0"`**,
+   if prod renders from a chart that has the key (added `a81b98b`). So the drift
+   gate should show that line as a *changed value*, not as an addition. If it
+   shows as an addition, prod is on a chart older than `a81b98b` — which is the
+   Prediction-B condition firing, and worth knowing.
+2. A grep of either values file alone answers a different question than "what
+   does prod deploy". `test_values_frontend_ships_the_flag_on` now asserts on
+   the **render** for exactly this reason, with the miss recorded in its
+   docstring.
+
+## Guards added, and proved live by mutation
+
+`charts/test_image_helper.py` went 12 → 17 checks (`EXPECTED_TEST_COUNT`
+bumped with them, so a silently vanishing test still fails the run). The prod
+pin had **no** guard at all until now, while gya-test has had one since the day
+it was pinned — a guard on one environment and not the other is an asymmetry,
+not coverage.
+
+- `test_values_frontend_is_still_pinned_by_digest`
+- `test_values_frontend_ui_is_still_pinned_by_digest`
+- `test_prod_ships_the_pairing_the_gate_actually_scored` — prod and gya-test must
+  render the **same two digests**. Ruling 2 ships "the gya-test pairing", and the
+  flip evidence is a gate run against that exact pair; bumping one side alone
+  would put prod on an unscored pairing while every single-file check still
+  passed.
+- `test_values_frontend_ships_the_flag_on` — on the render, not the file.
+- `test_values_yaml_default_stays_off` — a fresh install without the prod
+  overlay must not inherit the flip.
+
+Green does not show a guard is live, so each was mutated:
+
+| mutation | result |
+|---|---|
+| drop the prod api digest | FAIL × 2 (`…pinned_by_digest`, `…pairing…`) |
+| flag back to `"0"` | FAIL (`…ships_the_flag_on`) |
+| ui digest → all-zeroes | FAIL × 2 (`…ui_pinned…`, `…pairing…`) |
+
+Restored afterwards; 17/17 green on the restored tree. The suite still exits
+**UNRUN (2)** rather than passing when helm or the chart dependencies are
+absent.
