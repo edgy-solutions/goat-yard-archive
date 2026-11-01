@@ -437,16 +437,40 @@ if PASS3:
     assert not (set(HAD.SEALED_TRUTH) & set(PASS2_SELECTED_IDS)), "a pass-3 span is in HAD.SEALED_TRUTH"
     SKEL_NAME = "glyphsign_%s_pass3%s_%dspan.jsonl" % (SET, _R, len(PASS2_SELECTED_IDS))
 
-# ---- re-sign (ruling 4). The population is DERIVED from the 2026-10-25 audit: every span whose
-# prior signature that audit ruled a signature error. The verdict name is the only literal here, so
-# adding a row to the audit puts that span on the next re-sign sheet with no edit in this file.
+# ---- re-sign. The population is DERIVED, and since ruling 2026-11-01 item 3 it is derived from a
+# RULE rather than from one verdict literal: a row is signable when its audit verdict is `signature`
+# or `signature_suspect_unsettled`, or it is a reversal hit, AND every need recorded for it is met.
+# The rule lives in hebrew_glyph_card (`signable`) so that the card and the signer cannot disagree
+# about one span: a span the card still refuses on is absent here, by the same predicate.
+#
+# Spans excluded are PRINTED with the clause that excluded them. A population that silently narrows
+# is how a span disappears from a sitting without anyone deciding it should.
 RESIGN_VERDICT = "signature"
 RESIGN_BASIS = {}          # span_id -> [(arm, run_class, reversed, basis_without_hebrew)]
 if RESIGN:
-    _ar = [r for r in AUDIT.AUDIT if r["verdict"] == RESIGN_VERDICT]
-    check(bool(_ar), "no audit row carries verdict %r -- the re-sign population would be empty"
+    # Imported here, not at the top: the card module builds nothing at import, but the other
+    # dispositions have no use for it and this keeps the dependency where the rule is read.
+    import hebrew_glyph_card as _GC
+    # Audited spans UNION the spans carrying a recorded need. An audit-only population would
+    # never print p596:n2, which has no audit row -- so a span with a recorded need would go
+    # MISSING from the disclosure instead of appearing in it with its reason. Nothing new can be
+    # selected this way: a span with no audit row never qualifies under the rule's first clause.
+    _audited = sorted(set(r["span_id"] for r in AUDIT.AUDIT) | set(_GC.NEEDS))
+    RESIGN_HELD = []
+    _sel = []
+    for _sid in _audited:
+        _ok, _why = _GC.signable(_sid)
+        (_sel if _ok else RESIGN_HELD).append((_sid, _why))
+    PASS2_SELECTED_IDS = sorted(sid for sid, _w in _sel)
+    check(bool(PASS2_SELECTED_IDS),
+          "no audited span is signable under ruling 2026-11-01 item 3 -- the population is empty")
+    # The literal is kept as a liveness companion: if the audit ever stops carrying the verdict the
+    # rule's first clause names, the rule would still "pass" on the reversal clause alone and this
+    # check is what notices.
+    check(any(r["verdict"] == RESIGN_VERDICT for r in AUDIT.AUDIT),
+          "no audit row carries verdict %r any more -- the rule's first clause is dead"
           % RESIGN_VERDICT)
-    PASS2_SELECTED_IDS = sorted(set(r["span_id"] for r in _ar))
+    _ar = [r for r in AUDIT.AUDIT if r["span_id"] in set(PASS2_SELECTED_IDS)]
     check(not (set(PASS2_SELECTED_IDS) - set(SPAN_IDS)),
           "re-sign span(s) %s are not in the frozen 74"
           % sorted(set(PASS2_SELECTED_IDS) - set(SPAN_IDS)))
@@ -473,6 +497,8 @@ if RESIGN:
           "%d emitted row(s) got a marker %r, and %d emitted row(s) STILL carry Hebrew %r"
           % (len(_raw_heb), _raw_heb, len(_fired), _fired, len(_still), _still))
     SKEL_NAME = "glyphsign_%s_resign_%dspan.jsonl" % (SET, len(PASS2_SELECTED_IDS))
+    for _sid, _why in RESIGN_HELD:
+        print("  HELD OUT  %-9s %s" % (_sid, _why))
 
 RUN_SPAN_IDS = PASS2_SELECTED_IDS
 RUN_N = len(RUN_SPAN_IDS)

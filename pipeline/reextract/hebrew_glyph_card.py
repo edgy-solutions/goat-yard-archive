@@ -352,7 +352,8 @@ CARDS = [
                          "much in its own words: <i>no zayin exemplar on the card, so it cannot be "
                          "settled</i>. What it asks for is <i>zayin exemplars from this fount</i>, "
                          "and the route to those is a point-and-name sitting on any page in the "
-                         "volume &mdash; not a model, and not this card.")],
+                         "volume &mdash; not a model, and not this card.",
+                    cites=("exemplar:zayin",))],
          verdict="NO VERDICT, and this card cannot reach one as it stands. The audit's recorded "
                  "verdict is <code>signature_suspect_unsettled</code>. Note what it also says: "
                  "<i>the signed string is not a word</i> &mdash; that is an argument from context, "
@@ -370,16 +371,17 @@ CARDS = [
                           "the signature confirms the extraction rather than correcting it. "
                           "A disagreement at this glyph is on record in the 2026-10-25 audit. "
                           + READS_WITHHELD,
-                    note="The audit refuses to decide this one on these pixels: <i>the crop is "
-                         "tight and the descender cannot be judged</i>. The <b>baseline strip</b> "
-                         "it asks for is renderer item 5 and is NOT on this page yet, so a verdict "
-                         "signed here would be signed on the same crop the audit already called "
-                         "insufficient. The other two things it asks for &mdash; final-nun and vav "
-                         "exemplars, and the Latin gloss &mdash; are on this card.")],
-         verdict="NO VERDICT. Of the three things the audit names as needed, this card supplies "
-                 "two. Until the baseline is drawn, the honest action on this span is to leave it "
-                 "open: an ascender-versus-descender question asked on a crop with no baseline is "
-                 "not a question about the print."),
+                    note="The audit refused to decide this one on the crop alone: <i>the crop "
+                         "is tight and the descender cannot be judged</i>. <b>All three things it "
+                         "asked for are now on this card</b> &mdash; the baseline strip (renderer "
+                         "item 5), final-nun and vav exemplars, and the Latin gloss. The question "
+                         "the strip makes answerable is the one the audit could not ask: does the "
+                         "stroke cross the derived baseline, or stop at it.",
+                    cites=())],
+         verdict="SIGNABLE. Every need the audit recorded for this span is met, so the refusal that "
+                 "stood here is spent: it cited the baseline strip, and the strip is on this page. "
+                 "This card no longer withholds a verdict &mdash; record it in the signer, on the "
+                 "strip and the exemplars rather than on the tight crop the audit rejected."),
 
     dict(span_id="p910:n3", kind="letter",
          status="CANDIDATE -- not adjudicated; the weakest dispute in the set",
@@ -1436,6 +1438,166 @@ def _unguarded_exemplars(letter, partner):
         DISPUTED.update(saved)
 
 
+# --- WHAT A SPAN STILL NEEDS BEFORE IT CAN BE SIGNED --------------------------------------------
+# Ruling 2026-11-01. A need is a KEY with a predicate, never a sentence. Item 2 of that ruling asks
+# for a check that a card's "insufficient" note cites only needs that are currently UNMET, and a
+# sentence cannot be evaluated -- so the audit's two free-text needs are decomposed here into the
+# keys they name:
+#
+#   p233:n4  "zayin exemplars from this fount"
+#              -> exemplar:zayin
+#   p628:n2  "a strip with the baseline visible, final-nun and vav exemplars from this fount, and
+#             the Latin gloss as the expected tile"
+#              -> strip_baseline, exemplar:final_nun, exemplar:vav, latin_gloss
+#
+# The audit file is NOT edited to hold these. `audit_overlay_20261025.py` records what a human
+# adjudicated on 2026-10-25; a need is a statement about what this console can currently supply,
+# which changes every time a renderer lands, and writing one into the adjudication record would
+# make a moving quantity look like a signed finding. Each entry carries its own provenance so a
+# later reader can tell which needs came from the audit and which this lane added.
+NEEDS = {
+    "p233:n4": (("exemplar:zayin", "audit"),),
+    # Ruling 2026-11-01 item 4 asked for these two to be recorded as reversal hits. They are not.
+    # p910:n3 is `not_adjudicated` with reversed=False; p596:n2 has no audit row at all; and the
+    # only reversal hit in the twenty-row audit is p442:n0, which is already signable. So what is
+    # recorded is what is actually missing. Both also fail item 3's qualifying clause, so these
+    # needs do not currently decide anything -- they are here so that if a verdict ever lands, the
+    # need does not have to be remembered.
+    "p910:n3": (("adjudication", "laneB"),),
+    "p596:n2": (("audit_row", "laneB"),),
+    "p628:n2": (("strip_baseline", "audit"), ("exemplar:final_nun", "audit"),
+                ("exemplar:vav", "audit"), ("latin_gloss", "audit")),
+}
+
+NEED_TEXT = {
+    "strip_baseline": "a strip with the baseline visible",
+    "adjudication": "a human verdict: the 2026-10-25 audit never reached this row",
+    "audit_row": "an audit row at all: this span was never adjudicated",
+    "latin_gloss": "the Latin gloss as the expected tile",
+    "reading_order_tiles": "a reading-order tile card showing the candidate and its reverse",
+}
+
+
+def need_text(key):
+    """The need in words, for a card to print. Derived from the key, so the two cannot drift."""
+    if key.startswith("exemplar:"):
+        return "%s exemplars from this fount" % key.split(":", 1)[1].replace("_", "-")
+    return NEED_TEXT.get(key, key)
+
+
+def _ask_partners(span_id, letter):
+    """The rival candidates the card asks against at the position holding `letter`.
+
+    Rule 2 holds against EVERY rival or it does not hold, so an exemplar count that ignored the
+    other candidates at the same position would be a different number from the one on the card.
+    """
+    for c in CARDS:
+        if c["span_id"] != span_id:
+            continue
+        for a in c.get("asks") or ():
+            cand = tuple(a.get("candidates") or ())
+            if letter in cand:
+                return tuple(x for x in cand if x != letter)
+    return ()
+
+
+def need_met(span_id, key):
+    """(met, why) for one need, read off the record -- never off a note or a tally.
+
+    `strip_baseline` is the one that moved on 2026-10-25: item 5 landed, so a card still citing it
+    is citing a satisfied need. It is answered by building the strip and asking whether the
+    threshold rule ABSTAINED, not by asking whether the renderer exists -- an abstention leaves a
+    span with no baseline even though the code to draw one is present.
+    """
+    if key == "strip_baseline":
+        # card_spans(), NOT build_set. The first version of this asked build_set and reported
+        # "the span is not in the build set" for p628:n2, which is in the FROZEN set -- so a need
+        # the record SATISFIES came back unmet, and the card would have gone on refusing for a
+        # reason this function invented. A predicate that derives its own input from the wrong
+        # source fails in the direction that looks like a finding.
+        row = card_spans()[0].get(span_id)   # (spans, refused, overlap)
+        if row is None:
+            return False, "no span record a strip could be cut from"
+        sp = line_strip(row["page"], row["span_box"], row["column_bands"])
+        if sp.get("why"):
+            return False, "no strip: %s" % sp["why"]
+        si = strip_image(sp)
+        if si["baseline"] is None:
+            return False, "the threshold rule abstained on this strip"
+        return True, "baseline derived at strip row %d" % si["baseline"]
+    if key == "latin_gloss":
+        _t, _state, _why = latin_gloss(span_id)
+        return (_state == "present"), ("gloss %s" % _state) + (": %s" % _why if _why else "")
+    if key.startswith("exemplar:"):
+        letter = key.split(":", 1)[1]
+        if letter not in LETTER:
+            return False, "no such letter: %s" % letter
+        partners = _ask_partners(span_id, letter)
+        n_sig = len(sig_exemplars(letter))
+        n_span = len(exemplars(letter, partners, exclude=(span_id,)))
+        return (n_sig + n_span >= 1), "%d signed + %d span exemplar(s)" % (n_sig, n_span)
+    if key in ("adjudication", "audit_row"):
+        # Not a thing this console can supply, and deliberately not faked as one. These report the
+        # same fact item 3's qualifying clause reports, from the other side: nobody decided.
+        return False, "only a human adjudication can meet this"
+    if key == "reading_order_tiles":
+        # No card renders a candidate beside its reverse yet. The signer's reversal guard refuses a
+        # download whose assembly is the candidate reversed, which is a different thing: it catches
+        # a reversal after a human signed one, and cannot show a human which reading is which.
+        return False, "no card renders the candidate beside its reverse"
+    return False, "unknown need key"
+
+
+def needs_state(span_id):
+    """Every recorded need for a span, each with its provenance and whether it is met NOW."""
+    out = []
+    for key, source in NEEDS.get(span_id, ()):
+        met, why = need_met(span_id, key)
+        out.append(dict(key=key, source=source, met=met, why=why, text=need_text(key)))
+    return out
+
+
+def unmet(span_id):
+    return [n["key"] for n in needs_state(span_id) if not n["met"]]
+
+
+def audit_qualifies(span_id):
+    """(qualifies, why) under ruling 2026-11-01 item 3's first clause.
+
+    Signature, signature-suspect-unsettled, or a reversal hit. `not_adjudicated` is none of those,
+    and a span absent from the audit has no verdict at all -- neither is a near miss to be waved
+    through, because the clause names what a human decided and those two record that nobody did.
+    """
+    import audit_overlay_20261025 as _A
+    rows = [r for r in _A.AUDIT if r["span_id"] == span_id]
+    if not rows:
+        return False, "absent from the audit: no verdict and no reversal flag"
+    vs = sorted(set(r["verdict"] for r in rows))
+    if any(r["reversed"] for r in rows):
+        return True, "reversal hit (verdicts %s)" % ", ".join(vs)
+    for v in ("signature", "signature_suspect_unsettled"):
+        if v in vs:
+            return True, "verdict %s" % v
+    return False, "verdicts %s, and not a reversal hit" % ", ".join(vs)
+
+
+def signable(span_id):
+    """(signable, why) -- ruling 2026-11-01 item 3, as a rule over the record.
+
+    Readiness is "has a surface and all needs met" (item 4). This function is the second half; the
+    first half is whether the signer builds a console containing the span at all, which is this
+    same predicate read by glyph_signer. A card whose needs are unmet stays NO VERDICT and is
+    absent from the signer, so the two surfaces cannot disagree about one span.
+    """
+    ok, why = audit_qualifies(span_id)
+    if not ok:
+        return False, why
+    u = unmet(span_id)
+    if u:
+        return False, "needs unmet: %s" % ", ".join(u)
+    return True, "%s, every recorded need met" % why
+
+
 def census():
     """How many unambiguous exemplars each candidate letter actually has. MEASURED, not assumed.
 
@@ -2134,6 +2296,7 @@ def build(out=None):
 
 
 def selftest():
+    import audit_overlay_20261025 as _AUD
     n = [0]
     f = [0]
 
@@ -2835,6 +2998,93 @@ def selftest():
     # 1 biconditional, 1 derivation, 4 spans x 13, 2 caption, 4 synthetic = 60. This line is NOT
     # in its own total: `ck` evaluates the condition before it increments `n`.
     ck("section 12 ran every one of its checks", n[0] - _d0 == 60, n[0] - _d0)
+
+    print("")
+    print("(13) ruling 2026-11-01: needs, the cited-need check, and the signing rule")
+    _e0 = n[0]
+    _all_needs = [(sid, k, src) for sid, ents in NEEDS.items() for (k, src) in ents]
+    _cites = [(c["span_id"], a.get("cites")) for c in CARDS for a in card_asks(c)
+              if a.get("cites") is not None]
+    _cited = [(sid, k) for sid, ks in _cites for k in ks]
+
+    # A need whose key no predicate knows is not a need, it is a sentence with a colon in it.
+    _unknown = [(sid, k) for sid, k, _s in _all_needs if need_met(sid, k)[1] == "unknown need key"]
+    ck("every recorded need key is evaluable", not _unknown, _unknown)
+    ck("every span with a recorded need is in the card population",
+       not [sid for sid in NEEDS if sid not in {c["span_id"] for c in CARDS}],
+       [sid for sid in NEEDS if sid not in {c["span_id"] for c in CARDS}])
+    ck("every need carries a provenance this file knows",
+       not [(s, k, x) for s, k, x in _all_needs if x not in ("audit", "laneB")],
+       [(s, k, x) for s, k, x in _all_needs if x not in ("audit", "laneB")])
+    # Provenance, checked against the audit rather than trusted. An `audit` source must point at a
+    # span whose audit row actually carries a `needs` sentence -- otherwise the decomposition would
+    # be free to attribute this lane's own asks to a human's adjudication.
+    _AN = {r["span_id"] for r in _AUD.AUDIT if r.get("needs")}
+    ck("every audit-sourced need belongs to a span whose audit row records one",
+       not [(s, k) for s, k, x in _all_needs if x == "audit" and s not in _AN],
+       [(s, k) for s, k, x in _all_needs if x == "audit" and s not in _AN])
+    ck("every laneB-sourced need is one the audit did NOT record",
+       not [(s, k) for s, k, x in _all_needs if x == "laneB" and s in _AN],
+       [(s, k) for s, k, x in _all_needs if x == "laneB" and s in _AN])
+
+    # ---- item 2's check, and the two things that stop it passing on nothing --------------------
+    # THE CHECK. p628:n2 is why it exists: its note went on refusing on "the baseline strip is NOT
+    # on this page yet" after item 5 put the strip on the page, so the card withheld a verdict on a
+    # ground the same page satisfied.
+    _met_cited = [(sid, k, need_met(sid, k)[1]) for sid, k in _cited if need_met(sid, k)[0]]
+    ck("no card cites a need that is already met", not _met_cited, _met_cited)
+    # LIVENESS. Without this, deleting every `cites` would make the check above green forever.
+    ck("at least one card cites a need, so the check above has a subject",
+       any(ks for _s, ks in _cites), _cites)
+    # And the key has to be a RECORDED one: `need_met` answers an unknown key False, so an invented
+    # key reads as unmet and would pass the check indefinitely.
+    _ghost = [(sid, k) for sid, k in _cited if k not in [x[0] for x in NEEDS.get(sid, ())]]
+    ck("every cited key is a need the record records", not _ghost, _ghost)
+
+    # ---- item 3's rule, on the rows it decides -------------------------------------------------
+    ck("p628:n2 cites nothing and is signable",
+       dict(_cites).get("p628:n2") == () and signable("p628:n2")[0], signable("p628:n2"))
+    ck("p233:n4's zayin is unmet, so the card is not signable and says which need",
+       unmet("p233:n4") == ["exemplar:zayin"] and signable("p233:n4") ==
+       (False, "needs unmet: exemplar:zayin"), signable("p233:n4"))
+    # `not_adjudicated` and `absent from the audit` are not near misses to be waved through: they
+    # record that nobody decided, which is the opposite of a verdict.
+    ck("not_adjudicated does not qualify (p910:n3)",
+       audit_qualifies("p910:n3") == (False, "verdicts not_adjudicated, and not a reversal hit"),
+       audit_qualifies("p910:n3"))
+    ck("a span absent from the audit does not qualify (p596:n2)",
+       audit_qualifies("p596:n2")[0] is False
+       and "absent from the audit" in audit_qualifies("p596:n2")[1],
+       audit_qualifies("p596:n2"))
+    # The population, stated as a set rather than a count: a count would hold while one span
+    # swapped for another. glyph_signer reads `signable` over this same union, so the card and the
+    # sheet cannot disagree about one span.
+    _pop = sorted(set(r["span_id"] for r in _AUD.AUDIT) | set(NEEDS))
+    _sign = sorted(s for s in _pop if signable(s)[0])
+    ck("the signable set is exactly the five rows measured on 2026-11-01",
+       _sign == ["p254:n1", "p442:n0", "p628:n2", "p798:n0", "p831:n2"], _sign)
+    # The complement, BY CAUSE. The first draft of this check asserted the held-back set was the
+    # three rows the cards cover; the population is the whole audit -- fourteen spans over twenty
+    # rows -- so nine are held, and the check named a subset of the complement and called it the
+    # complement. Typed by cause rather than listed flat, because the two causes are not the same
+    # thing: a row held on the verdict clause is one a human decided needs no re-signing, while
+    # p233:n4 is one a human WANTS signed and cannot have yet.
+    _held = {}
+    for _s in sorted(set(_pop) - set(_sign)):
+        _held.setdefault("need" if signable(_s)[1].startswith("needs unmet") else "verdict",
+                         []).append(_s)
+    ck("the rows held on the verdict clause are the eight nobody asked to re-sign",
+       _held.get("verdict") == ["p326:n11", "p428:n0", "p558:n3", "p594:n0", "p596:n2",
+                                "p622:n0", "p735:n0", "p910:n3"], _held.get("verdict"))
+    ck("exactly one row is held on an unmet need, and it is p233:n4",
+       _held.get("need") == ["p233:n4"], _held.get("need"))
+    # NAMED RESIDUAL: this section governs DECLARED citations. A note that claims insufficiency and
+    # declares no `cites` is invisible to it -- only a reader catches that, and the reason the check
+    # is scoped this way is that a card's prose cannot be parsed for a claim. What it does kill is
+    # the shape the p628:n2 defect actually took: a named need, satisfied, still cited.
+    #
+    # 15 checks. This line is not in its own total: `ck` increments after evaluating.
+    ck("section 13 ran every one of its checks", n[0] - _e0 == 15, n[0] - _e0)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
