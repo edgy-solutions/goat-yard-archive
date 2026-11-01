@@ -24,7 +24,7 @@ from here.
 
 | | |
 |---|---|
-| chart tip | `f70ccf9` on `release-0.3.3` (chart `version: 0.3.0`, unchanged) |
+| chart tip | `release-0.3.3`, chart subtree `c56791ea` (chart `version: 0.3.0`, unchanged) |
 | api image | `ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:2fce1e34…b11433` |
 | ui image | `ghcr.io/edgy-solutions/goat-yard-archive/frontend@sha256:f386254e…96da4` |
 | flag | `GILL_STRUCTURED_ANSWER: "1"` (ConfigMap key, from `api.env`) |
@@ -58,13 +58,23 @@ checked something other than the upgrade.
 ```sh
 rm -rf  ~/.gya/chart-0.3.3
 mkdir -p ~/.gya/chart-0.3.3
-git -C ~/git/goatyard-rel033 archive f70ccf9:charts/goat-yard-archive \
+git -C ~/git/goatyard-rel033 rev-parse release-0.3.3:charts/goat-yard-archive
+# must print c56791ea5cab9414fb2bac3fde90ac45cdf8ee77
+git -C ~/git/goatyard-rel033 archive release-0.3.3:charts/goat-yard-archive \
   | tar -x -C ~/.gya/chart-0.3.3
 helm dependency update ~/.gya/chart-0.3.3
 ```
 
+**The sha named is the chart SUBTREE, not a commit.** The chart was last touched
+at `b8288d7` and the branch tip has moved past it since -- this deploy record is
+itself a commit -- so naming a commit would make this file stale the moment it
+was written. `c56791ea` is what `git archive` actually extracts, and it is stable
+under every later commit that does not touch `charts/`. If `rev-parse` prints
+anything else, the chart changed after this record was written and the record is
+no longer describing the deploy.
+
 `git archive` rather than `cp -r`, deliberately: the copy is then **exactly the
-committed tree at `f70ccf9`** with no local file in it. The worktree's
+committed chart tree** with no local file in it. The worktree's
 `Chart.lock` and `charts/minio-5.3.0.tgz` are untracked (the committed chart has
 neither), so a `cp -r` would silently mix committed templates with local
 artefacts and the copy would not be attributable to a sha.
@@ -82,7 +92,7 @@ Then confirm the copy is the commit it claims to be:
 
 ```sh
 git -C ~/git/goatyard-rel033 diff --no-index --stat \
-  <(git -C ~/git/goatyard-rel033 show f70ccf9:charts/goat-yard-archive/values-frontend.yaml) \
+  <(git -C ~/git/goatyard-rel033 show release-0.3.3:charts/goat-yard-archive/values-frontend.yaml) \
   ~/.gya/chart-0.3.3/values-frontend.yaml
 ```
 
