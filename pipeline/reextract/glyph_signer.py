@@ -173,8 +173,10 @@ _ARGP.add_argument("--test-console", choices=["pass3"], default=None,
                          "render the round-2 page on the named OLDER console blob, so a born-test can prove it "
                          "FAILS there. Never used to produce a page anyone signs on.")
 _ARGP.add_argument("--resign", action="store_true",
-                    help="RE-SIGN (ruling 4, 2026-10-25): sheet only the spans the 2026-10-25 audit "
-                         "ruled a SIGNATURE error, on the pass-5 console -- tiles right to left with "
+                    help="RE-SIGN (ruling 4, 2026-10-25; population by the rule of 2026-11-01): "
+                         "sheet the audited spans that are SIGNABLE -- verdict `signature` or "
+                         "`signature_suspect_unsettled`, or a reversal hit, AND every recorded need "
+                         "met -- on the pass-5 console, tiles right to left with "
                          "explicit position numbers, the assembly and the candidate both rendered, and "
                          "a download refused while the assembly is the candidate reversed. Imports "
                          "nothing: a re-sign must not inherit the verdict it replaces. Mutually "
@@ -214,7 +216,13 @@ EXPECTED_CHECKS_BY_MODE = {"default": 9, "pass2": 9, "pass3": 25, "pass3r2": 29,
                            # resign: 9 identity pins (the five blobs, the mode selection, the
                            # one-filled-copy check, the per-blob feature table, the prose probe) + 4 on
                            # the derived population and its basis rule + 8 in guard 3r.
-                           "resign": 21}
+                           # 2026-11-01: 21 -> 24. Ruling item 3 made the population a RULE, which
+                           # cost one check in the selection (the non-empty population, plus a
+                           # liveness companion that the verdict the rule's first clause names is
+                           # still carried by some audit row) and two in guard 3r (the verdict half
+                           # re-derived from AUDIT.AUDIT independently of the selector, and the
+                           # nine-row held-out complement).
+                           "resign": 24}
 MODE = "resign" if RESIGN else (("pass3r2" if PASS4 else "pass3") if PASS3
                                  else ("pass2" if PASS2 else "default"))
 EXPECTED_CHECKS = EXPECTED_CHECKS_BY_MODE[MODE]
@@ -2536,9 +2544,28 @@ H.append("<h1>Glyph signer <code>%s</code>%s &mdash; %d spans, per-glyph verdict
          % (SET, " &mdash; RE-SIGN" if RESIGN else
                  (" &mdash; PASS 3" if PASS3 else (" &mdash; PASS 2" if PASS2 else "")), RUN_N))
 if RESIGN:
-    H.append('<div class="sub">RE-SIGN (ruling 4, 2026-10-25). These spans\' prior signatures were ruled '
-             'SIGNATURE ERRORS by the audit of 2026-10-25 &mdash; the reading was wrong, not the pixels '
-             'and not the box. Nothing is imported: a re-sign that inherited the verdict it replaces '
+    # The composition is DERIVED and stated. The old sentence here claimed of EVERY row that
+    # its prior signature had been ruled a signature error, which was false for p628:n2: the
+    # audit refused to decide that one. A signer told the reading is already wrong is a signer
+    # handed a prior, and this sheet is the one surface that must not do that.
+    _RS_ERR = sorted(s for s in RUN_SPAN_IDS
+                     if any(r["verdict"] == "signature" for r in AUDIT.AUDIT
+                            if r["span_id"] == s))
+    _RS_UNS = sorted(set(RUN_SPAN_IDS) - set(_RS_ERR))
+    # The second sentence exists only when it has a subject. A sheet with no unsettled row would
+    # otherwise carry "The other 0 (none) the audit refused to decide", which is true and is noise.
+    _RS_SENT = ('<b>The other %d (%s)</b> the audit <b>refused to decide</b> '
+                '(<code>signature_suspect_unsettled</code>): it listed what would settle the '
+                'question, and every one of those things is now on the glyph card. Nobody has '
+                'ruled those readings wrong and this sheet is not telling you they are &mdash; '
+                'the basis under each row says which kind it is. '
+                % (len(_RS_UNS), ", ".join(_RS_UNS))) if _RS_UNS else ''
+    H.append('<div class="sub">RE-SIGN (ruling 4 of 2026-10-25; population by the rule of '
+             'ruling 2026-11-01). <b>%d of these %d</b> had a prior signature ruled a SIGNATURE '
+             'ERROR by the audit of 2026-10-25 &mdash; the reading was wrong, not the pixels and '
+             'not the box. %sNothing is imported: a re-sign '
+             'that inherited the verdict it replaces '
+             % (len(_RS_ERR), RUN_N, _RS_SENT) +
              'would be the same reading in a new file. The tiles below read <b>right to left</b>, '
              'position 1 is the <b>rightmost</b> glyph, and the download is REFUSED while an assembly '
              'is the candidate reversed. The prior signature is not shown here; it is on the glyph '
@@ -3022,10 +3049,29 @@ if RESIGN:
     check(not READABLE.search("".join(t for _b in RESIGN_BASIS.values()
                                        for (_a, _c, _v, t, _n) in _b)),
           "an emitted audit basis still carries Hebrew")
-    check(RUN_N == 4 and sorted(RUN_SPAN_IDS) == ["p254:n1", "p442:n0", "p798:n0", "p831:n2"],
-          "the re-sign population is %r, not the four spans the 2026-10-25 audit ruled signature "
-          "errors -- if the audit grew, this literal is the thing to update, deliberately"
-          % (sorted(RUN_SPAN_IDS),))
+    # Ruling 2026-11-01 item 3 added p628:n2: the audit left it `signature_suspect_unsettled`
+    # pending a baseline strip, renderer item 5 drew the strip, and every need it recorded is met.
+    # The literal is still a literal. `all(signable(s) for s in RUN_SPAN_IDS)` would be a verifier
+    # calling its own producer -- true by construction, never able to fail -- so what sits beside
+    # it instead is an INDEPENDENT re-derivation of the verdict half straight from AUDIT.AUDIT,
+    # and the complement, so a row cannot leave the population unnoticed either.
+    check(RUN_N == 5 and sorted(RUN_SPAN_IDS) == ["p254:n1", "p442:n0", "p628:n2", "p798:n0",
+                                                 "p831:n2"],
+          "the re-sign population is %r, not the five spans signable under ruling 2026-11-01 "
+          "item 3 -- if the audit grew or a need was met, this literal is the thing to update, "
+          "deliberately" % (sorted(RUN_SPAN_IDS),))
+    _qual = {}
+    for _r in AUDIT.AUDIT:
+        _q = _qual.setdefault(_r["span_id"], False)
+        _qual[_r["span_id"]] = _q or bool(_r["reversed"]) or _r["verdict"] in (
+            "signature", "signature_suspect_unsettled")
+    check(all(_qual.get(_s) for _s in RUN_SPAN_IDS),
+          "re-derived from the audit rows alone, %r do not carry a qualifying verdict or a "
+          "reversal flag" % [_s for _s in RUN_SPAN_IDS if not _qual.get(_s)])
+    check([s for s, _w in RESIGN_HELD] == ["p233:n4", "p326:n11", "p428:n0", "p558:n3", "p594:n0",
+                                           "p596:n2", "p622:n0", "p735:n0", "p910:n3"],
+          "the held-out complement is %r, not the nine rows the rule excludes"
+          % ([s for s, _w in RESIGN_HELD],))
     check("resign" in OUT_NAME_PREVIEW and "resign" in SKEL_NAME and "pass2" not in OUT_NAME_PREVIEW
           and "pass3" not in OUT_NAME_PREVIEW and ("_%dspan" % SET_N) not in OUT_NAME_PREVIEW,
           "a re-sign must never write to a pass-1/2/3 filename: %s / %s"
@@ -3341,8 +3387,10 @@ if PASS3:
     print("  import: %s (sha16 %s), %d signed row(s) embedded" % (PASS2_EXPORT_NAME, PASS2_EXPORT_SHA16, RUN_N))
     print("  note crops in %s" % NOTECROP_DIR)
 if RESIGN:
-    print("  re-sign selection (verdict %r in audit_overlay_20261025): %s"
-          % (RESIGN_VERDICT, ", ".join(RUN_SPAN_IDS)))
+    print("  re-sign selection (signable under ruling 2026-11-01 item 3): %s"
+          % ", ".join(RUN_SPAN_IDS))
+    for _sid in RUN_SPAN_IDS:
+        print("    %-9s %s" % (_sid, _GC.signable(_sid)[1]))
     print("  reversal guard %s (%d chars, sha16 %s); refuses on %s"
           % ("reversal_guard_js.GUARD_JS", RGJS.guard_id()[0], RGJS.guard_id()[1],
              ", ".join(RGJS.REFUSING_FLAGS)))
