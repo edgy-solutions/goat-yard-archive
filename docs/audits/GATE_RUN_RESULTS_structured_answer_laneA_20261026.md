@@ -231,3 +231,60 @@ same-configuration arms, not two, and derive the band from the union.
   report 0; for the ON arm this limitation is load-bearing on prediction 3 and
   is stated with the result.
 - The cause of the 2026-10-25 credential failure remains **UNDETERMINED**.
+
+---
+
+# Addendum — rulings of 2026-11-01, and where each one landed
+
+This report was **accepted as written** (ruling item 1), including the "not a
+win" decomposition. Prediction 4 is recorded as falsified. Nothing above is
+revised by this addendum; it records the dispositions so a later reader does
+not have to reconstruct them.
+
+| ruling | disposition |
+|---|---|
+| 1. Report accepted, prediction 4 falsified | nothing to do; recorded here |
+| 2. Flag ships to prod in 0.3.3, gya-test pairing by digest, flag as a chart value, CI-built only | **done** — `values-frontend.yaml`; five guards added to `charts/test_image_helper.py`, each proved live by mutation |
+| 3. Chris runs the drift gate + `helm upgrade`; predict the diff first; release note cites the gate run | **prepared** — prediction committed *before* the edit (`PROD_FLIP_PREDICTION_…_20261101.md`); `docs/releases/0.3.3.md` extended. Execution is Chris's: `secrets-prod` and `helm get values` are operator-only under the standing law of 2026-10-18 |
+| 4. Fix the pod filter before the next gate run; next lock budgets three same-config arms | **fix done** (below); the budget is recorded below for whoever writes the next lock |
+| 5. D-004/5/6 to 0.3.4; D-006 pre-existing on prod, does not block | **done** — D-006 written up as its own entry |
+| 6. `real_benjamin_type_001` is the one id to watch at higher n | **recorded, not acted on** — named in the release note and the prediction doc |
+
+## Ruling 4a — the pod filter is fixed
+
+`evals/paired_gate_run.py` no longer decides "one process is serving this arm"
+from the pod list. A terminating pod keeps serving until its grace period ends
+and stays `serving: true` in the EndpointSlice the whole time, so the Running-pod
+count was structurally unable to see the two-flag state the gate exists to
+prevent. The new `serving_pods_fault()` asks the **routing layer** and refuses
+rather than skips on anything it cannot attribute. The serving set is now
+recorded in each arm header as `serving_pods`, so the question "could two
+processes have answered this arm?" is answerable from the record instead of from
+trust that a gate ran.
+
+Correctness was proved separately from liveness, deliberately: 14 born checks on
+the pure function, and `evals/test_gate_wiring.py` drives the **real**
+`verify_arm` against a faked cluster to prove the gate is reached, is handed the
+pod `verify_arm` itself selected, and refuses the witnessed state end to end.
+Deleting the gate fails 6 wiring checks; ignoring its verdict fails 3. A
+born-tested function whose only caller hands it the wrong argument is this
+project's standing example of a guard that passes on nothing.
+
+## Ruling 4b — the budget the next lock must carry
+
+Pre-registered here so the next lock inherits it rather than re-deciding it:
+
+1. **Three same-config arms, not one pair.** This run's own data is the
+   argument: three OFF pairs gave **2, 5 and 5** stable flips, and the
+   pre-registered pair was the lowest of the three. A single null replicate
+   understates the noise it exists to measure, and one that shares an arm with
+   the effect comparison biases toward silence.
+2. **The null band is the UNION of per-id flips across those arms, not a count.**
+   The failure this closes is already recorded above: three arms each scored 14
+   STABLE-PASS while sharing only 9 ids. A band stated as "±N flips" admits an
+   arm that moved entirely different questions; a band stated as a **set of ids
+   known to move at fixed config** does not. Two of this run's
+   regression-direction ids sat outside the locked 2-id band.
+3. **State the band before looking**, as a set, with the arms that produced it
+   named — so a later id moving can be classified as inside or outside a
+   population that was fixed in advance.
