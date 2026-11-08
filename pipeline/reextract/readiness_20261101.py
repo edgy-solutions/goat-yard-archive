@@ -83,14 +83,18 @@ def surfaces(sid):
 
 
 for _line in LBR.header(
-        u"Lane B readiness, re-issued on ruling 2026-11-01 item 4's definition",
+        u"Lane B readiness — 2026-11-08 reissue, with p596:n2 read as SEALED",
         SESSION,
         built_from=u"Built from `hebrew_glyph_card` + `audit_overlay_20261025` at commit `%s`."
                    % os.popen("git -C %s rev-parse --short HEAD" % LANE).read().strip(),
-        supersedes=u"**Supersedes** `REPORT_laneB_20261101_sitting_readiness.md` (committed "
-                   u"`3ed712ef`), which measured need-supply only and had no surface clause. "
-                   u"That file is kept and nothing in it is withdrawn except its readiness "
-                   u"count."):
+        supersedes=u"**Supersedes** `REPORT_laneB_20261101_readiness_reissued.md`, which in "
+                   u"turn superseded `REPORT_laneB_20261101_sitting_readiness.md` (committed "
+                   u"`3ed712ef`). Both files are kept. From the sitting report, nothing is "
+                   u"withdrawn except its readiness count, which had no surface clause. From "
+                   u"the 11-01 reissue, **one paragraph is withdrawn**: it reported p596:n2 "
+                   u"as having no surface *at all* and read that absence as a gap. The "
+                   u"absence is a **seal** — see below. Its readiness counts stand; the "
+                   u"cause it gave for that one row does not."):
     w(_line)
 w()
 w(u"## What readiness means here")
@@ -144,7 +148,8 @@ w()
 w(u"- **Eight fail the verdict clause**, i.e. a human already decided they need no re-signing or")
 w(u"  never decided at all: `crop_edge_cut` (p326:n11, p428:n0, p622:n0 \u2014 the box was wrong, not")
 w(u"  the reading), `agreed` (p558:n3, p594:n0), `not_adjudicated` (p735:n0, p910:n3 \u2014 the audit")
-w(u"  did not reach them), and p596:n2, which has no audit row at all.")
+w(u"  did not reach them), and p596:n2, which has no audit row at all — and which is **sealed**,")
+w(u"  so it will not get one. See below.")
 w(u"- **One fails on an unmet need**: p233:n4, which a human WANTS settled and cannot have yet \u2014")
 w(u"  there is no zayin exemplar anywhere, signed or in a ratified signature (Table 2, 0 + 0).")
 w()
@@ -154,11 +159,46 @@ w(u"unspent sheet. The two clauses therefore agree on all fourteen rows here —
 w(u"table cannot currently distinguish \"no surface\" from \"does not qualify\". It will the moment a")
 w(u"verdict lands on p735:n0 or p910:n3 without a console being rebuilt.")
 w()
-w(u"One span has no surface *at all*: **p596:n2 has never been on a signing sheet**. It is in the")
-w(u"21-span build set but not in the frozen 74, so the 74-span console does not contain it and no")
-w(u"later sheet does. That is a stronger statement than \"not adjudicated\": nobody has ever been")
-w(u"shown it to sign. Its recorded need is `audit_row`, and the honest reading is that it needs a")
-w(u"sheet before it can need a verdict.")
+# READ off the predicate, never typed. The sentence this replaces was wrong because it was
+# typed from a tally; a corrected sentence typed the same way is one ruling away from being
+# wrong again. The `else` branch exists so that a lifted seal cannot print a stale claim.
+_sealed, _seal_why = G.seal_state(u"p596:n2")
+_sheet_met, _sheet_why = G.need_met(u"p596:n2", u"sheet")
+_wd = (G.DIRECTED.get(u"p596:n2") or {}).get(u"sheet_withdrawn") or {}
+if _sealed:
+    w(u"One span has no surface, and the cause is a **seal**, not an oversight: **p596:n2 is")
+    w(u"SEALED**. Measured: `%s`. Fourteen pages are sealed and ten spans are in the Hebrew"
+      % _seal_why)
+    w(u"seal table, and **none of the ten appears in the 96-span parent draw or in the frozen")
+    w(u"74**. So no sheet could have contained this span without the seal having been broken")
+    w(u"first. It is in the 21-span build set and not in the frozen 74, which is the seal")
+    w(u"operating at the draw — upstream of every sheet.")
+    w()
+    w(u"**The 11-01 reissue reported this as \"no surface *at all* … nobody has ever been shown")
+    w(u"it to sign\" and read it as a gap. That paragraph is withdrawn.** Every clause in it was")
+    w(u"true and the reading was wrong: it filed a decision as an omission, and a reader came")
+    w(u"away thinking a sheet was owed.")
+    if _wd:
+        w()
+        w(u"Asked whether ruling 2's read-only carve-out reached a human signing surface, Chris")
+        w(u"ruled **no** on %s: \"%s\" The sheet clause is **withdrawn**, the pin and"
+          % (_wd["on"], _wd["words"]))
+        w(u"`seal_ruling=None` are kept as the record, and the span's standing is **sealed and")
+        w(u"final**. Its `sheet` need is therefore **closed, not owed** — the console reports it")
+        w(u"as `%s`" % _sheet_why.split(u":")[0])
+        w(u"while leaving it unmet, because the span has never been on a sheet and that stays")
+        w(u"true. Its other recorded need, `audit_row`, is in the same position: nobody will")
+        w(u"adjudicate a span nobody may open.")
+    else:
+        w()
+        w(u"**No withdrawal is recorded and no ruling lifts the seal.** The directive to sheet")
+        w(u"this span and the seal are in collision and the console refuses to build. A human")
+        w(u"must rule.")
+else:
+    w(u"**p596:n2 is no longer sealed** (`%s`), so the paragraph this report used to carry"
+      % _seal_why)
+    w(u"about it does not apply and has not been replaced. Whoever lifted the seal owes this")
+    w(u"report a line; `sheet` need reads: %s" % _sheet_why)
 w()
 
 # ---- the exemplar column ------------------------------------------------------------------------
@@ -237,7 +277,9 @@ w(u"- p910:n3 and p735:n0 are unchanged by this ruling. Their recorded need is a
 w(u"  which no renderer can supply, so they wait on the audit being extended — not on code.")
 w()
 
-p = "C:/Users/cnogr/git/dr-voluminous/reextract_vol1/REPORT_laneB_20261101_readiness_reissued.md"
+# A NEW dated file. The 11-01 reissue is not overwritten: it is what this lane said on that
+# date, and a dated report rewritten in place is a report that was never wrong.
+p = "C:/Users/cnogr/git/dr-voluminous/reextract_vol1/REPORT_laneB_20261108_readiness_sealed.md"
 io.open(p, "w", encoding="utf-8", newline="\n").write(u"\n".join(OUT) + u"\n")
 print("wrote %s (%d lines)" % (p, len(OUT)))
 for ln in OUT:

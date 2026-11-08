@@ -1499,11 +1499,25 @@ DIRECTED = {
         # p596 is a SEALED page (measured: 596 in D.SEALED, p596:n2 in D.SEALED_TRUTH), and
         # ruling 2 of 2026-09-20 opens sealed pages for a READ in the aperture harness only.
         # A signing sheet is not that read: glyph_signer carries its own refusal, "re-sign
-        # span(s) ... are in HAD.SEALED_TRUTH -- sealed pages are SPENT". So this directive
-        # and the seal collide, and the collision is not mine to resolve. None means NO
-        # ruling exists; a ruling goes here with its date and its words, and `sheetable`
-        # stays a collision until it does.
+        # span(s) ... are in HAD.SEALED_TRUTH -- sealed pages are SPENT". The directive and
+        # the seal collided, Chris was asked, and he ruled the seal holds -- so this stays
+        # None. None means NO RULING LIFTS THE SEAL, which is what he decided; it is not a
+        # pending field. A field recording "the seal was upheld" would read, to a later
+        # consumer, as a ruling that opened the page.
         seal_ruling=None,
+        # The order above is NOT edited to agree with the ruling that overturned it. It is
+        # what he asked for on 2026-11-08 and it stays legible as that; the withdrawal
+        # stands beside it with its own date and its own words. Same standoff rule this lane
+        # applies to the printed text: the reading lives next to the form, never over it.
+        sheet_withdrawn=dict(
+            on="2026-11-08", by="Chris",
+            words="Ruling 2 opened sealed pages for a machine read in the aperture harness; "
+                  "putting a sealed span's glyph cards in front of a human signer is a "
+                  "different act and I'm not widening it for one span. Withdraw the sheet "
+                  "clause, reissue the readiness line as sealed, not missing, keep the pin "
+                  "and seal_ruling=None as the record.",
+            leaves="the pin, the order, and the span's standing: SEALED, and final",
+        ),
         licenses="sheet inclusion only: not a verdict, and not a qualifying audit row",
     ),
 }
@@ -1575,6 +1589,39 @@ def seal_state(span_id):
     return True, "%s; no ruling lifts it for a signing surface" % where
 
 
+SHEET_CODES = ("not_directed", "withdrawn", "collision", "ok")
+
+
+def sheet_verdict(directive, sealed, seal_why):
+    """(code, why) -- may a sheet contain this span? The whole table, in one place.
+
+    Every input is a REQUIRED ARGUMENT and none is derived here. That is deliberate twice
+    over. A predicate that fetches its own inputs cannot be driven through its own rows, and
+    this lane has already shipped one that silently took the wrong channel for 74 of 74
+    spans. And since p596:n2 is now withdrawn before it reaches the collision row, a table
+    driven only by live spans would stop exercising the row Chris asked be kept.
+
+    Order matters: WITHDRAWN outranks COLLISION. A collision is an open question; a
+    withdrawal is the answer to one. Reporting a settled matter as still colliding would ask
+    a human to rule on something he has already ruled on.
+    """
+    if directive is None:
+        return "not_directed", "no directive that a sheet contain this span"
+    w = directive.get("sheet_withdrawn")
+    if w:
+        return "withdrawn", ("the sheet clause was WITHDRAWN %s by %s: %s%s"
+                             % (w["on"], w["by"], w["words"],
+                                "" if not sealed else
+                                " -- %s, and that standing is final" % seal_why))
+    if sealed and not directive.get("seal_ruling"):
+        return "collision", ("COLLISION: a directive puts this span on a sheet, and %s. "
+                             "Ruling 2 (2026-09-20) opens sealed pages for a READ in the "
+                             "aperture harness only, and the signing surface carries its "
+                             "own refusal. No sheet is built until a human rules; the "
+                             "ruling goes in the directive's seal_ruling field." % seal_why)
+    return "ok", "directed onto a sheet, and nothing holds it back"
+
+
 def sheetable(span_id):
     """(sheetable, why) -- may the NEXT sheet contain this span?
 
@@ -1587,20 +1634,17 @@ def sheetable(span_id):
     if ok:
         return True, "signable: %s" % why
     dok, dwhy = directed(span_id)
-    if dok:
-        # THE COLLISION. A directive is an answer to "what goes on the next sheet"; the seal
-        # is an answer to "what may be opened at all", and the second is not this console's
-        # to overrule. Returning True here would license a build that glyph_signer refuses,
-        # and the refusal is the guard a builder would then be tempted to "fix".
-        sealed, swhy = seal_state(span_id)
-        if sealed and not (DIRECTED.get(span_id) or {}).get("seal_ruling"):
-            return False, ("COLLISION: %s -- and %s. Two laws on one span: ruling 2 "
-                           "(2026-09-20) opens sealed pages for a READ in the aperture "
-                           "harness only, and the signing surface carries its own refusal. "
-                           "No sheet is built until a human rules; the ruling goes in the "
-                           "directive's seal_ruling field." % (dwhy, swhy))
+    if not dok:
+        return False, "not signable (%s) and not directed (%s)" % (why, dwhy)
+    # A directive is an answer to "what goes on the next sheet"; the seal is an answer to
+    # "what may be opened at all", and the second was never this console's to overrule.
+    # Answering True here would license a build that glyph_signer refuses, and that refusal
+    # is the guard a builder would then be tempted to "fix".
+    sealed, swhy = seal_state(span_id)
+    code, cwhy = sheet_verdict(DIRECTED.get(span_id), sealed, swhy)
+    if code == "ok":
         return True, dwhy + ("" if not sealed else " [%s]" % swhy)
-    return False, "not signable (%s) and not directed (%s)" % (why, dwhy)
+    return False, "%s -- %s" % (dwhy, cwhy)
 
 
 def need_text(key):
@@ -1669,16 +1713,20 @@ def need_met(span_id, key):
         d = DIRECTED.get(span_id)
         if d is None:
             return False, "no sheet, and no directive that one be built"
-        if not d.get("sheet_crop_sha16"):
-            # "not built yet" promises a sheet is coming. For a sealed span nothing is
-            # coming until a human rules, and a need that misreports its own blocker is how
-            # a readiness report calls a decision a gap -- which mine did on 2026-11-01.
-            sealed, swhy = seal_state(span_id)
-            if sealed and not d.get("seal_ruling"):
-                return False, ("directed onto the next sheet %s, but %s -- BLOCKED by the "
-                               "seal, not merely unbuilt" % (d["on"], swhy))
-            return False, "directed onto the next sheet %s; that sheet is not built yet" % d["on"]
-        return True, "sheeted, crop %s" % d["sheet_crop_sha16"]
+        if d.get("sheet_crop_sha16"):
+            return True, "sheeted, crop %s" % d["sheet_crop_sha16"]
+        # "not built yet" promises a sheet is coming, and for this span none is. An unmet
+        # need that reads as pending is how a readiness report files a decision as a gap --
+        # which mine did on 2026-11-01, and which is the sentence Chris told me to reissue.
+        # The need stays unmet (the span has never been on a sheet, and that is true), but
+        # it is no longer OWED, and the difference is the whole point of saying so here.
+        sealed, swhy = seal_state(span_id)
+        code, cwhy = sheet_verdict(d, sealed, swhy)
+        if code == "withdrawn":
+            return False, "CLOSED, not owed: %s" % cwhy
+        if code == "collision":
+            return False, "BLOCKED by the seal, not merely unbuilt: %s" % cwhy
+        return False, "directed onto the next sheet %s; that sheet is not built yet" % d["on"]
     if key in ("adjudication", "audit_row"):
         # Not a thing this console can supply, and deliberately not faked as one. These report the
         # same fact item 3's qualifying clause reports, from the other side: nobody decided.
@@ -3281,18 +3329,50 @@ def selftest():
        seal_state("p596:n2"))
     ck("seal_state does not call every span sealed", not seal_state("p254:n1")[0],
        seal_state("p254:n1"))
-    # None means NO RULING EXISTS. The day one does, this check fails and whoever wrote the ruling
-    # has to come here and say so -- which is the point: no sheet gets built by a patch that
-    # quietly fills the field in.
-    ck("no ruling lifts the seal for a signing surface, so no sheet may be built",
+    # Chris ruled on 2026-11-08 that the seal HOLDS, so this field stays None -- None meaning no
+    # ruling lifts it, which is what he decided. A field recording "the seal was upheld" would
+    # read to a later consumer as a ruling that opened the page, so the upholding lives in the
+    # withdrawal and not here. If this ever becomes non-empty, somebody widened ruling 2.
+    ck("the ruling upheld the seal, so no directive carries one that lifts it",
        not [s for s in _dirs if DIRECTED[s].get("seal_ruling")],
        [(s, DIRECTED[s].get("seal_ruling")) for s in _dirs])
-    ck("p596:n2 is NOT sheetable: the directive and the seal collide, and it says so",
-       not sheetable("p596:n2")[0] and sheetable("p596:n2")[1].startswith("COLLISION:")
-       and "SEALED" in sheetable("p596:n2")[1], sheetable("p596:n2"))
-    ck("the `sheet` need blames the seal, not an unbuilt sheet",
-       "BLOCKED by the seal" in need_met("p596:n2", "sheet")[1],
-       need_met("p596:n2", "sheet"))
+    ck("p596:n2 is NOT sheetable: the sheet clause was withdrawn, and the seal is named as final",
+       not sheetable("p596:n2")[0] and "WITHDRAWN" in sheetable("p596:n2")[1]
+       and "standing is final" in sheetable("p596:n2")[1], sheetable("p596:n2"))
+    ck("the `sheet` need reads CLOSED and not owed, while staying unmet",
+       need_met("p596:n2", "sheet")[0] is False
+       and need_met("p596:n2", "sheet")[1].startswith("CLOSED, not owed:")
+       and "sheet" in unmet("p596:n2"), (need_met("p596:n2", "sheet"), unmet("p596:n2")))
+    # The ORDER is not edited to agree with the ruling that overturned it. Pinned verbatim,
+    # because "he asked for a sheet and I was told no" and "he never asked" are different
+    # histories and only one of them is true.
+    ck("the order stands in the record exactly as he gave it",
+       DIRECTED["p596:n2"]["words"] == ("p596:n2 goes on the next sheet by hash; no audit rows "
+                                        "written by hand"),
+       DIRECTED["p596:n2"]["words"])
+    # `.get(...) or {}`, not a subscript. A subscript here ABORTED the whole run under mutation
+    # W1 (the withdrawal deleted) with a KeyError, so the 100-odd checks after this line never
+    # ran and the harness could not tell a survival from a crash. A check must be able to FAIL.
+    _sw = DIRECTED["p596:n2"].get("sheet_withdrawn") or {}
+    ck("the withdrawal carries its own date, author and words",
+       all(_sw.get(k) for k in ("on", "by", "words")) and _sw.get("on") == "2026-11-08", _sw)
+    # THE TABLE. p596:n2 is withdrawn before it reaches the collision row, so without this the
+    # branch Chris asked be kept would be kept and never run -- one refactor from gone. Every
+    # input is passed IN, which is the whole reason `sheet_verdict` takes required arguments.
+    # Expected codes are literal and ORDERED: withdrawn must outrank collision, or a matter he
+    # has already settled comes back to him as an open question.
+    _W = {"on": "2026-11-08", "by": "Chris", "words": "W"}
+    _tbl = [(None, False, "-", "not_directed"),
+            ({"on": "d"}, False, "-", "ok"),
+            ({"on": "d"}, True, "page 9 is SEALED", "collision"),
+            ({"on": "d", "seal_ruling": "lifted by X"}, True, "page 9 is SEALED", "ok"),
+            ({"on": "d", "sheet_withdrawn": _W}, False, "-", "withdrawn"),
+            ({"on": "d", "sheet_withdrawn": _W}, True, "page 9 is SEALED", "withdrawn")]
+    _got = [sheet_verdict(a, b, c)[0] for a, b, c, _want in _tbl]
+    ck("sheet_verdict's table reads row for row, and withdrawn outranks collision",
+       _got == [r[3] for r in _tbl], list(zip(_got, [r[3] for r in _tbl])))
+    ck("the table exercises every code sheet_verdict can return",
+       sorted(set(_got)) == sorted(SHEET_CODES), (sorted(set(_got)), sorted(SHEET_CODES)))
     # Page-level is the stronger predicate and it is free: measured 2026-11-08, none of the frozen
     # 74 sits on any of the 14 sealed pages. If that ever stops holding, a span somebody signed is
     # on a sealed page and this lane needs to know before anything else. The count is the liveness
@@ -3350,8 +3430,12 @@ def selftest():
     # through the very change they were written to catch, because `signable` is an AND and
     # this span fails both halves of it. Six more the same day, when building the directed
     # sheet turned up the SEAL: one check ("p596:n2 is sheetable, by the directive") was
-    # REPLACED, because it asserted the thing that is now refused.
-    ck("section 14 ran every one of its checks", n[0] - _e14 == 23, n[0] - _e14)
+    # REPLACED, because it asserted the thing that is now refused. Then on his ruling the
+    # same day -- the seal holds, the sheet clause is withdrawn -- two of those six were
+    # REPLACED in turn and four added, the table drive among them: p596:n2 no longer
+    # reaches the collision row, so the row he asked be kept needs a driver that is not a
+    # live span.
+    ck("section 14 ran every one of its checks", n[0] - _e14 == 27, n[0] - _e14)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
