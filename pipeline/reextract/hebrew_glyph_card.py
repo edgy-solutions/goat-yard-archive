@@ -1496,6 +1496,14 @@ DIRECTED = {
         pixel_pin=("hebrew_aperture_crops_20260920/p596_n2_A2_spanbox.png",
                    "842abe52c2829e14"),
         sheet_crop_sha16=None,
+        # p596 is a SEALED page (measured: 596 in D.SEALED, p596:n2 in D.SEALED_TRUTH), and
+        # ruling 2 of 2026-09-20 opens sealed pages for a READ in the aperture harness only.
+        # A signing sheet is not that read: glyph_signer carries its own refusal, "re-sign
+        # span(s) ... are in HAD.SEALED_TRUTH -- sealed pages are SPENT". So this directive
+        # and the seal collide, and the collision is not mine to resolve. None means NO
+        # ruling exists; a ruling goes here with its date and its words, and `sheetable`
+        # stays a collision until it does.
+        seal_ruling=None,
         licenses="sheet inclusion only: not a verdict, and not a qualifying audit row",
     ),
 }
@@ -1543,6 +1551,30 @@ def directed(span_id):
     return True, "directed %s by %s: %s (%s)" % (d["on"], d["by"], d["words"], why)
 
 
+def seal_state(span_id):
+    """(sealed, why) -- is this span under the seal, and is there a ruling that lifts it?
+
+    Page-level, because that is how the seal is recorded: `D.SEALED` is 14 pages. The span
+    table `D.SEALED_TRUTH` is consulted too and reported when it adds anything, but the page
+    is the governing fact -- a span on a sealed page is sealed whether or not the Hebrew
+    table happens to carry a row for it.
+
+    A ruling is read off the DIRECTIVE, never off a page or a date: "somebody decided this"
+    is a thing a human writes down, and nothing here infers it.
+    """
+    page = int(span_id.split(":")[0].lstrip("p"))
+    in_page, in_table = page in D.SEALED, span_id in D.SEALED_TRUTH
+    if not (in_page or in_table):
+        return False, "page %d is not sealed" % page
+    where = "page %d is SEALED" % page + (" and the span is in SEALED_TRUTH" if in_table
+                                          else " (no SEALED_TRUTH row)")
+    d = DIRECTED.get(span_id) or {}
+    r = d.get("seal_ruling")
+    if r:
+        return True, "%s; lifted for a sheet by: %s" % (where, r)
+    return True, "%s; no ruling lifts it for a signing surface" % where
+
+
 def sheetable(span_id):
     """(sheetable, why) -- may the NEXT sheet contain this span?
 
@@ -1556,7 +1588,18 @@ def sheetable(span_id):
         return True, "signable: %s" % why
     dok, dwhy = directed(span_id)
     if dok:
-        return True, dwhy
+        # THE COLLISION. A directive is an answer to "what goes on the next sheet"; the seal
+        # is an answer to "what may be opened at all", and the second is not this console's
+        # to overrule. Returning True here would license a build that glyph_signer refuses,
+        # and the refusal is the guard a builder would then be tempted to "fix".
+        sealed, swhy = seal_state(span_id)
+        if sealed and not (DIRECTED.get(span_id) or {}).get("seal_ruling"):
+            return False, ("COLLISION: %s -- and %s. Two laws on one span: ruling 2 "
+                           "(2026-09-20) opens sealed pages for a READ in the aperture "
+                           "harness only, and the signing surface carries its own refusal. "
+                           "No sheet is built until a human rules; the ruling goes in the "
+                           "directive's seal_ruling field." % (dwhy, swhy))
+        return True, dwhy + ("" if not sealed else " [%s]" % swhy)
     return False, "not signable (%s) and not directed (%s)" % (why, dwhy)
 
 
@@ -1627,6 +1670,13 @@ def need_met(span_id, key):
         if d is None:
             return False, "no sheet, and no directive that one be built"
         if not d.get("sheet_crop_sha16"):
+            # "not built yet" promises a sheet is coming. For a sealed span nothing is
+            # coming until a human rules, and a need that misreports its own blocker is how
+            # a readiness report calls a decision a gap -- which mine did on 2026-11-01.
+            sealed, swhy = seal_state(span_id)
+            if sealed and not d.get("seal_ruling"):
+                return False, ("directed onto the next sheet %s, but %s -- BLOCKED by the "
+                               "seal, not merely unbuilt" % (d["on"], swhy))
             return False, "directed onto the next sheet %s; that sheet is not built yet" % d["on"]
         return True, "sheeted, crop %s" % d["sheet_crop_sha16"]
     if key in ("adjudication", "audit_row"):
@@ -3221,7 +3271,38 @@ def selftest():
        pin_holds("p254:n1") == (False, "no directive recorded for this span"),
        pin_holds("p254:n1"))
 
-    ck("p596:n2 is sheetable, by the directive", sheetable("p596:n2")[0], sheetable("p596:n2")[1])
+    # THE COLLISION, asserted on the sealed clause by itself. `seal_state` consults the seal
+    # and the ruling field and nothing else -- no audit, no needs -- so a check phrased over it
+    # cannot be carried by a clause it does not name. That is this morning's mutation lesson,
+    # applied before the defect instead of after it.
+    ck("p596 is a SEALED page and p596:n2 is in SEALED_TRUTH",
+       seal_state("p596:n2") == (True, "page 596 is SEALED and the span is in SEALED_TRUTH; "
+                                       "no ruling lifts it for a signing surface"),
+       seal_state("p596:n2"))
+    ck("seal_state does not call every span sealed", not seal_state("p254:n1")[0],
+       seal_state("p254:n1"))
+    # None means NO RULING EXISTS. The day one does, this check fails and whoever wrote the ruling
+    # has to come here and say so -- which is the point: no sheet gets built by a patch that
+    # quietly fills the field in.
+    ck("no ruling lifts the seal for a signing surface, so no sheet may be built",
+       not [s for s in _dirs if DIRECTED[s].get("seal_ruling")],
+       [(s, DIRECTED[s].get("seal_ruling")) for s in _dirs])
+    ck("p596:n2 is NOT sheetable: the directive and the seal collide, and it says so",
+       not sheetable("p596:n2")[0] and sheetable("p596:n2")[1].startswith("COLLISION:")
+       and "SEALED" in sheetable("p596:n2")[1], sheetable("p596:n2"))
+    ck("the `sheet` need blames the seal, not an unbuilt sheet",
+       "BLOCKED by the seal" in need_met("p596:n2", "sheet")[1],
+       need_met("p596:n2", "sheet"))
+    # Page-level is the stronger predicate and it is free: measured 2026-11-08, none of the frozen
+    # 74 sits on any of the 14 sealed pages. If that ever stops holding, a span somebody signed is
+    # on a sealed page and this lane needs to know before anything else. The count is the liveness
+    # guard -- "none of them is sealed" passes on an empty list.
+    _fz14 = [r["span_id"] for r in json.loads(io.open(str(FROZEN_SET),
+                                                      encoding="utf-8").read())["rows"]]
+    ck("all 74 of the frozen set are in front of that check", len(_fz14) == 74, len(_fz14))
+    ck("no span in the frozen 74 sits on a sealed page",
+       not [s for s in _fz14 if seal_state(s)[0]],
+       [s for s in _fz14 if seal_state(s)[0]])
 
     # THE guard, and it has to bite on the audit clause by itself. `signable` is an AND of the
     # audit verdict and the needs, and p596:n2 fails both, so the two checks below it pass whether
@@ -3264,11 +3345,13 @@ def selftest():
     # reading unmet. What this does catch is the inverse -- a hash recorded with no sheet behind
     # it fails the pin's sibling check the moment a consumer re-reads those bytes.
     #
-    # 17 checks. Not counting this line: `ck` increments after evaluating. Two were added
+    # 23 checks. Not counting this line: `ck` increments after evaluating. Two were added
     # 2026-11-08 after mutation showed the population pair was overdetermined: both passed
     # through the very change they were written to catch, because `signable` is an AND and
-    # this span fails both halves of it.
-    ck("section 14 ran every one of its checks", n[0] - _e14 == 17, n[0] - _e14)
+    # this span fails both halves of it. Six more the same day, when building the directed
+    # sheet turned up the SEAL: one check ("p596:n2 is sheetable, by the directive") was
+    # REPLACED, because it asserted the thing that is now refused.
+    ck("section 14 ran every one of its checks", n[0] - _e14 == 23, n[0] - _e14)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
