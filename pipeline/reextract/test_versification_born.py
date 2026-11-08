@@ -12,7 +12,7 @@ from book_codes import USFM_TO_OSIS, UsfmCountError, count_usfm_dir, count_usfm_
 GC_VERSIFICATION_COMMIT = "dba4257359a0e3ca19e3b3dea088ea9dbeb29461"
 GC_VERSIFICATION_PATH = "goldenchain/versification.py"
 GC_VERSIFICATION_SHA256 = "3ee4533405fcd84f950b8a886acd88a6bca4fa4cfa59bcf301fef712724a4b4a"
-GC_PIN_STATUS = "candidate_unratified"  # only commit that ever touched the file; NOT recorded as ratified (lock 545b69e6). Chris ratifies.
+GC_PIN_STATUS = "ratified"  # ratified by Chris on A2's three-way agreement, 2026-11-08 (lock 545b69e6 addendum)
 GOLDEN_CHAIN_REPO = os.environ.get("GOLDEN_CHAIN_REPO", "C:/Users/cnogr/git/golden-chain")
 KJV_USFM_DIR = os.environ.get("GOATYARD_KJV_USFM_DIR", "C:/Users/cnogr/git/dr-voluminous/bibles/eng-kjv2006_usfm")
 
