@@ -80,10 +80,19 @@ HEB = re.compile("[\u0590-\u05ff]")
 
 # Pinned to the count the first FULL run observes.  None until then: the real run prints the observed
 # count and marks the header checks_pinned=false.  The dry-run has its own pinned count.
-EXPECTED_CHECKS = None      # UNPINNED 2026-10-25: the law-8 send gate changed the call count,
-                            # so 668 (run 501ab577a18a6785, 178 calls) no longer describes this
-                            # path.  A guessed total coerces reality; the next full run prints
-                            # the observed count and this gets pinned to what it measured.
+EXPECTED_CHECKS = 630       # PINNED 2026-11-08 to what run 6a2292bdb14d3c43 MEASURED, as the
+                            # unpinned note said to do.  Not a guess: 668 was the 178-call run and
+                            # is retired.
+                            #
+                            # PRECONDITION, because this total is not a constant of the code: it
+                            # is a function of the CALL COUNT, and the call count is a function of
+                            # law 8's refusal set, which was {p190:n0, p493:n3, p594:n0, p803:n0}
+                            # -- 4 of 45 -- when this was measured.  Those refusals rest partly on
+                            # sidecar fields DEFAULTED on 54 of 74 spans, so the set will move the
+                            # day somebody adjudicates them.  When it does, this run ABORTS on the
+                            # count rather than running: that is correct, and the fix is to
+                            # re-measure with --dry-run (free) and re-pin, never to relax it to
+                            # None.  A pin nobody can explain is how a lost assertion hides.
 EXPECTED_CHECKS_DRY = 356        # dry-run, re-measured 2026-10-25 after the law-8 send gate: 16
                                  # fewer payloads (4 refused spans x 2 arms x 2 channels, less the
                                  # ctx call p245:n1 never had) means 32 fewer per-payload checks,
@@ -537,7 +546,11 @@ def md_report(header, run_sha, tables, ev, nik, recs, prov):
     L += ["", "## Agreement and wrong", ""]
     for ch, v in ev["agreement"].items():
         L.append(f"- {ch}: agreement_and_wrong {v['agreement_and_wrong']}; both_wrong_disagree {v['both_wrong_disagree']}")
-    L += ["", "## Subpopulations (primary; exact/nikud_only/wrong/abstain/error)", ""]
+    L += ["", "## Subpopulations (primary; exact/nikud_only/wrong/abstain/error)", "",
+          "`n ids` is the population the LOCK named; the `of N` on each cell is how many of them "
+          "this run actually read. Where they differ, law 8 refused the difference at send -- it is "
+          "not an abstention and not a missing read. A population showing `of 0` was scored over "
+          "nothing and this report says nothing about it.", ""]
     for pn, v in tables["populations"].items():
         L.append(f"### {pn} (n ids {v['n_ids']})")
         for k, c in v["cells"].items():
@@ -546,13 +559,76 @@ def md_report(header, run_sha, tables, ev, nik, recs, prov):
             L.append(f"- {k}: {t['exact']}/{t['nikud_only']}/{t['wrong']}/{t['abstain']}/{t['error']} of {t['n']}  (secondary {s['exact']}/{s['nikud_only']}/{s['wrong']}/{s['abstain']}/{s['error']})")
     L += ["", f"## p245:n1", f"Channel 2 absent. {ABSENT_BASIS}", "",
           "## Flags", f"- median output tokens per arm: {json.dumps(nik['median_out_tokens'])}; OUT_TOKEN_FLAG {OUT_TOKEN_FLAG}; flagged: {nik['out_token_flagged']}",
-          "", "## What this does NOT solve", "",
-          "- n=45 over a deliberately hard population; per-row differences between arms are not explained here, and no per-row prediction was registered.",
+          "", "## What this does NOT solve", ""]
+    # DERIVED, not typed. These two sentences carried "n=45" and "the 178-call run" from the days
+    # when nothing was refused; the executed run read fewer. A disclaimer that misstates the size
+    # of what it disclaims is worse than none, because a reader calibrates on it.
+    _n_read = len({r["span_id"] for r in recs})
+    _n_calls = len(recs)
+    _emptied = sorted(pn for pn, v in tables["populations"].items()
+                      if v["n_ids"] and not any(c["primary"]["n"] for c in v["cells"].values()))
+    L += [f"- n={_n_read} spans in {_n_calls} calls, over a population that is no longer the hard "
+          f"one the lock describes (see the subpopulation note); per-row differences between arms "
+          f"are not explained here, and no per-row prediction was registered.",
           "- The standard is the signed verdict. Six of twenty earlier signed truths were later found wrong the same way; a mismatch here can be the signature, not the read.",
           "- Context-channel gains cannot be told apart from canonical-verse recall by this run; no blank-crop control was run.",
-          "- The 178-call run is a single draw per cell at temperature 0; no null replicate was run, so a delta smaller than the null spread is not evidence.",
-          "- Nothing here promotes any arm to a production path.", ""]
+          f"- {_n_calls} calls, a single draw per cell at temperature 0; no null replicate was run, "
+          f"so a delta smaller than the null spread is not evidence. The channel-2 contrast moves "
+          f"5 rows of {len({r['span_id'] for r in recs if r['channel'] == 'context'})}; nothing "
+          f"here bounds the null.",
+          "- Nothing here promotes any arm to a production path."]
+    if _emptied:
+        L += [f"- {len(_emptied)} of the lock's populations were scored over ZERO rows "
+              f"({', '.join(_emptied)}): law 8 refused every member. No statement in this report "
+              f"is evidence about them."]
+    L += [""]
     return "\n".join(L)
+
+
+def rescore(run_sha, attempt_sfx=""):
+    """Rebuild the report from stored reads. No network, no key, no new reads, no clobber.
+
+    The reads are what cost money; the report is a pure function of them plus the lock. Without
+    this, correcting a sentence in a published report means re-spending or leaving the wrong
+    sentence in place -- and the second is what actually happens.
+
+    The recomputed tallies are asserted EQUAL to the stored ones. That is not a check of the
+    scorer (same function, so it would agree by construction); it is a check of this path -- that
+    it loaded the right reads file, kept every row, and split arm and channel the same way. A
+    rescore that quietly dropped rows would otherwise publish a smaller run under the same sha.
+    """
+    sheet, pred = load_inputs()
+    src = A / f"score45_reads_{run_sha}{attempt_sfx}.jsonl"
+    old_p = A / f"SCORE45_{run_sha}{attempt_sfx}.json"
+    chk(src.exists(), f"no reads file for {run_sha}{attempt_sfx}: {src.name}")
+    chk(old_p.exists(), f"no stored run json for {run_sha}{attempt_sfx}: {old_p.name}")
+    recs = [json.loads(l) for l in src.read_text(encoding="utf-8").splitlines() if l.strip()]
+    old = json.loads(old_p.read_text(encoding="utf-8"))
+    chk(old["run_sha16"] == run_sha, "the stored json names a different run_sha16")
+    tables = tally_tables(recs, pred)
+    chk(tables["all"] == old["tallies"]["all"],
+        "rescored tallies differ from the stored run: this path is not faithful")
+    chk(len(recs) == old["header"]["call_count"],
+        f'reads file holds {len(recs)} rows, header says {old["header"]["call_count"]}')
+    ev = evaluate(recs, pred)
+    chk(ev["sign_predictions"].keys() == old["evaluation"]["sign_predictions"].keys(),
+        "rescored evaluation has different predictions than the stored run")
+    hdr = dict(old["header"], rescored_from=old_p.name,
+               rescore_note="report text rebuilt from the stored reads; no call was made and no "
+                            "class was recomputed from pixels")
+    out = dict(old, header=hdr, tallies=tables, evaluation=ev)
+    md = md_report(hdr, run_sha, tables, ev, old["diagnostics"], recs,
+                   old["header"].get("provisional_reason"))
+    texts = {A / f"SCORE45_{run_sha}{attempt_sfx}_r2.json": json.dumps(out, ensure_ascii=False, indent=1) + "\n",
+             A / f"SCORE45_{run_sha}{attempt_sfx}_r2.md": md}
+    for pth, t in texts.items():
+        for h in FORBIDDEN_HOSTS:
+            chk(h not in t, f"forbidden host in record {pth.name}")
+    for pth, t in texts.items():
+        write_new(pth, t)
+    print(f"rescored {run_sha}{attempt_sfx} from {len(recs)} stored reads; wrote _r2; "
+          f"checks observed: {CHECKS}")
+    return 0
 
 
 def write_new(path, text):
@@ -566,12 +642,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--rescore", metavar="RUN_SHA16",
+                    help="rebuild the report from that run's stored reads; no network, no spend")
     ap.add_argument("--attempt", type=int, default=1,
                     help="rerun number; N>1 appends _a<N> to output stems so a rerun is not a clobber")
     a = ap.parse_args()
     if a.self_test:
         self_test()
         return 0
+    if a.rescore:
+        return rescore(a.rescore, "" if a.attempt <= 1 else f"_a{a.attempt}")
     dry = a.dry_run
 
     # GATE 1
