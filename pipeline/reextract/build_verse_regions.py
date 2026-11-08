@@ -121,12 +121,31 @@ def config_hash(base_config):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def load_chapter_metadata(metadata_dir, file_page):
+    """page{fp}_image1_metadata.json -> ((book_name, int(chapter)) | None, sha256 | None).
+    Missing, unreadable or unparseable -> (None, sha or None); never raises."""
+    path = Path(metadata_dir) / f"page{file_page}_image1_metadata.json"
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, None
+    sha = hashlib.sha256(raw).hexdigest()
+    try:
+        d = json.loads(raw.decode("utf-8"))
+        return (str(d["book_name"]), int(d["chapter"])), sha
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None, sha
+
+
 def build_config(args, module_sha256, git_head, git_dirty):
+    metadata_dir = args.metadata_dir or args.volume_dir
     base = {
         "pages": sorted(args.pages),
         "geometry": str(Path(args.geometry).resolve()),
         "volume_dir": str(Path(args.volume_dir).resolve()),
         "witness_dir": str(Path(args.witness_dir).resolve()) if args.witness_dir else None,
+        "metadata_dir": str(Path(metadata_dir).resolve()),
+        "metadata_sha256": {str(fp): load_chapter_metadata(metadata_dir, fp)[1] for fp in sorted(args.pages)},
         "read": args.read,
         "model": args.model,
         "endpoint_id": args.endpoint_id,
@@ -326,6 +345,9 @@ def build_arg_parser():
                      help="Path to volume1_page_geometry.jsonl.")
     ap.add_argument("--volume-dir", default=DEFAULT_VOLUME_DIR,
                      help="Directory holding pageNNN_image1.png.")
+    ap.add_argument("--metadata-dir", default=None,
+                    help="Directory holding page{fp}_image1_metadata.json (book_name, chapter); "
+                         "default = --volume-dir.")
     ap.add_argument("--witness-dir", default=None,
                      help="Directory holding pageNNN_image1_normalized.md (optional; omit to "
                           "run with witness=null everywhere, flagged numbers_single_source).")
@@ -535,9 +557,17 @@ def main(argv=None):
     witness_by_page = {fp: load_witness(args.witness_dir, fp) for fp in usable_pages}
 
     page_records_ordered = [{"file_page": fp} for fp in usable_pages]
+    metadata_dir = args.metadata_dir or args.volume_dir
+    chapter_meta, metadata_missing = {}, set()
+    for fp in usable_pages:
+        meta, _sha = load_chapter_metadata(metadata_dir, fp)
+        if meta is None:
+            metadata_missing.add(fp)
+        else:
+            chapter_meta[fp] = meta
     regions, page_summaries = VR.assemble_regions(
         page_records_ordered, s1_by_page, confirmed_by_page, rejected_by_page,
-        witness_by_page, config, abstained=head_abstained)
+        witness_by_page, config, abstained=head_abstained, chapter_meta=chapter_meta)
 
     # Step 3 (rerun 8): pass A pools the stroke population over ALL usable pages and derives the
     # run-level cutoff; pass B computes each rect's ink_box with it. `box` is never written.
@@ -570,6 +600,8 @@ def main(argv=None):
 
     for fp in usable_pages:
         ps = page_summaries[fp]
+        if fp in metadata_missing:
+            ps["flags"] = list(ps.get("flags") or []) + ["chapter_metadata_missing"]
         records.append({"kind": "page", "file_page": fp, **{k: v for k, v in ps.items() if k != "file_page"},
                          "s1_flags": s1_by_page[fp]["flags"],
                          "running_head_present": s1_by_page[fp]["running_head"] is not None,
@@ -599,8 +631,16 @@ def main(argv=None):
         else:
             col_split_summary["abstained"][cs["reason"]] = col_split_summary["abstained"].get(cs["reason"], 0) + 1
 
+    head_status_counts = Counter(r["head_status"] for r in regions if r.get("kind") == "verse")
+    head_reason_counts = Counter(x for r in regions if r.get("kind") == "verse"
+                                 for x in r.get("head_status_reasons") or [])
     summary = {
         "kind": "run_summary",
+        "head_status": dict(sorted(head_status_counts.items())),
+        "head_status_reasons": dict(sorted(head_reason_counts.items())),
+        "chapter_reset_metadata": flag_counts.get("chapter_reset:metadata", 0),
+        "chapter_source_missing": flag_counts.get("chapter_source_missing", 0),
+        "verse_withheld_ascending": flag_counts.get("verse_withheld:ascending", 0),
         "pages_requested": len(pages_requested), "pages_usable": len(usable_pages),
         "pages_invalid": len(invalid_records),
         "pages_head_abstained": len(usable_pages) if head_abstained else 0,

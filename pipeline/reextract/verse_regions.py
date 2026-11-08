@@ -1908,32 +1908,57 @@ def _count_sliver_bands(region, page_s1_by_page):
 _CHAIN_KINDS = {"verse", "chapter_intro", "book_intro", "continuation_unanchored"}
 
 
-def _chains(regions):
-    """Split `regions` (in order) into chains of consecutive VERSE regions, exactly as
-    ascdiag.chains: a chapter_intro or book_intro region always starts a new chain; any region
-    (of a recognized kind) whose file_page_first is not the previous recognized region's page or
-    that page + 1 also starts a new chain (a chain must not silently cross a page the walk never
-    saw); any kind outside _CHAIN_KINDS is invisible to this walk -- it neither enters a chain nor
-    resets one. Only verse regions are ever appended to a chain; chapter_intro/book_intro/
-    continuation_unanchored participate only as reset/continuity markers."""
+def _walk_chains(regions, chapter_meta):
+    """The chain walk. Returns (chains, flags_by_region): flags_by_region maps id(region) -> list of
+    flags for the FIRST VERSE region of a chain started by the chapter-source rules. Pure: it never
+    mutates a region, so calling it twice cannot double a flag (apply_order_checks calls it once).
+
+    Resets (unchanged): chapter_intro/book_intro start a new chain; a recognized region whose page
+    is not in (prev, prev+1) starts a new chain. NEW, at a boundary where a recognized region's page
+    is prev+1: if prev or fp is absent from chapter_meta (metadata missing/unreadable) the chain is
+    reset and the next verse region is flagged chapter_source_missing; elif (book, chapter) differs
+    across the boundary and NO chapter_intro/book_intro has its page in {prev, fp} (the heading was
+    missed) the chain is reset and the next verse region is flagged chapter_reset:metadata.
+    chapter_meta: dict file_page -> (book_name, chapter); a page absent = metadata missing. Never
+    reads lemma / truth / witness text."""
+    intro_pages = {r["file_page_first"] for r in regions if r.get("kind") in ("chapter_intro", "book_intro")}
     chains_out = []
+    flags_out = {}
     cur = []
     prev = None
+    pending = []
     for r in regions:
         kind = r.get("kind")
         if kind not in _CHAIN_KINDS:
             continue
         fp = r["file_page_first"]
-        if kind in ("chapter_intro", "book_intro") or (prev is not None and fp not in (prev, prev + 1)):
+        reset = kind in ("chapter_intro", "book_intro") or (prev is not None and fp not in (prev, prev + 1))
+        if prev is not None and fp == prev + 1:
+            if prev not in chapter_meta or fp not in chapter_meta:
+                reset = True
+                pending.append("chapter_source_missing")
+            elif chapter_meta[prev] != chapter_meta[fp] and not ({prev, fp} & intro_pages):
+                reset = True
+                pending.append("chapter_reset:metadata")
+        if reset:
             if cur:
                 chains_out.append(cur)
             cur = []
         if kind == "verse":
+            if pending:
+                flags_out[id(r)] = list(pending)
+                pending = []
             cur.append(r)
         prev = fp
     if cur:
         chains_out.append(cur)
-    return chains_out
+    return chains_out, flags_out
+
+
+def _chains(regions, chapter_meta):
+    """Split `regions` into chains of consecutive VERSE regions (see _walk_chains). chapter_meta is
+    REQUIRED (no default, no skip path). Returns the list of chains only."""
+    return _walk_chains(regions, chapter_meta)[0]
 
 
 def disputed(seq):
@@ -1968,6 +1993,61 @@ def disputed(seq):
     return set(idx) - keep
 
 
+def apply_order_checks(regions, chapter_meta):
+    """S5 per-source flags + the ascending GATE + head_status, over regions whose region["verse"]
+    was already set by reconcile_numbers (S3). Idempotent only on regions that have not been through
+    it (callers strip prior flags first). Never infers or increments a number; number_sources and
+    numbers_link_status are untouched.
+
+    S5: per-source `disputed` over the same chains (flags only). GATE: `disputed` over the
+    WOULD-SHIP sequence (region["verse"], None skipped); a disputed region has verse withheld
+    (None), flag verse_withheld:ascending and region["verse_withheld"] = the withheld list.
+    head_status on every kind=="verse" region: shipped / disputed (a source has a number; reasons
+    subset of numbers_disagree, numbers_single_source, ascending) / unread."""
+    chains, chapter_flags = _walk_chains(regions, chapter_meta)
+    for chain in chains:
+        for r in chain:
+            extra = chapter_flags.get(id(r))
+            if extra:
+                r["flags"] = list(r.get("flags") or []) + extra
+    # flags for a chain-start verse that is not in any chain cannot happen: every verse is chained.
+    for chain in chains:
+        disputed_by = [set() for _ in chain]
+        for src in ("read", "witness"):
+            seq = [r["number_sources"].get(src) for r in chain]
+            for i in disputed(seq):
+                disputed_by[i].add(src)
+        for region, srcs in zip(chain, disputed_by):
+            region["disputed"] = bool(srcs)
+            region["disputed_by"] = sorted(srcs)
+            if srcs:
+                flags = list(region.get("flags") or [])
+                flags.extend(f"verse_order_disputed:{src}" for src in sorted(srcs))
+                region["flags"] = flags
+        gate_seq = [r.get("verse") for r in chain]
+        for i in sorted(disputed(gate_seq)):
+            r = chain[i]
+            r["verse_withheld"] = list(r["verse"])
+            r["verse"] = None
+            r["flags"] = list(r.get("flags") or []) + ["verse_withheld:ascending"]
+    for r in regions:
+        if r.get("kind") != "verse":
+            continue
+        if r.get("verse") is not None:
+            r["head_status"], r["head_status_reasons"] = "shipped", []
+        elif any(v is not None for v in (r.get("number_sources") or {}).values()):
+            reasons = set()
+            if r.get("numbers_link_status") == "numbers_disagree":
+                reasons.add("numbers_disagree")
+            if r.get("numbers_link_status") == "numbers_single_source":
+                reasons.add("numbers_single_source")
+            if r.get("verse_withheld") is not None:
+                reasons.add("ascending")
+            r["head_status"], r["head_status_reasons"] = "disputed", sorted(reasons)
+        else:
+            r["head_status"], r["head_status_reasons"] = "unread", []
+
+
 def _new_unanchored(fp, leading_events, config):
     """A continuation_unanchored region from a page's (col, band) events before its first head."""
     unanchored = {
@@ -1983,7 +2063,7 @@ def _new_unanchored(fp, leading_events, config):
 
 
 def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected_by_page,
-                      witness_by_page, config, abstained=False):
+                      witness_by_page, config, abstained=False, *, chapter_meta):
     """Walk confirmed heads in reading order across `page_records` (ordered list of dicts with
     at least 'file_page'; pages chain ONLY if consecutive file pages) and build region records.
 
@@ -2227,24 +2307,7 @@ def assemble_regions(page_records, page_s1_by_page, candidates_by_page, rejected
             flags.append("head_only")
         region["flags"] = flags
 
-    # S5 ascending invariant, per NUMBER SOURCE (replaces the single-source verse_not_ascending
-    # check). That check only looked at the RECONCILED region["verse"], which is None on a
-    # disagreement, so it could not see one: 0d5622e's check never fired on 126R 22->32,
-    # 127R 24->21, 404R 2->35. It also chained across page gaps (92->126); _chains resets there.
-    # Checked independently per source (read, witness); flags only -- never changes region["verse"].
-    for chain in _chains(regions):
-        disputed_by = [set() for _ in chain]
-        for src in ("read", "witness"):
-            seq = [r["number_sources"].get(src) for r in chain]
-            for i in disputed(seq):
-                disputed_by[i].add(src)
-        for region, srcs in zip(chain, disputed_by):
-            region["disputed"] = bool(srcs)
-            region["disputed_by"] = sorted(srcs)
-            if srcs:
-                flags = list(region.get("flags") or [])
-                flags.extend(f"verse_order_disputed:{src}" for src in sorted(srcs))
-                region["flags"] = flags
+    apply_order_checks(regions, chapter_meta)
 
     return regions, page_summaries
 

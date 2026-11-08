@@ -106,7 +106,8 @@ def _build_real_run():
               "inset_thr": inset_thr}
     regions, page_summaries = VR.assemble_regions(
         page_records_ordered, s1_by_page, confirmed_by_page, rejected_by_page,
-        witness_by_page, config)
+        witness_by_page, config,
+        chapter_meta={fp: m for fp in PAGES if (m := BVR.load_chapter_metadata(VOLUME_DIR, fp)[0])})
     VR.assert_numbering_invariant(regions)
     VR.check_region_rects(regions, geom_by_page)
 

@@ -106,7 +106,8 @@ def test_layout_page_91_end_to_end():
     regions, _ = VR.assemble_regions(
         [{"file_page": 90}, {"file_page": 91}], {90: s90, 91: s91},
         {90: [vcand(90, "left", 30, 1)], 91: [vcand(91, "right", 50, 2)]},
-        {90: [], 91: []}, {90: None, 91: None}, config={})
+        {90: [], 91: []}, {90: None, 91: None}, config={},
+        chapter_meta={90: ("GENESIS", 1), 91: ("GENESIS", 1)})
     assert _zero(B.check_layout(regions)), B.check_layout(regions)["counts"]
     # the BUGGY shape as 26af210 produced it (Chris found it in the step-3 console, 2026-10-11):
     # Ver. 1 had nothing on 91; Ver. 2 got the top of both columns although its head is lower right.

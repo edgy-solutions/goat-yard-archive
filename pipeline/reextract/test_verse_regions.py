@@ -10,7 +10,10 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 104
+EXPECTED_TESTS = 118
+
+# one (book, chapter) on every page: existing fixtures never change chapter by metadata
+_CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
 
 
 # 1. derive_threshold ---------------------------------------------------------------------------
@@ -850,7 +853,7 @@ def test_assemble_regions_witness_pairs_by_text_not_by_numbers():
     s1 = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400, "left": bands, "right": [], "full": []}
     witness = {"verse_heads": wit_nums, "verse_lines": _WIT_TEXTS, "chapter_count": 0}
     regions, summaries = VR.assemble_regions(
-        [{"file_page": 1}], {1: s1}, {1: cands}, {1: []}, {1: witness}, config={})
+        [{"file_page": 1}], {1: s1}, {1: cands}, {1: []}, {1: witness}, config={}, chapter_meta=_CM)
     assert [r["witness_pairing"] for r in regions] == ["paired"] * 4
     assert [r["number_sources"]["witness"] for r in regions] == wit_nums
     assert [r["number_sources"]["read"] for r in regions] == [[n] for n in read_nums]
@@ -890,7 +893,7 @@ def test_chains_splits_at_chapter_intro_and_page_gap():
         {"kind": "unknown_kind", "file_page_first": 6, "tag": "u"},     # invisible to the walk
         {"kind": "verse", "file_page_first": 7, "tag": "f"},
     ]
-    chains = VR._chains(regs)
+    chains = VR._chains(regs, _CM)
     assert [[r["tag"] for r in c] for c in chains] == [["a", "b"], ["c"], ["d", "e", "f"]]
 
 
@@ -911,7 +914,7 @@ def test_ascending_invariant_wired_into_assemble_regions():
     s1 = {"file_page": 1, "H": 1000, "W": 800, "xdiv": 400, "left": bands, "right": [], "full": []}
     witness = {"verse_heads": [[n] for n in nums], "verse_lines": _WIT_TEXTS, "chapter_count": 0}
     regions, _ = VR.assemble_regions(
-        [{"file_page": 1}], {1: s1}, {1: cands}, {1: []}, {1: witness}, config={})
+        [{"file_page": 1}], {1: s1}, {1: cands}, {1: []}, {1: witness}, config={}, chapter_meta=_CM)
     assert [r["disputed"] for r in regions] == [False, False, True, True]
     assert [r["disputed_by"] for r in regions] == [[], [], ["read", "witness"], ["read", "witness"]]
     assert "verse_order_disputed:read" in regions[2]["flags"]
@@ -940,7 +943,7 @@ def test_chapter_count_resets_at_page_gap_404_to_745():
         s1b, cb = page(nxt, "verse")
         regions, summaries = VR.assemble_regions(
             [{"file_page": 404}, {"file_page": nxt}], {404: s1a, nxt: s1b}, {404: ca, nxt: cb},
-            {404: [], nxt: []}, {404: None, nxt: None}, config={})
+            {404: [], nxt: []}, {404: None, nxt: None}, config={}, chapter_meta=_CM)
         verse = [r for r in regions if r["kind"] == "verse"]
         assert len(verse) == 1 and verse[0]["file_page_first"] == nxt
         assert verse[0]["number_sources"]["count"] == want_count, (nxt, verse[0]["number_sources"])
@@ -969,21 +972,21 @@ def test_unanchored_continuation_listed_first_on_its_page_90_layout():
         return s1, [cand(fp, y, k) for y, k in heads]
 
     s1, c = page(90, [(30, "chapter"), (50, "verse")])
-    regions, _ = VR.assemble_regions([{"file_page": 90}], {90: s1}, {90: c}, {90: []}, {90: None}, config={})
+    regions, _ = VR.assemble_regions([{"file_page": 90}], {90: s1}, {90: c}, {90: []}, {90: None}, config={}, chapter_meta=_CM)
     assert [r["kind"] for r in regions] == ["continuation_unanchored", "chapter_intro", "verse"],         [r["kind"] for r in regions]
     assert regions[0]["rects"][0]["box"][1] == 10
 
     s1a, ca = page(89, [(30, "verse")])
     s1b, cb = page(91, [(30, "chapter"), (50, "verse")])
     regions, _ = VR.assemble_regions([{"file_page": 89}, {"file_page": 91}], {89: s1a, 91: s1b},
-                                     {89: ca, 91: cb}, {89: [], 91: []}, {89: None, 91: None}, config={})
+                                     {89: ca, 91: cb}, {89: [], 91: []}, {89: None, 91: None}, config={}, chapter_meta=_CM)
     got = [(r["kind"], r["file_page_first"]) for r in regions]
     assert got == [("continuation_unanchored", 89), ("verse", 89), ("continuation_unanchored", 91),
                    ("chapter_intro", 91), ("verse", 91)], got
     # chained control (89 -> 90): leading text extends 89's open verse, no continuation record
     s1b, cb = page(90, [(30, "chapter"), (50, "verse")])
     regions, _ = VR.assemble_regions([{"file_page": 89}, {"file_page": 90}], {89: s1a, 90: s1b},
-                                     {89: ca, 90: cb}, {89: [], 90: []}, {89: None, 90: None}, config={})
+                                     {89: ca, 90: cb}, {89: [], 90: []}, {89: None, 90: None}, config={}, chapter_meta=_CM)
     got = [(r["kind"], r["file_page_first"]) for r in regions]
     assert got == [("continuation_unanchored", 89), ("verse", 89), ("chapter_intro", 90), ("verse", 90)], got
 
@@ -1007,7 +1010,7 @@ def test_leading_text_continues_previous_page_region_91_layout():
     regions, _ = VR.assemble_regions(
         [{"file_page": 90}, {"file_page": 91}], {90: s90, 91: s91},
         {90: [vcand(90, "left", 30, 1)], 91: [vcand(91, "right", 50, 2)]},
-        {90: [], 91: []}, {90: None, 91: None}, config={})
+        {90: [], 91: []}, {90: None, 91: None}, config={}, chapter_meta=_CM)
     v = {r["number_sources"]["read"][0]: r for r in regions if r["kind"] == "verse"}
     r1 = {(x["file_page"], x["col"]): x["box"] for x in v[1]["rects"]}
     r2 = {(x["file_page"], x["col"]): x["box"] for x in v[2]["rects"]}
@@ -1018,7 +1021,7 @@ def test_leading_text_continues_previous_page_region_91_layout():
     regions, _ = VR.assemble_regions(
         [{"file_page": 89}, {"file_page": 91}], {89: dict(s90, file_page=89), 91: s91},
         {89: [vcand(89, "left", 30, 1)], 91: [vcand(91, "right", 50, 2)]},
-        {89: [], 91: []}, {89: None, 91: None}, config={})
+        {89: [], 91: []}, {89: None, 91: None}, config={}, chapter_meta=_CM)
     got = [(r["kind"], r["file_page_first"]) for r in regions]
     assert got[-2:] == [("continuation_unanchored", 91), ("verse", 91)], got
     cont = regions[-2]
@@ -1032,7 +1035,7 @@ def test_head_only_region_has_head_band_counted_and_region_empty_via_helper():
     cand = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20],
             "kind": "verse", "signature": {}, "head_confirm": None, "flags": []}
     regions, _ = VR.assemble_regions(
-        [{"file_page": 1}], {1: s1}, {1: [cand]}, {1: []}, {1: None}, config={})
+        [{"file_page": 1}], {1: s1}, {1: [cand]}, {1: []}, {1: None}, config={}, chapter_meta=_CM)
     assert len(regions) == 1
     # FIX5: the head band belongs to its own region's rect (extended on open) -- a region with
     # ONLY its head band is not empty (it has one ink band: the head itself), but it IS head_only.
@@ -1064,7 +1067,7 @@ def test_continuation_chains_and_unanchored():
     s1_p2 = {"file_page": 2, "H": 100, "W": 200, "xdiv": 100, "left": [body_band], "right": [], "full": []}
     regions_a, _ = VR.assemble_regions(
         [{"file_page": 1}, {"file_page": 2}],
-        {1: s1_p1, 2: s1_p2}, {1: [cand], 2: []}, {1: [], 2: []}, {1: None, 2: None}, config={})
+        {1: s1_p1, 2: s1_p2}, {1: [cand], 2: []}, {1: [], 2: []}, {1: None, 2: None}, config={}, chapter_meta=_CM)
     assert len(regions_a) == 1
     assert regions_a[0]["region_empty"] is False
     assert any(r["file_page"] == 2 for r in regions_a[0]["rects"])
@@ -1073,7 +1076,7 @@ def test_continuation_chains_and_unanchored():
     s1_p3 = {"file_page": 3, "H": 100, "W": 200, "xdiv": 100, "left": [body_band], "right": [], "full": []}
     regions_b, _ = VR.assemble_regions(
         [{"file_page": 1}, {"file_page": 3}],
-        {1: s1_p1, 3: s1_p3}, {1: [cand], 3: []}, {1: [], 3: []}, {1: None, 3: None}, config={})
+        {1: s1_p1, 3: s1_p3}, {1: [cand], 3: []}, {1: [], 3: []}, {1: None, 3: None}, config={}, chapter_meta=_CM)
     kinds = sorted(r["kind"] for r in regions_b)
     assert kinds == ["continuation_unanchored", "verse"]
     verse_r = next(r for r in regions_b if r["kind"] == "verse")
@@ -1427,7 +1430,7 @@ def test_assemble_regions_abstained_flag_emits_zero_regions_and_head_detection()
     cand = {"file_page": 1, "col": "left", "y0": 10, "y1": 20, "box": [0, 10, 100, 20],
             "kind": "verse", "signature": {}, "head_confirm": None, "flags": []}
     regions, page_summaries = VR.assemble_regions(
-        [{"file_page": 1}], {1: s1_p1}, {1: [cand]}, {1: []}, {1: None}, config={}, abstained=True)
+        [{"file_page": 1}], {1: s1_p1}, {1: [cand]}, {1: []}, {1: None}, config={}, abstained=True, chapter_meta=_CM)
     # Candidates are passed in here (as build_verse_regions.py would, pre-abstention-skip, if it
     # forgot to clear them) to prove abstained=True alone is what suppresses regions -- not an
     # empty candidates_by_page upstream.
@@ -2113,6 +2116,167 @@ def test_ig_p925_pair_overlap_18_measured_20_reproduces():
     assert len(hit) == 1, rec["pairs"]
     p = hit[0]
     assert p["measured_descender"] == 20 and p["T"] == 20 and p["T_source"] == "measured", p
+
+
+# -- ascending gate + chapter source (PREDICTION_ascending_gate_20261108.md) ------------------------
+
+def _og_regions(spec, meta=None):
+    """spec: list of ('verse', page, read, witness) | ('chapter_intro', page). Builds region dicts,
+    runs S3 reconcile exactly as assemble_regions does, then apply_order_checks."""
+    regions = []
+    for item in spec:
+        if item[0] == "verse":
+            _, fp, rd, wt = item
+            regions.append({"kind": "verse", "file_page_first": fp, "flags": [],
+                            "number_sources": {"count": None, "read": None if rd is None else [rd],
+                                               "witness": None if wt is None else [wt]}})
+        else:
+            regions.append({"kind": item[0], "file_page_first": item[1], "flags": [],
+                            "number_sources": {"count": None, "read": None, "witness": None}})
+    for r in regions:
+        if r["kind"] != "verse":
+            continue
+        rn = VR.reconcile_numbers(r["number_sources"])
+        r["numbers_link_status"], r["verse"] = rn["numbers_link_status"], rn["verse"]
+    VR.apply_order_checks(regions, _CM if meta is None else meta)
+    VR.assert_numbering_invariant(regions)
+    return regions
+
+
+# (name, truths, misread index, misread value, leading chapter_intro)
+_OG_MISREADS = {
+    "126R": ([21, 22, 23, 24], 1, 32, False),
+    "127R": ([22, 23, 24, 25], 2, 21, False),
+    "404R": ([1, 2, 3, 4], 1, 35, True),
+}
+
+
+def _og_arm(name, arm):
+    truths, k, mis, intro = _OG_MISREADS[name]
+    reads = list(truths)
+    reads[k] = mis
+    if arm == "witness_disagrees":
+        wits = list(truths)
+    elif arm == "witness_ablated":
+        wits = [None] * len(truths)
+    else:
+        wits = list(reads)
+    spec = [("chapter_intro", 1)] if intro else []
+    spec += [("verse", 1, rd, wt) for rd, wt in zip(reads, wits)]
+    regions = _og_regions(spec)
+    verses = [r for r in regions if r["kind"] == "verse"]
+    assert verses[k]["verse"] != [mis] and verses[k]["verse"] is None
+    return verses, k, truths
+
+
+def _og_check_disagree(name):
+    verses, k, _ = _og_arm(name, "witness_disagrees")
+    assert verses[k]["head_status"] == "disputed" and verses[k]["head_status_reasons"] == ["numbers_disagree"]
+
+
+def _og_check_ablated(name):
+    verses, k, _ = _og_arm(name, "witness_ablated")
+    assert verses[k]["head_status"] == "disputed" and verses[k]["head_status_reasons"] == ["numbers_single_source"]
+
+
+def _og_check_agree_wrong(name):
+    verses, k, truths = _og_arm(name, "agree_wrong")
+    r = verses[k]
+    assert r["head_status"] == "disputed" and r["head_status_reasons"] == ["ascending"], r
+    assert "verse_withheld:ascending" in r["flags"] and r["verse_withheld"] is not None
+    for i, v in enumerate(verses):
+        if i != k:
+            assert v["head_status"] == "shipped" and v["verse"] == [truths[i]], (i, v["verse"])
+            assert "verse_withheld:ascending" not in v["flags"]
+
+
+def test_gate_126R_witness_disagrees():
+    _og_check_disagree("126R")
+
+
+def test_gate_126R_witness_ablated():
+    _og_check_ablated("126R")
+
+
+def test_gate_126R_agree_wrong_withheld_no_collateral():
+    _og_check_agree_wrong("126R")
+
+
+def test_gate_127R_witness_disagrees():
+    _og_check_disagree("127R")
+
+
+def test_gate_127R_witness_ablated():
+    _og_check_ablated("127R")
+
+
+def test_gate_127R_agree_wrong_withheld_no_collateral():
+    _og_check_agree_wrong("127R")
+
+
+def test_gate_404R_witness_disagrees():
+    _og_check_disagree("404R")
+
+
+def test_gate_404R_witness_ablated():
+    _og_check_ablated("404R")
+
+
+def test_gate_404R_agree_wrong_withheld_no_collateral():
+    _og_check_agree_wrong("404R")
+
+
+def test_chapter_reset_metadata_splits_and_decrease_not_withheld():
+    meta = {1: ("Gen", 1), 2: ("Gen", 2)}
+    spec = [("verse", 1, n, n) for n in (28, 29, 30)] + [("verse", 2, n, n) for n in (1, 2)]
+    regions = _og_regions(spec, meta)
+    assert [r["verse"] for r in regions] == [[28], [29], [30], [1], [2]]
+    assert [r["flags"].count("chapter_reset:metadata") for r in regions] == [0, 0, 0, 1, 0]
+    assert all("verse_withheld:ascending" not in r["flags"] for r in regions)
+    assert len(VR._chains(regions, meta)) == 2
+    assert len(VR._chains(regions, meta)) == 2           # pure: a second walk adds no flag
+    assert regions[3]["flags"].count("chapter_reset:metadata") == 1
+
+
+def test_chapter_reset_metadata_not_flagged_when_heading_on_either_page():
+    meta = {1: ("Gen", 1), 2: ("Gen", 2)}
+    for intro_page in (2, 1):
+        spec = [("verse", 1, 29, 29), ("verse", 1, 30, 30)]
+        spec.insert(0 if intro_page == 1 else 2, ("chapter_intro", intro_page))
+        spec += [("verse", 2, 1, 1), ("verse", 2, 2, 2)]
+        regions = _og_regions(spec, meta)
+        assert not any("chapter_reset:metadata" in r["flags"] for r in regions), intro_page
+        if intro_page == 2:      # the heading itself resets the chain, so 30 -> 1 is legal
+            assert [r["verse"] for r in regions if r["kind"] == "verse"] == [[29], [30], [1], [2]]
+        # intro_page == 1: the spec exempts the boundary from the metadata reset, so the chain runs
+        # on and 30 -> 1 is gated (documented spec behavior; reported as a residual).
+
+
+def test_chapter_source_missing_splits_and_flags_first_verse():
+    spec = [("verse", 1, n, n) for n in (29, 30)] + [("verse", 2, n, n) for n in (1, 2)]
+    for meta in ({1: ("Gen", 1)}, {2: ("Gen", 2)}):          # either page's metadata missing
+        regions = _og_regions(spec, meta)
+        assert [r["flags"].count("chapter_source_missing") for r in regions] == [0, 0, 1, 0], meta
+        assert [r["verse"] for r in regions] == [[29], [30], [1], [2]]
+    assert "chapter_source_missing" not in " ".join(
+        f for r in _og_regions(spec, {1: ("Gen", 1), 2: ("Gen", 1)}) for f in r["flags"])
+
+
+def test_gate_end_of_chain_tie_withholds_misread_and_tail():
+    # 21,[32],22 agree-wrong: 32 and 22 tie at the same f-layer, so BOTH are withheld (conservative
+    # tie rule, same as disputed([[20],[21],[32],[23]]) == {2, 3}); 21 ships.
+    regions = _og_regions([("verse", 1, n, n) for n in (21, 32, 22)])
+    assert [r["verse"] for r in regions] == [[21], None, None]
+    assert [r["head_status_reasons"] for r in regions] == [[], ["ascending"], ["ascending"]]
+    # the literal ascending shape 21,22,32 is NOT detectable by an ascending check: all ship.
+    regions = _og_regions([("verse", 1, n, n) for n in (21, 22, 32)])
+    assert [r["verse"] for r in regions] == [[21], [22], [32]]
+
+
+def test_head_status_unread_when_no_numbers():
+    regions = _og_regions([("verse", 1, None, None), ("verse", 1, 2, 2)])
+    assert regions[0]["head_status"] == "unread" and regions[0]["head_status_reasons"] == []
+    assert regions[1]["head_status"] == "shipped"
 
 
 if __name__ == "__main__":
