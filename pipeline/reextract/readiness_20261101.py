@@ -26,6 +26,13 @@ import re
 import sys
 import time
 
+import laneB_report as LBR
+
+# This session, as ListAgents prints it. Typed in, not sniffed from the environment: a
+# session id guessed wrong attributes a measurement to a run that did not make it, which
+# is worse than one missing. A later session re-running this must change this line.
+SESSION = u"goat-yard-archive-eb [aca358]"
+
 LANE = "C:/Users/cnogr/git/goatyard-laneB/pipeline/reextract"
 AUDITS = "C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits"
 sys.path.insert(0, LANE)
@@ -75,16 +82,16 @@ def surfaces(sid):
     return (live[0] if live else None), live[1:], spent
 
 
-w(u"# Lane B readiness, re-issued on ruling 2026-11-01 item 4's definition")
-w()
-w(u"All page numbers are FILE pages (printed = file \u2212 88).")
-w()
-w(u"Built %s from `hebrew_glyph_card` + `audit_overlay_20261025` at commit "
-  u"`%s`." % (time.strftime("%Y-%m-%d %H:%M"), os.popen("git -C %s rev-parse --short HEAD" % LANE).read().strip()))
-w()
-w(u"**Supersedes** `REPORT_laneB_20261101_sitting_readiness.md` (committed `3ed712ef`), which "
-  u"measured need-supply only and had no surface clause. That file is kept and nothing in it is "
-  u"withdrawn except its readiness count.")
+for _line in LBR.header(
+        u"Lane B readiness, re-issued on ruling 2026-11-01 item 4's definition",
+        SESSION,
+        built_from=u"Built from `hebrew_glyph_card` + `audit_overlay_20261025` at commit `%s`."
+                   % os.popen("git -C %s rev-parse --short HEAD" % LANE).read().strip(),
+        supersedes=u"**Supersedes** `REPORT_laneB_20261101_sitting_readiness.md` (committed "
+                   u"`3ed712ef`), which measured need-supply only and had no surface clause. "
+                   u"That file is kept and nothing in it is withdrawn except its readiness "
+                   u"count."):
+    w(_line)
 w()
 w(u"## What readiness means here")
 w()

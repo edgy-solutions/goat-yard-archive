@@ -178,11 +178,28 @@ consumer must either act on it or state in its own output that it did not.
    |---|---|---|
    | verse-heading rect | **`ink_box`** — the region's ink extent, including capitals, ascenders and descenders | **top within 5 px**, and **bottom within 5 px OR within one measured descender height**. Top and bottom only; **x is column geometry and is not scored.** |
 
-   The descender height is the **run's own typographic descender mode, derived per run** — 16 px on
-   vol.1 — not a constant. **Basis:** the page-geometry lane's rerun-8 conventions, under Chris's
-   ruling 2 of 2026-10-25, relayed to this lane in writing. Lane B has not re-measured it, and the
-   Hebrew-span tolerance was never stated in these terms, so the two are **not** the same number
-   written twice.
+   The descender height is **measured at the boundary**, with **16 px as a floor and not as the
+   value**. On vol.1 the geometry lane measured 20 px at the 925R boundary, so a consumer that
+   asserts a flat 16 would refuse a rect the passing run accepts.
+
+   **Basis:** the page-geometry lane's **rerun-9** lock `b213cb9d` (results `4605c5c7`; substrate-v1
+   is tagged at the rerun-9 commit), under Chris's re-lock of P13 as "≤ the measured descender at
+   the boundary, floor d = 16", relayed to this lane in writing.
+
+   **Withdrawn 2026-11-08:** this rule previously cited the lane's **rerun-8** conventions and gave
+   the descender as "16 px on vol.1". Rerun 8's P13 FAILED on this exact clause — 925R's overlap
+   was 18 px against d = 16, it was real type, and the lock's fragment hypothesis was falsified —
+   so the citation named the run that was superseded on the very sentence it was supporting. The
+   likely source of the error is commit `301bde5`, whose message says "(rerun-8 lock)": true of the
+   DESIGN, but the design lock and the passing lock are different objects and only the second
+   licenses a consumer. Relayed to the geometry lane on 2026-11-08; if their lock differs from
+   this, theirs governs.
+
+   Lane B has not re-measured any of it. The Hebrew-span tolerance was never stated in these terms,
+   so the two are **not** the same number written twice — and this row is **not transferable** to
+   Lane B's Hebrew-span records, which carry no `ink_box` field at all (0 occurrences in
+   `hebrew_box_reratify.jsonl`). A tolerance stated over a field the records do not have would read
+   as satisfied by default.
 5. **On segmentation failure, abstain and flag.** Never fall back to reading the whole band: that
    records one note where there were thirteen.
 6. **Count is the gate.** Detected units must equal the extractor's count or the page abstains.

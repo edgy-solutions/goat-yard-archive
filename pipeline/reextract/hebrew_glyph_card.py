@@ -54,7 +54,7 @@ stands in front of the outbound calls -- a signing surface is not a softer place
 Everything shown is real page pixels, upscaled NEAREST. No smoothing, ever: a resampled curl is an
 invented curl, and the whole question on p217:n2 was whether a curl is present or ink-filled.
 """
-import base64, io, json, re, sys, unicodedata
+import base64, hashlib, io, json, re, sys, unicodedata
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw
@@ -1464,18 +1464,100 @@ NEEDS = {
     # needs do not currently decide anything -- they are here so that if a verdict ever lands, the
     # need does not have to be remembered.
     "p910:n3": (("adjudication", "laneB"),),
-    "p596:n2": (("audit_row", "laneB"),),
+    # Chris, 2026-11-08: "p596:n2 goes on the next sheet by hash." `audit_row` STAYS -- he also
+    # said no audit rows written by hand, so nobody has adjudicated this span and the record
+    # should not pretend otherwise. What changes is that the audit row is no longer the thing
+    # blocking it: `sheet` is, and `sheet` is met by building the next sheet, which is work this
+    # lane can actually do. The two needs say different things and both are true.
+    "p596:n2": (("sheet", "laneB"), ("audit_row", "laneB")),
     "p628:n2": (("strip_baseline", "audit"), ("exemplar:final_nun", "audit"),
                 ("exemplar:vav", "audit"), ("latin_gloss", "audit")),
+}
+
+# Human-directed sheet inclusions: a THIRD route onto a sheet, beside a qualifying audit
+# verdict and a reversal flag. Chris, 2026-11-08: "p596:n2 goes on the next sheet by hash; no
+# audit rows written by hand." Deliberately NOT folded into audit_qualifies -- that function
+# answers what a human adjudicated on 2026-10-25, and a directive about a future sheet is not
+# a verdict about pixels. Keeping them apart is also what leaves `signable` alone, so the
+# five-span console already built does not quietly grow a sixth row.
+#
+# `pixel_pin` is the point of "by hash": the file, and 16 hex of SHA-256 over its bytes, so a
+# sheet cannot carry a different crop under the same span id. `sheet_crop_sha16` is the sheet's
+# OWN crop and is None until a sheet exists -- which is what makes the `sheet` need falsifiable
+# without scanning a directory for documents.
+DIRECTED = {
+    "p596:n2": dict(
+        on="2026-11-08",
+        by="Chris",
+        words="p596:n2 goes on the next sheet by hash; no audit rows written by hand",
+        # Relative to D.DATA, which is the AUDITS directory, not the volume root. The first
+        # version of this entry wrote "audits/..." and the pin reported the crop gone --
+        # which is the gate working: a pin that cannot find its file must fail, not abstain.
+        pixel_pin=("hebrew_aperture_crops_20260920/p596_n2_A2_spanbox.png",
+                   "842abe52c2829e14"),
+        sheet_crop_sha16=None,
+        licenses="sheet inclusion only: not a verdict, and not a qualifying audit row",
+    ),
 }
 
 NEED_TEXT = {
     "strip_baseline": "a strip with the baseline visible",
     "adjudication": "a human verdict: the 2026-10-25 audit never reached this row",
-    "audit_row": "an audit row at all: this span was never adjudicated",
+    "audit_row": "an audit row at all: this span was never adjudicated (not a precondition "
+                 "for being SHEETED, only for being re-signed under item 3)",
+    "sheet": "a signing sheet that contains it: it has never been on one",
     "latin_gloss": "the Latin gloss as the expected tile",
     "reading_order_tiles": "a reading-order tile card showing the candidate and its reverse",
 }
+
+
+def pin_holds(span_id):
+    """(holds, why) -- does the directive's pinned file still hash to what it recorded?
+
+    Re-read from the bytes, never from a sidecar: a pin that trusted a recorded number to
+    verify itself would agree by construction. A missing file is a failure, not an abstention,
+    because "the pixels this directive is about" is the whole content of "by hash".
+    """
+    d = DIRECTED.get(span_id)
+    if d is None:
+        return False, "no directive recorded for this span"
+    rel, want = d["pixel_pin"]
+    path = D.DATA / rel
+    if not path.exists():
+        return False, "the pinned crop is gone: %s" % rel
+    with io.open(path, "rb") as fh:
+        got = hashlib.sha256(fh.read()).hexdigest()[:16]
+    if got != want:
+        return False, "the pinned crop now hashes %s, not %s" % (got, want)
+    return True, "pinned crop %s matches %s" % (rel.rsplit("/", 1)[-1], want)
+
+
+def directed(span_id):
+    """(directed, why) -- is this span on a sheet by a human's instruction, pins holding?"""
+    d = DIRECTED.get(span_id)
+    if d is None:
+        return False, "no directive recorded for this span"
+    ok, why = pin_holds(span_id)
+    if not ok:
+        return False, "directed %s by %s, but %s" % (d["on"], d["by"], why)
+    return True, "directed %s by %s: %s (%s)" % (d["on"], d["by"], d["words"], why)
+
+
+def sheetable(span_id):
+    """(sheetable, why) -- may the NEXT sheet contain this span?
+
+    Wider than `signable` on purpose. `signable` is item 3's rule for RE-signing a span the
+    2026-10-25 audit ruled on, and the five-span console is built to it. This answers a
+    different question -- what goes on the next sheet -- and a human's directive is an answer
+    to it that no audit verdict can supply. Nothing that is signable is excluded here.
+    """
+    ok, why = signable(span_id)
+    if ok:
+        return True, "signable: %s" % why
+    dok, dwhy = directed(span_id)
+    if dok:
+        return True, dwhy
+    return False, "not signable (%s) and not directed (%s)" % (why, dwhy)
 
 
 def need_text(key):
@@ -1536,6 +1618,17 @@ def need_met(span_id, key):
         n_sig = len(sig_exemplars(letter))
         n_span = len(exemplars(letter, partners, exclude=(span_id,)))
         return (n_sig + n_span >= 1), "%d signed + %d span exemplar(s)" % (n_sig, n_span)
+    if key == "sheet":
+        # Read off the directive's own sheet_crop_sha16, not off a scan of the audits folder.
+        # The question is "has a sheet been built that shows THESE pixels", and only the build
+        # that cut the crop can answer that; a document found by filename glob would answer a
+        # weaker question and call it this one.
+        d = DIRECTED.get(span_id)
+        if d is None:
+            return False, "no sheet, and no directive that one be built"
+        if not d.get("sheet_crop_sha16"):
+            return False, "directed onto the next sheet %s; that sheet is not built yet" % d["on"]
+        return True, "sheeted, crop %s" % d["sheet_crop_sha16"]
     if key in ("adjudication", "audit_row"):
         # Not a thing this console can supply, and deliberately not faked as one. These report the
         # same fact item 3's qualifying clause reports, from the other side: nobody decided.
@@ -3085,6 +3178,97 @@ def selftest():
     #
     # 15 checks. This line is not in its own total: `ck` increments after evaluating.
     ck("section 13 ran every one of its checks", n[0] - _e0 == 15, n[0] - _e0)
+
+    # ---------------------------------------------------------------- (14) directed inclusions
+    # Chris, 2026-11-08: "p596:n2 goes on the next sheet by hash; no audit rows written by hand."
+    # A human-directed route onto a sheet. The hazard is not that it admits a span -- that is its
+    # purpose -- but that it quietly widens a population somebody is about to sign, so both halves
+    # are asserted here: sheetable yes, signable no, and the five-row signable set unchanged.
+    print("")
+    print("(14) directed sheet inclusions")
+    _e14 = n[0]
+    _dirs = sorted(DIRECTED)
+    # Same union section 13 uses, plus the directed spans: a directive for a span in no other
+    # population would otherwise be invisible to every check below.
+    _pop14 = sorted(set(r["span_id"] for r in _AUD.AUDIT) | set(NEEDS) | set(DIRECTED))
+    _cards14 = {c["span_id"] for c in CARDS}
+    ck("at least one directive is recorded, so this section has a subject", bool(_dirs), _dirs)
+    ck("every directive's pinned crop still hashes to what it recorded",
+       all(pin_holds(s)[0] for s in _dirs),
+       [(s, pin_holds(s)[1]) for s in _dirs if not pin_holds(s)[0]])
+    ck("every directive names a span in the card population",
+       all(s in _cards14 for s in _dirs), [s for s in _dirs if s not in _cards14])
+    ck("every directive carries who, when, the words, and what it licenses",
+       all(all(str(DIRECTED[s].get(k) or "").strip() for k in ("on", "by", "words", "licenses"))
+           for s in _dirs),
+       [s for s in _dirs if not all(str(DIRECTED[s].get(k) or "").strip()
+                                    for k in ("on", "by", "words", "licenses"))])
+    # A directive for a span the audit already qualifies would be a widening of a rule that
+    # already covers it -- indistinguishable, afterwards, from the rule having changed.
+    ck("no directive covers a span the audit already qualifies",
+       not [s for s in _dirs if audit_qualifies(s)[0]],
+       [s for s in _dirs if audit_qualifies(s)[0]])
+    ck("no directive claims to license a verdict",
+       not [s for s in _dirs if "verdict" not in DIRECTED[s]["licenses"].lower()
+            or "not a verdict" not in DIRECTED[s]["licenses"].lower()],
+       [DIRECTED[s]["licenses"] for s in _dirs])
+    # The pin discriminates: a comparison that would pass on any bytes is not a pin.
+    _other = D.DATA / "hebrew_aperture_crops_20260920" / "p596_context_strip.png"
+    _oh = hashlib.sha256(_other.read_bytes()).hexdigest()[:16] if _other.exists() else None
+    ck("the pinned hash is specific to those pixels, not shared by a neighbouring crop",
+       _oh is not None and _oh != DIRECTED["p596:n2"]["pixel_pin"][1], _oh)
+    ck("pin_holds refuses a span with no directive",
+       pin_holds("p254:n1") == (False, "no directive recorded for this span"),
+       pin_holds("p254:n1"))
+
+    ck("p596:n2 is sheetable, by the directive", sheetable("p596:n2")[0], sheetable("p596:n2")[1])
+
+    # THE guard, and it has to bite on the audit clause by itself. `signable` is an AND of the
+    # audit verdict and the needs, and p596:n2 fails both, so the two checks below it pass whether
+    # or not the directive has leaked into qualification -- measured by mutation 2026-11-08: fold
+    # the directive into audit_qualifies and both of them go on passing. These two cannot: the
+    # qualifying population is the audit's answer with no needs clause in it, so a directive
+    # folded in there has nothing to hide behind.
+    ck("audit_qualifies does not consult the directive: it still reports p596:n2 absent",
+       audit_qualifies("p596:n2") == (False, "absent from the audit: no verdict and no "
+                                             "reversal flag"),
+       audit_qualifies("p596:n2"))
+    ck("the audit-qualifying population is unchanged by the directive",
+       sorted(s for s in _pop14 if audit_qualifies(s)[0]) == ["p233:n4", "p254:n1", "p442:n0",
+                                                              "p628:n2", "p798:n0", "p831:n2"],
+       sorted(s for s in _pop14 if audit_qualifies(s)[0]))
+    # Kept, and relabelled to what they show: two independent clauses hold this span out of the
+    # console. That is worth asserting as belt and braces. It is not evidence about either clause.
+    ck("p596:n2 is NOT signable -- by BOTH clauses, audit and needs (overdetermined)",
+       not signable("p596:n2")[0] and not audit_qualifies("p596:n2")[0]
+       and bool(unmet("p596:n2")), (signable("p596:n2"), unmet("p596:n2")))
+    ck("the signable set is still exactly the five measured on 2026-11-01",
+       sorted(s for s in _pop14 if signable(s)[0]) == ["p254:n1", "p442:n0", "p628:n2",
+                                                       "p798:n0", "p831:n2"],
+       sorted(s for s in _pop14 if signable(s)[0]))
+    ck("nothing signable is excluded from sheetable",
+       all(sheetable(s)[0] for s in _pop14 if signable(s)[0]),
+       [s for s in _pop14 if signable(s)[0] and not sheetable(s)[0]])
+
+    ck("every directed span records a `sheet` need",
+       all("sheet" in [k for k, _src in NEEDS.get(s, ())] for s in _dirs),
+       [s for s in _dirs if "sheet" not in [k for k, _src in NEEDS.get(s, ())]])
+    ck("the `sheet` need is unmet while the sheet's own crop hash is unrecorded",
+       all(need_met(s, "sheet")[0] == bool(DIRECTED[s].get("sheet_crop_sha16")) for s in _dirs),
+       [(s, need_met(s, "sheet")) for s in _dirs])
+    ck("p596:n2 still records that it has no audit row",
+       "audit_row" in [k for k, _src in NEEDS.get("p596:n2", ())],
+       [k for k, _src in NEEDS.get("p596:n2", ())])
+    # NAMED RESIDUAL: `sheet` is met by a hash written INTO this registry by whoever builds the
+    # next sheet. Nothing here forces that write, so a sheet could be built and the need left
+    # reading unmet. What this does catch is the inverse -- a hash recorded with no sheet behind
+    # it fails the pin's sibling check the moment a consumer re-reads those bytes.
+    #
+    # 17 checks. Not counting this line: `ck` increments after evaluating. Two were added
+    # 2026-11-08 after mutation showed the population pair was overdetermined: both passed
+    # through the very change they were written to catch, because `signable` is an AND and
+    # this span fails both halves of it.
+    ck("section 14 ran every one of its checks", n[0] - _e14 == 17, n[0] - _e14)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
