@@ -515,7 +515,16 @@ def md_report(header, run_sha, tables, ev, nik, recs, prov):
     L += ["", "Every nikud_only outcome is the MODEL adding points: 0 of 45 signed strings carry nikud.", "",
           "## Registered numbers (exact_in_crop)", ""]
     for k, v in ev["registered_numbers"].items():
-        L.append(f"- {k}: registered {v['registered_pct']}% ({v['registered_n']}), measured {v['measured_pct']}% ({v['measured_n']}), delta {v['delta_pp']:+} pp (no band, no verdict)")
+        # The JSON carries `delta_comparable` and a `denominator_note`; the markdown used to print
+        # a signed delta regardless, so the report asserted a comparison its own data denied. A
+        # prediction registered over 45 spans and a run that read 41 do not share a denominator,
+        # and the arithmetic difference of two rates over different populations is not a delta.
+        head = (f"- {k}: registered {v['registered_pct']}% ({v['registered_n']}), "
+                f"measured {v['measured_pct']}% ({v['measured_n']})")
+        if v["delta_comparable"]:
+            L.append(head + f", delta {v['delta_pp']:+} pp (no band, no verdict)")
+        else:
+            L.append(head + f", **NOT COMPARABLE** -- {v['denominator_note']}")
     L += ["", "## Sign / count predictions (hit or missed)", ""]
     for k, v in ev["sign_predictions"].items():
         L.append(f"- {k}: **{'hit' if v['hit'] else 'missed'}** -- {json.dumps({x: y for x, y in v.items() if x != 'hit'}, ensure_ascii=False)}")
