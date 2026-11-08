@@ -176,24 +176,35 @@ consumer must either act on it or state in its own output that it did not.
 
    | unit | ratified rect | agrees when |
    |---|---|---|
-   | verse-heading rect | **`ink_box`** — the region's ink extent, including capitals, ascenders and descenders | **top within 5 px**, and **bottom within 5 px OR within one measured descender height**. Top and bottom only; **x is column geometry and is not scored.** |
+   | verse-heading rect | **`ink_box`** — the region's ink extent, including capitals, ascenders and descenders | **top within 5 px of the line**, and **bottom no more than `d` beyond it** (P3). Top and bottom only; **x is column geometry and is not scored.** |
 
-   The descender height is **measured at the boundary**, with **16 px as a floor and not as the
-   value**. On vol.1 the geometry lane measured 20 px at the 925R boundary, so a consumer that
-   asserts a flat 16 would refuse a rect the passing run accepts.
+   **`d` is 16 px, and it is 16 px per run.** P12 establishes it once for the whole run. It is
+   the value, not a floor under something a consumer measures per boundary. P13's per-seam
+   overlap `T` is a **different quantity**: it exists only at the 19 seams P13 covers, and
+   putting it here would loosen a ratified rule with no ruling behind it — Chris refused that
+   substitution explicitly on 2026-11-08, and the overlap hazard is v1.1's guard's job, not
+   this tolerance's. A consumer asserts 16.
 
-   **Basis:** the page-geometry lane's **rerun-9** lock `b213cb9d` (results `4605c5c7`; substrate-v1
-   is tagged at the rerun-9 commit), under Chris's re-lock of P13 as "≤ the measured descender at
-   the boundary, floor d = 16", relayed to this lane in writing.
+   **Basis:** the page-geometry lane's **rerun-9** lock `b213cb9d`, results `4605c5c7` (substrate-v1
+   is tagged at the rerun-9 commit). The tolerance is **P3**'s — tops within 5 px, bottoms no
+   more than `d` beyond the line — and **`d` = 16 per run is P12's**. Relayed to this lane in
+   writing, and corrected by the geometry lane on 2026-11-08.
 
-   **Withdrawn 2026-11-08:** this rule previously cited the lane's **rerun-8** conventions and gave
-   the descender as "16 px on vol.1". Rerun 8's P13 FAILED on this exact clause — 925R's overlap
+   **Withdrawn 2026-11-08 — the basis, not the number.** `d = 16` survives every correction below;
+   what was withdrawn is the run cited and the predicate it was attributed to. This rule
+   previously cited the lane's **rerun-8** conventions and gave the descender as "16 px on
+   vol.1". Rerun 8's P13 FAILED on this exact clause — 925R's overlap
    was 18 px against d = 16, it was real type, and the lock's fragment hypothesis was falsified —
    so the citation named the run that was superseded on the very sentence it was supporting. The
    likely source of the error is commit `301bde5`, whose message says "(rerun-8 lock)": true of the
    DESIGN, but the design lock and the passing lock are different objects and only the second
-   licenses a consumer. Relayed to the geometry lane on 2026-11-08; if their lock differs from
-   this, theirs governs.
+   licenses a consumer. Relayed to the geometry lane on 2026-11-08; their reply **corrected the
+   attribution**: the clause is P3's with `d` from P12, not a P13 re-lock. The 20 px this rule
+   previously carried as "the measured descender" is an **overlap** figure of the kind P13
+   reports at a seam, and an overlap is not a descender. It is **not reconciled** with the 18 px
+   recorded two sentences above for rerun 8's 925R overlap — Lane B cannot source either number
+   and does not claim they are the same measurement. Neither of them is `d`, which is P12's and
+   is 16 per run. Both corrections are applied above. Their lock governs.
 
    Lane B has not re-measured any of it. The Hebrew-span tolerance was never stated in these terms,
    so the two are **not** the same number written twice — and this row is **not transferable** to
@@ -280,5 +291,11 @@ A consumer that cannot run 1, 2 and 3 has not been handed a truth set; it has be
   accept two shapes (a single and a double printed rule, say) and records nothing that tells them
   apart, this format does not currently carry that distinction. A consumer who needs it should
   request the field rather than infer it from a width.
+- **OPEN GAP: nothing this lane holds emits `ink_box`.** §6.4's tolerance is stated over a field
+  that does not exist in Lane B's Hebrew-span records (0 occurrences in
+  `hebrew_box_reratify.jsonl`), so against those records the row **cannot fail** — no emitter, no
+  consumer, nothing to check. The gap is the field, not the tolerance. Until some set emits
+  `ink_box`, §6.4 is a rule the page-geometry lane can run and this lane cannot, and no
+  acceptance check in §10 covers it. Do not read the row's silence as agreement.
 - **v1 is vol.1's shape.** It has never been emitted by a second volume. Generic is a claim that
   only survives a second book.
