@@ -149,15 +149,29 @@ FLOORS_FOR = "6a2292bdb14d3c43"
 FLOORS_FILE = A / ("SCORE45_%s.json" % FLOORS_FOR)
 SCORED_PAYLOAD_DIGEST = "870bf99e65725534"
 
-EXPECTED_CHECKS_BLANK = 1671       # DERIVED from the measured blank dry-run below, by the same
-                                   # 274 + 162 real-run-only term as EXPECTED_CHECKS: 1235 + 436.
-                                   # First MEASURED by the control's own run; re-pin if it aborts.
-EXPECTED_CHECKS_BLANK_DRY = 1235   # MEASURED 2026-11-08 in blank mode: 1167 (normal) + 68 for
-                                   # GATE B0, which re-hashes the cut, the lock and the contact
-                                   # sheet, re-reads all 45 blanks off disk, and checks both of
-                                   # the sheet's disclosure maps.  The two modes differ by GATE
-                                   # B0 alone: GATE B1 runs the same number of assertions either
-                                   # way, on opposite expectations.
+EXPECTED_CHECKS_BLANK = 1674       # DERIVED from the APPROVED blank dry count below, by the same
+                                   # 274 + 162 real-run-only term as EXPECTED_CHECKS: 1238 + 436.
+                                   # The approved count is the right base: an unapproved real run
+                                   # refuses at GATE B0, so 1238 is the only state a real run can
+                                   # be in.  First MEASURED by the control's own run; re-pin if
+                                   # it aborts, and never relax it to None.
+# The blank dry count has TWO legitimate values, because three of GATE B0's assertions only run
+# when the approval record is on disk.  Both MEASURED 2026-11-08, around Chris's approval:
+#
+#   False  1235  = 1167 (the normal dry count) + 68 for GATE B0, which re-hashes the cut, the
+#                  lock and the contact sheet, re-reads all 45 blanks off disk, and checks both
+#                  of the sheet's disclosure maps.  The two MODES differ by GATE B0 alone: GATE
+#                  B1 runs the same number of assertions either way, on opposite expectations.
+#   True   1238  = the same, plus GATE B0's three assertions on the approval record itself (it
+#                  names this sheet digest, it names this cut digest, it names an approver and
+#                  a date).
+#
+# Keyed rather than collapsed to one number: 1238 alone would abort every unapproved dry-run on
+# a false alarm, and 1235 alone would leave the approved path -- the only path a real run can
+# take -- as the unchecked one.  A pin with no state cannot answer which count it should have
+# been.  The enforcement reads the state off the approval the gate returned, never re-deciding
+# it, so the key and the gate cannot disagree.
+EXPECTED_CHECKS_BLANK_DRY = {False: 1235, True: 1238}
 
 CHECKS = 0
 
@@ -1272,8 +1286,15 @@ def main():
             print(f"  population {pn}: {len(ids)} ids")
         print("  agreement_and_wrong bare=_ ctx=_   both_wrong_disagree bare=_ ctx=_")
         chk(True, "dry-run end")
-        _pin = EXPECTED_CHECKS_BLANK_DRY if blank else EXPECTED_CHECKS_DRY
-        _name = "EXPECTED_CHECKS_BLANK_DRY" if blank else "EXPECTED_CHECKS_DRY"
+        if blank:
+            # The state comes from the approval the gate RETURNED.  Deciding it again here
+            # (by re-testing the file, say) would let the key and the gate disagree about
+            # which state the run was in, which is the one thing this pin must not do.
+            _approved = bool(appr_b and appr_b.get("by"))
+            _pin = EXPECTED_CHECKS_BLANK_DRY[_approved]
+            _name = "EXPECTED_CHECKS_BLANK_DRY[approved=%s]" % _approved
+        else:
+            _pin, _name = EXPECTED_CHECKS_DRY, "EXPECTED_CHECKS_DRY"
         print(f"checks: {CHECKS} ({_name} {_pin})")
         if _pin is None:
             print(f"{_name} is UNPINNED: pin it to the count above")
