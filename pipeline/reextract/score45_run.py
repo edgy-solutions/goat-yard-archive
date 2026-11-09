@@ -64,6 +64,23 @@ ARMS = ["anthropic/claude-opus-5.5", "qwen/qwen3.7-plus"]
 CHANNELS = {"bare": "A2 span crop alone",
             "context": "A2 span crop plus Latin note text, Hebrew runs masked to U+2022"}
 PRED_SHA = "36122ad8eb06a9c2"
+
+# THE SPEND SIDE OF THE NORMAL PATH (added 2026-11-08, for the null replicate).
+#
+# SHEET_BYTES_SHA is the stream hash of the contact sheet JSON itself, so the approval record is
+# named by the BYTES of the thing it approves -- a yes filed under a sheet's digest cannot be
+# inherited by a different sheet that later occupies the same filename.  SCORED_CUT_DIGEST is the
+# cut CROPDIR holds, carried in that directory's own name.
+SHEET_BYTES_SHA = "ad1ccbe4e7bbbc8b"
+SCORED_CUT_DIGEST = "0401b636ffa7bf1a"
+APPROVAL = A / ("APPROVAL_scoring45_%s.json" % SHEET_BYTES_SHA)
+
+# The methods lock for a REPLICATE.  It is a different document from PRED: PRED is the lock this
+# run's predictions are scored against and is NOT repointed, because repointing it would make the
+# run a new experiment instead of a replicate.  This one registers the methods question, the
+# evidential population, the baseline digest and the decision rule, before the first call.
+METHODS_LOCK_SHA = "2eedacaebfc11bfb"
+METHODS_LOCK = A / ("PREDICTIONS_replicate45_%s.json" % METHODS_LOCK_SHA)
 PAYLOAD_SHA = "6745f4be489471bd"
 SET_DIGEST = "adb9a26835533dbc"
 ABSENT = "p245:n1"
@@ -81,6 +98,15 @@ HEB = re.compile("[\u0590-\u05ff]")
 
 # Pinned to the count the first FULL run observes.  None until then: the real run prints the observed
 # count and marks the header checks_pinned=false.  The dry-run has its own pinned count.
+# GATE 0S IS NOT IN ANY OF THE THREE PINS BELOW.  It runs only for a replicate (attempt >= 2)
+# and contributes 4 checks with no approval record on disk, 8 with one; `gate_spend_checks` adds
+# that to whichever pin applies, from the record the gate returned.  So a replicate's real-run
+# total is EXPECTED_CHECKS + 8, and its dry total is EXPECTED_CHECKS_DRY + 4 or + 8.  MEASURED:
+# dry 1175 unapproved (attempt 3), and 1171 at attempt 1, i.e. the old path is untouched.  The
+# approved dry value 1179 and the real total 1621 are DERIVED from the 8, not yet measured -- the
+# approved value becomes measurable the moment an approval record exists, and is re-measured then.
+# Proved live by mutation, not by a green run: six arms (lock edited, no record in a real run,
+# by=null, wrong attempt at the lock, wrong attempt at the licence, another sheet bytes sha).
 EXPECTED_CHECKS = 1613      # DERIVED 2026-11-08, not measured.  630 was MEASURED on run
                             # 6a2292bdb14d3c43, whose dry-run measured 356, so the real-run-only
                             # checks were 630 - 356 = 274 (mostly do_call's per-ladder-step host
@@ -307,6 +333,78 @@ def gate_prediction(pred):
     chk(c == PRED_SHA, f"GATE 2 prediction lock: self_sha16 recomputes to {c}, not {PRED_SHA}")
     chk(pred.get("self_sha16") == PRED_SHA, "GATE 2: file's own self_sha16 != expected")
     return {"prediction_sha16": c}
+
+
+def gate_spend(attempt, dry):
+    """GATE 0S: the replicate's methods lock recomputes, and the spend carries a recorded yes.
+
+    The two inputs are separate on purpose.  The LOCK says what question this run answers and how
+    its result will be read -- registered with a hash so a prediction cannot be edited after the
+    numbers land.  The APPROVAL says a human looked at the crops and agreed to the money.  Neither
+    substitutes for the other, and the approval is a record of its own, never a field inside the
+    sheet: answering inside a content-addressed sheet renames the thing approved.
+
+    The approval also names the ATTEMPTS it licenses.  A yes to attempt 3 is not a yes to attempt 4
+    -- same pixels, another spend -- so the licence is by named instance with equality, not by the
+    sheet alone.
+    """
+    lock = json.loads(METHODS_LOCK.read_text(encoding="utf-8"))
+    # The lock's own stated recipe: strip `self_sha16`, canonical JSON, UTF-8 bytes,
+    # ensure_ascii=False.  Implemented from the rule in the file, not from memory.
+    body = {k: v for k, v in lock.items() if k != "self_sha16"}
+    got = sha16_bytes(canon(body).encode("utf-8"))
+    chk(got == METHODS_LOCK_SHA,
+        "GATE 0S methods lock: %s recomputes to %s, not %s -- the registered lock has been edited"
+        % (METHODS_LOCK.name, got, METHODS_LOCK_SHA))
+    chk(lock.get("self_sha16") == METHODS_LOCK_SHA,
+        "GATE 0S: %s's own self_sha16 is not %s" % (METHODS_LOCK.name, METHODS_LOCK_SHA))
+    chk(lock["run"]["attempt"] == attempt
+        and lock["run"]["payload_identity_digest_required"] == SCORED_PAYLOAD_DIGEST,
+        "GATE 0S: %s registers attempt %r over payload %r, and this is attempt %r over %s.  A "
+        "replicate runs under a lock written for it."
+        % (METHODS_LOCK.name, lock["run"]["attempt"],
+           lock["run"]["payload_identity_digest_required"], attempt, SCORED_PAYLOAD_DIGEST))
+
+    appr = {"by": None, "on": None, "record": None,
+            "wanted": "a human approves a SECOND spend on pixels already approved on 2026-10-25; "
+                      "the disclosure is unchanged, the money is new"}
+    if APPROVAL.exists():
+        rec = json.loads(APPROVAL.read_text(encoding="utf-8"))
+        chk(rec.get("approves_sheet_bytes_sha16") == SHEET_BYTES_SHA,
+            "GATE 0S: %s approves sheet bytes %r, and its own name says %s"
+            % (APPROVAL.name, rec.get("approves_sheet_bytes_sha16"), SHEET_BYTES_SHA))
+        chk(rec.get("approves_cut_digest") == SCORED_CUT_DIGEST,
+            "GATE 0S: %s approves cut %r, not %s -- the approved crops are not these crops"
+            % (APPROVAL.name, rec.get("approves_cut_digest"), SCORED_CUT_DIGEST))
+        chk(bool(rec.get("by")) and bool(rec.get("on")),
+            "GATE 0S: %s names no approver or no date" % APPROVAL.name)
+        chk(attempt in (rec.get("approves_attempts") or []),
+            "GATE 0S: %s licenses attempts %r, and this is attempt %r.  A yes to one spend is not "
+            "a yes to the next one on the same crops."
+            % (APPROVAL.name, rec.get("approves_attempts"), attempt))
+        appr = dict(rec, record=APPROVAL.name)
+    if dry:
+        chk(True, "GATE 0S approval evaluated (dry-run: reported, not fatal): by=%r"
+                  % appr.get("by"))
+    else:
+        chk(bool(appr.get("by")),
+            "GATE 0S: this spend is not approved -- %s does not exist or names no approver.  The "
+            "crops were approved on 2026-10-25 and the scored run spent on them; a replicate is a "
+            "new spend and needs its own recorded yes." % APPROVAL.name)
+    return lock, appr
+
+
+def gate_spend_checks(appr):
+    """How many checks GATE 0S contributed, for the pins.
+
+    LITERALS, deliberately: 3 on the methods lock, +4 when the approval record is on disk, +1
+    either way.  Not counted off the gate's chk calls -- a delta derived from the code it measures
+    absorbs a new assertion in silence, and the point of a pin is to break when the check set
+    moves.  `appr is None` means the gate did not run (attempt 1).
+    """
+    if appr is None:
+        return 0
+    return 8 if appr.get("record") else 4
 
 
 def gate_crops(sheet):
@@ -1264,6 +1362,10 @@ def main():
     chk(all(r["reached_wire"] is False for r in plan.refused_records()),
         "GATE 0: a refused record claims it reached the wire")
     g2 = gate_prediction(pred)
+    # GATE 0S, here because both of its inputs are on disk before anything is built.  A replicate
+    # (attempt >= 2) runs only under a methods lock written for it and a recorded approval of the
+    # spend; attempt 1 predates both documents and is never re-run.
+    mlock, appr_s = gate_spend(a.attempt, dry) if a.attempt >= 2 else (None, None)
     crop_shas = gate_crops(sheet)
     pay_sha = gate_payload_identity(sheet)
     chk(pred["scored_over"]["set_digest"] == SET_DIGEST, "prediction scored_over set_digest")
@@ -1336,6 +1438,18 @@ def main():
                 "cannot_do": lock_b["cannot_do"],
                 "real_crop_sha16_replaced": {k: crop_shas[k] for k in sorted(crop_shas)},
             })
+    # A replicate records WHICH methods lock governed it, so a later reader can tell a registered
+    # prediction from one written after the numbers landed.  The lock is not scored by this run --
+    # PRED stays the scored lock, and repointing it would make this a new experiment, not a
+    # replicate -- so what belongs in the header is its identity, not its contents.
+    header["methods_lock"] = None if mlock is None else {
+        "file": METHODS_LOCK.name, "sha16": METHODS_LOCK_SHA,
+        "registers": "the methods question, the evidential population, the run-1 baseline item "
+                     "digest and the decision rule, all before the first call",
+        "scored_lock_unchanged": PRED_SHA,
+    }
+    header["spend_approval"] = appr_s
+
     # GATE 10.  The header is complete here, before any call.  The forbidden-host check used to
     # live only in the write block, which is reached after all 162 calls are paid for: a run
     # once made every call and then refused on a host literal that was sitting in the header
@@ -1398,6 +1512,11 @@ def main():
             _name = "EXPECTED_CHECKS_BLANK_DRY[approved=%s]" % _approved
         else:
             _pin, _name = EXPECTED_CHECKS_DRY, "EXPECTED_CHECKS_DRY"
+        # GATE 0S runs on both paths and only for a replicate, so its contribution is added to
+        # whichever pin applies rather than baked into either.  State from the returned record.
+        _d0s = gate_spend_checks(appr_s)
+        if _d0s:
+            _pin, _name = _pin + _d0s, "%s + GATE 0S %d" % (_name, _d0s)
         print(f"checks: {CHECKS} ({_name} {_pin})")
         if _pin is None:
             print(f"{_name} is UNPINNED: pin it to the count above")
@@ -1491,6 +1610,9 @@ def main():
     print(f"checks observed: {CHECKS}")
     _pin = EXPECTED_CHECKS_BLANK if blank else EXPECTED_CHECKS
     _name = "EXPECTED_CHECKS_BLANK" if blank else "EXPECTED_CHECKS"
+    _d0s = gate_spend_checks(appr_s)
+    if _d0s:
+        _pin, _name = _pin + _d0s, "%s + GATE 0S %d" % (_name, _d0s)
     if _pin is None:
         print(f"{_name} is unpinned: pin it to the observed count above")
     elif CHECKS != _pin:
