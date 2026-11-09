@@ -153,7 +153,16 @@ FLOORS_FOR = "6a2292bdb14d3c43"
 FLOORS_FILE = A / ("SCORE45_%s.json" % FLOORS_FOR)
 SCORED_PAYLOAD_DIGEST = "870bf99e65725534"
 
-EXPECTED_CHECKS_BLANK = 1684       # DERIVED from the APPROVED blank dry count below, by the same
+EXPECTED_CHECKS_BLANK = 1685       # 1684 was MEASURED on run c957403401a9f865 (the clean one).
+                                   # +1 for the section-6 RENDER CHECK added 2026-11-08, which
+                                   # runs once per real run and not in dry mode (the blank dry
+                                   # count is unchanged at 1242, re-measured after the change).
+                                   # It is proved live by mutation, not by a green run: the old
+                                   # section-6 renderer re-exec'd over this run's own records
+                                   # raises and names p245:n0.  So 1685 is a DERIVED pin again
+                                   # (measured 1684 + 1), and the next real run confirms it.
+                                   # Earlier derivation, still the basis of the 1684:
+                                   # DERIVED from the APPROVED blank dry count below, by the same
                                    # 274 + 162 real-run-only term as EXPECTED_CHECKS, plus the
                                    # write block's 6 per-record key checks: 1242 + 436 + 6.
                                    # The approved count is the right base: an unapproved real run
@@ -857,7 +866,7 @@ def md_report(header, run_sha, tables, ev, nik, recs, prov):
           f"one the lock describes (see the subpopulation note); per-row differences between arms "
           f"are not explained here, and no per-row prediction was registered.",
           "- The standard is the signed verdict. Six of twenty earlier signed truths were later found wrong the same way; a mismatch here can be the signature, not the read.",
-          "- Context-channel gains cannot be told apart from canonical-verse recall by this run; no blank-crop control was run.",
+          "- Context-channel gains cannot be told apart from canonical-verse recall BY THIS RUN. The blank-crop control that does tell them apart has since been run twice (9cc1b9de00ebe2b1 provisional, c957403401a9f865 clean) and found the context channel able to return a signed string from a uniform-255 rectangle: see audits/blank_crop_control_result_20261108.md.",
           f"- {_n_calls} calls, a single draw per cell at temperature 0; no null replicate was run, "
           f"so a delta smaller than the null spread is not evidence. The channel-2 contrast moves "
           f"5 rows of {len({r['span_id'] for r in recs if r['channel'] == 'context'})}; nothing "
@@ -924,6 +933,13 @@ def evaluate_blank(recs, lock, floored):
     def ex(a, c):
         return cells[f"{a}|{c}"]["exact_floor"]
 
+    # NO ASSERTION BELONGS HERE.  `exact_ctx_ids[arm]` and `ex(arm, "context")` are two derivations
+    # of one list -- the same `sub`, filtered on the same field -- so any check between them passes
+    # by construction, like a verifier that calls its own producer.  The defect this field pair was
+    # added for was never a miscomputation: every number on run c957403401a9f865 was right, and the
+    # RENDERED SECTION 6 still told the reader "0 span(s)".  Only the render can see that, so the
+    # check lives at the end of md_blank_report, where the text and the numbers meet.
+
     claims = {s["id"]: s["claim"] for s in lock["registered_signs"]}
     chk(tuple(sorted(claims)) == BLANK_SIGNS, "the lock's signs are not the four this scores")
     signs = {
@@ -951,8 +967,30 @@ def evaluate_blank(recs, lock, floored):
                                 and r["channel"] == "bare" and r["class_primary"] == "exact")
             for a in ARMS},
         # RULE 4, and PROVISIONAL at one draw per span.
+        #
+        # A CONJUNCTION OVER TWO ARMS CANNOT WITNESS A SINGLE-ARM FAILURE (measured 2026-11-08).
+        # `ids` is an INTERSECTION.  On run c957403401a9f865 it was [] while qwen|context's
+        # exact_floor was 1 -- p245:n0 returned the exact signed string from a uniform-255
+        # rectangle and opus abstained 162 of 162 across two runs, so the one event this field
+        # exists for left it empty and section 6 printed "0 span(s)".  The definition below is
+        # kept VERBATIM because it is the one the lock registered, and a definition rewritten
+        # after seeing a result is a retune.  The single-arm population gets its own field, and
+        # the two chk calls above it assert each arm's set against that cell's measured floor, so
+        # this pair cannot disagree with the numbers it sits beside.
+        "no_pixel_recoverable_single_arm": {
+            "by_arm": {a: sorted(exact_ctx_ids[a] - set(both)) for a in ARMS},
+            "n": sum(len(exact_ctx_ids[a] - set(both)) for a in ARMS),
+            "meaning": "the Latin note alone, with no span pixels, was enough for ONE arm to "
+                       "produce the signed string.  Read this before `no_pixel_recoverable`: a "
+                       "single arm recovering a span is the common case and the conjunction "
+                       "above cannot see it.  Each (span, arm) here is struck from that arm's "
+                       "context-channel read-evidence in run %s." % lock["floors_run"],
+            "status": "PROVISIONAL -- one draw per span at temperature 0",
+        },
         "no_pixel_recoverable": {
             "ids": both,
+            "is_a_conjunction": "BOTH arms.  Empty does NOT mean no span was recovered without "
+                                "pixels -- see no_pixel_recoverable_single_arm.",
             "status": "PROVISIONAL -- one draw per span at temperature 0; a span that lands here "
                       "once has not been shown to land here reliably",
             "meaning": "the Latin note alone, with no span pixels, was enough for both arms to "
@@ -1038,8 +1076,24 @@ def md_blank_report(header, run_sha, tables, evb, nik, recs, prov):
             L.append(f"- {k}: none. No span's signed string came back from a white rectangle in "
                      f"this channel.")
     npr = evb["no_pixel_recoverable"]
+    sa = evb["no_pixel_recoverable_single_arm"]
     L += ["", "## 6. Spans recoverable without pixels (rule 4)", "",
-          f"**{len(npr['ids'])} span(s)**, {npr['status']}.", "", npr["meaning"], ""]
+          f"**One arm: {sa['n']} span(s).  Both arms: {len(npr['ids'])} span(s).** "
+          f"{sa['status']}.", "", sa["meaning"], ""]
+    if sa["n"] and not npr["ids"]:
+        # The defect this section had on run c957403401a9f865: it printed only the conjunction,
+        # which was empty, on a run where one arm did recover a span from a white rectangle.
+        L += [f"> **{sa['n']} span(s) came back correct from a white rectangle on ONE arm, and the "
+              f"both-arms count below is 0.** A reader who reads only the conjunction will conclude "
+              f"nothing was recovered. It was.", ""]
+    for _a, _ids in sa["by_arm"].items():
+        if _ids:
+            _sigs = {r["span_id"]: r["signature"] for r in recs}
+            L += [f"**{_a}**, context channel, recovered without pixels:", "",
+                  "| span | signature |", "|---|---|"]
+            L += [f"| {_s} | `{_sigs.get(_s, '')}` |" for _s in _ids]
+            L += [""]
+    L += [f"Both arms ({len(npr['ids'])}): {npr['status']}.", "", npr["meaning"], ""]
     if npr["ids"]:
         L += ["", "| span | signature |", "|---|---|"]
         sigs = {r["span_id"]: r["signature"] for r in recs}
@@ -1069,8 +1123,20 @@ def md_blank_report(header, run_sha, tables, evb, nik, recs, prov):
           f"{header['call_count']} calls. Spans law 8 refused have no floor because they have no "
           f"read.",
           "- Nothing here promotes or demotes an arm, and nothing here is an ADR.", ""]
-    return "\n".join(L)
-
+    # RENDER CHECK: the numbers and the text a reader actually reads are different artifacts, and
+    # on run c957403401a9f865 they disagreed -- a cell's exact_floor was 1 and this section printed
+    # "0 span(s)", because it rendered only the both-arms conjunction. A file-scoped assertion
+    # could not have seen that; only the rendered markdown can. One chk, covering every recovered
+    # span at once, so the count stays deterministic. The second clause is what keeps it from
+    # passing vacuously on a run where nothing was recovered: the count line must be there.
+    _md = "\n".join(L)
+    _must = sorted(set(npr["ids"]) | {i for v in sa["by_arm"].values() for i in v})
+    _missing = [i for i in _must if i not in _md]
+    chk(not _missing and f"One arm: {sa['n']} span(s)" in _md,
+        "section 6 does not show what the numbers say: span(s) %s were recovered without pixels "
+        "but do not appear in the rendered report, or the single-arm count line is missing. A "
+        "reader of this report would conclude nothing was recovered." % (_missing or "<none>"))
+    return _md
 
 def rescore(run_sha, attempt_sfx=""):
     """Rebuild the report from stored reads. No network, no key, no new reads, no clobber.
