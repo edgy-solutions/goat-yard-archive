@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 118
+EXPECTED_TESTS = 119
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -694,6 +694,28 @@ def test_reconcile_numbers_cases():
 
     r = VR.reconcile_numbers({"count": None, "read": None, "witness": None})
     assert r["numbers_link_status"] == "numbers_none" and r["verse"] is None
+
+
+def test_count_is_not_a_reader():
+    # Chris 2026-11-08: "verse-1 rule + model read = one reader". On a witness-less volume the
+    # verse-1 head after a CHAP. heading is disputed, never shipped on count + read.
+    for srcs in ({"count": 1, "read": [1], "witness": None}, {"count": 1, "read": None, "witness": [1]}):
+        r = VR.reconcile_numbers(srcs)
+        assert r["numbers_link_status"] == "numbers_single_source" and r["verse"] is None, (srcs, r)
+    # count keeps its veto: disagreeing with one reader, or with two agreeing readers
+    r = VR.reconcile_numbers({"count": 1, "read": [2], "witness": None})
+    assert r["numbers_link_status"] == "numbers_disagree" and r["numbers_disagree_pairs"] == ["count|read"], r
+    r = VR.reconcile_numbers({"count": 1, "read": [2], "witness": [2]})
+    assert r["numbers_link_status"] == "numbers_disagree" and r["verse"] is None, r
+    assert r["numbers_disagree_pairs"] == ["count|read", "count|witness"], r
+    # the invariant refuses a shipped verse whose second source is count, even if labelled agree
+    bad = {"file_page_first": 90, "verse": [1], "numbers_link_status": "numbers_agree",
+           "number_sources": {"count": 1, "read": [1], "witness": None}}
+    try:
+        VR.assert_numbering_invariant([bad])
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "90" in str(e)
 
 
 # 7. assert_numbering_invariant ----------------------------------------------------------------------

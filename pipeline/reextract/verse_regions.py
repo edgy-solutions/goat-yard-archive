@@ -1488,9 +1488,12 @@ def _norm_numbers(v):
 
 def reconcile_numbers(sources):
     """sources: {"count": int|None, "read": [int..]|None, "witness": [int..]|None}. Pure rule,
-    never merging silently: >=2 non-null sources must AGREE for `verse` to be set. count (an int)
-    agrees with a longer tuple iff it equals its first element (narrow count rule, amendment A:
-    count is only ever a bare '1', never a full group)."""
+    never merging silently: both READERS (read, witness) must be non-null and AGREE for `verse`
+    to be set. count is code-owned structure (verse 1 after a CHAP. head), not a reader (Chris
+    2026-11-08: "verse-1 rule + model read = one reader"): it can VETO by disagreeing but never
+    counts toward the two, so count + one reader is numbers_single_source ("single" = one
+    reader). count (an int) agrees with a longer tuple iff it equals its first element (narrow
+    count rule, amendment A: count is only ever a bare '1', never a full group)."""
     present = [(name, sources.get(name)) for name in ("count", "read", "witness") if sources.get(name) is not None]
     if len(present) == 0:
         return {"numbers_link_status": "numbers_none", "numbers_disagree_pairs": [], "verse": None}
@@ -1513,6 +1516,8 @@ def reconcile_numbers(sources):
             disagree_pairs.append(f"{a}|{b}")
     if disagree_pairs:
         return {"numbers_link_status": "numbers_disagree", "numbers_disagree_pairs": disagree_pairs, "verse": None}
+    if "read" not in norm or "witness" not in norm:
+        return {"numbers_link_status": "numbers_single_source", "numbers_disagree_pairs": [], "verse": None}
 
     best = None
     for name in ("read", "witness", "count"):
@@ -1523,17 +1528,18 @@ def reconcile_numbers(sources):
 
 def assert_numbering_invariant(records):
     """records: region records (or anything carrying 'verse', 'numbers_link_status',
-    'number_sources'). Raises ValueError NAMING the region if any has verse set without >=2
-    agreeing non-null sources. Fail loud -- this is the condition-1 born invariant."""
+    'number_sources'). Raises ValueError NAMING the region if any has verse set without both
+    readers (read AND witness) non-null and agreeing; count is not a reader. Fail loud -- this is
+    the condition-1 born invariant."""
     for r in records:
         if r.get("verse") is not None:
             srcs = r.get("number_sources") or {}
-            non_null = [v for v in srcs.values() if v is not None]
-            if r.get("numbers_link_status") != "numbers_agree" or len(non_null) < 2:
+            readers = [srcs.get(name) for name in ("read", "witness")]
+            if r.get("numbers_link_status") != "numbers_agree" or any(v is None for v in readers):
                 label = r.get("file_page_first", r.get("file_page", "?"))
                 raise ValueError(
                     f"numbering invariant violated in region at file_page {label!r}: verse="
-                    f"{r['verse']!r} set without >=2 agreeing sources "
+                    f"{r['verse']!r} set without both readers agreeing "
                     f"(link_status={r.get('numbers_link_status')!r}, sources={srcs!r})")
 
 
@@ -2024,6 +2030,9 @@ def apply_order_checks(regions, chapter_meta):
                 flags = list(region.get("flags") or [])
                 flags.extend(f"verse_order_disputed:{src}" for src in sorted(srcs))
                 region["flags"] = flags
+        # The ONE best-effort gate (Chris 2026-11-08): withholding `verse` here is the recorded
+        # exception to "mapping checks emit link_status flags, not gates". No other check may
+        # withhold a field on the strength of this exception.
         gate_seq = [r.get("verse") for r in chain]
         for i in sorted(disputed(gate_seq)):
             r = chain[i]
