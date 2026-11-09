@@ -148,8 +148,8 @@ def classify_read(text, done_reason, n_lines):
 
 def read_chunk(client, png_bytes):
     """One native /api/chat call (think False, stream False, temperature 0, num_predict 2048).
-    -> {"text","done_reason","eval_count","http_status"}. Any non-200 status (429, 5xx, ...)
-    raises RunFault; transport exceptions propagate unchanged."""
+    -> {"text","done_reason","eval_count","http_status"}. Any non-200 status (429, 5xx, ...) or a
+    reply without done:true raises RunFault; transport exceptions propagate unchanged."""
     b64 = base64.b64encode(png_bytes).decode("ascii")
     payload = {
         "model": getattr(client, "model", VHR.DEFAULT_MODEL),
@@ -163,6 +163,13 @@ def read_chunk(client, png_bytes):
     if status != 200:
         raise RunFault(f"HTTP {status} from {client.base_url}")
     body = resp.json()
+    if body.get("done") is not True:
+        # A non-streamed reply that is not done is the server cutting generation off, not a read:
+        # on 2026-11-08 endpoint D degraded mid-run and every call (the canary chunk too) came back
+        # HTTP 200, done:false, no done_reason, text ending in '/' x 31. As an item `truncated` it
+        # took 3 calls to abort and the fault named "HTTP/timeout".
+        raise RunFault(f"partial reply from {client.base_url}: done={body.get('done')!r}, "
+                       f"done_reason={body.get('done_reason')!r}")
     return {"text": (body.get("message") or {}).get("content", ""),
             "done_reason": body.get("done_reason"),
             "eval_count": body.get("eval_count"),

@@ -104,13 +104,13 @@ class FakeClient:
             if self.http_from and idx >= self.http_from[0]:
                 return FakeResp({}, self.http_from[1])
             if self.degenerate_first and idx == 0:
-                return FakeResp({"message": {"content": "12 34"}, "done_reason": "stop"})
+                return FakeResp({"message": {"content": "12 34"}, "done": True, "done_reason": "stop"})
             if self.empty_from is not None and idx >= self.empty_from:
-                return FakeResp({"message": {"content": ""}, "done_reason": "stop"})
+                return FakeResp({"message": {"content": ""}, "done": True, "done_reason": "stop"})
             text = f"Body {sha[:6]}"
             if sha == self.canary_sha:
                 text += f" call{idx}"
-            return FakeResp({"message": {"content": text}, "done_reason": "stop", "eval_count": 5})
+            return FakeResp({"message": {"content": text}, "done": True, "done_reason": "stop", "eval_count": 5})
         idx = self.head_calls
         self.head_calls += 1
         self.log.append(("head",))
@@ -118,7 +118,7 @@ class FakeClient:
             txt = "Ver. 99."
         else:
             txt = "Ver. 21." if idx % 2 == 0 else "Ver. 6."
-        return FakeResp({"message": {"content": txt}, "done_reason": "stop"})
+        return FakeResp({"message": {"content": txt}, "done": True, "done_reason": "stop"})
 
 
 class Env:
@@ -233,7 +233,7 @@ def test_two_empty_reads_are_item_errors_not_a_fault(env):
             state["n"] += 1
             if state["n"] in (3, 6):      # call 1 is the canary; two non-consecutive empties among reads
                 env.fake.body_calls += 1
-                return FakeResp({"message": {"content": ""}, "done_reason": "stop"})
+                return FakeResp({"message": {"content": ""}, "done": True, "done_reason": "stop"})
         return orig(url, json=json, timeout=timeout)
     env.fake.post = post
     assert env.run() == 0

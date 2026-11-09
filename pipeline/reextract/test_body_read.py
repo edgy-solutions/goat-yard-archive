@@ -7,7 +7,7 @@ import numpy as np
 
 import body_read as BR
 
-EXPECTED_TESTS = 18
+EXPECTED_TESTS = 19
 
 
 def page45():
@@ -23,7 +23,7 @@ class FakeResp:
     def __init__(self, status=200, body=None):
         self.status_code = status
         self._body = body if body is not None else {
-            "message": {"content": "Line one"}, "done_reason": "stop", "eval_count": 7}
+            "message": {"content": "Line one"}, "done": True, "done_reason": "stop", "eval_count": 7}
 
     def json(self):
         return self._body
@@ -211,9 +211,21 @@ def test_body_prompt_is_the_locked_text():
 
 
 def test_read_chunk_missing_fields_do_not_invent_text():
-    c = FakeClient(FakeResp(200, {"done_reason": "stop"}))
+    c = FakeClient(FakeResp(200, {"done": True, "done_reason": "stop"}))
     res = BR.read_chunk(c, b"x")
     assert res["text"] == "" and BR.classify_read(res["text"], res["done_reason"], 2) == "empty"
+
+
+def test_read_chunk_partial_reply_is_a_runfault_not_an_item():
+    # The 2026-11-08 endpoint-D shape: HTTP 200, done:false, no done_reason, text cut off.
+    partial = {"model": "m", "done": False, "message": {"role": "assistant", "content": "/" * 31}}
+    for body in (partial, {"message": {"content": "Line one"}, "done_reason": "stop"}):
+        try:
+            BR.read_chunk(FakeClient(FakeResp(200, body)), b"x")
+        except BR.RunFault as e:
+            assert "partial reply" in str(e)
+        else:
+            raise AssertionError(f"must raise RunFault: {body!r}")
 
 
 if __name__ == "__main__":
