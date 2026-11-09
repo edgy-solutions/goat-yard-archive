@@ -81,13 +81,15 @@ HEB = re.compile("[\u0590-\u05ff]")
 
 # Pinned to the count the first FULL run observes.  None until then: the real run prints the observed
 # count and marks the header checks_pinned=false.  The dry-run has its own pinned count.
-EXPECTED_CHECKS = 1603      # DERIVED 2026-11-08, not measured.  630 was MEASURED on run
+EXPECTED_CHECKS = 1613      # DERIVED 2026-11-08, not measured.  630 was MEASURED on run
                             # 6a2292bdb14d3c43, whose dry-run measured 356, so the real-run-only
                             # checks were 630 - 356 = 274 (mostly do_call's per-ladder-step host
                             # assertion, one per call because the ladder stepped once per call in
                             # that run).  The dry-run now MEASURES 1167, and this commit adds one
                             # further unconditional assertion per call in do_call, so
-                            # 1167 + 274 + 162 = 1603.
+                            # 1167 + 274 + 162 = 1603, and then GATE 10 (+4, measured) and the
+                            # write block's per-record key check (+1 x 6 records, real-run only)
+                            # take it to 1613.
                             #
                             # Two caveats a later reader needs.  The 274 is borrowed from a run
                             # under a condition that could change: if the reasoning ladder has to
@@ -105,7 +107,9 @@ EXPECTED_CHECKS = 1603      # DERIVED 2026-11-08, not measured.  630 was MEASURE
                             # count rather than running: that is correct, and the fix is to
                             # re-measure with --dry-run (free) and re-pin, never to relax it to
                             # None.  A pin nobody can explain is how a lost assertion hides.
-EXPECTED_CHECKS_DRY = 1167       # MEASURED 2026-11-08 in normal mode.  356 (measured 2026-10-25
+EXPECTED_CHECKS_DRY = 1171       # MEASURED 2026-11-08 in normal mode, after GATE 10 (+4: three
+                                 # forbidden hosts and key material, over the header).  Before it,
+                                 # 1167, reached as follows.  356 (measured 2026-10-25
                                  # after the law-8 send gate) + 162 (build_payloads: the encoded
                                  # bytes equal the file on disk) + 4*162 (GATE B1, per payload:
                                  # the payload hash has not drifted, the crop carries no fault,
@@ -149,8 +153,9 @@ FLOORS_FOR = "6a2292bdb14d3c43"
 FLOORS_FILE = A / ("SCORE45_%s.json" % FLOORS_FOR)
 SCORED_PAYLOAD_DIGEST = "870bf99e65725534"
 
-EXPECTED_CHECKS_BLANK = 1674       # DERIVED from the APPROVED blank dry count below, by the same
-                                   # 274 + 162 real-run-only term as EXPECTED_CHECKS: 1238 + 436.
+EXPECTED_CHECKS_BLANK = 1684       # DERIVED from the APPROVED blank dry count below, by the same
+                                   # 274 + 162 real-run-only term as EXPECTED_CHECKS, plus the
+                                   # write block's 6 per-record key checks: 1242 + 436 + 6.
                                    # The approved count is the right base: an unapproved real run
                                    # refuses at GATE B0, so 1238 is the only state a real run can
                                    # be in.  First MEASURED by the control's own run; re-pin if
@@ -158,20 +163,21 @@ EXPECTED_CHECKS_BLANK = 1674       # DERIVED from the APPROVED blank dry count b
 # The blank dry count has TWO legitimate values, because three of GATE B0's assertions only run
 # when the approval record is on disk.  Both MEASURED 2026-11-08, around Chris's approval:
 #
-#   False  1235  = 1167 (the normal dry count) + 68 for GATE B0, which re-hashes the cut, the
+#   False  1239  = 1171 (the normal dry count) + 68 for GATE B0, which re-hashes the cut, the
 #                  lock and the contact sheet, re-reads all 45 blanks off disk, and checks both
 #                  of the sheet's disclosure maps.  The two MODES differ by GATE B0 alone: GATE
 #                  B1 runs the same number of assertions either way, on opposite expectations.
-#   True   1238  = the same, plus GATE B0's three assertions on the approval record itself (it
+#   True   1242  = the same, plus GATE B0's three assertions on the approval record itself (it
 #                  names this sheet digest, it names this cut digest, it names an approver and
 #                  a date).
 #
-# Keyed rather than collapsed to one number: 1238 alone would abort every unapproved dry-run on
-# a false alarm, and 1235 alone would leave the approved path -- the only path a real run can
+# Keyed rather than collapsed to one number: the approved count alone would abort every
+# unapproved dry-run on a false alarm, and the unapproved count alone would leave the approved
+# path -- the only path a real run can
 # take -- as the unchecked one.  A pin with no state cannot answer which count it should have
 # been.  The enforcement reads the state off the approval the gate returned, never re-deciding
 # it, so the key and the gate cannot disagree.
-EXPECTED_CHECKS_BLANK_DRY = {False: 1235, True: 1238}
+EXPECTED_CHECKS_BLANK_DRY = {False: 1239, True: 1242}  # both MEASURED, +4 each for GATE 10
 
 CHECKS = 0
 
@@ -248,6 +254,17 @@ def sha16_bytes(b):
 
 def canon(o):
     return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def scan_text_for_leaks(text, what):
+    u"""Forbidden hosts and key material must not reach an artifact.  One predicate, two
+    populations: the header before the calls (GATE 10) and each finished record after them.
+    Extracted rather than written twice, so a host added to the list cannot be enforced on one
+    axis and not the other.
+    """
+    for h in FORBIDDEN_HOSTS:
+        chk(h not in text, f"forbidden host {h} in {what}")
+    chk("sk-or-" not in text, f"key material in {what}")
 
 
 def git_state(repo):
@@ -1239,6 +1256,12 @@ def main():
                 "cannot_do": lock_b["cannot_do"],
                 "real_crop_sha16_replaced": {k: crop_shas[k] for k in sorted(crop_shas)},
             })
+    # GATE 10.  The header is complete here, before any call.  The forbidden-host check used to
+    # live only in the write block, which is reached after all 162 calls are paid for: a run
+    # once made every call and then refused on a host literal that was sitting in the header
+    # the whole time.  Detect it where it is already knowable, and keep the late check too --
+    # it is the only one that can see a host arriving in a model's own returned text.
+    scan_text_for_leaks(canon(header), "the run header (GATE 10)")
     run_sha = sha16_bytes(canon(header).encode("utf-8"))
 
     if dry:
@@ -1380,8 +1403,7 @@ def main():
                                                md_report(header, run_sha, tables, ev, nik, recs, prov))}
     for pth, t in texts.items():
         chk(not pth.exists(), f"refuse to clobber {pth.name}; pass --attempt N (N>1) for a legitimate rerun")
-        for h in FORBIDDEN_HOSTS:
-            chk(h not in t, f"forbidden host in record {pth.name}")
+        scan_text_for_leaks(t, f"record {pth.name}")
     for pth, t in texts.items():
         write_new(pth, t)
     for pth in texts:
