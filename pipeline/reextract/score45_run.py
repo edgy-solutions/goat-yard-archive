@@ -1168,6 +1168,20 @@ def main():
 
     # GATE 0 (law 8, ruling B(4); wired 2026-10-25 on A2's substrate commit 6243756).
     #
+    # WHERE GATES GO (standing law, Chris 2026-11-08, on the third instance).  A gate belongs at
+    # the EARLIEST POINT ITS INPUTS EXIST -- not where it is convenient, not where the artifact
+    # it reads happens to get assembled.  Corollary: EVERY HEADER-SCOPED CHECK RUNS AT THAT SAME
+    # POINT, i.e. the moment the header is complete and before the first call, so that no
+    # header-scoped guard is ever discovered by spending.  The three instances behind the law:
+    # this gate, which runs before any payload is built; classify45_sheet.py:897, a flag
+    # computable from the signed set before any call that did not fire; and GATE 10, added after
+    # a forbidden host literal sitting in the header from the start was not noticed until the
+    # write block, by which time all 162 calls were paid for.
+    #
+    # A late check is not thereby wrong -- keep it when it is the only thing that can see its
+    # input, as the write-block scan is for a host arriving in a model's own returned text.  The
+    # law is about the EARLIEST placement, not the only one.
+    #
     # BEFORE any payload is built.  `on_refused="record"` rather than `"fail"`: this is a scorer, and
     # the four refused spans are owed a recorded `unscorable:input-refused` row.  Dropping them with
     # no record would make an absence that a later reader cannot tell from "never drawn".
