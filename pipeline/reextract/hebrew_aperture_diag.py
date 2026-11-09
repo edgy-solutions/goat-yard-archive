@@ -705,25 +705,42 @@ def bandclip_fault(pth):
     return None
 
 
-def b64_gated(src, what="", offnet=False, **geo):
+def b64_gated(src, what="", offnet=False, allow_fault=None, **geo):
     """base64 of an image that PASSED the gate, or CropRefused. The ONLY sanctioned encoder.
 
     Every arm routes its base64 through here -- hebrew_frontier_or, hebrew_local_arms,
     hebrew_aperture_frontier, hebrew_recrop. The gate is placed at the ENCODE rather than beside the
     post() because an arm cannot reach the wire without encoding, so this is the one step that cannot
-    be skipped by forgetting. A gate an arm has to remember to call is not a gate; it is a comment."""
-    raw, fault = gate_outbound(src, offnet=offnet, **geo)
+    be skipped by forgetting. A gate an arm has to remember to call is not a gate; it is a comment.
+
+    `allow_fault` is named in the signature rather than left to ride in on **geo: a licence to
+    send a crop the gate refuses is the last thing that should be invisible at the one step no
+    arm can skip. It is a string, not a flag, and it makes the call STRICTER -- see
+    gate_outbound. Used by blank45 and by nothing else."""
+    raw, fault = gate_outbound(src, offnet=offnet, allow_fault=allow_fault, **geo)
     if fault:
         raise CropRefused(fault, what or str(getattr(src, "name", "") or src)[-60:])
     return base64.b64encode(raw).decode()
 
 
-def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None, offnet=False):
+def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None, offnet=False,
+                  allow_fault=None):
     """(png_bytes, None) when it is safe to send; (None, fault) when it is refused.
 
     `src` is a path or a PIL image. Geometry arguments are optional because a recrop made in memory
     has no ratified rect to check -- but the pixel checks always run, so nothing reaches the wire
-    unexamined."""
+    unexamined.
+
+    `allow_fault` licenses ONE named fault, for a control that must send what this gate exists
+    to refuse: the blank-crop floor measurement needs a uniform-255 crop on the wire. It is a
+    string and it requires EQUALITY, so the licensed call is STRICTER than the default path --
+    it refuses an inked crop, a crop blank at another level, and a crop with no fault at all.
+    A boolean would have licensed the whole `blank:` family and any crop that happened to
+    pass, which is the real crop: the one thing a blank-crop control must never send.
+
+    The licence reaches `crop_fault`'s verdict and nothing above it. The offnet aperture
+    checks refuse first and are not licensable by any value of it, because "no note-box crop
+    leaves the network" is a standing rule and not a parameter."""
     if offnet:
         # Aperture check FIRST: refuse before the bytes are read, so a refused image is never held in
         # memory on the path to the wire.
@@ -747,6 +764,13 @@ def gate_outbound(src, page_size=None, rects=(), strip_box=None, strip_size=None
         raw = pth.read_bytes()
         im = Image.open(io.BytesIO(raw))
     fault = crop_fault(im, list(rects), page_size or im.size, strip_box, strip_size)
+    if allow_fault is not None:
+        # Equality in BOTH directions. `fault is None` lands here too and is refused: a caller
+        # that claims a licence for a crop with no fault has the wrong file, and for this one
+        # caller the wrong file is the real crop.
+        if fault != allow_fault:
+            return None, ("allow_fault=%r but this crop's fault is %r" % (allow_fault, fault))
+        return raw, None
     if fault:
         return None, fault
     return raw, None
