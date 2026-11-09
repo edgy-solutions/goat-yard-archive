@@ -7,7 +7,7 @@ import numpy as np
 
 import body_read as BR
 
-EXPECTED_TESTS = 14
+EXPECTED_TESTS = 18
 
 
 def page45():
@@ -87,6 +87,62 @@ def test_core_at_edge_false_on_gap_edges_and_ink_tight_box():
     boxes, _n, _f = BR.chunk_rect(g, (0, tops[0], 300, tops[-1] + 10))
     for b in boxes:
         assert BR.core_at_edge(g, b) is False, b
+
+
+def textured_line(g, top):
+    """A printed-looking line, 13 rows: 3 sparse ascender rows, 7 dense core rows, 3 sparse
+    descender rows (the solid bars of page45 have no tapering fringe, which hid the any-ink bug)."""
+    for r in range(3):
+        g[top + r, 20:240:20] = 0
+    g[top + 3:top + 10, 10:250] = 0
+    for r in range(10, 13):
+        g[top + r, 25:240:30] = 0
+
+
+def test_core_at_edge_ignores_fringe_specks_beyond_an_ink_tight_edge():
+    # Production shape: stage-1 boxes are ink-tight, and a speck of a neighbour's descender or this
+    # line's own ascender lies on the row just outside (168 of 175 chunks refused before the fix).
+    g = np.full((200, 300), 255, np.uint8)
+    textured_line(g, 50)
+    textured_line(g, 80)
+    g[49, 30:34] = 0           # speck above the top edge
+    g[93, 200:203] = 0         # speck below the bottom edge
+    assert BR.core_at_edge(g, (0, 50, 300, 93)) is False
+
+
+def test_core_at_edge_true_when_edge_cuts_a_textured_line_core():
+    g = np.full((200, 300), 255, np.uint8)
+    textured_line(g, 50)
+    textured_line(g, 80)
+    assert BR.core_at_edge(g, (0, 56, 300, 93)) is True    # top edge mid-core of the first line
+    assert BR.core_at_edge(g, (0, 50, 300, 86)) is True    # bottom edge mid-core of the second
+
+
+def test_core_at_edge_descender_fringe_below_a_boundary_is_not_a_cut():
+    # p200R shape: a boundary in line 1's descender rows leaves a fringe at the top of the lower
+    # chunk. Judged against the fringe's own peak it read as a cut from below only; against the
+    # rect's line peak both chunks sharing the edge agree it is not a cut.
+    g = np.full((200, 300), 255, np.uint8)
+    textured_line(g, 50)
+    textured_line(g, 80)
+    rect = (0, 50, 300, 93)
+    assert BR.core_at_edge(g, (0, 61, 300, 93), rect) is False
+    assert BR.core_at_edge(g, (0, 50, 300, 61), rect) is False
+    assert BR.edge_ratio(g, rect, 61) < BR.EDGE_CORE_FRAC
+
+
+def test_edge_ratio_valley_sliver_band_does_not_set_the_scale():
+    # p200L shape: text_lines split a merged band into (.., 1865), (1865, 1867), (1867, ..), and the
+    # chunk boundary 1866 sits in the 2-row valley sliver. The sliver's own peak is the valley's ink,
+    # so against it the valley read as a core (0.905); against the rect's line peak it does not.
+    g = np.full((200, 300), 255, np.uint8)
+    g[50:57, 10:250] = 0                 # line core, 240 px/row
+    g[57:59, 25:240:30] = 0              # valley rows, 8 px/row
+    g[59:66, 10:250] = 0                 # next line core
+    lines = [(50, 57), (57, 59), (59, 66)]
+    rect = (0, 50, 300, 66)
+    assert BR.line_peak(g, rect, lines) == 240.0
+    assert BR.edge_ratio(g, rect, 58, lines) < BR.EDGE_CORE_FRAC
 
 
 def test_classify_read_every_branch():

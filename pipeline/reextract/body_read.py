@@ -71,22 +71,66 @@ def chunk_rect(gray, box, max_lines=MAX_LINES):
     return boxes, [len(g) for g in groups], None
 
 
-def core_at_edge(gray, chunk_box):
-    """True iff a printed line (text_lines band) of the chunk crosses its top or bottom edge: the
-    band touches the chunk's first/last row AND the page row just outside the chunk, within the
-    chunk's x-range, also carries ink (so the line continues beyond the edge, i.e. the edge cuts
-    it). A line that merely starts at an ink-tight box edge, with blank page beyond, is not cut."""
+EDGE_CORE_FRAC = 0.35
+
+
+def line_peak(gray, rect_box, lines=None):
+    """The rect's typical line-core density: the median, over its text_lines bands at least half the
+    median band height, of each band's peak ink row-sum (within the rect's x-range). Sliver bands
+    (text_lines splits merged bands into 2-7-row fragments at valleys) and descender fringes never
+    vote, so their tiny own peaks cannot make a valley row look like a line's core."""
+    arr = np.asarray(gray)
+    x0, _y0, x1, _y1 = (int(v) for v in rect_box)
+    if lines is None:
+        lines = _ink_lines(arr, tuple(int(v) for v in rect_box))
+    if not lines:
+        return 0.0
+    half = 0.5 * float(np.median([b - a for a, b in lines]))
+    rows = (arr[:, x0:x1] < NSD.INK).sum(axis=1)
+    peaks = [float(rows[a:b].max()) for a, b in lines if b - a >= half]
+    return float(np.median(peaks)) if peaks else 0.0
+
+
+def edge_ratio(gray, rect_box, y, lines=None, peak=None):
+    """min(rowsum(y-1), rowsum(y)) / line_peak of the rect (rowsums within the rect's x-range, on
+    the page); 0.0 when no text_lines band of the rect holds row y-1 or row y (the edge lies in an
+    inter-line gap) or y is the page's first/last row. `lines` / `peak`: the rect's bands and
+    line_peak, if the caller already has them."""
     arr = np.asarray(gray)
     H = arr.shape[0]
-    x0, y0, x1, y1 = (int(v) for v in chunk_box)
-    lines = _ink_lines(arr, (x0, y0, x1, y1))
-    if not lines:
-        return False
-    if lines[0][0] <= y0 and y0 > 0 and bool((arr[y0 - 1, x0:x1] < NSD.INK).any()):
-        return True
-    if lines[-1][1] >= y1 and y1 < H and bool((arr[y1, x0:x1] < NSD.INK).any()):
-        return True
-    return False
+    x0, _ry0, x1, _ry1 = (int(v) for v in rect_box)
+    if not 0 < y < H:
+        return 0.0
+    if lines is None:
+        lines = _ink_lines(arr, tuple(int(v) for v in rect_box))
+    if not any(b[0] <= y < b[1] or b[0] <= y - 1 < b[1] for b in lines):
+        return 0.0
+    if peak is None:
+        peak = line_peak(arr, rect_box, lines)
+    edge = min(float((arr[y - 1, x0:x1] < NSD.INK).sum()), float((arr[y, x0:x1] < NSD.INK).sum()))
+    return edge / peak if peak else 0.0
+
+
+def core_at_edge(gray, chunk_box, rect_box=None):
+    """True iff the chunk's top or bottom edge cuts a printed line's CORE: both rows straddling the
+    edge (y-1 and y, within the x-range) carry ink row-sum >= EDGE_CORE_FRAC x the rect's typical
+    line peak (edge_ratio / line_peak). This is the straddle test's rule (verse_head_read.guard_crop:
+    a core run of >= 2 rows touching the boundary), applied across the edge.
+    Bands and line_peak are those of `rect_box` (the stage-1 rect the chunk was cut from; default:
+    the chunk itself), so the two chunks sharing an internal boundary judge it from identical
+    inputs. Measuring an edge against the peak of whatever band holds it failed twice on real
+    pages: a descender fringe left below a boundary (p200R) and text_lines' 2-7-row valley slivers
+    (p92L, p129L, p200L) each have a tiny own peak, so a valley row read as a cut.
+    Ascender/descender specks beyond an ink-tight edge are not a cut: the first version tested any
+    ink pixel outside and refused 168 of 175 production chunks (every ink-tight box top).
+    EDGE_CORE_FRAC is the midpoint of the two modes (MEASURE_core_at_edge_20261108.md). Known blind
+    spot: a line with no x-height concentration (spaced capitals, sparse headings) can be cut
+    mid-line below the threshold."""
+    rect = chunk_box if rect_box is None else rect_box
+    lines = _ink_lines(np.asarray(gray), tuple(int(v) for v in rect))
+    peak = line_peak(gray, rect, lines)
+    _x0, y0, _x1, y1 = (int(v) for v in chunk_box)
+    return any(edge_ratio(gray, rect, y, lines, peak) >= EDGE_CORE_FRAC for y in (y0, y1))
 
 
 def classify_read(text, done_reason, n_lines):

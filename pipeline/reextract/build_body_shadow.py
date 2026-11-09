@@ -131,13 +131,14 @@ def crop_png_bytes(gray, box):
     return buf.getvalue()
 
 
-def chunk_guard(gray, box):
-    """None if the chunk may be sent, else the refusal reason."""
+def chunk_guard(gray, box, rect_box):
+    """None if the chunk may be sent, else the refusal reason. rect_box (the stage-1 rect the chunk
+    was cut from) is required: core_at_edge judges edges on the rect's banding, never the chunk's."""
     H, W = gray.shape
     raw = VHR.guard_crop(gray, tuple(box), (H, W))
     if raw in GUARD_REFUSALS:
         return raw, raw
-    if BR.core_at_edge(gray, box):
+    if BR.core_at_edge(gray, box, rect_box):
         return "core_at_edge", raw
     return None, raw
 
@@ -207,7 +208,7 @@ def main(argv=None):
         if hit:
             g = load(BODY_CANARY_PAGE)
             boxes, nls, _flag = BR.chunk_rect(g, hit[0]["box"], args.max_lines)
-            reason, _raw = chunk_guard(g, boxes[0])
+            reason, _raw = chunk_guard(g, boxes[0], hit[0]["box"])
             if reason is not None:
                 raise ValueError(f"body canary chunk refused by the guard: {reason}")
             canary_png, canary_n_lines = crop_png_bytes(g, boxes[0]), nls[0]
@@ -289,7 +290,7 @@ def main(argv=None):
                          "eval_count": None, "error": None}
                     if flag:
                         c["flags"] = [flag]
-                    reason, raw = chunk_guard(gray, box)
+                    reason, raw = chunk_guard(gray, box, rect["box"])
                     if raw != "ok":
                         c["guard_raw"] = raw
                     if reason is not None:
