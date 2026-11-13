@@ -8,8 +8,16 @@ Record order in OUT.jsonl: run_header (written FIRST, before any model call), th
 per (stage-1 region, file page) in --pages order, then run_summary. The whole file is written to
 OUT.tmp and renamed to OUT only on a clean finish.
 
-Run-level fault (RunFault = HTTP 429/5xx/non-200/transport, CanaryFault, a degenerate body canary,
-or 3 consecutive item errors): write OUT.fault.json with the cause, delete the temp file, exit 3,
+Before the header the model is unloaded (keep_alive:0, /api/ps verified), so the first call of the
+run is the first call of a fresh load, and that call is always a canary.
+
+Prompt echo (decision a, Chris 2026-11-12): every reply is passed through body_read.strip_echo; the
+stored text is the remainder, echo_stripped records the copies removed, an echo-only reply is the
+item error `echo`.
+
+Run-level fault (RunFault = HTTP 429/5xx/non-200/transport, CanaryFault, a degenerate or echo-only
+body canary, a body canary whose echo-stripped text differs from batch 0's, or 3 consecutive item
+errors): write OUT.fault.json with the cause, delete the temp file, exit 3,
 write NO OUT. A rerun starts from the top; nothing is spliced. Item errors (empty / truncated /
 degenerate output) are recorded and never retried.
 
@@ -51,7 +59,21 @@ HTTP_TIMEOUT_S = 30
 
 
 class BodyCanaryFault(RuntimeError):
-    """The body canary read was degenerate/empty/truncated: the endpoint is suspect, abort."""
+    """The body canary read was degenerate/empty/truncated/echo-only, or its echo-stripped text
+    differs from batch 0's (Chris 2026-11-12, A5 folded into decision a): the endpoint is suspect,
+    abort."""
+
+
+def unload_model(client, base_url, model):
+    """keep_alive:0 unload, then /api/ps must no longer list `model`. The only reset known to clear
+    D's request-history state (2026-11-08). Returns the /api/ps listing after the unload."""
+    root = base_url.rstrip("/")
+    client.post(root + "/api/generate", json={"model": model, "keep_alive": 0}, timeout=120)
+    ps = client.get(root + "/api/ps", timeout=HTTP_TIMEOUT_S).json()
+    left = [m.get("name") for m in ps.get("models", [])]
+    if model in left:
+        raise BR.RunFault(f"unload failed: {model} still listed by /api/ps ({left})")
+    return ps
 
 
 class _RequestsClient:
@@ -220,7 +242,11 @@ def main(argv=None):
 
     client = make_client(base_url, args.model)
     base_url, digest = VHR.resolve_and_check(args.host, args.model, client=client)
-    ps = client.get(base_url.rstrip("/") + "/api/ps", timeout=HTTP_TIMEOUT_S).json()
+    ps_before = client.get(base_url.rstrip("/") + "/api/ps", timeout=HTTP_TIMEOUT_S).json()
+    try:
+        ps = unload_model(client, base_url, args.model)
+    except BR.RunFault as e:
+        return _refuse(str(e))
 
     repo_root = Path(__file__).resolve().parents[2]
     config = {
@@ -239,12 +265,16 @@ def main(argv=None):
         "canary_every": CANARY_EVERY,
         "body_canary": {"file_page": BODY_CANARY_PAGE, "col": BODY_CANARY_COL, "box": canary_box},
         "guard_refusals": list(GUARD_REFUSALS),
+        "echo_rule": "strip every leading BODY_PROMPT copy; echo-only = item error 'echo'; "
+                     "body canary echo-only or not identical to batch 0 = BodyCanaryFault",
+        "unloaded_before": True,
         "body_read_sha256": sha256_file(BR.__file__),
         "builder_sha256": sha256_file(__file__),
     }
     chash = BVR.config_hash(config)
     header = {"kind": "run_header", "tier": "best_effort", "config": config,
-              "config_hash": chash, "api_ps": ps, "started_utc": BVR.now_utc_iso()}
+              "config_hash": chash, "api_ps_before_unload": ps_before, "api_ps": ps,
+              "started_utc": BVR.now_utc_iso()}
 
     fh = open(tmp_path, "w", encoding="utf-8")
     _emit(fh, header)  # HEADER-WRITE: before the first model call
@@ -267,14 +297,18 @@ def main(argv=None):
     def canary(batch, at_read):
         head = VHR.run_canary(client, load, batch, at_read)  # CanaryFault aborts
         res = transport(BR.read_chunk, client, canary_png)
-        err = BR.classify_read(res["text"], res["done_reason"], canary_n_lines)
+        kept, n_echo, err = BR.classify_body_reply(res["text"], res["done_reason"], canary_n_lines)
         if err:
             raise BodyCanaryFault(f"body canary batch {batch}: {err}")
-        sha = sha256_text(res["text"])
+        sha = sha256_text(kept)
         if state["ref_sha"] is None:
             state["ref_sha"] = sha
         canaries.append({"batch": batch, "at_read": at_read, "identical": sha == state["ref_sha"],
-                         "sha": sha, "head_ok": bool(head.get("ok"))})
+                         "sha": sha, "raw_sha": sha256_text(res["text"] or ""),
+                         "echo_stripped": n_echo, "head_ok": bool(head.get("ok"))})
+        if sha != state["ref_sha"]:
+            raise BodyCanaryFault(f"body canary batch {batch}: echo-stripped text differs from "
+                                  f"batch 0 ({sha[:8]} vs {state['ref_sha'][:8]})")
 
     try:
         for line_no, rec, rects, fp in units:
@@ -302,10 +336,12 @@ def main(argv=None):
                         canary(counts["reads"] // CANARY_EVERY, counts["reads"])
                     res = transport(BR.read_chunk, client, crop_png_bytes(gray, box))
                     counts["reads"] += 1
+                    kept, n_echo, err = BR.classify_body_reply(res["text"], res["done_reason"], nl)
                     c["text"], c["done_reason"], c["eval_count"] = (
-                        res["text"], res["done_reason"], res["eval_count"])
-                    c["sha256"] = sha256_text(res["text"] or "")
-                    err = BR.classify_read(res["text"], res["done_reason"], nl)
+                        kept, res["done_reason"], res["eval_count"])
+                    c["echo_stripped"] = n_echo
+                    c["sha256"] = sha256_text(kept or "")
+                    c["raw_sha256"] = sha256_text(res["text"] or "")
                     c["error"] = err
                     chunks.append(c)
                     if err:

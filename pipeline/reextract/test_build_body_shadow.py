@@ -15,7 +15,7 @@ import numpy as np
 import body_read as BR
 import build_body_shadow as BSB
 
-EXPECTED_TESTS = 15
+EXPECTED_TESTS = 20
 
 D_HOST = "192.168.1.169:11435"
 PAGE_H, PAGE_W = 3500, 1000
@@ -83,14 +83,22 @@ class FakeClient:
         self.head_wrong_from = None   # head call index from which the canary mismatches
         self.canary_sha = None        # image sha whose reply varies per call (non-identical)
         self.degenerate_first = False
+        self.echo_prefix = False      # every body reply starts with BODY_PROMPT (D, 2026-11-08)
+        self.echo_only_at = ()        # body call indices answered with the prompt twice, nothing else
+        self.ps_keeps_model = False   # /api/ps still lists the model after the unload
 
     def get(self, url, timeout=None):
         self.log.append(("get", url))
         if url.endswith("/api/tags"):
             return FakeResp({"models": [{"name": self.model, "digest": "digest-xyz"}]})
+        if self.ps_keeps_model:
+            return FakeResp({"models": [{"name": self.model}]})
         return FakeResp({"models": []})
 
     def post(self, url, json=None, timeout=None):
+        if url.endswith("/api/generate"):     # the keep_alive:0 unload, not a model read
+            self.log.append(("unload", json.get("keep_alive")))
+            return FakeResp({"done": True})
         if self.header_seen_at_first_post is None:
             p = Path(self.tmp_path)
             first = p.read_text(encoding="utf-8").splitlines()[0] if p.exists() else ""
@@ -110,6 +118,10 @@ class FakeClient:
             text = f"Body {sha[:6]}"
             if sha == self.canary_sha:
                 text += f" call{idx}"
+            if idx in self.echo_only_at:
+                text = BR.BODY_PROMPT + "\n" + BR.BODY_PROMPT
+            elif self.echo_prefix:
+                text = BR.BODY_PROMPT + "\n" + text
             return FakeResp({"message": {"content": text}, "done": True, "done_reason": "stop", "eval_count": 5})
         idx = self.head_calls
         self.head_calls += 1
@@ -229,7 +241,7 @@ def test_two_empty_reads_are_item_errors_not_a_fault(env):
     state = {"n": 0}
 
     def post(url, json=None, timeout=None):
-        if json["messages"][0]["content"] == BR.BODY_PROMPT:
+        if "messages" in json and json["messages"][0]["content"] == BR.BODY_PROMPT:
             state["n"] += 1
             if state["n"] in (3, 6):      # call 1 is the canary; two non-consecutive empties among reads
                 env.fake.body_calls += 1
@@ -274,18 +286,81 @@ def test_body_canary_byte_identity_is_recorded_and_not_an_abort(env):
 
 
 @with_env()
-def test_body_canary_mismatch_is_measured_not_an_abort(env):
-    # the canary chunk is the first chunk of R0; learn its image sha from a first dry run
+def test_body_canary_mismatch_aborts(env):
+    # Chris 2026-11-12 (A5 folded into decision a): a mismatch is a run fault, no longer measured.
+    # The canary chunk is the first chunk of R0; learn its image sha from a first dry run.
     assert env.run() == 0
     first_body = [e for e in env.fake.log if e[0] == "body"][0][1]
     env.out.unlink()
     env.fake.canary_sha = first_body
     env.fake.log, env.fake.body_calls, env.fake.head_calls = [], 0, 0
     env.fake.header_seen_at_first_post = None
+    assert env.run() == 3
+    assert not env.out.exists()
+    fault = json.loads(Path(str(env.out) + ".fault.json").read_text(encoding="utf-8"))
+    assert fault["type"] == "BodyCanaryFault" and "batch 1" in fault["cause"] and "differs" in fault["cause"]
+    assert [c["identical"] for c in fault["canaries"]] == [True, False]
+    assert fault["reads_before_fault"] == 3
+
+
+@with_env()
+def test_echo_prefix_is_stripped_recorded_and_canary_compares_the_remainder(env):
+    env.fake.echo_prefix = True
     assert env.run() == 0
-    s = env.records()[-1]
-    assert s["counts"]["canary_identical"] == "0/2" and s["counts"]["canary_batches"] == 3
-    assert [c["identical"] for c in s["canaries"]] == [True, False, False]
+    recs = env.records()
+    chunks = [c for r in recs if r["kind"] == "body_region" for c in r["chunks"] if c["guard"] == "ok"]
+    assert len(chunks) == 8
+    for c in chunks:
+        assert c["echo_stripped"] == 1 and c["error"] is None
+        assert c["text"].startswith("Body ") and "Transcribe" not in c["text"]
+        assert c["sha256"] == hashlib.sha256(c["text"].encode()).hexdigest() != c["raw_sha256"]
+    s = recs[-1]
+    assert s["counts"]["canary_identical"] == "2/2"
+    assert all(c["echo_stripped"] == 1 for c in s["canaries"])
+    assert all("Transcribe" not in r.get("body_raw", "") for r in recs if r["kind"] == "body_region")
+
+
+@with_env()
+def test_echo_only_read_is_item_error_echo_never_a_read(env):
+    env.fake.echo_only_at = (2,)     # body call 0 = canary, 1 = read 0, 2 = read 1
+    assert env.run() == 0
+    recs = env.records()
+    chunks = [c for r in recs if r["kind"] == "body_region" for c in r["chunks"] if c["guard"] == "ok"]
+    bad = [c for c in chunks if c["error"]]
+    assert len(bad) == 1 and bad[0]["error"] == "echo" and bad[0]["echo_stripped"] == 2
+    assert recs[-1]["counts"]["item_errors"] == {"echo": 1}
+    region = [r for r in recs if r["kind"] == "body_region" and bad[0] in r["chunks"]][0]
+    assert region["body_status"] == "incomplete" and "Transcribe" not in region["body_raw"]
+
+
+@with_env()
+def test_echo_only_body_canary_aborts(env):
+    env.fake.echo_only_at = (0,)
+    assert env.run() == 3
+    fault = json.loads(Path(str(env.out) + ".fault.json").read_text(encoding="utf-8"))
+    assert fault["type"] == "BodyCanaryFault" and "echo" in fault["cause"]
+    assert fault["reads_before_fault"] == 0
+
+
+@with_env()
+def test_unload_precedes_header_and_the_first_model_call_is_a_canary(env):
+    assert env.run() == 0
+    kinds = [e[0] for e in env.fake.log]
+    i_unload = kinds.index("unload")
+    assert env.fake.log[i_unload][1] == 0
+    first_call = next(k for k in kinds if k in ("head", "body"))
+    assert i_unload < kinds.index(first_call) and first_call == "head"   # the head canary opens the load
+    hdr = env.records()[0]
+    assert hdr["config"]["unloaded_before"] is True and "api_ps_before_unload" in hdr
+    assert env.fake.header_seen_at_first_post is True
+
+
+@with_env()
+def test_failed_unload_is_refused_before_any_model_call(env):
+    env.fake.ps_keeps_model = True
+    assert env.run() == 2
+    assert env.fake.body_calls == 0 and env.fake.head_calls == 0
+    assert not env.out.exists() and not Path(str(env.out) + ".tmp").exists()
 
 
 @with_env()

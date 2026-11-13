@@ -7,7 +7,7 @@ import numpy as np
 
 import body_read as BR
 
-EXPECTED_TESTS = 19
+EXPECTED_TESTS = 22
 
 
 def page45():
@@ -155,6 +155,30 @@ def test_classify_read_every_branch():
     assert BR.classify_read("ab" + "x" * 19 + "cd", "stop", 3) is None
     assert BR.classify_read("12345 ...", "stop", 2) == "degenerate_no_latin"
     assert BR.classify_read("12345 ...", "stop", 0) is None
+
+
+def test_strip_echo_loops_over_every_leading_copy():
+    P = BR.BODY_PROMPT
+    # D's three observed shapes: prompt + text (canary 88e8), prompt alone, prompt + "\n" + prompt
+    assert BR.strip_echo(P + "\nof the foundation\nof the earth") == ("of the foundation\nof the earth", 1)
+    assert BR.strip_echo(P) == ("", 1)
+    assert BR.strip_echo(P + "\n" + P) == ("", 2)
+    # whitespace-normalised: the echo may re-wrap the prompt
+    assert BR.strip_echo(P.replace(" ", "\n  ") + "\ntext") == ("text", 1)
+
+
+def test_strip_echo_leaves_a_clean_reply_byte_identical():
+    for t in ("  In the beginning\nGod", "", "Transcribe this", "x " + BR.BODY_PROMPT):
+        assert BR.strip_echo(t) == (t, 0), t   # a prompt copy not at the start is not an echo
+    assert BR.strip_echo(None) == (None, 0)
+
+
+def test_classify_body_reply_types_echo_apart_from_empty():
+    P = BR.BODY_PROMPT
+    assert BR.classify_body_reply(P + "\n" + P, "stop", 3) == ("", 2, "echo")
+    assert BR.classify_body_reply(P + "\nSome text", "stop", 3) == ("Some text", 1, None)
+    assert BR.classify_body_reply("", "stop", 3) == ("", 0, "empty")
+    assert BR.classify_body_reply(P + "\nSome text", "length", 3) == ("Some text", 1, "truncated")
 
 
 def test_join_wordbreaks_joins_lowercase_continuation():

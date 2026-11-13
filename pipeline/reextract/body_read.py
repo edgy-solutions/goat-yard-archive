@@ -146,6 +146,37 @@ def classify_read(text, done_reason, n_lines):
     return None
 
 
+ECHO = "echo"
+
+
+def strip_echo(text, prompt=BODY_PROMPT):
+    """(remainder, n): remove EVERY leading copy of `prompt`, compared whitespace-normalised.
+    On D (2026-11-08) body replies began with BODY_PROMPT verbatim: the canary was prompt + text, and
+    one tall crop returned the prompt alone, once or twice (prompt, newline, prompt). A single prefix
+    test would keep the second copy as a "transcription", so this loops. The remainder keeps its own
+    line breaks; only the whitespace before it is dropped. Instruction text only, never a context
+    channel: copying from context is leakage, not echo."""
+    words = (prompt or "").split()
+    if text is None or not words:
+        return text, 0
+    pat = re.compile(r"\s*" + r"\s+".join(map(re.escape, words)))
+    n = 0
+    while True:
+        m = pat.match(text)
+        if not m:
+            return (text.lstrip() if n else text), n
+        text, n = text[m.end():], n + 1
+
+
+def classify_body_reply(text, done_reason, n_lines):
+    """(kept_text, echo_stripped, error): strip_echo, then classify_read on what is left.
+    An echo-only reply is the item error `echo`, never a read."""
+    kept, n = strip_echo(text)
+    if n and (kept is None or kept.strip() == ""):
+        return kept, n, ECHO
+    return kept, n, classify_read(kept, done_reason, n_lines)
+
+
 def read_chunk(client, png_bytes):
     """One native /api/chat call (think False, stream False, temperature 0, num_predict 2048).
     -> {"text","done_reason","eval_count","http_status"}. Any non-200 status (429, 5xx, ...) or a
