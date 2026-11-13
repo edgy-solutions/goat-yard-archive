@@ -105,11 +105,43 @@ HEB = re.compile("[\u0590-\u05ff]")
 # dry 1175 unapproved (attempt 3), and 1171 at attempt 1, i.e. the old path is untouched.  The
 # approved dry value 1179 and the real total 1621 are DERIVED from the 8, not yet measured -- the
 # approved dry value 1179 is now MEASURED TOO (2026-11-12, with the record on disk) and equals
-# the derivation.  The real total 1621 stays DERIVED and fires AFTER the files are written, so a
-# mismatch aborts a run that already spent: re-pin from the observed count, never relax it.
+# the derivation.  The real total is now MEASURED as well: 1619 on run b39dea2005246c6c, i.e.
+# EXPECTED_CHECKS 1611 + GATE 0S 8.  The DERIVED 1621 was wrong by 2 and fired AFTER the files were
+# written -- it aborted a run that had already spent, exactly as the comment warned.  Re-pinned
+# from the observed count, never relaxed; see EXPECTED_CHECKS for why a lost assertion is not what
+# fired.
 # Proved live by mutation, not by a green run: six arms (lock edited, no record in a real run,
 # by=null, wrong attempt at the lock, wrong attempt at the licence, another sheet bytes sha).
-EXPECTED_CHECKS = 1613      # DERIVED 2026-11-08, not measured.  630 was MEASURED on run
+EXPECTED_CHECKS = 1611      # MEASURED 2026-11-12 on run b39dea2005246c6c (the null
+                            # replicate): 1619 observed at attempt 3 with an approval record on
+                            # disk, minus GATE 0S's measured 8.  GATE 0S does not run at attempt 1,
+                            # so 1611 is also the base for an ordinary run.
+                            #
+                            # It replaces a DERIVED 1613 that fired on this run (1619 != 1621) and
+                            # could not be audited when it did, which is the lesson worth keeping.
+                            # The old derivation rested on a term BORROWED from run
+                            # 6a2292bdb14d3c43 -- 274 real-run-only checks whose composition was
+                            # never written down -- plus a `+1 x 6 records` write-block term that
+                            # is wrong on both factors: the block holds FOUR paths (reads.jsonl,
+                            # refused.jsonl, .json, .md) and TWO chk loops over them (8), plus the
+                            # refused-count and refused/read-disjointness checks (10 in all).
+                            #
+                            # The re-pin is not a relaxation, and here is why a lost assertion is
+                            # not what fired.  A pin catches a lost check; a lost check would have
+                            # to be conditional on this run's data, and this run's conditional
+                            # surface is IDENTICAL to run 1's: reasoning ladder 81 `enabled:false`
+                            # and 81 `effort:minimal` in both runs, retries 0, errors 0,
+                            # finish_reason `stop` x 162, providers 81/81, refusal set 4 of 45.
+                            # Nothing data-dependent moved, so the quantity that failed to
+                            # reproduce is the only one that was never measured.
+                            #
+                            # `checks_at_header_freeze` in the header now records the count at the
+                            # moment the header is frozen, so the next mismatch decomposes into a
+                            # pre-write part and the write block's 10 instead of being one opaque
+                            # total.  It is a PARTIAL count by construction -- the write block's
+                            # own checks run after any record can contain them -- and is named for
+                            # what it is.  ORIGINAL DERIVATION, kept because a later reader needs
+                            # to see what was wrong with it:  630 was MEASURED on run
                             # 6a2292bdb14d3c43, whose dry-run measured 356, so the real-run-only
                             # checks were 630 - 356 = 274 (mostly do_call's per-ladder-step host
                             # assertion, one per call because the ladder stepped once per call in
@@ -1451,6 +1483,10 @@ def main():
         "scored_lock_unchanged": PRED_SHA,
     }
     header["spend_approval"] = appr_s
+    # A PARTIAL count, by construction and by name: the write block's own checks necessarily run
+    # after any record that could carry them.  Recorded so a future pin mismatch decomposes into a
+    # pre-write part and the write block's 10, instead of being one opaque total nobody can audit.
+    header["checks_at_header_freeze"] = CHECKS
 
     # GATE 10.  The header is complete here, before any call.  The forbidden-host check used to
     # live only in the write block, which is reached after all 162 calls are paid for: a run
