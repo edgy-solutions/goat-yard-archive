@@ -104,7 +104,9 @@ HEB = re.compile("[\u0590-\u05ff]")
 # total is EXPECTED_CHECKS + 8, and its dry total is EXPECTED_CHECKS_DRY + 4 or + 8.  MEASURED:
 # dry 1175 unapproved (attempt 3), and 1171 at attempt 1, i.e. the old path is untouched.  The
 # approved dry value 1179 and the real total 1621 are DERIVED from the 8, not yet measured -- the
-# approved value becomes measurable the moment an approval record exists, and is re-measured then.
+# approved dry value 1179 is now MEASURED TOO (2026-11-12, with the record on disk) and equals
+# the derivation.  The real total 1621 stays DERIVED and fires AFTER the files are written, so a
+# mismatch aborts a run that already spent: re-pin from the observed count, never relax it.
 # Proved live by mutation, not by a green run: six arms (lock edited, no record in a real run,
 # by=null, wrong attempt at the lock, wrong attempt at the licence, another sheet bytes sha).
 EXPECTED_CHECKS = 1613      # DERIVED 2026-11-08, not measured.  630 was MEASURED on run
