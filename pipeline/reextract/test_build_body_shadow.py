@@ -15,8 +15,9 @@ import numpy as np
 import body_read as BR
 import build_body_shadow as BSB
 
-EXPECTED_TESTS = 20
+EXPECTED_TESTS = 27
 
+RUN_HOST = "192.168.1.169:11434"   # C (ruling 2026-11-14)
 D_HOST = "192.168.1.169:11435"
 PAGE_H, PAGE_W = 3500, 1000
 
@@ -69,7 +70,7 @@ class FakeResp:
 
 
 class FakeClient:
-    base_url = "http://" + D_HOST
+    base_url = "http://" + RUN_HOST
     model = BSB.VHR.DEFAULT_MODEL
 
     def __init__(self):
@@ -86,6 +87,10 @@ class FakeClient:
         self.echo_prefix = False      # every body reply starts with BODY_PROMPT (D, 2026-11-08)
         self.echo_only_at = ()        # body call indices answered with the prompt twice, nothing else
         self.ps_keeps_model = False   # /api/ps still lists the model after the unload
+        self.chat_payloads = []       # every /api/chat payload as SENT (after PinnedClient)
+        self.reload_at = None         # chat call index whose reply reports a fresh load
+        self.no_load_first = False    # the first chat reply reports no load
+        self.unloaded_at = 0          # chat index of the first call after the latest unload
 
     def get(self, url, timeout=None):
         self.log.append(("get", url))
@@ -98,11 +103,21 @@ class FakeClient:
     def post(self, url, json=None, timeout=None):
         if url.endswith("/api/generate"):     # the keep_alive:0 unload, not a model read
             self.log.append(("unload", json.get("keep_alive")))
+            self.unloaded_at = len(self.chat_payloads)   # the next chat call loads the model afresh
             return FakeResp({"done": True})
         if self.header_seen_at_first_post is None:
             p = Path(self.tmp_path)
             first = p.read_text(encoding="utf-8").splitlines()[0] if p.exists() else ""
             self.header_seen_at_first_post = bool(first) and '"run_header"' in first
+        k = len(self.chat_payloads)
+        self.chat_payloads.append(json)
+        loaded = (k == self.unloaded_at and not self.no_load_first) or k == self.reload_at
+        r = self._chat(json)
+        if isinstance(r._b, dict) and r._b:
+            r._b = dict(r._b, load_duration=int(9e9) if loaded else int(2e7))
+        return r
+
+    def _chat(self, json):
         msg = json["messages"][0]
         if msg["content"] == BR.BODY_PROMPT:
             idx = self.body_calls
@@ -147,7 +162,7 @@ class Env:
         self.every = every
         self.saved = (BSB.make_client, BSB.load_page_gray, BSB.png_sha256, BSB.CANARY_EVERY)
 
-    def run(self, pages=(91, 90, 92), host=D_HOST):
+    def run(self, pages=(91, 90, 92), host=RUN_HOST):
         BSB.make_client = lambda base_url, model: self.fake
         BSB.load_page_gray = lambda vd, fp: self.pages.get(fp)
         BSB.png_sha256 = lambda vd, fp: f"sha-page-{fp}"
@@ -245,7 +260,9 @@ def test_two_empty_reads_are_item_errors_not_a_fault(env):
             state["n"] += 1
             if state["n"] in (3, 6):      # call 1 is the canary; two non-consecutive empties among reads
                 env.fake.body_calls += 1
-                return FakeResp({"message": {"content": ""}, "done": True, "done_reason": "stop"})
+                env.fake.chat_payloads.append(json)   # a later call of the load: no reload
+                return FakeResp({"message": {"content": ""}, "done": True, "done_reason": "stop",
+                                 "load_duration": int(2e7)})
         return orig(url, json=json, timeout=timeout)
     env.fake.post = post
     assert env.run() == 0
@@ -431,6 +448,93 @@ def test_out_exists_is_refused_and_untouched(env):
     env.out.write_text("keep", encoding="utf-8")
     assert env.run() == 2 and env.out.read_text(encoding="utf-8") == "keep"
     assert env.fake.log == []
+
+
+FIT_OPTIONS = {"temperature": 0, "seed": 0, "num_predict": 2048, "num_ctx": 16384, "num_batch": 512}
+
+
+@with_env()
+def test_every_chat_call_carries_pinned_options_and_body_equals_fitness(env):
+    assert env.run() == 0
+    pl = env.fake.chat_payloads
+    assert pl and all(p["keep_alive"] == "5m" for p in pl)
+    assert all({k: p["options"][k] for k in BSB.PINNED_OPTIONS} == BSB.PINNED_OPTIONS for p in pl)
+    body = [p for p in pl if p["messages"][0]["content"] == BR.BODY_PROMPT]
+    head = [p for p in pl if p["messages"][0]["content"] != BR.BODY_PROMPT]
+    assert body and head and all(p["options"] == FIT_OPTIONS for p in body)
+    summ = env.records()[-1]
+    assert summ["kind"] == "run_summary" and FIT_OPTIONS in summ["options_sent"]
+    assert len(summ["options_sent"]) == 2          # head (num_predict 64) + body, nothing else
+    lt = summ["load_trace"]
+    assert lt["chat_calls"] == len(pl) and lt["first_load_s"] == 9.0 and lt["max_later_load_s"] == 0.02
+    assert env.records()[0]["config"]["pinned_options"] == BSB.PINNED_OPTIONS
+
+
+@with_env()
+def test_mid_run_reload_on_a_body_read_is_run_fault(env):
+    env.fake.reload_at = len(BSB.VHR.CANARY_CROPS) + 2     # past the batch-0 canaries: a body read
+    assert env.run() == 3
+    assert not env.out.exists() and not Path(str(env.out) + ".tmp").exists()
+    fault = json.loads(Path(str(env.out) + ".fault.json").read_text(encoding="utf-8"))
+    assert fault["type"] == "RunFault" and "mid-run reload at chat call" in fault["cause"], fault
+    assert fault["load_trace"]["fault"] == fault["cause"]
+
+
+@with_env()
+def test_reload_inside_head_canary_is_run_fault_not_canary_mismatch(env):
+    assert len(BSB.VHR.CANARY_CROPS) >= 2
+    env.fake.reload_at = 1                                  # the second head-canary crop
+    assert env.run() == 3
+    fault = json.loads(Path(str(env.out) + ".fault.json").read_text(encoding="utf-8"))
+    assert fault["type"] == "RunFault" and "mid-run reload at chat call 1" in fault["cause"], fault
+
+
+@with_env()
+def test_first_call_not_triggering_the_load_is_run_fault(env):
+    env.fake.no_load_first = True
+    assert env.run() == 3
+    fault = json.loads(Path(str(env.out) + ".fault.json").read_text(encoding="utf-8"))
+    assert fault["type"] == "RunFault" and "did not trigger the load" in fault["cause"], fault
+
+
+def test_conflicting_caller_option_is_run_fault_and_never_sent():
+    class Inner:
+        base_url, model, sent = "http://" + RUN_HOST, "m", []
+
+        def post(self, url, json=None, timeout=None):
+            self.sent.append(json)
+            return FakeResp({"done": True, "load_duration": int(9e9)})
+    for bad in ({"options": {"num_batch": 1024}}, {"options": {}, "keep_alive": 0}):
+        pc = BSB.PinnedClient(Inner())
+        try:
+            pc.post(RUN_HOST + "/api/chat", json=bad)
+        except BR.RunFault as e:
+            assert "conflicts with the pinned" in str(e) and pc.fault == str(e)
+        else:
+            raise AssertionError(f"conflict accepted: {bad}")
+    assert Inner.sent == []
+
+
+def test_reply_without_load_duration_is_run_fault():
+    class Inner:
+        base_url, model = "http://" + RUN_HOST, "m"
+
+        def post(self, url, json=None, timeout=None):
+            return FakeResp({"done": True, "message": {"content": "x"}})
+    pc = BSB.PinnedClient(Inner())
+    try:
+        pc.post(RUN_HOST + "/api/chat", json={"options": {}})
+    except BR.RunFault as e:
+        assert "no load_duration" in str(e) and pc.load_durations_s == [], e
+    else:
+        raise AssertionError("a reply without load_duration was accepted")
+
+
+@with_env()
+def test_endpoint_D_is_now_refused_before_any_call(env):
+    assert env.run(host="http://" + D_HOST) == 2
+    assert env.fake.log == [] and env.fake.chat_payloads == []
+    assert not env.out.exists() and not Path(str(env.out) + ".tmp").exists()
 
 
 if __name__ == "__main__":

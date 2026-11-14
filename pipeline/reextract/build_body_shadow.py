@@ -1,7 +1,8 @@
 """build_body_shadow -- stage 2 of the 20-page body shadow run (PREDICTION_shadow_run_20p_20261108.md).
 
 Reads the BODY of every stage-1 region that has rects, one guarded chunk at a time, through the
-native Ollama /api/chat of endpoint D only (192.168.1.169:11435). Output is private data and goes
+native Ollama /api/chat of endpoint C only (192.168.1.169:11434; ruling 2026-11-14: C FIT on the fitness
+protocol, D UNFIT, the shadow run goes on ONE endpoint). Output is private data and goes
 through build_verse_regions.validate_out_path (never inside a repo).
 
 Record order in OUT.jsonl: run_header (written FIRST, before any model call), then one body_region
@@ -10,6 +11,13 @@ OUT.tmp and renamed to OUT only on a clean finish.
 
 Before the header the model is unloaded (keep_alive:0, /api/ps verified), so the first call of the
 run is the first call of a fresh load, and that call is always a canary.
+
+Pinned options (addendum 2, 2026-11-14): every /api/chat call -- head canary, body canary, body read --
+goes through PinnedClient, which adds PINNED_OPTIONS (seed, num_ctx, num_batch) and KEEP_ALIVE, so the
+body payload equals the fitness protocol's OPTIONS exactly and the server never chooses a load-time
+option (11-12 load 5: n_batch 1024 vs 512 under identical undeclared options). It records every reply's
+load_duration: the first call must trigger the load (> RELOAD_S), no later call may (a mid-run reload
+is a RunFault). The options actually sent are recorded in the summary (realized, not requested).
 
 Prompt echo (decision a, Chris 2026-11-12): every reply is passed through body_read.strip_echo; the
 stored text is the remainder, echo_stripped records the copies removed, an echo-only reply is the
@@ -27,7 +35,7 @@ padded margin, which an ink-tight body chunk never has (the first chunk starts o
 top row), so applying them refuses every chunk. core_at_edge replaces the straddle test. The raw
 non-ok status is kept on the chunk as guard_raw.
 
-Exit codes: 0 clean, 2 refused before any call (host not D, bad input, OUT exists), 3 run fault.
+Exit codes: 0 clean, 2 refused before any call (host not C, bad input, OUT exists), 3 run fault.
 """
 from __future__ import annotations
 
@@ -48,7 +56,10 @@ import build_verse_regions as BVR  # noqa: E402
 import endpoint_guard  # noqa: E402
 import verse_head_read as VHR  # noqa: E402
 
-EXPECTED_HOST = "192.168.1.169:11435"
+EXPECTED_HOST = "192.168.1.169:11434"   # C only (ruling 2026-11-14)
+PINNED_OPTIONS = {"seed": 0, "num_ctx": 16384, "num_batch": 512}
+KEEP_ALIVE = "5m"
+RELOAD_S = 1.0
 CANARY_EVERY = 20
 UNIT_KINDS = ("verse", "chapter_intro", "continuation_unanchored")
 GUARD_REFUSALS = ("clamped", "blank", "uniform")
@@ -88,6 +99,63 @@ class _RequestsClient:
     def get(self, url, timeout=None):
         import requests
         return requests.get(url, timeout=timeout)
+
+
+_dumps = json.dumps
+
+
+class PinnedClient:
+    """Wraps the run's client. Every /api/chat payload is sent with PINNED_OPTIONS and KEEP_ALIVE (a
+    caller value that differs is a RunFault, never overridden). Every 200 /api/chat reply's load_duration
+    is recorded: the first must exceed RELOAD_S (the unload-verified load is triggered by the run's first
+    call), no later one may (a mid-run reload). A violation is kept in .fault and raised as RunFault."""
+
+    def __init__(self, inner):
+        self.inner, self.base_url, self.model = inner, inner.base_url, inner.model
+        self.load_durations_s = []
+        self.options_sent = []
+        self.fault = None
+
+    def _fail(self, msg):
+        if self.fault is None:
+            self.fault = msg
+        raise BR.RunFault(msg)
+
+    def get(self, url, timeout=None):
+        return self.inner.get(url, timeout=timeout)
+
+    def post(self, url, json=None, timeout=None):
+        if not url.endswith("/api/chat"):
+            return self.inner.post(url, json=json, timeout=timeout)
+        opts = dict(json.get("options") or {})
+        for k, v in PINNED_OPTIONS.items():
+            if k in opts and opts[k] != v:
+                self._fail(f"caller option {k}={opts[k]!r} conflicts with the pinned {v!r}")
+            opts[k] = v
+        if json.get("keep_alive", KEEP_ALIVE) != KEEP_ALIVE:
+            self._fail(f"caller keep_alive {json.get('keep_alive')!r} conflicts with the pinned {KEEP_ALIVE!r}")
+        sent = _dumps(opts, sort_keys=True)
+        if sent not in self.options_sent:
+            self.options_sent.append(sent)
+        resp = self.inner.post(url, json=dict(json, options=opts, keep_alive=KEEP_ALIVE), timeout=timeout)
+        if getattr(resp, "status_code", 200) == 200:
+            n = len(self.load_durations_s)
+            ld = resp.json().get("load_duration")
+            if not isinstance(ld, (int, float)) or isinstance(ld, bool):
+                self._fail(f"chat call {n}: reply carries no load_duration ({ld!r})")
+            sec = ld / 1e9
+            self.load_durations_s.append(round(sec, 3))
+            if n == 0 and sec <= RELOAD_S:
+                self._fail(f"chat call 0 did not trigger the load: load_duration {sec:.3f}s <= {RELOAD_S}s")
+            if n > 0 and sec > RELOAD_S:
+                self._fail(f"mid-run reload at chat call {n}: load_duration {sec:.3f}s > {RELOAD_S}s")
+        return resp
+
+    def load_trace(self):
+        later = self.load_durations_s[1:]
+        return {"chat_calls": len(self.load_durations_s),
+                "first_load_s": self.load_durations_s[0] if self.load_durations_s else None,
+                "max_later_load_s": max(later) if later else None, "fault": self.fault}
 
 
 def make_client(base_url, model):
@@ -199,10 +267,10 @@ def main(argv=None):
     if out_path.exists():
         return _refuse(f"{out_path} exists; never clobbered")
 
-    # Host first: nothing is sent anywhere unless it resolves to endpoint D.
+    # Host first: nothing is sent anywhere unless it resolves to endpoint C.
     base_url = endpoint_guard.resolve_ollama_base_url(args.host, purpose="build_body_shadow")
     if urlparse(base_url).netloc != EXPECTED_HOST:
-        return _refuse(f"host resolves to {base_url!r}; endpoint D ({EXPECTED_HOST}) only")
+        return _refuse(f"host resolves to {base_url!r}; endpoint C ({EXPECTED_HOST}) only")
 
     pages = list(args.pages)
     stage1 = read_stage1(args.stage1)
@@ -240,7 +308,7 @@ def main(argv=None):
         raise ValueError(f"no stage-1 verse region has a rect on page {BODY_CANARY_PAGE} "
                          f"column {BODY_CANARY_COL!r}: no body canary")
 
-    client = make_client(base_url, args.model)
+    client = PinnedClient(make_client(base_url, args.model))
     base_url, digest = VHR.resolve_and_check(args.host, args.model, client=client)
     ps_before = client.get(base_url.rstrip("/") + "/api/ps", timeout=HTTP_TIMEOUT_S).json()
     try:
@@ -268,6 +336,7 @@ def main(argv=None):
         "echo_rule": "strip every leading BODY_PROMPT copy; echo-only = item error 'echo'; "
                      "body canary echo-only or not identical to batch 0 = BodyCanaryFault",
         "unloaded_before": True,
+        "pinned_options": dict(PINNED_OPTIONS), "keep_alive": KEEP_ALIVE, "reload_s": RELOAD_S,
         "body_read_sha256": sha256_file(BR.__file__),
         "builder_sha256": sha256_file(__file__),
     }
@@ -295,7 +364,12 @@ def main(argv=None):
             raise BR.RunFault(f"transport failure: {type(e).__name__}: {e}")
 
     def canary(batch, at_read):
-        head = VHR.run_canary(client, load, batch, at_read)  # CanaryFault aborts
+        try:
+            head = VHR.run_canary(client, load, batch, at_read)  # CanaryFault aborts
+        except VHR.CanaryFault:
+            if client.fault:  # a load-trace fault inside a head crop is the run's fault, not a mismatch
+                raise BR.RunFault(client.fault)
+            raise
         res = transport(BR.read_chunk, client, canary_png)
         kept, n_echo, err = BR.classify_body_reply(res["text"], res["done_reason"], canary_n_lines)
         if err:
@@ -367,14 +441,18 @@ def main(argv=None):
                               "canary_batches": len(canaries),
                               "canary_identical": f"{n_ident}/{max(0, len(canaries) - 1)}",
                               "elapsed_s": round(time.monotonic() - t_start, 1)},
-                   "canaries": canaries})
+                   "canaries": canaries,
+                   "options_sent": [json.loads(o) for o in client.options_sent],
+                   "load_trace": client.load_trace()})
     except (BR.RunFault, VHR.ConsecutiveReadErrorFault, VHR.CanaryFault, BodyCanaryFault) as e:
         fh.close()
         os.remove(tmp_path)
         fault_path.write_text(json.dumps({
             "kind": "run_fault", "cause": str(e), "type": type(e).__name__,
             "config_hash": chash, "reads_before_fault": counts["reads"],
-            "item_errors": dict(item_errors), "canaries": canaries}, ensure_ascii=False, indent=1),
+            "item_errors": dict(item_errors), "canaries": canaries,
+            "options_sent": [json.loads(o) for o in client.options_sent],
+            "load_trace": client.load_trace()}, ensure_ascii=False, indent=1),
             encoding="utf-8")
         print(f"RUN FAULT: {type(e).__name__}: {e}", file=sys.stderr)
         return 3
