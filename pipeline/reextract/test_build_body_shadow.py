@@ -15,7 +15,7 @@ import numpy as np
 import body_read as BR
 import build_body_shadow as BSB
 
-EXPECTED_TESTS = 27
+EXPECTED_TESTS = 28
 
 RUN_HOST = "192.168.1.169:11434"   # C (ruling 2026-11-14)
 D_HOST = "192.168.1.169:11435"
@@ -528,6 +528,31 @@ def test_reply_without_load_duration_is_run_fault():
         assert "no load_duration" in str(e) and pc.load_durations_s == [], e
     else:
         raise AssertionError("a reply without load_duration was accepted")
+
+
+def test_load_trace_calls_one_entry_per_chat_call_including_a_faulting_one():
+    class Inner:
+        base_url, model, n = "http://" + RUN_HOST, "m", 0
+
+        def post(self, url, json=None, timeout=None):
+            self.n += 1
+            ld = int(9e9) if self.n in (1, 3) else int(1e8)   # call 2 is fine, call 3 reloads
+            return FakeResp({"done": True, "load_duration": ld})
+    pc = BSB.PinnedClient(Inner())
+    for i in range(3):
+        payload = {"messages": [{"role": "user", "content": "p%d" % i, "images": ["img%d" % i]}],
+                   "options": {"temperature": 0}}
+        try:
+            pc.post(RUN_HOST + "/api/chat", json=payload)
+        except BR.RunFault:
+            assert i == 2
+    calls = pc.load_trace()["calls"]
+    assert [c["n"] for c in calls] == [0, 1, 2], calls            # the faulting call is recorded
+    for c in calls:
+        assert set(c) == {"n", "load_duration_s", "options_idx", "prompt_sha8", "image_sha8"}, c
+        assert len(c["prompt_sha8"]) == 8 and len(c["image_sha8"]) == 8
+    assert calls[2]["load_duration_s"] == 9.0 and pc.fault and "mid-run reload" in pc.fault
+    assert pc.load_trace()["chat_calls"] == 3 and pc.options_sent[calls[0]["options_idx"]]
 
 
 @with_env()

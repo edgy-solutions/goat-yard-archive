@@ -55,36 +55,22 @@ import body_read as BR  # noqa: E402
 import build_verse_regions as BVR  # noqa: E402
 import endpoint_guard  # noqa: E402
 import verse_head_read as VHR  # noqa: E402
+from pinned_client import (HTTP_TIMEOUT_S, KEEP_ALIVE, PINNED_OPTIONS, RELOAD_S, PinnedClient,  # noqa: E402,F401
+                           _dumps, unload_model)
 
 EXPECTED_HOST = "192.168.1.169:11434"   # C only (ruling 2026-11-14)
-PINNED_OPTIONS = {"seed": 0, "num_ctx": 16384, "num_batch": 512}
-KEEP_ALIVE = "5m"
-RELOAD_S = 1.0
 CANARY_EVERY = 20
 UNIT_KINDS = ("verse", "chapter_intro", "continuation_unanchored")
 GUARD_REFUSALS = ("clamped", "blank", "uniform")
 BODY_CANARY_PAGE = 90
 BODY_CANARY_COL = "left"
 CONSECUTIVE_ITEM_ERRORS = 3
-HTTP_TIMEOUT_S = 30
 
 
 class BodyCanaryFault(RuntimeError):
     """The body canary read was degenerate/empty/truncated/echo-only, or its echo-stripped text
     differs from batch 0's (Chris 2026-11-12, A5 folded into decision a): the endpoint is suspect,
     abort."""
-
-
-def unload_model(client, base_url, model):
-    """keep_alive:0 unload, then /api/ps must no longer list `model`. The only reset known to clear
-    D's request-history state (2026-11-08). Returns the /api/ps listing after the unload."""
-    root = base_url.rstrip("/")
-    client.post(root + "/api/generate", json={"model": model, "keep_alive": 0}, timeout=120)
-    ps = client.get(root + "/api/ps", timeout=HTTP_TIMEOUT_S).json()
-    left = [m.get("name") for m in ps.get("models", [])]
-    if model in left:
-        raise BR.RunFault(f"unload failed: {model} still listed by /api/ps ({left})")
-    return ps
 
 
 class _RequestsClient:
@@ -99,63 +85,6 @@ class _RequestsClient:
     def get(self, url, timeout=None):
         import requests
         return requests.get(url, timeout=timeout)
-
-
-_dumps = json.dumps
-
-
-class PinnedClient:
-    """Wraps the run's client. Every /api/chat payload is sent with PINNED_OPTIONS and KEEP_ALIVE (a
-    caller value that differs is a RunFault, never overridden). Every 200 /api/chat reply's load_duration
-    is recorded: the first must exceed RELOAD_S (the unload-verified load is triggered by the run's first
-    call), no later one may (a mid-run reload). A violation is kept in .fault and raised as RunFault."""
-
-    def __init__(self, inner):
-        self.inner, self.base_url, self.model = inner, inner.base_url, inner.model
-        self.load_durations_s = []
-        self.options_sent = []
-        self.fault = None
-
-    def _fail(self, msg):
-        if self.fault is None:
-            self.fault = msg
-        raise BR.RunFault(msg)
-
-    def get(self, url, timeout=None):
-        return self.inner.get(url, timeout=timeout)
-
-    def post(self, url, json=None, timeout=None):
-        if not url.endswith("/api/chat"):
-            return self.inner.post(url, json=json, timeout=timeout)
-        opts = dict(json.get("options") or {})
-        for k, v in PINNED_OPTIONS.items():
-            if k in opts and opts[k] != v:
-                self._fail(f"caller option {k}={opts[k]!r} conflicts with the pinned {v!r}")
-            opts[k] = v
-        if json.get("keep_alive", KEEP_ALIVE) != KEEP_ALIVE:
-            self._fail(f"caller keep_alive {json.get('keep_alive')!r} conflicts with the pinned {KEEP_ALIVE!r}")
-        sent = _dumps(opts, sort_keys=True)
-        if sent not in self.options_sent:
-            self.options_sent.append(sent)
-        resp = self.inner.post(url, json=dict(json, options=opts, keep_alive=KEEP_ALIVE), timeout=timeout)
-        if getattr(resp, "status_code", 200) == 200:
-            n = len(self.load_durations_s)
-            ld = resp.json().get("load_duration")
-            if not isinstance(ld, (int, float)) or isinstance(ld, bool):
-                self._fail(f"chat call {n}: reply carries no load_duration ({ld!r})")
-            sec = ld / 1e9
-            self.load_durations_s.append(round(sec, 3))
-            if n == 0 and sec <= RELOAD_S:
-                self._fail(f"chat call 0 did not trigger the load: load_duration {sec:.3f}s <= {RELOAD_S}s")
-            if n > 0 and sec > RELOAD_S:
-                self._fail(f"mid-run reload at chat call {n}: load_duration {sec:.3f}s > {RELOAD_S}s")
-        return resp
-
-    def load_trace(self):
-        later = self.load_durations_s[1:]
-        return {"chat_calls": len(self.load_durations_s),
-                "first_load_s": self.load_durations_s[0] if self.load_durations_s else None,
-                "max_later_load_s": max(later) if later else None, "fault": self.fault}
 
 
 def make_client(base_url, model):

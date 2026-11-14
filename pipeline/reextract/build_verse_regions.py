@@ -64,6 +64,8 @@ import verse_regions as VR  # noqa: E402  (bare-name import convention of this t
 import verse_head_read as VHR  # noqa: E402
 import endpoint_guard  # noqa: E402
 import box_sanity  # noqa: E402
+import body_read as BR  # noqa: E402
+import pinned_client as PC  # noqa: E402
 
 DEFAULT_VOLUME_DIR = "C:/Users/cnogr/git/dr-voluminous/commentary/volume1"
 DEFAULT_GEOMETRY = "C:/Users/cnogr/git/dr-voluminous/body_shadow_vol1/geometry/volume1_page_geometry.jsonl"
@@ -183,6 +185,11 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "git_head": git_head,
         "git_dirty": git_dirty,
     }
+    if args.read == "on":
+        # read off: config (and so its hash) is exactly as before this block existed
+        base["pinned_options"] = dict(PC.PINNED_OPTIONS)
+        base["keep_alive"] = PC.KEEP_ALIVE
+        base["reload_s"] = PC.RELOAD_S
     cfg = dict(base)
     cfg["hash"] = config_hash(base)
     return cfg
@@ -294,6 +301,10 @@ class _RequestsClient:
         import requests
         return requests.post(url, json=json, timeout=timeout)
 
+    def get(self, url, timeout=None):
+        import requests
+        return requests.get(url, timeout=timeout)
+
 
 def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client, counter,
               canary_hook=None):
@@ -323,6 +334,8 @@ def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client
             try:
                 result = VHR.guarded_read_head(client, gray, box, (H, W))
                 counter.record_success()
+            except BR.RunFault:
+                raise  # a run fault (pinned-options / mid-run reload) is never a read error
             except Exception:
                 counter.record_error()
                 continue
@@ -496,7 +509,24 @@ def main(argv=None):
         # Law: the header is on disk BEFORE the first model call (a crash mid-read still leaves
         # the config, thresholds, endpoint and digest). The final _write replaces this file.
         _write(out_path, records[:1])
-        client = _RequestsClient(base_url, args.model)
+        client = PC.PinnedClient(_RequestsClient(base_url, args.model))
+        records[0]["api_ps_before_unload"] = None
+        records[0]["api_ps"] = None
+        records[0]["unloaded_before"] = True
+        try:
+            records[0]["api_ps_before_unload"] = client.get(
+                base_url.rstrip("/") + "/api/ps", timeout=PC.HTTP_TIMEOUT_S).json()
+            records[0]["api_ps"] = PC.unload_model(client, base_url, args.model)
+        except Exception as e:
+            records[0]["unloaded_before"] = False
+            records[0]["status"] = "aborted"
+            records[0]["abort_reason"] = f"unload_failed: {e}"
+            records[0]["finished_utc"] = now_utc_iso()
+            _write(out_path, records[:1])
+            print(f"ERROR: unload failed: {e}", file=sys.stderr)
+            return 4
+        # Law: the header (with the unload verdict) is on disk BEFORE the first chat call.
+        _write(out_path, records[:1])
         counter = VHR.ConsecutiveErrorCounter(limit=3)
         load_gray = lambda fp: load_page_gray(args.volume_dir, fp)  # noqa: E731
         canary_log = []
@@ -518,17 +548,34 @@ def main(argv=None):
             _write(out_path, records[:1])  # header ONLY -- no retry, no partial page/region data
             print(f"ERROR: canary failed: {e}", file=sys.stderr)
 
+        def _abort_run_fault(e):
+            records[0]["status"] = "aborted"
+            records[0]["abort_reason"] = f"run_fault: {client.fault or str(e)}"
+            records[0]["canary"] = canary_log
+            records[0]["options_sent"] = [json.loads(o) for o in client.options_sent]
+            records[0]["load_trace"] = client.load_trace()
+            records[0]["finished_utc"] = now_utc_iso()
+            _write(out_path, records[:1])  # header ONLY -- no page/region records
+            print(f"ERROR: run fault: {client.fault or e}", file=sys.stderr)
+            return 4
+
         # Canary batch 0: before the first head read.
         try:
             _do_canary(0)
         except VHR.CanaryFault as e:
+            if client.fault:
+                return _abort_run_fault(e)
             _abort_canary(e)
             return 3
 
         try:
             head_reads, n_reads = run_reads(candidates_by_page, gray_by_page, geom_by_page,
                                              s1_by_page, client, counter, canary_hook=_do_canary)
+        except BR.RunFault as e:
+            return _abort_run_fault(e)
         except VHR.CanaryFault as e:
+            if client.fault:
+                return _abort_run_fault(e)
             _abort_canary(e)
             return 3
         except VHR.ConsecutiveReadErrorFault as e:
@@ -545,8 +592,12 @@ def main(argv=None):
         try:
             _do_canary(n_reads)
         except VHR.CanaryFault as e:
+            if client.fault:
+                return _abort_run_fault(e)
             _abort_canary(e)
             return 3
+        records[0]["options_sent"] = [json.loads(o) for o in client.options_sent]
+        records[0]["load_trace"] = client.load_trace()
 
     confirmed_by_page, rejected_by_page = {}, {}
     for fp in usable_pages:

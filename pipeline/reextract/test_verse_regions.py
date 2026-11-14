@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 121
+EXPECTED_TESTS = 127
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -1384,6 +1384,8 @@ def test_build_canary_failure_writes_header_only_aborted():
     def fake_canary(client, load_gray, batch, at_read):
         raise VHR.CanaryFault(f"canary_failed batch {batch}: forced-by-test")
 
+    orig_rc = BVR._RequestsClient
+    BVR._RequestsClient = lambda base_url, model: _FakeInner(base_url, model)
     BVR.derive_inset_thr = fake_derive
     VHR.resolve_and_check = fake_resolve
     VHR.run_canary = fake_canary
@@ -1394,6 +1396,7 @@ def test_build_canary_failure_writes_header_only_aborted():
         BVR.derive_inset_thr = orig_derive
         VHR.resolve_and_check = orig_resolve
         VHR.run_canary = orig_canary
+        BVR._RequestsClient = orig_rc
 
     assert rc == 3, f"canary failure must abort with exit 3, got {rc}"
     lines = [l for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -2335,6 +2338,158 @@ def test_head_status_unread_when_no_numbers():
     regions = _og_regions([("verse", 1, None, None), ("verse", 1, 2, 2)])
     assert regions[0]["head_status"] == "unread" and regions[0]["head_status_reasons"] == []
     assert regions[1]["head_status"] == "shipped"
+
+
+# ---- stage 1 --read on goes through PinnedClient (lane A2) -------------------------------------------
+
+class _FakeR:
+    status_code = 200
+
+    def __init__(self, body):
+        self._b = body
+
+    def json(self):
+        return self._b
+
+
+class _FakeInner:
+    """Fake HTTP layer for build_verse_regions._RequestsClient: no network, ever."""
+
+    def __init__(self, base_url, model, reload_at=None):
+        self.base_url, self.model, self.reload_at = base_url, model, reload_at
+        self.log, self.chat_payloads, self.n_chat = [], [], 0
+        self.ps_after_unload_lists_model = False
+
+    def post(self, url, json=None, timeout=None):
+        self.log.append(("post", url))
+        if url.endswith("/api/generate"):
+            return _FakeR({"done": True})
+        assert url.endswith("/api/chat"), url
+        self.chat_payloads.append(json)
+        n = self.n_chat
+        self.n_chat += 1
+        ld = 2e9 if (n == 0 or n == self.reload_at) else 1e8
+        return _FakeR({"message": {"content": "Ver. 21."}, "done": True, "load_duration": ld})
+
+    def get(self, url, timeout=None):
+        self.log.append(("get", url))
+        assert url.endswith("/api/ps"), url
+        return _FakeR({"models": [{"name": self.model}] if self.ps_after_unload_lists_model else []})
+
+
+def _read_on_main(reload_at=None, n_heads=3, ps_keeps_model=False):
+    import json
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+    import build_verse_regions as BVR
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="a2_pinned_read_"))
+    vol_dir = tmpdir / "vol"
+    vol_dir.mkdir()
+    pg = np.full((300, 400), 255, dtype=np.uint8)
+    for r0 in (60, 110, 160):
+        pg[r0:r0 + 12, 40:160] = 0
+    Image.fromarray(pg).save(vol_dir / "page1_image1.png")
+    geom_path = tmpdir / "geom.jsonl"
+    geom_path.write_text(json.dumps({"file_page": 1, "xdiv": 200, "body_regions": [
+        {"col": "left", "box": [0, 0, 200, 300]}, {"col": "right", "box": [200, 0, 400, 300]}]}) + "\n",
+        encoding="utf-8")
+    out_path = tmpdir / "out" / "run.jsonl"
+    fake = _FakeInner("http://fake-host:11434", "fake-model", reload_at=reload_at)
+    fake.ps_after_unload_lists_model = ps_keeps_model
+    cands = [{"file_page": 1, "col": "left", "y0": 60 + 50 * i, "y1": 72 + 50 * i,
+              "box": [0, 60 + 50 * i, 200, 72 + 50 * i], "kind": "verse", "signature": {},
+              "head_confirm": None, "flags": []} for i in range(n_heads)]
+    saved = (BVR.derive_inset_thr, VHR.resolve_and_check, VHR.CANARY_CROPS, VHR.head_crop_box,
+             VR.head_candidates, BVR._RequestsClient, BVR.load_chapter_metadata)
+    BVR.derive_inset_thr = lambda s1: ({"status": "ok", "reason": None, "value": 50.0, "rule": "mode_midpoint",
+                                        "bin_px": 5, "pitch_px": 57, "flush_bin": 0, "indent_bin": 10,
+                                        "flush_count": 100, "indent_count": 10, "n": 110,
+                                        "hist": [100] + [0] * 9 + [10]}, [45])
+    VHR.resolve_and_check = lambda host, model, client=None: ("http://fake-host:11434", "sha256:fake")
+    VHR.CANARY_CROPS = [{"file_page": 1, "col": "left", "box": (20, 40, 180, 100),
+                         "expected": {"ver": True, "numbers": [21]}}]
+    VHR.head_crop_box = lambda band, col_box, pad_y=None, width_frac=None: (20, 40, 180, 100)
+    VR.head_candidates = lambda s1, inset_thr=None, **kw: [dict(c) for c in cands]
+    BVR._RequestsClient = lambda base_url, model: fake
+    try:
+        rc = BVR.main(["--pages", "1", "--geometry", str(geom_path), "--volume-dir", str(vol_dir),
+                       "--out", str(out_path), "--read", "on", "--host", "fake-host",
+                       "--model", "fake-model"])
+    finally:
+        (BVR.derive_inset_thr, VHR.resolve_and_check, VHR.CANARY_CROPS, VHR.head_crop_box,
+         VR.head_candidates, BVR._RequestsClient, BVR.load_chapter_metadata) = saved
+    recs = [json.loads(l) for l in out_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    return rc, recs, fake
+
+
+def test_read_on_every_chat_payload_pinned_and_unload_first():
+    rc, recs, fake = _read_on_main()
+    assert rc == 0, (rc, recs[0])
+    assert fake.chat_payloads, "no chat calls"
+    for p in fake.chat_payloads:
+        o = p["options"]
+        assert (o["seed"], o["num_ctx"], o["num_batch"]) == (0, 16384, 512), o
+        assert (o["temperature"], o["num_predict"]) == (0, 64), o
+        assert p["keep_alive"] == "5m", p
+    kinds = [(m, u.rsplit("/", 1)[-1]) for m, u in fake.log]
+    first_chat = kinds.index(("post", "chat"))
+    assert ("post", "generate") in kinds[:first_chat] and kinds.index(("post", "generate")) < first_chat
+    assert ("get", "ps") in kinds[kinds.index(("post", "generate")):first_chat], kinds[:first_chat + 1]
+    h = recs[0]
+    assert h["unloaded_before"] is True and h["api_ps"] == {"models": []}
+    assert h["api_ps_before_unload"] == {"models": []}
+    assert h["config"]["pinned_options"] == {"seed": 0, "num_ctx": 16384, "num_batch": 512}
+    assert h["config"]["keep_alive"] == "5m" and h["config"]["reload_s"] == 1.0
+
+
+def test_read_on_unload_failure_aborts_header_only():
+    rc, recs, fake = _read_on_main(ps_keeps_model=True)
+    assert rc == 4 and len(recs) == 1, (rc, len(recs))
+    assert recs[0]["status"] == "aborted" and recs[0]["abort_reason"].startswith("unload_failed"), recs[0]
+    assert fake.chat_payloads == []
+
+
+def test_read_on_mid_run_reload_in_head_read_aborts_run_fault():
+    rc, recs, fake = _read_on_main(reload_at=2)    # call 0 canary, 1 head, 2 head -> reload
+    assert rc == 4, rc
+    assert len(recs) == 1, [r.get("kind") for r in recs]
+    assert recs[0]["status"] == "aborted" and recs[0]["abort_reason"].startswith("run_fault"), recs[0]
+    assert "mid-run reload" in recs[0]["abort_reason"]
+    assert recs[0]["load_trace"]["fault"] and recs[0]["options_sent"]
+
+
+def test_read_on_reload_inside_canary_crop_is_run_fault_not_canary_failed():
+    rc, recs, fake = _read_on_main(reload_at=4, n_heads=3)    # call 4 = the final canary crop
+    assert rc == 4, rc
+    assert len(recs) == 1
+    assert recs[0]["abort_reason"].startswith("run_fault"), recs[0]["abort_reason"]
+    assert "canary_failed" not in recs[0]["abort_reason"]
+
+
+def test_read_on_header_load_trace_calls_one_per_chat_call():
+    rc, recs, fake = _read_on_main()
+    assert rc == 0, (rc, recs[0])
+    calls = recs[0]["load_trace"]["calls"]
+    assert len(calls) == fake.n_chat and fake.n_chat >= 5
+    assert [c["n"] for c in calls] == list(range(fake.n_chat))
+    assert isinstance(recs[0]["options_sent"], list) and recs[0]["options_sent"]
+
+
+def test_read_off_config_has_no_pinned_keys_and_hash_is_of_the_rest():
+    import argparse
+    import build_verse_regions as BVR
+    import tempfile
+    d = tempfile.mkdtemp(prefix="a2_cfg_")
+    args = argparse.Namespace(pages=[1], geometry=d + "/g.jsonl", volume_dir=d, metadata_dir=None,
+                              witness_dir=None, read="off", model="m", endpoint_id=None)
+    cfg = BVR.build_config(args, "x", "h", False)
+    assert not ({"pinned_options", "keep_alive", "reload_s"} & set(cfg)), sorted(cfg)
+    assert cfg["hash"] == BVR.config_hash({k: v for k, v in cfg.items() if k != "hash"})
+    args.read = "on"
+    cfg_on = BVR.build_config(args, "x", "h", False)
+    assert cfg_on["hash"] != cfg["hash"] and "pinned_options" in cfg_on
 
 
 if __name__ == "__main__":

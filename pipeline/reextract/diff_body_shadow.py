@@ -1,11 +1,14 @@
 """diff_body_shadow -- stage 3 of the 20-page body shadow run: offline, read-only, NO model.
 
-Per FILE page: old = the body part of page{fp}_image1_normalized.md (assembler.split_body_defs);
+Per FILE page: old = the body part of page{fp}_image1_normalized.md (split_old_defs: every footnote
+definition block, numeric or letter marker, is removed);
 new = that page's stage-2 chunk texts in run order. Both sides go through ONE tokeniser
 (`tagged_tokens`: word-break join, then whitespace split). The diff is difflib with autojunk off;
 every non-equal opcode is a hunk, and every hunk gets exactly one class in a fixed precedence:
 
-  1 disputed_head  touches the first 4 tokens of a verse region whose head_status != "shipped"
+  1 disputed_head  touches the first 4 tokens of a verse region whose head_status != "shipped";
+                   BOTH sides use the first 4 tokens counted from the region's Ver token (new side:
+                   the region's first token; old side: the Ver token of the old line holding it)
   2 verse_boundary touches a token starting with "Ver" on either side, or its new span covers
                    tokens of 2 regions
   3 ws_punct       the two sides are equal after removing whitespace and every Unicode P* char
@@ -159,8 +162,9 @@ def diff_page(file_page, old_text, units):
         oa = old_pos_of(a)
         if oa is not None:
             line = [k for k, g in enumerate(old_line_of) if g == old_line_of[oa]]
-            if any(is_ver_token(old_toks[k]) for k in line):
-                head_old.append((line[0], line[-1] + 1))
+            kv = next((k for k in line if is_ver_token(old_toks[k])), None)
+            if kv is not None:
+                head_old.append((kv, min(kv + HEAD_TOKENS, line[-1] + 1)))
 
     hunks = []
     for op_idx, (tag, i1, i2, j1, j2) in enumerate(ops):
@@ -243,16 +247,37 @@ def load_body_units(body_path):
     return header, by_page, order
 
 
+DEF_START = re.compile(r"^\s*\[\^\w+\]:")
+
+
+def split_old_defs(md):
+    """-> (body_text, defs_text). A line starting a definition ([^N]: or [^a]:) opens a block and goes
+    to defs; the NON-BLANK lines after it continue the block (a note's wrapped text has no blank line);
+    a blank line closes the block and stays in body. Inline references mid-line are not definitions."""
+    body, defs, in_def = [], [], False
+    for ln in md.split(_NL):
+        if DEF_START.match(ln):
+            in_def = True
+            defs.append(ln)
+        elif in_def and ln.strip():
+            defs.append(ln)
+        else:
+            in_def = False
+            body.append(ln)
+    return _NL.join(body), _NL.join(defs)
+
+
 def load_old_body(witness_dir, file_page):
     path = Path(witness_dir) / f"page{file_page}_image1_normalized.md"
     if not path.exists():
         raise ValueError(f"witness md missing for file_page {file_page}: {path}")
-    body, _defs = assembler.split_body_defs(path.read_text(encoding="utf-8"))
+    body, _defs = split_old_defs(path.read_text(encoding="utf-8"))
     return body
 
 
-def summarize(hunks, vnums):
-    out = {"kind": "diff_summary", "classes": Counter(), "per_page": {}, "flags_per_class": {},
+def summarize(hunks, vnums, head_status_changed=()):
+    out = {"kind": "diff_summary", "classes": Counter(), "per_page": {},
+           "head_status_changed_vs_body": sorted(head_status_changed), "flags_per_class": {},
            "verse_agreement": {"n": 0, "head_read_eq_witness": 0, "body_read_eq_witness": 0},
            "verse_agreement_per_page": {}}
     for h in hunks:
@@ -298,6 +323,22 @@ def main(argv=None):
         return 2
     body_header, by_page, order = load_body_units(args.body)
     stage1 = BSB.read_stage1(args.stage1)
+    changed = []
+    for fp in order:
+        for u in by_page[fp]:
+            ln = u["stage1_line"]
+            rec = stage1[ln] if isinstance(ln, int) and 0 <= ln < len(stage1) else None
+            try:
+                key_ok = rec is not None and BSB.region_key(rec) == list(u["key"])
+            except (KeyError, IndexError, TypeError):
+                key_ok = False
+            if not key_ok or rec.get("kind") != u["stage1_kind"]:
+                print(f"REFUSED: body unit {u['key']} (stage1_line {ln}, kind {u['stage1_kind']}) does "
+                      f"not match the stage-1 record there; wrong --stage1 for this --body", file=sys.stderr)
+                return 2
+            if rec.get("head_status") != u["head_status"]:
+                changed.append(json.dumps(u["key"]))
+            u["head_status"] = rec.get("head_status")
     repo_root = Path(__file__).resolve().parents[2]
     config = {
         "body_sha256": BSB.sha256_file(args.body),
@@ -308,6 +349,8 @@ def main(argv=None):
         "pages": order, "head_tokens": HEAD_TOKENS, "context_tokens": CONTEXT_TOKENS,
         "git_head": BVR.get_git_head(repo_root), "git_dirty": BVR.get_git_dirty(repo_root),
         "module_sha256": BSB.sha256_file(__file__),
+        "old_defs_rule": "def_block_v1", "head_old_rule": "first4_from_ver",
+        "head_status_source": "stage1",
     }
     chash = BVR.config_hash(config)
     records = [{"kind": "diff_header", "tier": "best_effort", "config": config,
@@ -324,7 +367,7 @@ def main(argv=None):
                 vnums.append({**verse_number_record(fp, rec, line_no, unit), "config_hash": chash})
     records.extend(hunks)
     records.extend(vnums)
-    records.append({**summarize(hunks, vnums), "tier": "best_effort", "config_hash": chash})
+    records.append({**summarize(hunks, vnums, changed), "tier": "best_effort", "config_hash": chash})
     tmp = Path(str(out_path) + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         for r in records:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import diff_body_shadow as DBS
 
-EXPECTED_TESTS = 20
+EXPECTED_TESTS = 28
 
 
 def unit(chunk_texts, key=(90, "left", 10), kind="verse", status="shipped", head=True, line=1):
@@ -54,11 +54,11 @@ def test_continuation_unit_is_not_a_head_unit():
 
 def test_old_side_alignment_catches_a_hunk_on_the_old_ver_line():
     old = "Ver. 5. a b c d e f"
-    new = "Ver. 5. a b c d e g"
-    # the new-side head range is the first 4 tokens, the hunk is at token 8: only the old Ver line
-    # (aligned through the equal opcode) reaches it
-    assert classes(old, [unit([new], status="disputed")]) == ["disputed_head"]
-    assert classes(old, [unit([new], status="shipped")]) == ["content"]
+    # the old-side head range is the first 4 tokens FROM the Ver token (lock), found through the
+    # equal-opcode alignment: a hunk at old token 3 is a head hunk, one at token 7 is not
+    assert classes(old, [unit(["Ver. 5. a X c d e f"], status="disputed")]) == ["disputed_head"]
+    assert classes(old, [unit(["Ver. 5. a X c d e f"], status="shipped")]) == ["content"]
+    assert classes(old, [unit(["Ver. 5. a b c d e g"], status="disputed")]) == ["content"]
 
 
 def test_prose_ver_words_are_not_verse_heads():
@@ -182,6 +182,7 @@ def test_main_end_to_end_on_synthetic_files():
             "Ver. 1. In the beginning God\nmade the heaven.\n\n[^1] note text\n", encoding="utf-8")
         s1 = [{"kind": "run_header"},
               {"kind": "verse", "file_page_first": 90, "head_status": "shipped",
+               "head": {"col": "left", "y0": 10},
                "number_sources": {"count": [1], "read": [1], "witness": [1]}}]
         (d / "s1.jsonl").write_text("\n".join(json.dumps(r) for r in s1) + "\n", encoding="utf-8")
         chunk = {"file_page": 90, "col": "left", "rect_idx": 0, "chunk_idx": 0, "box": [0, 0, 10, 10],
@@ -214,6 +215,107 @@ def test_missing_witness_fails_loud_naming_the_page():
         assert "987654" in str(e)
     else:
         raise AssertionError("a missing witness md must raise")
+
+
+
+def test_head_old_range_is_first_four_tokens_from_ver_not_the_whole_line():
+    words = " ".join("w%d" % i for i in range(30))
+    old = "Ver. 22. " + words
+    # a changed token 8+ tokens after the Ver token: under the whole-line rule this was disputed_head
+    assert classes(old, [unit(["Ver. 22. " + words.replace("w10", "wX"), ], status="disputed")]) == ["content"]
+    # a changed head number IS a head hunk
+    assert classes(old, [unit(["Ver. 32. " + words], status="disputed")]) == ["disputed_head"]
+    # a line with text before the Ver token: the range starts AT the Ver token
+    old2 = "lead in text Ver. 22. " + words
+    assert classes(old2, [unit(["lead in text Ver. 32. " + words], status="disputed")]) == ["disputed_head"]
+
+
+def test_split_old_defs_wrapped_numeric_definitions_all_removed():
+    md = ("Ver. 1. body text\n\n[^3]: and, with mighty wings\ncontinues here\nand here\n"
+          "[^4]: another note\n")
+    body, defs = DBS.split_old_defs(md)
+    assert "[^3]" not in body and "mighty" not in body and "continues here" not in body
+    assert "[^4]" not in body and "another note" not in body
+    assert "Ver. 1. body text" in body
+    assert "continues here" in defs and "and here" in defs and "[^4]: another note" in defs
+
+
+def test_split_old_defs_blank_closes_block_and_paragraph_stays_in_body():
+    md = ("[^8]: first def\n\nA body paragraph that must stay.\n\n[^10]: tenth def\nwrapped tail\n")
+    body, defs = DBS.split_old_defs(md)
+    assert "A body paragraph that must stay." in body
+    assert "first def" not in body and "tenth def" not in body and "wrapped tail" not in body
+    assert "first def" in defs and "tenth def" in defs
+
+
+def test_split_old_defs_inline_reference_is_not_a_definition():
+    md = "He cites Strabo[^14]: and more text\nnext line\n"
+    body, defs = DBS.split_old_defs(md)
+    assert body == md and defs == ""
+
+
+def test_split_old_defs_no_defs_body_unchanged():
+    md = "Ver. 1. text\n\nmore text\n"
+    body, defs = DBS.split_old_defs(md)
+    assert body == md and defs == ""
+
+
+def test_split_old_defs_letter_marker_removed_too():
+    body, defs = DBS.split_old_defs("text\n[^a]: x\nmore\n")
+    assert body.split("\n")[0] == "text" and "[^a]: x" in defs and "more" not in body
+
+
+def _synthetic_run(d, s1_extra=None, body_status="shipped", s1_status="shipped", s1_head_y0=10,
+                   text="Ver. 1. In the beginning God"):
+    (d / "page90_image1_normalized.md").write_text("Ver. 1. In the beginning God\n", encoding="utf-8")
+    s1 = [{"kind": "run_header"},
+          {"kind": "verse", "file_page_first": 90, "head_status": s1_status,
+           "head": {"col": "left", "y0": s1_head_y0},
+           "number_sources": {"count": [1], "read": [1], "witness": [1]}}]
+    (d / "s1.jsonl").write_text("\n".join(json.dumps(r) for r in s1) + "\n", encoding="utf-8")
+    chunk = {"file_page": 90, "col": "left", "rect_idx": 0, "chunk_idx": 0, "box": [0, 0, 10, 10],
+             "n_lines": 1, "guard": "ok", "text": text, "error": None}
+    body = [{"kind": "run_header", "config_hash": "abc"},
+            {"kind": "body_region", "file_page": 90, "key": [90, "left", 10], "stage1_line": 1,
+             "stage1_kind": "verse", "head_status": body_status, "chunks": [chunk]}]
+    (d / "body.jsonl").write_text("\n".join(json.dumps(r) for r in body) + "\n", encoding="utf-8")
+    out = d / "diff.jsonl"
+    rc = DBS.main(["--body", str(d / "body.jsonl"), "--stage1", str(d / "s1.jsonl"),
+                   "--witness-dir", str(d), "--out", str(out)])
+    return rc, out
+
+
+def test_head_status_mismatched_stage1_region_key_refuses_and_writes_nothing():
+    d = Path(tempfile.mkdtemp(prefix="dbs_test_"))
+    try:
+        rc, out = _synthetic_run(d, s1_head_y0=99)
+        assert rc == 2 and not out.exists()
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_head_status_comes_from_stage1_and_changes_are_listed():
+    d = Path(tempfile.mkdtemp(prefix="dbs_test_"))
+    try:
+        rc, out = _synthetic_run(d, body_status="shipped", s1_status="disputed",
+                                 text="Ver. 2. In the beginning God")
+        assert rc == 0
+        recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert recs[0]["config"]["head_status_source"] == "stage1"
+        assert recs[0]["config"]["old_defs_rule"] == "def_block_v1"
+        assert recs[0]["config"]["head_old_rule"] == "first4_from_ver"
+        assert recs[-1]["head_status_changed_vs_body"] == [json.dumps([90, "left", 10])]
+        # the head hunk is classified with the STAGE-1 status (body said shipped)
+        assert [r["class"] for r in recs if r["kind"] == "hunk"] == ["disputed_head"]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    d = Path(tempfile.mkdtemp(prefix="dbs_test_"))
+    try:
+        rc, out = _synthetic_run(d, body_status="shipped", s1_status="shipped")
+        recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert recs[-1]["head_status_changed_vs_body"] == []
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":
