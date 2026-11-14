@@ -10,7 +10,7 @@ import numpy as np
 import verse_regions as VR
 import verse_head_read as VHR
 
-EXPECTED_TESTS = 119
+EXPECTED_TESTS = 121
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -732,6 +732,42 @@ def test_assert_numbering_invariant_raises_and_passes():
     good = {"file_page_first": 99, "verse": [3], "numbers_link_status": "numbers_agree",
             "number_sources": {"count": None, "read": [3], "witness": [3]}}
     VR.assert_numbering_invariant([good])    # must not raise
+
+
+def test_reconcile_numbers_prefix_rule_is_count_only():
+    # audit A1: a prefix between the two READERS is a disagreement, never a ship of the longer tuple
+    for rd, wi in (([12], [12, 13]), ([12, 13], [12])):
+        r = VR.reconcile_numbers({"count": None, "read": rd, "witness": wi})
+        assert r["numbers_link_status"] == "numbers_disagree", r
+        assert r["numbers_disagree_pairs"] == ["read|witness"] and r["verse"] is None, r
+    r = VR.reconcile_numbers({"count": 1, "read": [1], "witness": [1, 2]})
+    assert r["numbers_link_status"] == "numbers_disagree" and r["verse"] is None, r
+    assert "read|witness" in r["numbers_disagree_pairs"], r
+    # amendment A survives: count=1 with identical [1,2] readers agrees, shipped value is the readers'
+    r = VR.reconcile_numbers({"count": 1, "read": [1, 2], "witness": [1, 2]})
+    assert r["numbers_link_status"] == "numbers_agree" and r["verse"] == [1, 2], r
+    # count is not a reader, so it can never lengthen the verse: a tuple count that passes the
+    # count-pair prefix rule must not ship as the verse ("longest tuple ships" would give [1, 2])
+    r = VR.reconcile_numbers({"count": [1, 2], "read": [1], "witness": [1]})
+    assert r["numbers_link_status"] == "numbers_agree" and r["verse"] == [1], r
+
+
+def test_assert_numbering_invariant_compares_values():
+    def rec(verse, read, witness, count=None, status="numbers_agree"):
+        return {"file_page_first": 77, "verse": verse, "numbers_link_status": status,
+                "number_sources": {"count": count, "read": read, "witness": witness}}
+    for forged in (rec([12, 13], [12], [12, 13]),          # A1 forgery: verse rests on one reader
+                   rec([12, 13], [12, 13], [12]),
+                   rec([5], [3], [3]),                      # agree label, verse != read
+                   rec([3], [3], [3], count=2),             # count vetoes: count != verse[0]
+                   rec([1], [1], [1], status="numbers_disagree")):
+        try:
+            VR.assert_numbering_invariant([forged])
+            assert False, ("expected ValueError", forged)
+        except ValueError as e:
+            assert "77" in str(e)
+    VR.assert_numbering_invariant([rec([1, 2], [1, 2], [1, 2], count=1), rec([3], [3], [3]),
+                                   rec(None, [12], [12, 13], status="numbers_disagree")])
 
 
 # 7b. parse_ver_head / parse_witness -- one code-owned verse-number parser -----------------------

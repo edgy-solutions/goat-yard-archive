@@ -1492,8 +1492,12 @@ def reconcile_numbers(sources):
     to be set. count is code-owned structure (verse 1 after a CHAP. head), not a reader (Chris
     2026-11-08: "verse-1 rule + model read = one reader"): it can VETO by disagreeing but never
     counts toward the two, so count + one reader is numbers_single_source ("single" = one
-    reader). count (an int) agrees with a longer tuple iff it equals its first element (narrow
-    count rule, amendment A: count is only ever a bare '1', never a full group)."""
+    reader). The prefix rule applies ONLY to pairs involving count: count (an int) agrees with a
+    longer tuple iff it equals its first element (narrow count rule, amendment A: count is only
+    ever a bare '1', never a full group). read|witness needs exact equality after _norm_numbers;
+    any difference, a prefix included (read=[12], witness=[12,13]), is numbers_disagree with pair
+    "read|witness" and verse None (verse 13 would rest on one reader). On numbers_agree, verse is
+    list(read), which equals witness; count never changes it."""
     present = [(name, sources.get(name)) for name in ("count", "read", "witness") if sources.get(name) is not None]
     if len(present) == 0:
         return {"numbers_link_status": "numbers_none", "numbers_disagree_pairs": [], "verse": None}
@@ -1509,33 +1513,40 @@ def reconcile_numbers(sources):
             va, vb = norm[a], norm[b]
             if va == vb:
                 continue
-            if len(va) == 1 and len(vb) > 1 and va[0] == vb[0]:
-                continue
-            if len(vb) == 1 and len(va) > 1 and vb[0] == va[0]:
-                continue
+            if a == "count" or b == "count":
+                if len(va) == 1 and len(vb) > 1 and va[0] == vb[0]:
+                    continue
+                if len(vb) == 1 and len(va) > 1 and vb[0] == va[0]:
+                    continue
             disagree_pairs.append(f"{a}|{b}")
     if disagree_pairs:
         return {"numbers_link_status": "numbers_disagree", "numbers_disagree_pairs": disagree_pairs, "verse": None}
     if "read" not in norm or "witness" not in norm:
         return {"numbers_link_status": "numbers_single_source", "numbers_disagree_pairs": [], "verse": None}
 
-    best = None
-    for name in ("read", "witness", "count"):
-        if name in norm and (best is None or len(norm[name]) > len(best)):
-            best = norm[name]
-    return {"numbers_link_status": "numbers_agree", "numbers_disagree_pairs": [], "verse": list(best)}
+    # read == witness exactly here (checked above); count can neither lengthen nor shorten it.
+    return {"numbers_link_status": "numbers_agree", "numbers_disagree_pairs": [], "verse": list(norm["read"])}
 
 
 def assert_numbering_invariant(records):
     """records: region records (or anything carrying 'verse', 'numbers_link_status',
     'number_sources'). Raises ValueError NAMING the region if any has verse set without both
-    readers (read AND witness) non-null and agreeing; count is not a reader. Fail loud -- this is
-    the condition-1 born invariant."""
+    readers (read AND witness) non-null and agreeing; count is not a reader. Compares VALUES, not
+    just labels: verse set requires status numbers_agree, read and witness non-null,
+    _norm_numbers(read) == _norm_numbers(witness) == tuple(verse), and, when count is non-null,
+    count == verse[0]. Fail loud -- this is the condition-1 born invariant."""
     for r in records:
         if r.get("verse") is not None:
             srcs = r.get("number_sources") or {}
             readers = [srcs.get(name) for name in ("read", "witness")]
-            if r.get("numbers_link_status") != "numbers_agree" or any(v is None for v in readers):
+            ok = r.get("numbers_link_status") == "numbers_agree" and not any(v is None for v in readers)
+            if ok:
+                v = tuple(r["verse"])
+                ok = _norm_numbers(readers[0]) == _norm_numbers(readers[1]) == v
+                cnt = srcs.get("count")
+                if ok and cnt is not None:
+                    ok = bool(v) and _norm_numbers(cnt)[0] == v[0]
+            if not ok:
                 label = r.get("file_page_first", r.get("file_page", "?"))
                 raise ValueError(
                     f"numbering invariant violated in region at file_page {label!r}: verse="
