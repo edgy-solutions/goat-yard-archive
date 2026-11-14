@@ -565,6 +565,54 @@ def gate_spend_checks(appr):
     return 8 if appr.get("record") else 4
 
 
+def scoreability_from_lock(lock):
+    """GATE 0R: the lock's own P1, and the cells it licenses a STABILITY claim about.
+
+    Derived from the lock's REGISTERED baseline, never from this run's own output.  A
+    precondition that reads the result it governs cannot refuse it: the cells that may be
+    spoken about were fixed before the first call, and this returns them so the report's first
+    line can name them rather than paraphrase.
+
+    A falsifier phrased over variation fires on perfect stability too -- a cell that abstains
+    41/41 in both runs gives 0 == 0, which scores nothing.  Three of the four cells are in
+    exactly that state, so the report must say so BEFORE it prints a number.
+
+    `raise`, not `chk()`: this is an invariant about what the report may claim, and counting it
+    would move EXPECTED_CHECKS_PRECALL / _BLANK / _DRY and buy a paid re-measure for nothing.
+    """
+    pcs = lock.get("scoreability_preconditions") or []
+    p1 = [p for p in pcs if p.get("id") == "P1"]
+    if len(p1) != 1:
+        raise AssertionError(
+            "GATE 0R: the lock registers %d preconditions with id P1, not 1.  The blank report's "
+            "first line quotes P1 VERBATIM; with no P1 there is nothing to quote, and the report "
+            "would print its own paraphrase in the lock's voice.  NOTHING HAS BEEN SPENT."
+            % len(p1))
+    text = (p1[0].get("precondition") or "").strip()
+    if not text:
+        raise AssertionError(
+            "GATE 0R: the lock's P1 carries an empty `precondition`.  NOTHING HAS BEEN SPENT.")
+    base = lock.get("baseline_measured") or {}
+    # baseline_measured also carries non-cell keys (`no_pixel_recoverable_ids` and a status
+    # string).  Select cells by SHAPE, not by iterating the mapping: a key that merely sits in
+    # the same dict is not a cell, and treating one as a cell would invent a fifth.
+    cells = {k: v for k, v in base.items()
+             if isinstance(v, dict) and "n" in v and "answered_without_pixels" in v}
+    if not cells:
+        raise AssertionError(
+            "GATE 0R: the lock's baseline_measured names no cell carrying both `n` and "
+            "`answered_without_pixels`, so the scoreable set cannot be derived and the report "
+            "cannot name it.  NOTHING HAS BEEN SPENT.")
+    scoreable = sorted(k for k, v in cells.items() if (v.get("answered_without_pixels") or 0) > 0)
+    floor_only = sorted(k for k in cells if k not in scoreable)
+    return {"p1_verbatim": text, "scoreable": scoreable, "floor_only": floor_only,
+            "n_cells": len(cells),
+            "basis": "the lock's own baseline_measured, read before the first call: a cell is "
+                     "scoreable for STABILITY only if it answered without pixels at least once.  "
+                     "A cell that abstained completely can only have a floor of zero "
+                     "CORROBORATED, never its stability tested."}
+
+
 def gate_call_loop_checks(loop, n_calls, run_level_after=2):
     """GATE 0Q: divide the call loop's check count by the calls, and refuse a remainder.
 
@@ -1291,9 +1339,64 @@ def evaluate_blank(recs, lock, floored):
     }
 
 
+def blank_scoreability_line(sc):
+    """The report's first line, built from the lock's P1 and the cells it licenses.
+
+    The advisor's ruling of 2026-11-14: the precondition goes "in the result's first line".  It
+    is the first line of the report after its title, which is the earliest place a reader can
+    reach -- and `gate_blank_first_line` asserts no number precedes it.
+    """
+    if sc is None:
+        return ("**SCOREABILITY: NO LOCK.** This run registered no scoreability precondition "
+                "before its first call, so NOTHING below is licensed as a stability claim by "
+                "anything written in advance.  Read every number here as a single draw.")
+    sa = ", ".join("`%s`" % c for c in sc["scoreable"])
+    fo = ", ".join("`%s`" % c for c in sc["floor_only"])
+    return ('**SCOREABILITY, fixed before the first call (the lock\'s P1, verbatim):** "%s"  '
+            "So of %d cells only %s %s scoreable for stability in this run.  %s abstained "
+            "completely in the baseline run: for %s this run can only CORROBORATE a floor of "
+            "zero and can NEVER test its stability, and a 0 == 0 below is not a confirmation of "
+            "anything.  No stability claim is made for %s, whatever the numbers show."
+            % (sc["p1_verbatim"], sc["n_cells"], sa or "no cell",
+               "is" if len(sc["scoreable"]) == 1 else "are",
+               fo or "No cell", "them" if len(sc["floor_only"]) != 1 else "it",
+               fo or "any of them"))
+
+
+def gate_blank_first_line(md):
+    """GATE 0R(write): the precondition is the report's first line, and no number precedes it.
+
+    `raise`, not `chk()`, for the reason given on `scoreability_from_lock`: a check about what
+    the document may claim must not move the counts GATE 0P pins.
+    """
+    lines = md.split("\n")
+    if not lines or not lines[0].startswith("# "):
+        raise AssertionError("GATE 0R(write): the blank report does not open with its title.")
+    body = [n for n, l in enumerate(lines) if l.strip()]
+    hits = [n for n, l in enumerate(lines) if l.startswith("**SCOREABILITY")]
+    if len(hits) != 1:
+        raise AssertionError(
+            "GATE 0R(write): the report carries %d scoreability lines, not 1.  The ruling puts "
+            "the precondition in the result's FIRST line; two copies means a reader can meet a "
+            "second, differently worded one." % len(hits))
+    if len(body) < 2 or body[1] != hits[0]:
+        raise AssertionError(
+            "GATE 0R(write): the scoreability line is at line %d, and the first line of the "
+            "report after its title is line %d.  The precondition must be the first thing read, "
+            "before any number."
+            % (hits[0], body[1] if len(body) > 1 else -1))
+    first_table = [n for n, l in enumerate(lines) if l.startswith("| arm |")]
+    if first_table and first_table[0] < hits[0]:
+        raise AssertionError(
+            "GATE 0R(write): a cell table at line %d precedes the scoreability line at line %d."
+            % (first_table[0], hits[0]))
+    return hits[0]
+
+
 def md_blank_report(header, run_sha, tables, evb, nik, recs, prov):
     bc = header["blank_control"]
     L = [f"# BLANK45 {run_sha} -- blank-crop CONTROL for run {bc['floors_run']}", "",
+         blank_scoreability_line(header.get("scoreability")), "",
          "ALL PAGE NUMBERS ARE FILE PAGES (printed = file - 88).", "",
          "**This is a control, not a read.** Every call in this run posted a uniform-255 rectangle "
          "of the span crop's own size and mode in place of the crop. Nothing below is a reading "
@@ -1424,6 +1527,7 @@ def md_blank_report(header, run_sha, tables, evb, nik, recs, prov):
         "section 6 does not show what the numbers say: span(s) %s were recovered without pixels "
         "but do not appear in the rendered report, or the single-arm count line is missing. A "
         "reader of this report would conclude nothing was recovered." % (_missing or "<none>"))
+    gate_blank_first_line(_md)      # the result cannot be written without its precondition first
     return _md
 
 def rescore(run_sha, attempt_sfx=""):
@@ -1679,6 +1783,18 @@ def main():
     if _pp is not None and _d0p:
         _pp, _ppn = _pp + _d0p, "%s + GATE 0S %d" % (_ppn, _d0p)
     print("GATE 0P checks_at_precall: %d (%s %s)" % (CHECKS_AT_PRECALL, _ppn, _pp))
+
+    # GATE 0R.  The blank report's first line quotes the lock's P1 and names the cells the lock
+    # licenses a stability claim about.  Derived HERE -- before the first paid call, from the
+    # lock alone -- because a precondition derived at write time would be derived from the
+    # result it is supposed to constrain.  Three of four cells abstained completely in run 1, so
+    # for them this run can only corroborate a floor of zero; the report says that before it
+    # prints a number, and `gate_blank_first_line` refuses to write it otherwise.
+    _scy = scoreability_from_lock(mlock) if (a.blank_crop and mlock) else None
+    header["scoreability"] = _scy
+    if _scy:
+        print("GATE 0R scoreable: %s | floor-only: %s"
+              % (",".join(_scy["scoreable"]) or "<none>", ",".join(_scy["floor_only"]) or "<none>"))
     if _pp is None:
         print("GATE 0P: %s is UNPINNED, so a real run is NOT gated on it.  Measure it with "
               "--dry-run in THIS mode and THIS approval state -- free -- and pin it." % _ppn)
