@@ -248,6 +248,117 @@ EXPECTED_CHECKS_BLANK = 1685       # 1684 was MEASURED on run c957403401a9f865 (
 # it, so the key and the gate cannot disagree.
 EXPECTED_CHECKS_BLANK_DRY = {False: 1239, True: 1242}  # both MEASURED, +4 each for GATE 10
 
+# ---- THE PRE-CALL PIN (GATE 0P).  2026-11-14.
+#
+# Why this exists.  All three totals above are enforced in the WRITE BLOCK, after every call is
+# paid for.  One of them (the DERIVED 1621) fired exactly there and aborted a run that had
+# already spent.  The cause was not a lost assertion.  It was a pin DERIVED by borrowing a
+# 274-check real-run-only difference from run 6a2292bdb14d3c43 -- a run with its own call count
+# and its own ladder behaviour -- and treating it as a constant of the code.  Two properties made
+# that unfixable after the fact: the borrowed term's composition was never written down, and a
+# single total cannot be decomposed.  The clean blank run c957403401a9f865 persisted NO check
+# count anywhere in its record, so even "1684 was MEASURED" cannot be re-verified from the
+# artifact today; it survives only as a comment.
+#
+# This pin does not share that defect, on three counts.
+#   1. MEASURED, never borrowed.  Everything above GATE 0P is header-scoped and runs identically
+#      in dry and real mode, so the count is measured FOR FREE by --dry-run in the same mode and
+#      with the same approval state.  No term comes from another run.
+#   2. ENFORCED BEFORE THE FIRST PAID CALL.  Gate-placement law: a gate belongs at the earliest
+#      point its inputs exist, and every header-scoped check runs at that point, so no
+#      header-scoped guard is discovered by spending.
+#   3. DECOMPOSED AND PERSISTED.  The run records checks_at_precall, checks_per_call (measured in
+#      the run itself and asserted to divide exactly) and checks_post_call, in the header.  A
+#      future mismatch names WHICH TERM moved instead of handing a reader one opaque total.
+#
+# What it does NOT do.  It cannot pin a real-run total, and nothing offline can: the post-call
+# term has never been measured under this instrumentation, and enumerating it from the write
+# block would be "a delta derived from the code it measures", which absorbs a new assertion in
+# silence -- the error `gate_spend_checks` refuses by using literals.  So the totals above are
+# left exactly as they are, and the first real run under this instrumentation PRINTS the three
+# terms for pinning.  GATE 0P moves the part that can be known for free to before the spend and
+# stops the rest from pretending to be derivable.
+EXPECTED_CHECKS_PRECALL = 1170          # MEASURED 2026-11-14, `--dry-run`, attempt 1, exit 0.
+                                        # The same dry run still reported 1171 against
+                                        # EXPECTED_CHECKS_DRY, which is the evidence that GATE 0P
+                                        # and GATE 0Q contribute nothing to CHECKS and that no
+                                        # pin above was disturbed by adding them.
+                                        #
+                                        # It is NOT derived as "the dry total minus one".  That
+                                        # subtraction would assume the composition of the dry
+                                        # tail, and assuming a term's composition is precisely
+                                        # the defect being removed here.  The gap happens to be
+                                        # 1; it is read off the run, not predicted.
+EXPECTED_CHECKS_BLANK_PRECALL = {
+    True: 1241,                         # MEASURED 2026-11-14, `--blank-crop --dry-run`, with
+                                        # Chris's 2026-11-08 approval record on disk, exit 0,
+                                        # dry total still 1242.
+    False: None,                        # NOT MEASURED, and deliberately left so.  Measuring it
+                                        # means running with the approval record absent, and that
+                                        # record is a human's signature -- moving it to take a
+                                        # measurement is not a thing this lane does.  A real run
+                                        # cannot be in this state anyway: GATE B0 refuses an
+                                        # unapproved real run.  `.get()` yields None here and
+                                        # GATE 0P prints UNPINNED rather than crashing, so the
+                                        # unapproved DRY path keeps working ungated -- which is
+                                        # exactly its status today, now stated instead of
+                                        # implied.
+}
+# ---- GATE 0S's two modes.  2026-11-14.
+#
+# GATE 0S was written for one mode and hard-wired to it: METHODS_LOCK, SCORED_PAYLOAD_DIGEST,
+# APPROVAL, SHEET_BYTES_SHA and SCORED_CUT_DIGEST are all module constants naming the READ path.
+# That is why "GATE B0 has no methods lock" has sat as a debt: a blank-crop rerun is a rerun, so
+# it needs --attempt N>1 to get past refuse-to-clobber, which runs GATE 0S, which then demands a
+# lock registering the READ payload digest -- a digest the blank run does not send.  There was no
+# honest lock to write.  A blank replicate could only have run under a lock that misdescribed it.
+#
+# So the identity the gate requires is now an ARGUMENT, one record per mode.  A function that
+# derives its own input fails silently; the caller states which spend it is licensing.
+BLANK_PAYLOAD_DIGEST = "3e7c47cd095bd52c"   # MEASURED 2026-11-14 by `--blank-crop --dry-run`
+                                            # (free), printed by GATE B2 as its payload identity.
+                                            # The read path's is 870bf99e65725534: the ablation
+                                            # moves it, which is the point of the control.
+SPEND_MODES = {
+    "read": {
+        "key": "read", "label": "read", "lock": None, "lock_sha": METHODS_LOCK_SHA, "lock_path": None,
+        "payload_digest": SCORED_PAYLOAD_DIGEST, "approval": None,
+        "sheet_bytes_sha": SHEET_BYTES_SHA, "cut_digest": SCORED_CUT_DIGEST,
+        "wanted": "a human approves a SECOND spend on pixels already approved on 2026-10-25; "
+                  "the disclosure is unchanged, the money is new",
+    },
+    "blank": {
+        "key": "blank", "label": "blank-crop control", "lock": None, "lock_sha": None, "lock_path": None,
+        "payload_digest": BLANK_PAYLOAD_DIGEST, "approval": None,
+        "sheet_bytes_sha": BLANK_SHEET_DIGEST, "cut_digest": BLANK_CUT_DIGEST,
+        "wanted": "a human approves a SECOND spend on the 45 uniform-255 crops approved on "
+                  "2026-11-08.  The pixels carry nothing, so the disclosure is unchanged and the "
+                  "only new thing is the money and the attempt number.",
+    },
+}
+# Filled in below, once the paths can be built from the digests above.  Kept out of the literal
+# so the two records cannot drift from the names they are addressed by.
+SPEND_MODES["read"]["lock_path"] = METHODS_LOCK
+SPEND_MODES["read"]["approval"] = APPROVAL
+BLANK_METHODS_LOCK_SHA = "9870c46591b19aec"   # the blank replicate's own methods lock, written
+                                              # 2026-11-14 by blank45_replicate_lock.py.  It
+                                              # registers the question, the 162-call population
+                                              # with law 8's refusal set as a precondition, the
+                                              # run-1 per-cell baseline, the decision rule with
+                                              # three falsifiers, and three SCOREABILITY
+                                              # preconditions -- three of the four cells abstained
+                                              # completely in run 1, so for them this run can only
+                                              # corroborate a floor of zero and can never test its
+                                              # stability.  Said in the lock, before the run.
+SPEND_MODES["blank"]["lock_sha"] = BLANK_METHODS_LOCK_SHA
+SPEND_MODES["blank"]["lock_path"] = A / (
+    "PREDICTIONS_blank45_replicate_%s.json" % BLANK_METHODS_LOCK_SHA)
+SPEND_MODES["blank"]["approval"] = A / ("APPROVAL_blank45_spend_%s.json" % BLANK_SHEET_DIGEST)
+
+CHECKS_PER_CALL_MIN = 1                 # NOT a pin on the per-call value -- that value is
+                                        # measured in the run.  This refuses a silent ZERO, which
+                                        # is what every lost per-call assertion looks like.
+
 CHECKS = 0
 
 
@@ -369,8 +480,13 @@ def gate_prediction(pred):
     return {"prediction_sha16": c}
 
 
-def gate_spend(attempt, dry):
+def gate_spend(attempt, dry, mode):
     """GATE 0S: the replicate's methods lock recomputes, and the spend carries a recorded yes.
+
+    `mode` is one of SPEND_MODES: it names the lock, the payload identity the lock must register,
+    the approval record, and the sheet/cut digests that record must name.  It is an argument and
+    not a module constant because the gate used to be hard-wired to the read path, which left a
+    blank-crop replicate with no lock it could honestly run under.
 
     The two inputs are separate on purpose.  The LOCK says what question this run answers and how
     its result will be read -- registered with a hash so a prediction cannot be edited after the
@@ -382,49 +498,57 @@ def gate_spend(attempt, dry):
     -- same pixels, another spend -- so the licence is by named instance with equality, not by the
     sheet alone.
     """
-    lock = json.loads(METHODS_LOCK.read_text(encoding="utf-8"))
+    _lp, _lsha = mode["lock_path"], mode["lock_sha"]
+    if _lp is None or _lsha is None:
+        raise RunFault(
+            "GATE 0S: the %s path has no methods lock registered, so attempt %d cannot run.  A "
+            "replicate runs under a lock written FOR IT, registering the question, the "
+            "population, the baseline digest and the decision rule before the first call.  "
+            "Write it, pin its sha16 into SPEND_MODES[%r], and run again.  This refusal is the "
+            "debt being paid, not a bug." % (mode["label"], attempt, mode["key"]))
+    lock = json.loads(_lp.read_text(encoding="utf-8"))
     # The lock's own stated recipe: strip `self_sha16`, canonical JSON, UTF-8 bytes,
     # ensure_ascii=False.  Implemented from the rule in the file, not from memory.
     body = {k: v for k, v in lock.items() if k != "self_sha16"}
     got = sha16_bytes(canon(body).encode("utf-8"))
-    chk(got == METHODS_LOCK_SHA,
+    chk(got == _lsha,
         "GATE 0S methods lock: %s recomputes to %s, not %s -- the registered lock has been edited"
-        % (METHODS_LOCK.name, got, METHODS_LOCK_SHA))
-    chk(lock.get("self_sha16") == METHODS_LOCK_SHA,
-        "GATE 0S: %s's own self_sha16 is not %s" % (METHODS_LOCK.name, METHODS_LOCK_SHA))
+        % (_lp.name, got, _lsha))
+    chk(lock.get("self_sha16") == _lsha,
+        "GATE 0S: %s's own self_sha16 is not %s" % (_lp.name, _lsha))
     chk(lock["run"]["attempt"] == attempt
-        and lock["run"]["payload_identity_digest_required"] == SCORED_PAYLOAD_DIGEST,
-        "GATE 0S: %s registers attempt %r over payload %r, and this is attempt %r over %s.  A "
-        "replicate runs under a lock written for it."
-        % (METHODS_LOCK.name, lock["run"]["attempt"],
-           lock["run"]["payload_identity_digest_required"], attempt, SCORED_PAYLOAD_DIGEST))
+        and lock["run"]["payload_identity_digest_required"] == mode["payload_digest"],
+        "GATE 0S: %s registers attempt %r over payload %r, and this is attempt %r over %s (%s).  "
+        "A replicate runs under a lock written for it."
+        % (_lp.name, lock["run"]["attempt"],
+           lock["run"]["payload_identity_digest_required"], attempt, mode["payload_digest"],
+           mode["label"]))
 
-    appr = {"by": None, "on": None, "record": None,
-            "wanted": "a human approves a SECOND spend on pixels already approved on 2026-10-25; "
-                      "the disclosure is unchanged, the money is new"}
-    if APPROVAL.exists():
-        rec = json.loads(APPROVAL.read_text(encoding="utf-8"))
-        chk(rec.get("approves_sheet_bytes_sha16") == SHEET_BYTES_SHA,
+    _ap = mode["approval"]
+    appr = {"by": None, "on": None, "record": None, "wanted": mode["wanted"]}
+    if _ap.exists():
+        rec = json.loads(_ap.read_text(encoding="utf-8"))
+        chk(rec.get("approves_sheet_bytes_sha16") == mode["sheet_bytes_sha"],
             "GATE 0S: %s approves sheet bytes %r, and its own name says %s"
-            % (APPROVAL.name, rec.get("approves_sheet_bytes_sha16"), SHEET_BYTES_SHA))
-        chk(rec.get("approves_cut_digest") == SCORED_CUT_DIGEST,
+            % (_ap.name, rec.get("approves_sheet_bytes_sha16"), mode["sheet_bytes_sha"]))
+        chk(rec.get("approves_cut_digest") == mode["cut_digest"],
             "GATE 0S: %s approves cut %r, not %s -- the approved crops are not these crops"
-            % (APPROVAL.name, rec.get("approves_cut_digest"), SCORED_CUT_DIGEST))
+            % (_ap.name, rec.get("approves_cut_digest"), mode["cut_digest"]))
         chk(bool(rec.get("by")) and bool(rec.get("on")),
-            "GATE 0S: %s names no approver or no date" % APPROVAL.name)
+            "GATE 0S: %s names no approver or no date" % _ap.name)
         chk(attempt in (rec.get("approves_attempts") or []),
             "GATE 0S: %s licenses attempts %r, and this is attempt %r.  A yes to one spend is not "
             "a yes to the next one on the same crops."
-            % (APPROVAL.name, rec.get("approves_attempts"), attempt))
-        appr = dict(rec, record=APPROVAL.name)
+            % (_ap.name, rec.get("approves_attempts"), attempt))
+        appr = dict(rec, record=_ap.name)
     if dry:
         chk(True, "GATE 0S approval evaluated (dry-run: reported, not fatal): by=%r"
                   % appr.get("by"))
     else:
         chk(bool(appr.get("by")),
-            "GATE 0S: this spend is not approved -- %s does not exist or names no approver.  The "
-            "crops were approved on 2026-10-25 and the scored run spent on them; a replicate is a "
-            "new spend and needs its own recorded yes." % APPROVAL.name)
+            "GATE 0S: this %s spend is not approved -- %s does not exist or names no approver.  "
+            "The crops were approved once and a run spent on them; a replicate is a NEW spend and "
+            "needs its own recorded yes." % (mode["label"], _ap.name))
     return lock, appr
 
 
@@ -439,6 +563,38 @@ def gate_spend_checks(appr):
     if appr is None:
         return 0
     return 8 if appr.get("record") else 4
+
+
+def gate_call_loop_checks(loop, n_calls, run_level_after=2):
+    """GATE 0Q: divide the call loop's check count by the calls, and refuse a remainder.
+
+    A module-level function and not an inline block, so it can be PROVED LIVE BY MUTATION
+    without a paid run.  Returns the measured per-call count.
+
+    `loop` is CHECKS_AFTER_CALLS - CHECKS_AT_PRECALL - run_level_after.  The caller passes the
+    run-level term rather than letting this function work it out: a function that derives its own
+    input fails silently.
+    """
+    if n_calls <= 0:
+        raise AssertionError("GATE 0Q: %d calls -- there is nothing to divide by" % n_calls)
+    if loop < 0:
+        raise AssertionError(
+            "GATE 0Q: the call loop ran %d checks, which is negative -- the snapshots are out of "
+            "order or run_level_after (%d) is wrong" % (loop, run_level_after))
+    if loop % n_calls:
+        raise AssertionError(
+            "GATE 0Q: the call loop ran %d checks over %d calls, remainder %d.  Some call ran a "
+            "different number of assertions than the others -- a stepped reasoning ladder, or a "
+            "per-call assertion lost on one path.  Do NOT re-pin a total over this: find the "
+            "call.  The pin that aborted a paid run was off by exactly this kind of term, "
+            "borrowed from another run as a constant." % (loop, n_calls, loop % n_calls))
+    per_call = loop // n_calls
+    if per_call < CHECKS_PER_CALL_MIN:
+        raise AssertionError(
+            "GATE 0Q: %d checks per call, under the floor %d -- do_call's per-call assertions are "
+            "gone.  A total pin would have absorbed this as a %d-check shortfall with no cause "
+            "attached to it." % (per_call, CHECKS_PER_CALL_MIN, loop))
+    return per_call
 
 
 def gate_crops(sheet):
@@ -1399,7 +1555,8 @@ def main():
     # GATE 0S, here because both of its inputs are on disk before anything is built.  A replicate
     # (attempt >= 2) runs only under a methods lock written for it and a recorded approval of the
     # spend; attempt 1 predates both documents and is never re-run.
-    mlock, appr_s = gate_spend(a.attempt, dry) if a.attempt >= 2 else (None, None)
+    _smode = SPEND_MODES["blank" if a.blank_crop else "read"]
+    mlock, appr_s = gate_spend(a.attempt, dry, _smode) if a.attempt >= 2 else (None, None)
     crop_shas = gate_crops(sheet)
     pay_sha = gate_payload_identity(sheet)
     chk(pred["scored_over"]["set_digest"] == SET_DIGEST, "prediction scored_over set_digest")
@@ -1477,7 +1634,8 @@ def main():
     # PRED stays the scored lock, and repointing it would make this a new experiment, not a
     # replicate -- so what belongs in the header is its identity, not its contents.
     header["methods_lock"] = None if mlock is None else {
-        "file": METHODS_LOCK.name, "sha16": METHODS_LOCK_SHA,
+        "file": _smode["lock_path"].name if _smode["lock_path"] else None,
+        "sha16": _smode["lock_sha"], "mode": _smode["label"],
         "registers": "the methods question, the evidential population, the run-1 baseline item "
                      "digest and the decision rule, all before the first call",
         "scored_lock_unchanged": PRED_SHA,
@@ -1495,6 +1653,45 @@ def main():
     # it is the only one that can see a host arriving in a model's own returned text.
     scan_text_for_leaks(canon(header), "the run header (GATE 10)")
     run_sha = sha16_bytes(canon(header).encode("utf-8"))
+
+    # GATE 0P.  The pre-call check-count gate.  See EXPECTED_CHECKS_PRECALL for why it is here
+    # and not only in the write block.  It sits BEFORE the dry/real branch, so a real run cannot
+    # reach do_call with a header-scoped check count nobody has seen, and the dry-run measures
+    # the very same number for free.
+    #
+    # It raises instead of going through chk() ON PURPOSE.  These are invariants ABOUT the
+    # counter; counting them would change the quantity they measure and would invalidate all
+    # three MEASURED totals above, forcing a paid re-measure of the real read path to buy
+    # nothing.  `raise` and not `assert`: -O strips assert.  GATE 0P and GATE 0Q therefore
+    # contribute ZERO to CHECKS, by construction, and the pins above are untouched.
+    CHECKS_AT_PRECALL = CHECKS
+    _apr_p = bool(appr_b and appr_b.get("by"))
+    if blank:
+        _pp = EXPECTED_CHECKS_BLANK_PRECALL.get(_apr_p)
+        _ppn = "EXPECTED_CHECKS_BLANK_PRECALL[approved=%s]" % _apr_p
+    else:
+        _pp, _ppn = EXPECTED_CHECKS_PRECALL, "EXPECTED_CHECKS_PRECALL"
+    # GATE 0S runs on both paths and only for a replicate, so its contribution is ADDED to
+    # whichever pin applies rather than baked into it.  State off the record the gate returned,
+    # never re-decided here.  `is None` is tested FIRST: an unpinned value plus an int is a
+    # TypeError, which would turn "nobody has pinned this yet" into a crash.
+    _d0p = gate_spend_checks(appr_s)
+    if _pp is not None and _d0p:
+        _pp, _ppn = _pp + _d0p, "%s + GATE 0S %d" % (_ppn, _d0p)
+    print("GATE 0P checks_at_precall: %d (%s %s)" % (CHECKS_AT_PRECALL, _ppn, _pp))
+    if _pp is None:
+        print("GATE 0P: %s is UNPINNED, so a real run is NOT gated on it.  Measure it with "
+              "--dry-run in THIS mode and THIS approval state -- free -- and pin it." % _ppn)
+    elif CHECKS_AT_PRECALL != _pp:
+        raise AssertionError(
+            "GATE 0P: checks_at_precall %d != %s %d.  A header-scoped assertion moved.  "
+            "NOTHING HAS BEEN SPENT -- this fires before the first call.  Re-measure free with "
+            "--dry-run and re-pin; never relax it to None." % (CHECKS_AT_PRECALL, _ppn, _pp))
+    # Recorded AFTER run_sha deliberately: these are diagnostics, and putting them in the hashed
+    # header would change every future run's identity and make it incomparable to the runs this
+    # lane has already scored.  They are written into the record, just not into the identity.
+    header["checks_at_precall"] = CHECKS_AT_PRECALL
+    header["checks_at_precall_pin"] = {"name": _ppn, "value": _pp}
 
     if dry:
         print("DRY-RUN: all gates but the key and the network.  Writes NOTHING.")
@@ -1553,7 +1750,7 @@ def main():
         # GATE 0S runs on both paths and only for a replicate, so its contribution is added to
         # whichever pin applies rather than baked into either.  State from the returned record.
         _d0s = gate_spend_checks(appr_s)
-        if _d0s:
+        if _pin is not None and _d0s:        # `None + 8` is a TypeError, not a message
             _pin, _name = _pin + _d0s, "%s + GATE 0S %d" % (_name, _d0s)
         print(f"checks: {CHECKS} ({_name} {_pin})")
         if _pin is None:
@@ -1573,6 +1770,20 @@ def main():
         print(f"[{i + 1}/{len(payloads)}] {rec['span_id']} {rec['arm']} {rec['channel']} {rec['class_primary']}", flush=True)
     chk(len(recs) == len(payloads), f"{len(payloads)} calls attempted (the gated plan), got {len(recs)}")
     chk(not any(r["span_id"] == ABSENT and r["channel"] == "context" for r in recs), "no p245:n1 ctx call")
+
+    # GATE 0Q.  The per-call term, MEASURED IN THIS RUN instead of borrowed from another one.
+    # The pin that aborted a paid run rested on a 274-check difference lifted from run
+    # 6a2292bdb14d3c43, and that comment names the condition which would invalidate it: one extra
+    # reasoning-ladder step on any call makes the number low by one, silently.  Here the term is
+    # divided out of this run's own counter and required to divide EXACTLY, so a stepped ladder
+    # or a lost per-call assertion surfaces as a non-zero REMAINDER naming the defect, rather
+    # than as a total that is merely wrong.  Zero contribution to CHECKS -- see GATE 0P.
+    CHECKS_AFTER_CALLS = CHECKS
+    _rl = 2                                  # the two run-level chks between the loop and here
+    _loop = CHECKS_AFTER_CALLS - CHECKS_AT_PRECALL - _rl
+    _per_call = gate_call_loop_checks(_loop, len(payloads), _rl)
+    print("GATE 0Q checks per call: %d (MEASURED over %d calls, divides exactly)"
+          % (_per_call, len(payloads)))
 
     g1 = {"goatyard-laneB": git_state(REPO_B), "dr-voluminous": git_state(REPO_DR)}
     same = all(g0[k]["head"] == g1[k]["head"] and not g1[k]["dirty"] and not g0[k]["dirty"] for k in g0)
@@ -1596,6 +1807,17 @@ def main():
     cost = round(sum(r["cost_usd"] or 0 for r in recs), 6)
     header.update(git_end=g1, retry_total=sum(r["retries"] for r in recs), cost_usd_measured=cost,
                   provisional=bool(prov), provisional_reason=prov, seconds=round(time.time() - t_start, 1))
+    # The decomposition, PERSISTED.  No run before this one recorded a check count at all, which
+    # is why "1684 was measured" is today an unverifiable comment rather than evidence.  The
+    # post-call term is filled in at the pin, once the write block has run.
+    header["checks_decomposition"] = {
+        "at_precall": CHECKS_AT_PRECALL, "per_call": _per_call, "n_calls": len(payloads),
+        "in_call_loop": _loop, "run_level_after_loop": 2, "post_call": None,
+        "basis": "at_precall is pinned by GATE 0P and measurable free with --dry-run; per_call is "
+                 "measured in this run and divides the loop count exactly (GATE 0Q); post_call "
+                 "is measured here and is the only term no free run can see.  Nothing is "
+                 "borrowed from another run.",
+    }
     byid = {r["span_id"]: r for r in sheet["rows"]}
     pops = populations(pred)
     rows = []
@@ -1646,15 +1868,27 @@ def main():
     for pth in texts:
         chk("sk-or-" not in pth.read_text(encoding="utf-8"), f"key material in {pth.name}")
     print(f"checks observed: {CHECKS}")
+    # The post-call term: everything the write block ran.  Printed and persisted so the NEXT
+    # mismatch of the total below decomposes into a term instead of a mystery.
+    _post = CHECKS - CHECKS_AFTER_CALLS
+    header["checks_decomposition"]["post_call"] = _post
+    print("checks decomposition: precall %d + per_call %d x %d calls + 2 run-level + post_call "
+          "%d = %d" % (CHECKS_AT_PRECALL, _per_call, len(payloads), _post, CHECKS))
     _pin = EXPECTED_CHECKS_BLANK if blank else EXPECTED_CHECKS
     _name = "EXPECTED_CHECKS_BLANK" if blank else "EXPECTED_CHECKS"
+    # `is None` FIRST.  `None + 8` is a TypeError, so the old order turned an unpinned total on a
+    # replicate into a crash in the write block -- the one place in this run where an exception
+    # is most expensive and least informative.
     _d0s = gate_spend_checks(appr_s)
-    if _d0s:
+    if _pin is not None and _d0s:
         _pin, _name = _pin + _d0s, "%s + GATE 0S %d" % (_name, _d0s)
     if _pin is None:
         print(f"{_name} is unpinned: pin it to the observed count above")
     elif CHECKS != _pin:
-        raise AssertionError(f"CHECKS {CHECKS} != {_name} {_pin}")
+        raise AssertionError(
+            f"CHECKS {CHECKS} != {_name} {_pin}.  The decomposition printed above says which "
+            f"term moved; GATE 0P already cleared the pre-call term BEFORE any spend, so the "
+            f"difference is in the call loop or the write block.")
     print(f"wrote {run_sha} ({header['kind']}); cost ${cost}; provisional={bool(prov)}")
     return 0
 
