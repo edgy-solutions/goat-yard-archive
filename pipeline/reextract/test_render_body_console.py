@@ -17,7 +17,7 @@ import build_body_shadow as BSB
 import render_body_console as RBC
 import score_body_console as SBC
 
-EXPECTED_TESTS = 26
+EXPECTED_TESTS = 35
 
 
 def hunk(fp, idx, cls, nl=False):
@@ -498,7 +498,7 @@ def test_crops_json_shas_are_of_the_bytes_stage2_sent_and_carry_no_text():
         assert "old_side" not in raw and "old" not in raw and "new" not in raw and "alpha" not in raw
         assert Image.open(out / "crops" / f"{cid}.png").size == (400, 130)
         key = json.loads((out / "key.json").read_text(encoding="utf-8"))
-        assert set(key) == {"seed", "diff_config_hash", "cards"}
+        assert set(key) == {"seed", "diff_config_hash", "render_rules", "cards"}
         assert set(key["cards"][cid]) == {"old_side", "stratum", "file_page", "opcode_idx"}
         html = (out / "index.html").read_text(encoding="utf-8")
         assert "read crops: 2" in html and 'class="ol"' in html and "<i>2</i>" in html
@@ -538,6 +538,108 @@ def test_score_crops_puts_not_cardable_in_their_own_bucket():
     assert s["not_cardable"] == 1 and s["unanswered"] == 1 and s["new_wrong"] == 1
     plain = SBC.score(rows, key)["content"]
     assert "not_cardable" not in plain and plain["unanswered"] == 2, "without --crops: unchanged"
+
+
+def test_neutralize_makes_every_mark_form_display_identically():
+    n = RBC.NEUTRAL_MARK
+    for t in ("word[^3] next", "word^a^ next", "word ^a next", "word^1^ next"):
+        assert RBC.neutralize(t) == f"word{n} next", t
+    assert RBC.neutralize("word ^. next") == f"word{n}. next"
+    assert RBC.neutralize("no mark here, 3 words.") == "no mark here, 3 words."
+
+
+def test_marker_only_rule():
+    assert RBC.marker_only("of God[^3] and", "of God^b^ and") is True
+    assert RBC.marker_only("Lord[^1].", "Lord ^c.") is True
+    assert RBC.marker_only("Jarchi[^2]", "Jarcin^b^") is False
+    assert RBC.marker_only("a  b", "a b") is False, "whitespace only, no mark"
+    assert RBC.marker_only("same[^1]", "same[^1]") is False
+
+
+def test_cover_for_refuses_a_marker_only_hunk():
+    h = hunk(90, 1, "content")
+    h["old_text"], h["new_text"] = "of God[^3] and", "of God^b^ and"
+    cov = RBC.cover_for(h)
+    assert cov["cardable"] is False and cov["reason"] == "marker_only" and cov["read_crops"] == []
+    assert "marker_only" in RBC._REASON and "old" not in RBC._REASON["marker_only"].lower()         and "new" not in RBC._REASON["marker_only"].lower()
+
+
+def _marked_hunks():
+    h = hunk(90, 1, "content")
+    h["old_text"], h["new_text"] = "alpha[^4] one", "beta^d^ one"
+    h["old_before"], h["new_before"] = "x[^4] y", "x ^d y"
+    for k in ("chunk",):
+        h[k]["box"] = [10, 40, 210, 70]
+    h["span_chunks"][0]["box"] = [10, 40, 210, 70]
+    return [h]
+
+
+def test_rendered_page_has_no_mark_format_and_shows_the_neutral_token():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        out, rc, _ = _run_one(d, _marked_hunks())
+        assert rc == 0
+        html = (out / "index.html").read_text(encoding="utf-8")
+        assert RBC.leak_check(html) == []
+        assert RBC.NEUTRAL_MARK in html and "[^" not in html
+        key = json.loads((out / "key.json").read_text(encoding="utf-8"))
+        assert key["render_rules"] == {"marker": "marker_any_v1", "neutral_token": RBC.NEUTRAL_MARK,
+                                       "marker_only": "marker_only_v1", "leak_check": "leak_v1"}
+        assert set(key) == {"seed", "diff_config_hash", "render_rules", "cards"}
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_leak_check_sees_each_form_and_static_page_parts_are_clean():
+    assert RBC.leak_check("a [^3] b") == ["[^"]
+    assert RBC.leak_check("a ^b^ c") == ["^b"]
+    assert RBC.leak_check("clean") == []
+    assert RBC.leak_check(RBC._CSS + RBC._JS) == []
+
+
+def test_build_refuses_and_leaves_nothing_when_a_mark_would_leak():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    orig = RBC.neutralize
+    try:
+        RBC.neutralize = lambda t: t
+        out, rc, _ = _run_one(d, _marked_hunks())
+        assert rc == 3
+        assert not out.exists(), "a refused build leaves no out-dir"
+    finally:
+        RBC.neutralize = orig
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_a_card_with_a_mark_in_view_is_not_carry_eligible():
+    h = hunk(90, 1, "content")
+    h["old_before"] = "x[^4] y"
+    card = RBC.build_cards([("content", h)], 5)[0]
+    assert card["carry_eligible"] is True, "before settle: unchanged"
+    assert RBC.settle_card(card, None)["carry_eligible"] is False
+    clean = RBC.build_cards([("content", hunk(90, 2, "content"))], 5)[0]
+    assert RBC.settle_card(clean, None)["carry_eligible"] is True
+
+
+def test_marker_only_hunk_is_listed_not_cardable_in_a_real_run():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        h = hunk(90, 1, "content")
+        h["old_text"], h["new_text"] = "of God[^3] and", "of God^b^ and"
+        h["span_chunks"][0]["box"] = h["chunk"]["box"] = [10, 40, 210, 70]
+        out, rc, _ = _run_one(d, [h])
+        assert rc == 0
+        cj = json.loads((out / "crops.json").read_text(encoding="utf-8"))
+        cid = RBC.card_id_for(90, 1, 5)
+        assert cj[cid]["cardable"] is False and cj[cid]["reason"] == "marker_only"
+        assert not (out / "crops" / f"{cid}.png").exists()
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_score_reads_only_cards_from_key():
+    import inspect
+    src = inspect.getsource(SBC)
+    assert "render_rules" not in src
 
 
 if __name__ == "__main__":

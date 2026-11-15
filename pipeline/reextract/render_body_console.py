@@ -21,6 +21,7 @@ import hashlib
 import html
 import json
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -39,6 +40,43 @@ N_WS_PUNCT = 5
 COVER_MAX_H = 2616
 VERDICTS = (("A", "A matches page"), ("B", "B matches page"), ("neither", "neither"),
             ("both", "both"), ("cant_tell", "can't tell"))
+
+
+# Rule marker_any_v1: every form a footnote mark takes on either side.
+MARKER_RE = re.compile(r"\[\^\d+\]|\^[A-Za-z0-9]{1,2}\^?|\^(?=[^\sA-Za-z0-9^])")
+NEUTRAL_MARK = "⟨fn⟩"
+_NEUTRAL_RE = re.compile(r"\s*(?:" + MARKER_RE.pattern + ")")
+
+
+def neutralize(t):
+    """Every mark (and the whitespace before it) becomes one neutral token, so neither the mark's
+    format nor its spacing identifies a side."""
+    return _NEUTRAL_RE.sub(NEUTRAL_MARK, t)
+
+
+def _norm(t):
+    toks = []
+    for tok in MARKER_RE.sub("", t).split():
+        if re.match(r"^[^\w]+$", tok) and toks:
+            toks[-1] += tok
+        else:
+            toks.append(tok)
+    return toks
+
+
+def marker_only(old_t, new_t):
+    """Rule marker_only_v1: the two texts differ only in the form of a footnote mark."""
+    return (old_t != new_t and bool(MARKER_RE.search(old_t) or MARKER_RE.search(new_t))
+            and _norm(old_t) == _norm(new_t))
+
+
+def leak_check(page_html):
+    """Rule leak_v1: one entry per surviving old-side or new-side mark form in the final page."""
+    hits = []
+    if "[^" in page_html:
+        hits.append("[^")
+    hits.extend(re.findall(r"\^[A-Za-z]", page_html))
+    return hits
 
 
 def card_id_for(file_page, opcode_idx, seed):
@@ -85,6 +123,8 @@ def cover_for(hunk):
     if "ends_on_chunk_last_line" not in hunk:
         raise ValueError(f"hunk page {hunk.get('file_page')} opcode {hunk.get('opcode_idx')} has no "
                          "ends_on_chunk_last_line: rebuild the diff with the current diff_body_shadow")
+    if marker_only(hunk["old_text"], hunk["new_text"]):
+        return {"cardable": False, "reason": "marker_only", "cover_box": None, "read_crops": []}
     crops = hunk["span_chunks"]
     if not crops:
         return {"cardable": False, "reason": "old_only", "cover_box": None, "read_crops": []}
@@ -144,7 +184,9 @@ def settle_card(card, gray):
             cov["cardable"], cov["reason"] = False, "too_tall"
     card["cover"] = cov
     card["extension"] = ext
-    card["carry_eligible"] = bool(cov["cardable"] and cov["cover_box"] == (card["chunk"] or {}).get("box"))
+    shown = [card[s][k] for s in ("A", "B") for k in ("before", "text", "after")]
+    card["carry_eligible"] = bool(cov["cardable"] and cov["cover_box"] == (card["chunk"] or {}).get("box")
+                                  and not any(MARKER_RE.search(t) for t in shown))
     return card
 
 
@@ -167,9 +209,9 @@ def build_cards(sample, seed):
 
 
 def _side_html(label, side):
-    text = html.escape(side["text"]) if side["text"] else "<i>(nothing)</i>"
-    return (f'<div class="side"><b>{label}</b> {html.escape(side["before"])} '
-            f'<mark>{text}</mark> {html.escape(side["after"])}</div>')
+    text = html.escape(neutralize(side["text"])) if side["text"] else "<i>(nothing)</i>"
+    return (f'<div class="side"><b>{label}</b> {html.escape(neutralize(side["before"]))} '
+            f'<mark>{text}</mark> {html.escape(neutralize(side["after"]))}</div>')
 
 
 _CSS = """
@@ -229,7 +271,8 @@ document.getElementById('import').addEventListener('change',function(ev){
 """
 
 _REASON = {"old_only": "no read crop contains this text",
-           "too_tall": "covering crop taller than {} px".format(COVER_MAX_H)}
+           "too_tall": "covering crop taller than {} px".format(COVER_MAX_H),
+           "marker_only": "the two texts differ only in the form of a footnote mark"}
 
 
 def render_html(cards, seed, console="console"):
@@ -300,7 +343,6 @@ def main(argv=None):
         raise ValueError("diff was built from a different body run than --body "
                          f"({diff_header['config']['body_config_hash']} != {body_header['config_hash']})")
     cards = build_cards(sample_hunks([r for r in diff if r["kind"] == "hunk"], args.seed), args.seed)
-    (out_dir / "crops").mkdir(parents=True, exist_ok=True)
     grays = {}
     for c in cards:
         if not c["cover"]["read_crops"]:
@@ -316,6 +358,7 @@ def main(argv=None):
             grays[fp] = BVR.load_page_gray(args.volume_dir, fp)
         settle_card(c, grays[fp])
     crops_meta = {}
+    crop_files = {}
     for c in cards:
         cov = c["cover"]
         crops_meta[c["card_id"]] = {"cardable": cov["cardable"], "reason": cov["reason"],
@@ -330,11 +373,21 @@ def main(argv=None):
                  "rect_idx": r["rect_idx"], "box": r["box"],
                  "sha256": hashlib.sha256(BSB.crop_png_bytes(grays[fp], r["box"])).hexdigest()})
         if cov["cardable"]:
-            (out_dir / "crops" / f"{c['card_id']}.png").write_bytes(
-                BSB.crop_png_bytes(grays[fp], cov["cover_box"]))
-    (out_dir / "index.html").write_text(render_html(cards, args.seed, out_dir.name), encoding="utf-8")
+            crop_files[c["card_id"]] = BSB.crop_png_bytes(grays[fp], cov["cover_box"])
+    page_html = render_html(cards, args.seed, out_dir.name)
+    leaks = leak_check(page_html)
+    if leaks:
+        print(f"REFUSED: the page still shows a side-identifying footnote mark {leaks[:10]}; "
+              "nothing written", file=sys.stderr)
+        return 3
+    (out_dir / "crops").mkdir(parents=True, exist_ok=True)
+    for cid, b in crop_files.items():
+        (out_dir / "crops" / f"{cid}.png").write_bytes(b)
+    (out_dir / "index.html").write_text(page_html, encoding="utf-8")
     (out_dir / "crops.json").write_text(json.dumps(crops_meta, indent=1), encoding="utf-8")
     key = {"seed": args.seed, "diff_config_hash": diff_header["config_hash"],
+           "render_rules": {"marker": "marker_any_v1", "neutral_token": NEUTRAL_MARK,
+                            "marker_only": "marker_only_v1", "leak_check": "leak_v1"},
            "cards": {c["card_id"]: {"old_side": c["old_side"], "stratum": c["stratum"],
                                     "file_page": c["file_page"], "opcode_idx": c["opcode_idx"]}
                      for c in cards}}
