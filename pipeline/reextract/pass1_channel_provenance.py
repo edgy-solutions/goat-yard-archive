@@ -43,6 +43,8 @@ import re
 import subprocess
 import sys
 
+from write_scope import assert_inside
+
 sys.stdout.reconfigure(encoding="utf-8")
 
 REPO = "C:/Users/cnogr/git/goatyard-laneB"
@@ -201,6 +203,7 @@ check(CHECKS + 1 == EXPECTED, "ran %d checks before the final count, expected %d
 
 dest = os.path.join(AUD, "CHANNELBASIS_pass1_insertions_%s.json" % doc["record_sha16"])
 final = json.dumps(doc, indent=1, ensure_ascii=True).encode("utf-8")
+assert_inside(dest, "the channel-basis record belongs in the audits directory")
 if os.path.exists(dest) and io.open(dest, "rb").read() != final:
     sys.exit("REFUSING TO CLOBBER: %s exists and holds different bytes" % os.path.basename(dest))
 io.open(dest, "wb").write(final)

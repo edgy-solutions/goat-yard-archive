@@ -24,6 +24,8 @@ import os
 import re
 import sys
 
+from write_scope import assert_inside
+
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -500,7 +502,10 @@ if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
         sys.exit(2)
     print(format_resign_diff(_rep))
     if len(_argv) > 4:
-        io.open(_argv[4], "w", encoding="utf-8").write(json.dumps(_rep, indent=1, ensure_ascii=True))
+        # The report path comes off the COMMAND LINE, so this is the one write in this file
+        # whose destination a typo picks. Refused outside Lane B's two roots, before the bytes.
+        io.open(assert_inside(_argv[4], "a diff report belongs in the audits directory"),
+                "w", encoding="utf-8").write(json.dumps(_rep, indent=1, ensure_ascii=True))
     sys.exit(0)
 
 

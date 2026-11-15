@@ -21,6 +21,8 @@ import json
 import sys
 import pathlib
 
+from write_scope import assert_inside
+
 A = pathlib.Path("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits")
 CUR = A / "glyphsign_0401b636ffa7bf1a_resign_5span_signed_50d419a4.jsonl"
 PRI = A / "glyphsign_signed_0401b636ffa7bf1a_20261004_pass1.jsonl"
@@ -112,6 +114,7 @@ doc["diagnostic_sha16_rule"] = _rule
 doc["diagnostic_sha16"] = hashlib.sha256(body).hexdigest()[:16]
 dest = A / ("TILESONLY_pass1_4span_%s.json" % doc["diagnostic_sha16"])
 final = json.dumps(doc, indent=1, ensure_ascii=True).encode("utf-8")
+assert_inside(dest, "the diagnostic belongs in the audits directory")
 if dest.exists() and io.open(dest, "rb").read() != final:
     sys.exit("REFUSING TO CLOBBER: %s exists and holds different bytes" % dest.name)
 io.open(dest, "wb").write(final)

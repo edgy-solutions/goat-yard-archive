@@ -51,6 +51,7 @@ import re
 import sys
 
 import hebrew_aperture_diag as D
+from write_scope import assert_inside
 from hebrew_glyph_card import (CARDS, LETTER, RERAT, SIG_REQUIRED, SIGS, card_asks, exemplars,
                                has_nikud, sig_exemplars, strip_nikud)
 
@@ -541,6 +542,7 @@ def build():
          "</script>"
          % (_q(IMGREL), _q(str(SIGS)), _q(str(RERAT)), FIRST,
             json.dumps(LETTER, ensure_ascii=False), JS)]
+    assert_inside(OUT, "the capture page belongs in the audits directory, beside the cards")
     OUT.write_text("\n".join(h), encoding="utf-8")
     return OUT
 
