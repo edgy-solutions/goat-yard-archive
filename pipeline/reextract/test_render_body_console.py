@@ -12,11 +12,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+import body_read
 import build_body_shadow as BSB
 import render_body_console as RBC
 import score_body_console as SBC
 
-EXPECTED_TESTS = 18
+EXPECTED_TESTS = 26
 
 
 def hunk(fp, idx, cls, nl=False):
@@ -27,7 +28,8 @@ def hunk(fp, idx, cls, nl=False):
             "chunk": {"box": [0, 0, 40, 30], "file_page": fp, "col": "left", "rect_idx": 0,
                       "chunk_idx": 0, "key": [fp, "left", 1], "stage1_line": 1},
             "span_chunks": [{"box": [0, 0, 40, 30], "file_page": fp, "col": "left", "rect_idx": 0,
-                             "chunk_idx": 0, "key": [fp, "left", 1], "stage1_line": 1}]}
+                             "chunk_idx": 0, "key": [fp, "left", 1], "stage1_line": 1}],
+            "ends_on_chunk_last_line": False}
 
 
 def ref(box, ci=0, ri=0, fp=90):
@@ -283,6 +285,127 @@ def test_born_card2_cover_is_union_and_the_old_crop_missed_the_second_read_box()
     assert _inside(h["span_chunks"][1]["box"], cov["cover_box"])
 
 
+def _bands(rows, shape=(400, 300), thin=()):
+    g = np.full(shape, 255, np.uint8)
+    for a, b in list(rows) + list(thin):
+        g[a:b, 10:290] = 0
+    return g
+
+
+def _ext_hunk(boxes, ends=True):
+    h = with_span(hunk(90, 1, "content"), boxes)
+    h["ends_on_chunk_last_line"] = ends
+    return h
+
+
+def test_extend_down_clipped_line_goes_to_end_of_next_line():
+    g = _bands([(20, 40), (60, 80), (100, 120)])
+    assert RBC.extend_down(g, [5, 10, 295, 70]) == ([5, 10, 295, 120], None)
+
+
+def test_extend_down_no_line_below_ends_clipped_line():
+    g = _bands([(20, 40), (60, 80)])
+    assert RBC.extend_down(g, [5, 10, 295, 70]) == ([5, 10, 295, 80], "no_line_below")
+    assert RBC.extend_down(g, [5, 10, 295, 100]) == ([5, 10, 295, 100], "no_line_below"), "never shrinks"
+
+
+def test_extend_down_blank_cover_is_unchanged_and_flagged():
+    g = _bands([(200, 220)])
+    assert RBC.extend_down(g, [5, 10, 295, 70]) == ([5, 10, 295, 70], "no_line_in_cover")
+
+
+def test_extend_down_thin_rule_is_not_the_next_line():
+    g = _bands([(20, 40), (60, 80), (120, 140)], thin=[(90, 96)])
+    assert body_read._ink_lines(g, (0, 0, 300, 400)) == [(20, 40), (60, 80), (90, 96), (120, 140)]
+    assert RBC.extend_down(g, [5, 10, 295, 70]) == ([5, 10, 295, 140], None)
+
+
+def test_extension_trigger_requires_the_bottom_chunk_to_hold_the_end():
+    top, bottom = [0, 0, 300, 70], [0, 40, 300, 130]
+    h = _ext_hunk([bottom, top])          # last token's chunk is `top`: bottom edge is bottom's
+    assert not RBC.triggers_extension(h, RBC.cover_for(h)["cover_box"])
+    h = _ext_hunk([top, bottom])
+    assert RBC.triggers_extension(h, RBC.cover_for(h)["cover_box"])
+    h = _ext_hunk([top, bottom], ends=False)
+    assert not RBC.triggers_extension(h, RBC.cover_for(h)["cover_box"])
+    h = _ext_hunk([top, bottom], ends=None)
+    assert not RBC.triggers_extension(h, RBC.cover_for(h)["cover_box"])
+    (card,) = RBC.build_cards([("content", _ext_hunk([bottom, top]))], 1)
+    assert card["trigger_candidate"] is False
+    (card,) = RBC.build_cards([("content", _ext_hunk([top, bottom]))], 1)
+    assert card["trigger_candidate"] is True
+
+
+def test_too_tall_applies_after_extension():
+    mx = RBC.COVER_MAX_H
+    g = _bands([(10, 30), (mx - 20, mx + 10), (mx + 40, mx + 70)], shape=(mx + 400, 300))
+    h = _ext_hunk([[0, 0, 300, mx]])
+    (card,) = RBC.build_cards([("content", h)], 1)
+    assert card["cover"]["cardable"]
+    RBC.settle_card(card, g)
+    assert card["extension"]["triggered"] and card["extension"]["to_y1"] == mx + 70
+    assert not card["cover"]["cardable"] and card["cover"]["reason"] == "too_tall"
+    assert card["cover"]["cover_box"] == [0, 0, 300, mx + 70]
+
+
+def test_extended_card_is_not_carry_eligible_and_crop_bytes_follow_final_box():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        g = _bands([(20, 40), (60, 80), (100, 120)])
+        vol = d / "vol"
+        vol.mkdir()
+        Image.fromarray(g).save(vol / "page90_image1.png")
+        body = d / "body.jsonl"
+        body.write_text(json.dumps({"kind": "run_header", "config_hash": "bodyhash", "config": {
+            "png_sha256": {"90": BSB.png_sha256(vol, 90)}}}) + "\n", encoding="utf-8")
+        h = _ext_hunk([[10, 10, 290, 70]])
+        h["chunk"] = dict(h["span_chunks"][0])
+        plain = _ext_hunk([[10, 10, 290, 70]], ends=False)
+        plain["opcode_idx"] = 2
+        plain["chunk"] = dict(plain["span_chunks"][0])
+        diff = d / "diff.jsonl"
+        rows = [{"kind": "diff_header", "config_hash": "diffhash",
+                 "config": {"body_config_hash": "bodyhash"}}, h, plain]
+        diff.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        out = d / "console"
+        assert RBC.main(["--diff", str(diff), "--body", str(body), "--volume-dir", str(vol),
+                         "--out-dir", str(out), "--seed", "5"]) == 0
+        cj = json.loads((out / "crops.json").read_text(encoding="utf-8"))
+        c1, c2 = RBC.card_id_for(90, 1, 5), RBC.card_id_for(90, 2, 5)
+        assert cj[c1]["cover_box"] == [10, 10, 290, 120] and cj[c1]["carry_eligible"] is False
+        assert cj[c1]["extension"] == {"rule": "one_line_down_v1", "triggered": True, "flag": None,
+                                       "from_y1": 70, "to_y1": 120}
+        assert (out / "crops" / f"{c1}.png").read_bytes() == BSB.crop_png_bytes(g, [10, 10, 290, 120])
+        assert cj[c2]["carry_eligible"] is True and cj[c2]["cover_box"] == [10, 10, 290, 70]
+        assert cj[c2]["extension"] == {"rule": "one_line_down_v1", "triggered": False, "flag": None,
+                                       "from_y1": 70, "to_y1": 70}
+        html = (out / "index.html").read_text(encoding="utf-8")
+        assert f'data-id="{c1}" data-carry="0"' in html
+        assert "height:54.5455%" in html, "outline = 60 of the 110 px final image"
+        assert "extension" not in html
+        key = json.loads((out / "key.json").read_text(encoding="utf-8"))
+        assert set(key["cards"][c1]) == {"old_side", "stratum", "file_page", "opcode_idx"}
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_hunk_without_ends_on_chunk_last_line_is_refused():
+    h = hunk(90, 1, "content")
+    del h["ends_on_chunk_last_line"]
+    try:
+        RBC.cover_for(h)
+    except ValueError as e:
+        assert "ends_on_chunk_last_line" in str(e)
+    else:
+        raise AssertionError("cover_for must refuse")
+    try:
+        RBC.build_cards([("content", h)], 1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("build_cards must refuse")
+
+
 def test_delete_is_not_cardable_has_no_crop_and_is_listed():
     d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
     try:
@@ -370,7 +493,7 @@ def test_crops_json_shas_are_of_the_bytes_stage2_sent_and_carry_no_text():
         for r in e["read_crops"]:
             assert r["sha256"] == hashlib.sha256(BSB.crop_png_bytes(page, r["box"])).hexdigest()
             assert set(r) == {"key", "stage1_line", "chunk_idx", "rect_idx", "box", "sha256"}
-        assert set(e) == {"cardable", "reason", "cover_box", "carry_eligible", "read_crops"}
+        assert set(e) == {"cardable", "reason", "cover_box", "carry_eligible", "extension", "read_crops"}
         raw = (out / "crops.json").read_text(encoding="utf-8").lower()
         assert "old_side" not in raw and "old" not in raw and "new" not in raw and "alpha" not in raw
         assert Image.open(out / "crops" / f"{cid}.png").size == (400, 130)

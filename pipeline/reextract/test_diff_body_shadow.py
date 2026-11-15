@@ -10,7 +10,7 @@ from pathlib import Path
 
 import diff_body_shadow as DBS
 
-EXPECTED_TESTS = 31
+EXPECTED_TESTS = 35
 
 
 def unit(chunk_texts, key=(90, "left", 10), kind="verse", status="shipped", head=True, line=1):
@@ -152,6 +152,42 @@ def test_pre_existing_hunk_fields_unchanged_by_span_chunks():
             assert h["chunk"] == legacy
             assert list(h)[:2] == ["kind", "file_page"] and "span_chunks" in h
             assert bool(h["regions"]) == bool(h["span_chunks"]) and set(h["flags"]) == {"non_latin", "marker", "chunk_edge"}
+
+
+def test_ends_on_chunk_last_line_true_false_none_and_key_order():
+    a = unit(["a b c\nd e f"], key=(90, "left", 10), line=3)
+    (h,) = DBS.diff_page(90, "a b c d X f", [a])
+    assert h["ends_on_chunk_last_line"] is True, "hunk ends on line 2 of 2"
+    assert list(h).index("ends_on_chunk_last_line") == list(h).index("span_chunks") + 1
+    (h,) = DBS.diff_page(90, "a X c d e f", [a])
+    assert h["ends_on_chunk_last_line"] is False, "hunk ends on line 1"
+    (h,) = DBS.diff_page(90, "a b c Q d e f", [a])
+    assert h["op"] == "delete" and h["ends_on_chunk_last_line"] is None
+
+
+def test_ends_on_chunk_last_line_word_break_join_keeps_first_part_index():
+    import assembler
+    dash = assembler._WORDBREAK_DASH[0]
+    a = unit(["a b c\nd e\nfo" + dash + "\nllow"], key=(90, "left", 10), line=3)
+    (h,) = DBS.diff_page(90, "a b c d e X", [a])
+    assert h["new_text"] == "follow" and h["ends_on_chunk_last_line"] is True
+    (h,) = DBS.diff_page(90, "a b c d X follow", [a])
+    assert h["new_text"] == "e" and h["ends_on_chunk_last_line"] is False
+
+
+def test_ends_on_chunk_last_line_is_per_chunk():
+    a = unit(["a b c\nd e f", "g h i"], key=(90, "left", 10), line=3)
+    (h,) = DBS.diff_page(90, "a b c d e f g h X", [a])
+    assert h["ends_on_chunk_last_line"] is True
+    (h,) = DBS.diff_page(90, "a b c d e X g h i", [a])
+    assert h["ends_on_chunk_last_line"] is True, "last line of chunk 0, mid-page"
+    (h,) = DBS.diff_page(90, "X b c d e f g h i", [a])
+    assert h["ends_on_chunk_last_line"] is False
+
+
+def test_header_config_has_span_end_rule():
+    src = Path(DBS.__file__).read_text(encoding="utf-8")
+    assert '"span_end_rule": "chunk_last_line_v1"' in src and '"span_chunks_rule"' in src
 
 
 def test_hunk_maps_to_region_and_chunk():

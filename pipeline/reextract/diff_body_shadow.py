@@ -145,11 +145,15 @@ def diff_page(file_page, old_text, units):
         for c in u["chunks"]:
             if not c.get("usable"):
                 continue
-            for ln in (c["text"] or "").split(_NL):
-                new_lines.append((ln, (ui, c["chunk_idx"], c["rect_idx"])))
+            for li, ln in enumerate((c["text"] or "").split(_NL)):
+                new_lines.append((ln, (ui, c["chunk_idx"], c["rect_idx"], li)))
     new_tt = tagged_tokens(new_lines)
     new_toks = [t for t, _ in new_tt]
-    new_tags = [g for _, g in new_tt]
+    new_tags = [g[:3] for _, g in new_tt]
+    new_li = [g[3] for _, g in new_tt]
+    last_li = {}
+    for t, li in zip(new_tags, new_li):
+        last_li[t] = max(last_li.get(t, -1), li)
 
     ops = difflib.SequenceMatcher(None, old_toks, new_toks, autojunk=False).get_opcodes()
 
@@ -193,6 +197,8 @@ def diff_page(file_page, old_text, units):
                       "chunk_edge": _chunk_edge(new_tags, j1, j2)},
             "regions": [units[u]["key"] for u in regions], "chunk": ref,
             "span_chunks": span_chunks,
+            "ends_on_chunk_last_line": (None if j1 == j2
+                                        else new_li[j2 - 1] == last_li[new_tags[j2 - 1]]),
             "old_before": " ".join(old_toks[max(0, i1 - CONTEXT_TOKENS):i1]),
             "old_after": " ".join(old_toks[i2:i2 + CONTEXT_TOKENS]),
             "new_before": " ".join(new_toks[max(0, j1 - CONTEXT_TOKENS):j1]),
@@ -357,6 +363,7 @@ def main(argv=None):
         "old_defs_rule": "def_block_v1", "head_old_rule": "first4_from_ver",
         "head_status_source": "stage1",
         "span_chunks_rule": "distinct_new_tags_v1",
+        "span_end_rule": "chunk_last_line_v1",
     }
     chash = BVR.config_hash(config)
     records = [{"kind": "diff_header", "tier": "best_effort", "config": config,

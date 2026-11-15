@@ -24,7 +24,10 @@ import random
 import sys
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import body_read  # noqa: E402
 import build_body_shadow as BSB  # noqa: E402
 import build_verse_regions as BVR  # noqa: E402
 
@@ -79,6 +82,9 @@ def cover_for(hunk):
     if "span_chunks" not in hunk:
         raise ValueError(f"hunk page {hunk.get('file_page')} opcode {hunk.get('opcode_idx')} has no "
                          "span_chunks: rebuild the diff with the current diff_body_shadow")
+    if "ends_on_chunk_last_line" not in hunk:
+        raise ValueError(f"hunk page {hunk.get('file_page')} opcode {hunk.get('opcode_idx')} has no "
+                         "ends_on_chunk_last_line: rebuild the diff with the current diff_body_shadow")
     crops = hunk["span_chunks"]
     if not crops:
         return {"cardable": False, "reason": "old_only", "cover_box": None, "read_crops": []}
@@ -93,6 +99,55 @@ def cover_for(hunk):
     return {"cardable": True, "reason": None, "cover_box": cover, "read_crops": crops}
 
 
+def extend_down(gray, box):
+    """Pure. one_line_down_v1: when the cover's bottom edge may clip a printed line, extend it to the
+    end of the next printed line. -> (new_box, flag); flag None | "no_line_in_cover" | "no_line_below".
+    x0, y0, x1 never change. A band qualifies as a line iff its height >= 0.5 * the median band
+    height inside the cover (a printed rule is thinner)."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    hp = np.asarray(gray).shape[0]
+    bands = body_read._ink_lines(gray, (x0, y0, x1, hp))
+    inside = [b for b in bands if b[0] < y1]
+    if not inside:
+        return [x0, y0, x1, y1], "no_line_in_cover"
+    med = float(np.median([e - st for st, e in inside]))
+    qual = [b for b in bands if (b[1] - b[0]) >= 0.5 * med]
+    lasts = [b for b in qual if b[0] < y1]
+    if not lasts:
+        return [x0, y0, x1, y1], "no_line_in_cover"
+    last = lasts[-1]
+    nxt = next((b for b in qual if b[0] >= last[1]), None)
+    if nxt is not None:
+        return [x0, y0, x1, int(nxt[1])], None
+    return [x0, y0, x1, int(max(y1, last[1]))], "no_line_below"
+
+
+def triggers_extension(hunk, cover_box):
+    """The cover's bottom may clip a line: the hunk's last new token is on the last read line of the
+    chunk that read it, and that chunk sets the cover's bottom edge."""
+    return bool(hunk["ends_on_chunk_last_line"] is True and hunk["span_chunks"]
+                and hunk["span_chunks"][-1]["box"][3] == cover_box[3])
+
+
+def settle_card(card, gray):
+    """Apply the extension rule, the too_tall test on the final box, and carry eligibility, in place.
+    Needs the page gray; call before render_html."""
+    cov = dict(card["cover"])
+    ext = {"rule": "one_line_down_v1", "triggered": False, "flag": None,
+           "from_y1": cov["cover_box"][3] if cov["cover_box"] else None,
+           "to_y1": cov["cover_box"][3] if cov["cover_box"] else None}
+    if cov["cardable"] and card["trigger_candidate"]:
+        nb, flag = extend_down(gray, cov["cover_box"])
+        ext.update(triggered=True, flag=flag, to_y1=nb[3])
+        cov["cover_box"] = nb
+        if nb[3] - nb[1] > COVER_MAX_H:
+            cov["cardable"], cov["reason"] = False, "too_tall"
+    card["cover"] = cov
+    card["extension"] = ext
+    card["carry_eligible"] = bool(cov["cardable"] and cov["cover_box"] == (card["chunk"] or {}).get("box"))
+    return card
+
+
 def build_cards(sample, seed):
     cards = []
     for stratum, h in sample:
@@ -105,6 +160,7 @@ def build_cards(sample, seed):
                       "opcode_idx": h["opcode_idx"], "old_side": "A" if a_old else "B",
                       "A": old if a_old else new, "B": new if a_old else old,
                       "flags": h["flags"], "chunk": h.get("chunk"), "cover": cover,
+                      "trigger_candidate": bool(cover["cardable"] and triggers_extension(h, cover["cover_box"])),
                       "carry_eligible": bool(cover["cardable"]
                                              and cover["cover_box"] == (h.get("chunk") or {}).get("box"))})
     return cards
@@ -246,13 +302,9 @@ def main(argv=None):
     cards = build_cards(sample_hunks([r for r in diff if r["kind"] == "hunk"], args.seed), args.seed)
     (out_dir / "crops").mkdir(parents=True, exist_ok=True)
     grays = {}
-    crops_meta = {}
     for c in cards:
-        cov = c["cover"]
-        crops_meta[c["card_id"]] = {"cardable": cov["cardable"], "reason": cov["reason"],
-                                    "cover_box": cov["cover_box"], "carry_eligible": c["carry_eligible"],
-                                    "read_crops": []}
-        if not cov["read_crops"]:
+        if not c["cover"]["read_crops"]:
+            settle_card(c, None)
             continue
         fp = c["file_page"]
         if fp not in grays:
@@ -262,6 +314,16 @@ def main(argv=None):
                 raise ValueError(f"page {fp} PNG differs from the pixels the body run read "
                                  f"({have} != {want})")
             grays[fp] = BVR.load_page_gray(args.volume_dir, fp)
+        settle_card(c, grays[fp])
+    crops_meta = {}
+    for c in cards:
+        cov = c["cover"]
+        crops_meta[c["card_id"]] = {"cardable": cov["cardable"], "reason": cov["reason"],
+                                    "cover_box": cov["cover_box"], "carry_eligible": c["carry_eligible"],
+                                    "extension": c["extension"], "read_crops": []}
+        if not cov["read_crops"]:
+            continue
+        fp = c["file_page"]
         for r in cov["read_crops"]:
             crops_meta[c["card_id"]]["read_crops"].append(
                 {"key": r["key"], "stage1_line": r["stage1_line"], "chunk_idx": r["chunk_idx"],
