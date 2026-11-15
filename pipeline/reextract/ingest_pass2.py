@@ -113,7 +113,8 @@ def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
     """Every tile whose (shown, verdict, chose) changed and every insertion whose (chose, verdict) changed,
     for each span in `current_rows`, against `prior_rows`. Raises ResignDiffError unless crop_sha16 and
     candidate_sha16 are identical for every compared span (a diff only means something over the same
-    pixels) and the tile index sets agree. Returns the report; `adjudication` is None on every entry."""
+    pixels), the tile index sets agree, and BOTH exports carry an `insertions` channel at all -- an
+    absent channel is not an empty one. Returns the report; `adjudication` is None on every entry."""
     prior = {r["span_id"]: r for r in prior_rows}
     if len(prior) != len(prior_rows):
         raise ResignDiffError("duplicate span_id in the prior export")
@@ -149,6 +150,19 @@ def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
                 if rev:
                     n_rev += 1
                     reversal_rows.add(sid)
+
+        # An ABSENT insertion channel is not an EMPTY one. The 2026-10-04 pass-1 console had no
+        # insertion channel at all, and the line below used to die with a bare KeyError -- a refusal
+        # the caller could not read. Coercing the missing key to [] would be worse: it would assert
+        # that that signer looked at the span and made no insertions, which the file does not say.
+        missing = [w for w, d in (("current", r), ("prior", p)) if "insertions" not in d]
+        if missing:
+            raise ResignDiffError(
+                "%s: the %s export has no 'insertions' channel at all. An absent channel is not an "
+                "empty channel: reading it as [] would assert that signer made no insertions, which "
+                "the file does not say. Diff against a signature taken on a console that HAD the "
+                "insertion channel, or rule on the row without a diff."
+                % (sid, " and ".join(missing)))
 
         def ikey(x):
             return (x.get("seq"), x.get("after_i"), x.get("kind"))
@@ -224,11 +238,117 @@ def format_resign_diff(rep):
     return "\n".join(L)
 
 
+EXPECTED_CHECKS_RESIGN = 13
+
+
+def resign_selftest():
+    """The REFUSAL branches of diff_resigned, over synthetic rows. No data file read, nothing written.
+
+    These are the branches a green run never visits: every refusal here is a path the three real
+    exports do not take. Each case names the refusal it expects, so a refusal that stopped firing, or
+    started firing for a different reason, fails rather than passes.
+
+    The discriminating case is case 3: two exports that both carry an EMPTY insertions channel must
+    diff CLEANLY. Without it, a guard written as `if not r["insertions"]` would satisfy every other
+    case in this function while turning a signer's statement that he made no insertions into a
+    refusal -- the exact confusion the guard exists to prevent, passing as a green run.
+    """
+    def row(sid, tiles, ins=(), crop="c0", cand="d0"):
+        return {"span_id": sid, "crop_sha16": crop, "candidate_sha16": cand,
+                "tiles": [dict(t) for t in tiles], "insertions": [dict(x) for x in ins]}
+
+    def refuses(cur, pri, want, label):
+        # An untyped blow-up is NOT a refusal. `KeyError: 'insertions'` is what the pass-1 diff
+        # actually printed, and no caller could read what had been refused or why. Catch anything,
+        # name the type, and require the refusal to be the typed one.
+        msg, typed = "", False
+        try:
+            diff_resigned(cur, pri, "cur", "pri")
+        except ResignDiffError as e:
+            msg, typed = str(e), True
+        except Exception as e:
+            msg = "UNTYPED %s: %s" % (type(e).__name__, e)
+        check(typed and all(w in msg for w in want),
+              "%s: expected a ResignDiffError naming %s, got %r" % (label, list(want), msg))
+
+    T = [{"i": 0, "kind": "consonant", "shown": "a", "verdict": "confirmed", "chose": ""},
+         {"i": 1, "kind": "consonant", "shown": "b", "verdict": "confirmed", "chose": ""}]
+    base = row("p1:n0", T)
+    noins = dict((k, v) for k, v in base.items() if k != "insertions")
+
+    # 1-2. the absent channel, each side, named as the side it is absent from
+    refuses([base], [noins], ("p1:n0", "prior", "'insertions' channel"), "prior lacks the channel")
+    refuses([noins], [base], ("p1:n0", "current", "'insertions' channel"), "current lacks the channel")
+
+    # 3. THE CONTROL: an empty channel is a statement, not an absence. It must diff.
+    def diffs(cur, pri, label):
+        # A case that expects a RESULT must not be left to raise: an exception in a test file ends the
+        # run, so the check below would never evaluate and its message would never print. Fold the
+        # exception into the check instead, and let the check say what happened.
+        try:
+            return diff_resigned(cur, pri, "cur", "pri"), ""
+        except Exception as e:
+            return None, "REFUSED %s: %s" % (type(e).__name__, e)
+
+    rep, why = diffs([row("p1:n0", T)], [row("p1:n0", T)], "the control")
+    check(rep is not None and rep["disagreements"] == [] and rep["rate"]["rows_touched"] == 0,
+          "two identical rows with EMPTY insertion channels did not diff cleanly: %s"
+          % (why or rep["rate"]))
+
+    # 4. the pixel gate: a different hash and an absent hash are both refusals
+    refuses([row("p1:n0", T, crop="X")], [base], ("crop_sha16 differs",), "crop hash differs")
+    refuses([row("p1:n0", T, cand="")], [base], ("candidate_sha16 differs",), "candidate hash empty")
+
+    # 5. a current row with nothing to compare against
+    refuses([base], [row("p9:n9", T)], ("p1:n0", "no prior row"), "no prior row")
+
+    # 6. duplicate span ids, each side
+    refuses([base, base], [base], ("duplicate span_id in the current export",), "duplicate current")
+    refuses([base], [base, base], ("duplicate span_id in the prior export",), "duplicate prior")
+
+    # 7. the tile index sets
+    refuses([base], [row("p1:n0", T[:1])], ("tile index sets differ",), "tile index sets")
+
+    # 8. a positive, so the refusals above are not passing by refusing everything
+    rep, why = diffs([row("p1:n0", [T[0], dict(T[1], verdict="corrected", chose="z")],
+                          ins=[{"seq": 0, "after_i": 0, "kind": "consonant",
+                                "chose": "q", "verdict": "confirmed"}])],
+                     [base], "the positive case")
+    dis = [] if rep is None else rep["disagreements"]
+    check(rep is not None and [(d["what"], d.get("i"), d.get("seq")) for d in dis]
+          == [("tile", 1, None), ("insertion", None, 0)],
+          "the positive case found %s" % (why or dis))
+    check(rep is not None and rep["rate"]["tiles_changed"] == 1
+          and rep["rate"]["insertions_changed"] == 1
+          and rep["rate"]["reversals_corrected_to_confirmed"] == 0,
+          "the positive case counted %s" % (why or rep["rate"]))
+    check(rep is not None and all(d["adjudication"] is None for d in dis),
+          "a disagreement came out of the diff pre-adjudicated: %s" % (why or dis))
+
+    check(CHECKS + 1 == EXPECTED_CHECKS_RESIGN, "ran %d checks before the final count, expected %d"
+          % (CHECKS + 1, EXPECTED_CHECKS_RESIGN))
+    print("resign-diff refusal selftest: PASS %d/%d  (no data file read, nothing written)"
+          % (CHECKS, EXPECTED_CHECKS_RESIGN))
+
+
+if len(sys.argv) > 1 and sys.argv[1] == "--resign-selftest":
+    resign_selftest()
+    sys.exit(0)
+
+
 if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
     _cur, _pri = sys.argv[2], sys.argv[3]
-    _rep = diff_resigned([json.loads(l) for l in io.open(_cur, encoding="utf-8") if l.strip()],
-                         [json.loads(l) for l in io.open(_pri, encoding="utf-8") if l.strip()],
-                         _rs_file_sha16(_cur), _rs_file_sha16(_pri))
+    try:
+        _rep = diff_resigned([json.loads(l) for l in io.open(_cur, encoding="utf-8") if l.strip()],
+                             [json.loads(l) for l in io.open(_pri, encoding="utf-8") if l.strip()],
+                             _rs_file_sha16(_cur), _rs_file_sha16(_pri))
+    except ResignDiffError as _e:
+        # A refusal is an ANSWER, not a crash: a traceback buries it under a stack. No report is
+        # written either -- a build that refuses must leave nothing behind, and `admit_resigned`
+        # admits nothing without one.
+        print("REFUSED: %s" % _e)
+        print("no report written; no row is admitted without one")
+        sys.exit(2)
     print(format_resign_diff(_rep))
     if len(sys.argv) > 4:
         io.open(sys.argv[4], "w", encoding="utf-8").write(json.dumps(_rep, indent=1, ensure_ascii=True))
