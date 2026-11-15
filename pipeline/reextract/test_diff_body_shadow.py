@@ -10,7 +10,7 @@ from pathlib import Path
 
 import diff_body_shadow as DBS
 
-EXPECTED_TESTS = 28
+EXPECTED_TESTS = 31
 
 
 def unit(chunk_texts, key=(90, "left", 10), kind="verse", status="shipped", head=True, line=1):
@@ -112,6 +112,46 @@ def test_chunk_edge_flag_within_one_token_of_a_boundary():
     far2 = DBS.diff_page(90, old, [unit(["a b c d e f", "g h i j Z l"])])        # token 10
     assert near[0]["flags"]["chunk_edge"] and near2[0]["flags"]["chunk_edge"]
     assert not far[0]["flags"]["chunk_edge"] and not far2[0]["flags"]["chunk_edge"]
+
+
+def test_span_chunks_crossing_two_units_in_token_order():
+    a = unit(["a b c"], key=(90, "left", 10), line=1)
+    b = unit(["d e f"], key=(90, "left", 11), line=2)
+    hs = DBS.diff_page(90, "a b X Y f", [a, b])
+    assert len(hs) == 1
+    h = hs[0]
+    assert [r["key"] for r in h["span_chunks"]] == [[90, "left", 10], [90, "left", 11]]
+    assert h["span_chunks"][0] == h["chunk"], "first token's chunk is the first span chunk"
+    assert set(h["span_chunks"][1]) == set(h["chunk"]) == {
+        "key", "stage1_line", "file_page", "col", "rect_idx", "chunk_idx", "box"}
+
+
+def test_span_chunks_pure_delete_is_empty_and_single_chunk_equals_chunk():
+    a = unit(["a b c", "d e f"], key=(90, "left", 10), line=3)
+    h = DBS.diff_page(90, "a b c Q d e f", [a])[0]
+    assert h["op"] == "delete" and h["span_chunks"] == []
+    assert h["chunk"] is not None, "the old single-crop ref is unchanged for a delete"
+    h = DBS.diff_page(90, "a b c d X f", [a])[0]
+    assert h["span_chunks"] == [h["chunk"]]
+    # same distinct chunk repeated across several tokens -> one ref
+    h = DBS.diff_page(90, "a b c d", [a])[0]
+    assert len(h["span_chunks"]) == 1 and h["new_text"] == "e f"
+
+
+def test_pre_existing_hunk_fields_unchanged_by_span_chunks():
+    a = unit(["a b c", "d e f"], key=(90, "left", 10), line=3)
+    b = unit(["g h i"], key=(90, "left", 11), line=4)
+    b["chunks"][0]["box"] = [0, 500, 10, 590]
+    for old in ("a b c d X f g h i", "a b c Q d e f g h i", "a b X Y f g Z i"):
+        for h in DBS.diff_page(90, old, [a, b]):
+            ch = [c for c in a["chunks"] + b["chunks"] if c["box"] == h["chunk"]["box"]][0]
+            u = a if ch in a["chunks"] else b
+            legacy = {"key": u["key"], "stage1_line": u["stage1_line"], "file_page": 90,
+                      "col": ch["col"], "rect_idx": ch["rect_idx"], "chunk_idx": ch["chunk_idx"],
+                      "box": ch["box"]}
+            assert h["chunk"] == legacy
+            assert list(h)[:2] == ["kind", "file_page"] and "span_chunks" in h
+            assert bool(h["regions"]) == bool(h["span_chunks"]) and set(h["flags"]) == {"non_latin", "marker", "chunk_edge"}
 
 
 def test_hunk_maps_to_region_and_chunk():
@@ -304,6 +344,7 @@ def test_head_status_comes_from_stage1_and_changes_are_listed():
         assert recs[0]["config"]["head_status_source"] == "stage1"
         assert recs[0]["config"]["old_defs_rule"] == "def_block_v1"
         assert recs[0]["config"]["head_old_rule"] == "first4_from_ver"
+        assert recs[0]["config"]["span_chunks_rule"] == "distinct_new_tags_v1"
         assert recs[-1]["head_status_changed_vs_body"] == [json.dumps([90, "left", 10])]
         # the head hunk is classified with the STAGE-1 status (body said shipped)
         assert [r["class"] for r in recs if r["kind"] == "hunk"] == ["disputed_head"]

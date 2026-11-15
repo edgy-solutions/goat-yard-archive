@@ -123,6 +123,15 @@ def _chunk_edge(new_tags, j1, j2):
 
 # ---- one page --------------------------------------------------------------------------------
 
+def _chunk_ref(units, file_page, tag):
+    """The ref dict for one (unit, chunk_idx, rect_idx) tag: used by `chunk` and `span_chunks`."""
+    ui, ci, ri = tag
+    ch = [c for c in units[ui]["chunks"] if c["chunk_idx"] == ci and c["rect_idx"] == ri][0]
+    return {"key": units[ui]["key"], "stage1_line": units[ui]["stage1_line"],
+            "file_page": file_page, "col": ch["col"], "rect_idx": ri, "chunk_idx": ci,
+            "box": ch["box"]}
+
+
 def diff_page(file_page, old_text, units):
     """Pure. units: [{"key","stage1_line","stage1_kind","head_status","head_unit":bool,
     "chunks":[{"chunk_idx","rect_idx","col","box","text","usable":bool}, ...]}, ...] in run order.
@@ -173,13 +182,8 @@ def diff_page(file_page, old_text, units):
         old_t, new_t = " ".join(old_toks[i1:i2]), " ".join(new_toks[j1:j2])
         cls = classify_hunk(old_toks, new_toks, new_tags, i1, i2, j1, j2, head_new, head_old)
         regions = sorted({new_tags[k][0] for k in range(j1, j2)})
-        ref = None
-        if new_tags:
-            ui, ci, ri = new_tags[min(j1, len(new_tags) - 1)]
-            ch = [c for c in units[ui]["chunks"] if c["chunk_idx"] == ci and c["rect_idx"] == ri][0]
-            ref = {"key": units[ui]["key"], "stage1_line": units[ui]["stage1_line"],
-                   "file_page": file_page, "col": ch["col"], "rect_idx": ri, "chunk_idx": ci,
-                   "box": ch["box"]}
+        ref = _chunk_ref(units, file_page, new_tags[min(j1, len(new_tags) - 1)]) if new_tags else None
+        span_chunks = [_chunk_ref(units, file_page, t) for t in dict.fromkeys(new_tags[j1:j2])]
         hunks.append({
             "kind": "hunk", "file_page": file_page, "opcode_idx": op_idx, "op": tag,
             "old_span": [i1, i2], "new_span": [j1, j2], "old_text": old_t, "new_text": new_t,
@@ -188,6 +192,7 @@ def diff_page(file_page, old_text, units):
                       "marker": bool(_MARKER_RE.search(old_t) or _MARKER_RE.search(new_t)),
                       "chunk_edge": _chunk_edge(new_tags, j1, j2)},
             "regions": [units[u]["key"] for u in regions], "chunk": ref,
+            "span_chunks": span_chunks,
             "old_before": " ".join(old_toks[max(0, i1 - CONTEXT_TOKENS):i1]),
             "old_after": " ".join(old_toks[i2:i2 + CONTEXT_TOKENS]),
             "new_before": " ".join(new_toks[max(0, j1 - CONTEXT_TOKENS):j1]),
@@ -351,6 +356,7 @@ def main(argv=None):
         "module_sha256": BSB.sha256_file(__file__),
         "old_defs_rule": "def_block_v1", "head_old_rule": "first4_from_ver",
         "head_status_source": "stage1",
+        "span_chunks_rule": "distinct_new_tags_v1",
     }
     chash = BVR.config_hash(config)
     records = [{"kind": "diff_header", "tier": "best_effort", "config": config,

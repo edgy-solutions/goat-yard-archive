@@ -3,6 +3,7 @@ in a temp dir; no model, no private data. Run: python test_render_body_console.p
 
 EXPECTED_TESTS asserts the suite's OWN test count so a silently-dropped test fails the run.
 """
+import hashlib
 import json
 import shutil
 import tempfile
@@ -15,7 +16,7 @@ import build_body_shadow as BSB
 import render_body_console as RBC
 import score_body_console as SBC
 
-EXPECTED_TESTS = 10
+EXPECTED_TESTS = 18
 
 
 def hunk(fp, idx, cls, nl=False):
@@ -24,7 +25,19 @@ def hunk(fp, idx, cls, nl=False):
             "old_text": f"alpha{idx}", "new_text": f"beta{idx}",
             "old_before": "x y", "old_after": "z", "new_before": "x y", "new_after": "z",
             "chunk": {"box": [0, 0, 40, 30], "file_page": fp, "col": "left", "rect_idx": 0,
-                      "chunk_idx": 0, "key": [fp, "left", 1], "stage1_line": 1}}
+                      "chunk_idx": 0, "key": [fp, "left", 1], "stage1_line": 1},
+            "span_chunks": [{"box": [0, 0, 40, 30], "file_page": fp, "col": "left", "rect_idx": 0,
+                             "chunk_idx": 0, "key": [fp, "left", 1], "stage1_line": 1}]}
+
+
+def ref(box, ci=0, ri=0, fp=90):
+    return {"box": box, "file_page": fp, "col": "left", "rect_idx": ri, "chunk_idx": ci,
+            "key": [fp, "left", 1], "stage1_line": 1}
+
+
+def with_span(h, boxes):
+    h["span_chunks"] = [ref(b, ci=i) for i, b in enumerate(boxes)]
+    return h
 
 
 def population():
@@ -100,6 +113,7 @@ def _make_run(d, seed=11):
     hs = [hunk(90, 1, "disputed_head"), hunk(90, 2, "content", True), hunk(90, 3, "ws_punct")]
     for h in hs:
         h["chunk"]["box"] = [10, 40, 210, 70]
+        h["span_chunks"][0]["box"] = [10, 40, 210, 70]
     diff = d / "diff.jsonl"
     rows = [{"kind": "diff_header", "config_hash": "diffhash", "config": {"body_config_hash": "bodyhash"}}] + hs
     diff.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
@@ -127,6 +141,9 @@ def test_main_writes_blinded_html_crops_and_separate_key():
         assert "alpha1" in html and "beta1" in html
         assert "A matches page" in html and "can't tell" in __import__("html").unescape(html) and "Export JSONL" in html
         assert "localStorage" in html
+        assert "crops.json" not in low
+        cj = (out / "crops.json").read_text(encoding="utf-8")
+        assert "old" not in cj.lower() and "new" not in cj.lower() and "alpha" not in cj
         # never clobbers a finished console
         assert RBC.main(["--diff", str(diff), "--body", str(body), "--volume-dir", str(vol),
                          "--out-dir", str(out), "--seed", "11"]) == 2
@@ -220,8 +237,184 @@ def test_end_to_end_blinding_round_trip():
         s = SBC.score(rows, key)
         assert sum(v["old_wrong"] for v in s.values()) == 3
         assert sum(v["new_wrong"] for v in s.values()) == 0
+        # a carried export row ({"carried": true}) is harmless to the scorer's row handling
+        rows2 = [dict(r, carried=True) for r in rows]
+        assert SBC.score(rows2, key) == s
+        crops = json.loads((out / "crops.json").read_text(encoding="utf-8"))
+        assert SBC.score(rows, key, crops) == {k: dict(v, not_cardable=0) for k, v in s.items()}
+        for t in (html_low := (out / "index.html").read_text(encoding="utf-8").lower(),):
+            assert "old" not in t and "new" not in t
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def _run_one(d, hunks, shape=(300, 400), seed=5, crop_box_for_png=None):
+    """Console over `hunks` (all on page 90) on a gray gradient page; -> (out, rc, gray)."""
+    vol = d / "vol"
+    vol.mkdir(exist_ok=True)
+    page = (np.arange(shape[0] * shape[1], dtype=np.int64).reshape(shape) % 251).astype(np.uint8)
+    Image.fromarray(page).save(vol / "page90_image1.png")
+    body = d / "body.jsonl"
+    body.write_text(json.dumps({"kind": "run_header", "config_hash": "bodyhash", "config": {
+        "png_sha256": {"90": BSB.png_sha256(vol, 90)}}}) + "\n", encoding="utf-8")
+    diff = d / "diff.jsonl"
+    rows = [{"kind": "diff_header", "config_hash": "diffhash", "config": {"body_config_hash": "bodyhash"}}] + hunks
+    diff.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    out = d / "console"
+    rc = RBC.main(["--diff", str(diff), "--body", str(body), "--volume-dir", str(vol),
+                   "--out-dir", str(out), "--seed", str(seed)])
+    return out, rc, page
+
+
+def _inside(inner, outer):
+    return outer[0] <= inner[0] and outer[1] <= inner[1] and inner[2] <= outer[2] and inner[3] <= outer[3]
+
+
+def test_born_card2_cover_is_union_and_the_old_crop_missed_the_second_read_box():
+    h = with_span(hunk(90, 2, "content"), [[1660, 2101, 3584, 2365], [0, 2523, 3584, 2581]])
+    h["chunk"]["box"] = [1660, 2101, 3584, 2365]
+    cov = RBC.cover_for(h)
+    assert cov["cardable"] and cov["reason"] is None and cov["cover_box"] == [0, 2101, 3584, 2581]
+    assert len(cov["read_crops"]) == 2
+    (card,) = RBC.build_cards([("content", h)], 1)
+    assert card["carry_eligible"] is False
+    # the defect, documented: the single crop the console used to cut does not hold read box 2
+    assert not _inside(h["span_chunks"][1]["box"], h["chunk"]["box"])
+    assert _inside(h["span_chunks"][1]["box"], cov["cover_box"])
+
+
+def test_delete_is_not_cardable_has_no_crop_and_is_listed():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        dele = hunk(90, 1, "content")
+        dele["span_chunks"] = []
+        keep = hunk(90, 2, "content")
+        out, rc, _ = _run_one(d, [dele, keep])
+        assert rc == 0
+        cid_d = RBC.card_id_for(90, 1, 5)
+        cid_k = RBC.card_id_for(90, 2, 5)
+        assert not (out / "crops" / f"{cid_d}.png").exists() and (out / "crops" / f"{cid_k}.png").exists()
+        cj = json.loads((out / "crops.json").read_text(encoding="utf-8"))
+        assert cj[cid_d]["cardable"] is False and cj[cid_d]["reason"] == "old_only"
+        assert cj[cid_d]["cover_box"] is None and cj[cid_d]["read_crops"] == []
+        html = (out / "index.html").read_text(encoding="utf-8")
+        assert f'data-id="{cid_d}"' not in html and f'data-id="{cid_k}"' in html
+        tail = html.split("Not cardable", 1)[1]
+        assert cid_d in tail and "no read crop contains this text" in tail and cid_k not in tail
+        assert "alpha1" not in html and "beta1" not in html, "no texts for a not-cardable hunk"
+        assert "#1 " in tail
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_too_tall_cover_is_not_cardable():
+    h = with_span(hunk(90, 1, "content"), [[0, 0, 100, 100], [0, RBC.COVER_MAX_H, 100, RBC.COVER_MAX_H + 50]])
+    cov = RBC.cover_for(h)
+    assert not cov["cardable"] and cov["reason"] == "too_tall"
+    assert cov["cover_box"] == [0, 0, 100, RBC.COVER_MAX_H + 50]
+    ok = with_span(hunk(90, 1, "content"), [[0, 0, 100, 100], [0, RBC.COVER_MAX_H - 100, 100, RBC.COVER_MAX_H]])
+    assert RBC.cover_for(ok)["cardable"], "exactly COVER_MAX_H is allowed"
+
+
+def test_single_chunk_cover_equals_chunk_and_crop_bytes_identical():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        h = hunk(90, 1, "content")
+        h["chunk"]["box"] = h["span_chunks"][0]["box"] = [10, 40, 210, 70]
+        (card,) = RBC.build_cards([("content", h)], 5)
+        assert card["cover"]["cover_box"] == h["chunk"]["box"] and card["carry_eligible"] is True
+        out, rc, page = _run_one(d, [h])
+        want = BSB.crop_png_bytes(page, [10, 40, 210, 70])
+        assert (out / "crops" / f"{card['card_id']}.png").read_bytes() == want
+        html = (out / "index.html").read_text(encoding="utf-8")
+        assert 'data-carry="1"' in html and 'data-carry="0"' not in html and "read crops: 1" in html
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_missing_span_chunks_is_refused_and_nothing_is_written():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        h = hunk(90, 1, "content")
+        del h["span_chunks"]
+        try:
+            RBC.cover_for(h)
+        except ValueError as e:
+            assert "span_chunks" in str(e)
+        else:
+            raise AssertionError("cover_for must refuse")
+        try:
+            _run_one(d, [h])
+        except ValueError as e:
+            assert "span_chunks" in str(e)
+        else:
+            raise AssertionError("main must refuse")
+        out = d / "console"
+        assert not (out / "index.html").exists() and not (out / "key.json").exists()
+        assert not (out / "crops.json").exists() and not list(out.glob("crops/*"))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_crops_json_shas_are_of_the_bytes_stage2_sent_and_carry_no_text():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        h = with_span(hunk(90, 2, "content"), [[20, 100, 380, 160], [0, 200, 400, 230]])
+        h["chunk"]["box"] = [20, 100, 380, 160]
+        out, rc, page = _run_one(d, [h])
+        cid = RBC.card_id_for(90, 2, 5)
+        cj = json.loads((out / "crops.json").read_text(encoding="utf-8"))
+        e = cj[cid]
+        assert e["cardable"] and e["cover_box"] == [0, 100, 400, 230] and e["carry_eligible"] is False
+        assert [r["box"] for r in e["read_crops"]] == [[20, 100, 380, 160], [0, 200, 400, 230]]
+        for r in e["read_crops"]:
+            assert r["sha256"] == hashlib.sha256(BSB.crop_png_bytes(page, r["box"])).hexdigest()
+            assert set(r) == {"key", "stage1_line", "chunk_idx", "rect_idx", "box", "sha256"}
+        assert set(e) == {"cardable", "reason", "cover_box", "carry_eligible", "read_crops"}
+        raw = (out / "crops.json").read_text(encoding="utf-8").lower()
+        assert "old_side" not in raw and "old" not in raw and "new" not in raw and "alpha" not in raw
+        assert Image.open(out / "crops" / f"{cid}.png").size == (400, 130)
+        key = json.loads((out / "key.json").read_text(encoding="utf-8"))
+        assert set(key) == {"seed", "diff_config_hash", "cards"}
+        assert set(key["cards"][cid]) == {"old_side", "stratum", "file_page", "opcode_idx"}
+        html = (out / "index.html").read_text(encoding="utf-8")
+        assert "read crops: 2" in html and 'class="ol"' in html and "<i>2</i>" in html
+        assert "left:5.0000%" in html and "top:0.0000%" in html      # outline 1, relative to the cover
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_html_namespaces_verdicts_and_offers_carry_import():
+    d = Path(tempfile.mkdtemp(prefix="rbc_test_"))
+    try:
+        one = hunk(90, 1, "content")
+        one["chunk"]["box"] = one["span_chunks"][0]["box"] = [10, 40, 210, 70]
+        two = with_span(hunk(90, 2, "content"), [[20, 100, 380, 160], [0, 200, 400, 230]])
+        two["chunk"]["box"] = [20, 100, 380, 160]
+        out, rc, _ = _run_one(d, [one, two])
+        html = (out / "index.html").read_text(encoding="utf-8")
+        assert "'verdict:'+CONSOLE+':'" in html and "var CONSOLE=\"console\"" in html
+        assert "'verdict:'+id" not in html and "'verdict:'+card" not in html
+        assert html.count('data-carry="1"') == 1 and html.count('data-carry="0"') == 1
+        assert 'id="import"' in html and "Import previous verdicts" in html
+        assert "carried from previous console" in html and "carried:carried(id)" in html
+        assert "applied '+applied" in html and "discarded" in html
+        assert "outlined crop" in html and "whole page image" in html
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_score_crops_puts_not_cardable_in_their_own_bucket():
+    key = {"cards": {"c1": {"old_side": "A", "stratum": "content"},
+                     "c2": {"old_side": "A", "stratum": "content"},
+                     "c3": {"old_side": "A", "stratum": "content"}}}
+    crops = {"c1": {"cardable": True}, "c2": {"cardable": False, "reason": "old_only"},
+             "c3": {"cardable": True}}
+    rows = [{"card_id": "c1", "verdict": "A", "carried": True}]
+    s = SBC.score(rows, key, crops)["content"]
+    assert s["not_cardable"] == 1 and s["unanswered"] == 1 and s["new_wrong"] == 1
+    plain = SBC.score(rows, key)["content"]
+    assert "not_cardable" not in plain and plain["unanswered"] == 2, "without --crops: unchanged"
 
 
 if __name__ == "__main__":
