@@ -105,6 +105,72 @@ def _rs_file_sha16(path):
     return hashlib.sha256(io.open(path, "rb").read()).hexdigest()[:16]
 
 
+# A RULING about a named sitting, pinned by the signed file's hash, by the provenance record's own
+# hash, and by the truth standing that record must state. All three by equality: a record is
+# self-consistent by construction, so without the record hash a hand-written record stating a
+# different standing would hash fine and lift the ruling. This is a pinned ADJUDICATION, the same
+# shape as SEALED_TRUTH -- not a pinned measurement, which is the thing that goes stale.
+SITTING_RULINGS = {
+    "50d419a4e1cafbc4": {
+        "record_sha16": "d60c86def66861e3",
+        "no_row_is_truth_on_its_own": True,
+        "ruling": "advisor ruling 2026-11-15 item 1: a Claude model read each crop aloud to Chris "
+                  "during the sitting; no row from this sitting is truth on its own",
+    },
+}
+
+
+def _sitting_fault(sitting, current_sha16, span_id):
+    """Why this sitting-provenance record does NOT cover this row, or "" if it does.
+
+    The hash rule is recomputed here from the record's own terms and shares no code with
+    `sitting_provenance.py`, which wrote it -- a verifier that calls the producer agrees by
+    construction. Every provenance field must be a real bool: the export has no channel for how a
+    sitting was conducted, and a field that may be absent is the silence the record exists to end."""
+    if not isinstance(sitting, dict):
+        return "the sitting provenance is not an object"
+    if sitting.get("kind") != "sitting_provenance":
+        return "the record is of kind %r, not sitting_provenance" % sitting.get("kind")
+    if not current_sha16:
+        return ("the diff report records no current file hash, so no record can be matched to it by "
+                "equality")
+    if sitting.get("describes_file_sha16") != current_sha16:
+        return ("the record describes the file %r, not the file this diff compared (%r)"
+                % (sitting.get("describes_file_sha16"), current_sha16))
+    rows = sitting.get("rows")
+    if not isinstance(rows, dict) or not rows:
+        return "the record covers no rows, so it would cover every row by vacuity"
+    if span_id not in rows:
+        return "the record does not cover %s; it covers %s" % (span_id, ", ".join(sorted(rows)))
+    per_row = rows[span_id] if isinstance(rows[span_id], dict) else {}
+    if not isinstance(per_row.get("signed_with_advisor_reading"), bool):
+        return ("the record states no boolean signed_with_advisor_reading for %s (%r)"
+                % (span_id, per_row.get("signed_with_advisor_reading")))
+    if not isinstance(sitting.get("signed_with_advisor_reading"), bool):
+        return ("the record states no boolean signed_with_advisor_reading for the sitting (%r)"
+                % sitting.get("signed_with_advisor_reading"))
+    standing = sitting.get("no_row_is_truth_on_its_own")
+    if not isinstance(standing, bool):
+        return "the record states no boolean no_row_is_truth_on_its_own (%r)" % (standing,)
+    if standing and not str(sitting.get("what_would_lift_it") or "").strip():
+        return ("the record withholds truth standing and names nothing that would lift it; a refusal "
+                "that names no way out is a dead end, not a gate")
+    claimed = sitting.get("record_sha16")
+    body = {k: v for k, v in sitting.items() if k not in ("record_sha16", "record_sha16_rule")}
+    got = sha16(json.dumps(body, indent=1, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+    if claimed != got:
+        return "the record was altered after it was written (claims %r, is %r)" % (claimed, got)
+    ruling = SITTING_RULINGS.get(current_sha16)
+    if ruling and claimed != ruling["record_sha16"]:
+        # The hash was recomputed from the record's own body just above, so pinning the hash pins
+        # EVERY field of the ruled record, the truth standing included. A separate comparison of the
+        # standing could not be reached by any record and could not be killed by any mutation -- an
+        # unreachable check reads as a second line of defence that is not there.
+        return ("this file is under a ruling that names record %s; the record supplied is %s"
+                % (ruling["record_sha16"], claimed))
+    return ""
+
+
 def _rs_basis_token(basis):
     """The part of a channel basis the diff digest must cover, so a basis cannot be attached to a
     diff after the fact. EMPTY when there is no basis, which keeps the formula -- and so the
@@ -261,11 +327,22 @@ def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16="", ch
             "diff_sha16": _rs_digest(dis, current_sha16, prior_sha16, cur_ids, channel_basis)}
 
 
-def admit_resigned(row, report, adjudications=None):
+def admit_resigned(row, report, adjudications=None, sitting=None):
     """The only door a re-signed row goes through. Refuses unless `report` is an intact output of
     diff_resigned covering this row, and every disagreement on this row carries a human verdict in
     ADJUDICATIONS (adjudications: {(span_id, what, i_or_seq): 'keep'|'take'|'neither'}). Returns a copy of
-    the row annotated with the diff id; it does not choose between readings."""
+    the row annotated with the diff id; it does not choose between readings.
+
+    `sitting` is the sitting-provenance record for the file this diff took as CURRENT. It is required
+    whenever that file is under a ruling in SITTING_RULINGS, and admitting such a row without it would
+    assert that nothing influenced the signer -- a claim nobody made, since the export's only
+    provenance field is a constant. A record that withholds truth standing REFUSES here, which in the
+    round-2 shape puts the row in `held_rows` with the reason, where a reader looks.
+
+    There is deliberately NO door for a later sitting's confirmation: the second sitting produces its
+    own file, with its own provenance record, and that file is then the current side of its own diff.
+    A confirmation format nobody has written yet would be a door with no key and a hole for a weak
+    one."""
     if not isinstance(report, dict) or "diff_sha16" not in report or "disagreements" not in report:
         raise ResignDiffError("no diff report: a re-signed row is not admitted without the diff")
     sid = row["span_id"]
@@ -277,6 +354,24 @@ def admit_resigned(row, report, adjudications=None):
                                           report["prior_file_sha16"], report["spans_compared"],
                                           report.get("channel_basis")):
         raise ResignDiffError("the diff report was altered after it was produced")
+    _cf = report.get("current_file_sha16")
+    _ruling = SITTING_RULINGS.get(_cf)
+    if _ruling is not None and sitting is None:
+        raise ResignDiffError(
+            "%s: the current file %s is under a ruling and no sitting-provenance record was supplied. "
+            "%s. The export has no channel for how a sitting was conducted -- every row of every "
+            "sitting carries the same constant signed_in -- so admitting this row in silence would "
+            "assert that nothing influenced the signer." % (sid, _cf, _ruling["ruling"]))
+    if sitting is not None:
+        _why = _sitting_fault(sitting, _cf, sid)
+        if _why:
+            raise ResignDiffError("%s: the sitting-provenance record does not cover this row: %s"
+                                  % (sid, _why))
+        if sitting["no_row_is_truth_on_its_own"]:
+            raise ResignDiffError(
+                "%s: no row from this sitting is truth on its own (%s). What would lift it: %s"
+                % (sid, sitting.get("ruled_by") or "ruling not named on the record",
+                   sitting["what_would_lift_it"]))
     adjudications = adjudications or {}
     for d in report["disagreements"]:
         if d["span_id"] != sid:
@@ -287,6 +382,16 @@ def admit_resigned(row, report, adjudications=None):
                                   "verdict from a human" % key)
     out = dict(row)
     out["resign_diff_sha16"] = report["diff_sha16"]
+    if sitting is not None:
+        # The row names how its own sitting was conducted. Reached only when the record does NOT
+        # withhold truth standing; a withheld row raised above and is never stamped as admitted.
+        out["sitting_provenance"] = {
+            "describes_file_sha16": sitting["describes_file_sha16"],
+            "record_sha16": sitting["record_sha16"],
+            "signed_with_advisor_reading": sitting["rows"][sid]["signed_with_advisor_reading"],
+            "ruled_by": sitting.get("ruled_by"),
+            "means": "what was in the room when this row was signed, recorded beside the signed file "
+                     "because the export has no field for it"}
     if report.get("channel_basis"):
         # The row names its own licence. A row admitted over an ABSENT channel must carry what made
         # that admissible, or a later reader sees a clean diff and no sign that one axis of it was
@@ -324,7 +429,7 @@ def format_resign_diff(rep):
     return "\n".join(L)
 
 
-EXPECTED_CHECKS_RESIGN = 21
+EXPECTED_CHECKS_RESIGN = 32          # 21 diff/basis refusals + 11 sitting-gate cases
 
 
 def resign_selftest():
@@ -468,6 +573,88 @@ def resign_selftest():
             basis(insert_tokens_not_allowed_found=["insertRow"]))
     refuses([cur1], [pass1], ("not insertions",), "basis is about another channel",
             basis(channel="tiles"))
+
+    # ---------------------------------------------------------------- the sitting gate
+    # Synthetic records, hashed here, so nothing is read from disk. RULED is the file hash the ruling
+    # names; UNRULED is any other sitting, where a record is optional but still validated.
+    RULED, UNRULED = "50d419a4e1cafbc4", "aaaa0000bbbb1111"
+
+    def sitting(file_sha16=UNRULED, rows=None, standing=True, lift="a second sitting", **kw):
+        rec = {"kind": "sitting_provenance", "describes_file_sha16": file_sha16,
+               "rows": rows if rows is not None else {"s1": {"signed_with_advisor_reading": True}},
+               "signed_with_advisor_reading": True, "no_row_is_truth_on_its_own": standing,
+               "what_would_lift_it": lift, "ruled_by": "a ruling"}
+        rec.update(kw)
+        if "record_sha16" not in kw:
+            body = {k: v for k, v in rec.items() if k not in ("record_sha16", "record_sha16_rule")}
+            rec["record_sha16"] = sha16(json.dumps(body, indent=1, sort_keys=True,
+                                                   ensure_ascii=False).encode("utf-8"))
+        return rec
+
+    def adm(cur_sha16, sit, row_sid="s1"):
+        """Admit cur1 through a clean diff whose CURRENT file hash is cur_sha16. Returns the admitted
+        row, or the refusal text."""
+        r = dict(cur1, span_id=row_sid)
+        rep2 = diff_resigned([r], [r], cur_sha16, "PRI16")
+        try:
+            return admit_resigned(r, rep2, {}, sit)
+        except ResignDiffError as e:
+            return "REFUSED: %s" % e
+
+    def sit_refuses(sit, needle, label, cur_sha16=UNRULED):
+        got = adm(cur_sha16, sit)
+        check(isinstance(got, str) and needle in got, "%s: expected a refusal naming %r, got %r"
+              % (label, needle, got))
+
+    # (a) a file under a ruling, with no record at all: silence must not admit it
+    got = adm(RULED, None)
+    check(isinstance(got, str) and "under a ruling and no sitting-provenance record" in got
+          and "nothing influenced the signer" in got,
+          "a ruled file admitted a row with no provenance record: %r" % got)
+
+    # (b) a ruled file with a record that is not the one the ruling names: refused, so the ruling
+    # cannot be talked round with a self-consistent record of somebody's own making
+    sit_refuses(sitting(file_sha16=RULED, standing=False),
+                "names record d60c86def66861e3", "a ruled file took another record", RULED)
+
+    # (c) a record that withholds truth standing refuses, and the refusal carries the way out
+    got = adm(UNRULED, sitting(standing=True, lift="a second sitting, blind, no model reading"))
+    check(isinstance(got, str) and "no row from this sitting is truth on its own" in got
+          and "blind, no model reading" in got,
+          "a withheld sitting did not refuse with its way out: %r" % got)
+
+    # (d) THE DISCRIMINATING CASE: a record that does not withhold standing ADMITS, and the row then
+    # carries how it was signed. Without this, "refuse whenever a record is present" would pass (a-c).
+    got = adm(UNRULED, sitting(standing=False))
+    # `.get(...) or {}`: with the stamp gone this check must FAIL with its own message, not raise.
+    # A raise in a hand-rolled suite aborts the run, and an aborted run loses every later assertion.
+    _sp = (got.get("sitting_provenance") or {}) if isinstance(got, dict) else {}
+    check(isinstance(got, dict) and _sp.get("signed_with_advisor_reading") is True
+          and _sp.get("describes_file_sha16") == UNRULED,
+          "a sitting that does not withhold standing failed to admit and stamp: %r" % got)
+
+    # (k) the stamp reads the ROW, not the sitting: the ruling is about rows, and a sitting where
+    # only some crops were read aloud is a sitting the record can state. With both values True
+    # everywhere else, nothing could tell a row-level read from a sitting-level one.
+    got = adm(UNRULED, sitting(standing=False, signed_with_advisor_reading=True,
+                               rows={"s1": {"signed_with_advisor_reading": False}}))
+    _sp = (got.get("sitting_provenance") or {}) if isinstance(got, dict) else {}
+    check(isinstance(got, dict) and _sp.get("signed_with_advisor_reading") is False,
+          "the stamp took the sitting-level flag where the row's differs: %r" % got)
+
+    # (e-j) the record must be ABOUT this file, this row, and must not have moved
+    sit_refuses(sitting(file_sha16="ffff0000ffff0000", standing=False),
+                "not the file this diff compared", "record about another file")
+    sit_refuses(sitting(rows={"somebody_else": {"signed_with_advisor_reading": True}}, standing=False),
+                "does not cover s1", "record does not cover the row")
+    sit_refuses(sitting(rows={"s1": {"signed_with_advisor_reading": "yes"}}, standing=False),
+                "no boolean signed_with_advisor_reading for s1", "per-row flag is not a bool")
+    sit_refuses(sitting(standing=False, record_sha16="0" * 16),
+                "altered after it was written", "record hash does not recompute")
+    sit_refuses(sitting(rows={}, standing=False),
+                "by vacuity", "record covers no rows")
+    sit_refuses(sitting(standing=True, lift="   "),
+                "names nothing that would lift it", "withheld with no way out")
 
     check(CHECKS + 1 == EXPECTED_CHECKS_RESIGN, "ran %d checks before the final count, expected %d"
           % (CHECKS + 1, EXPECTED_CHECKS_RESIGN))
