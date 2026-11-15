@@ -103,18 +103,69 @@ def _rs_file_sha16(path):
     return hashlib.sha256(io.open(path, "rb").read()).hexdigest()[:16]
 
 
-def _rs_digest(dis, current_sha16, prior_sha16, ids):
+def _rs_basis_token(basis):
+    """The part of a channel basis the diff digest must cover, so a basis cannot be attached to a
+    diff after the fact. EMPTY when there is no basis, which keeps the formula -- and so the
+    diff_sha16 of every report already written -- byte-for-byte what it was."""
+    if not basis:
+        return ""
+    return "|basis:%s:%s:%s:%s" % (basis.get("kind"), basis.get("channel"),
+                                   basis.get("side"), basis.get("commit"))
+
+
+def _rs_digest(dis, current_sha16, prior_sha16, ids, basis=None):
     body = json.dumps([{k: v for k, v in d.items() if k != "adjudication"} for d in dis],
                       sort_keys=True, ensure_ascii=True)
-    return sha16(sha16(body) + "|" + current_sha16 + "|" + prior_sha16 + "|" + ",".join(ids))
+    return sha16(sha16(body) + "|" + current_sha16 + "|" + prior_sha16 + "|" + ",".join(ids)
+                 + _rs_basis_token(basis))
 
 
-def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
+def _rs_basis_fault(basis, missing_sides, current_sha16, prior_sha16):
+    """Why this channel basis does NOT license this comparison, or "" if it does.
+
+    A licence by NAMED INSTANCE, with equality: the record must name the side that is actually
+    absent and the very file being compared. The hash rule is recomputed here from the record's own
+    terms and shares no code with the script that wrote it -- a verifier that calls the producer
+    agrees by construction."""
+    if not isinstance(basis, dict):
+        return "the channel basis is not an object"
+    if basis.get("kind") != "channel_absent_by_construction":
+        return "the basis is of kind %r, not channel_absent_by_construction" % basis.get("kind")
+    if basis.get("channel") != "insertions":
+        return "the basis is about the %r channel, not insertions" % basis.get("channel")
+    side = basis.get("side")
+    if side not in ("current", "prior"):
+        return "the basis names side %r" % side
+    if set(missing_sides) != {side}:
+        return ("the basis licenses the %s side, but the channel is absent from %s"
+                % (side, " and ".join(missing_sides)))
+    if not re.match(r"^[0-9a-f]{40}$", str(basis.get("commit") or "")):
+        return "the basis carries no 40-hex commit (%r)" % basis.get("commit")
+    if basis.get("insert_tokens_not_allowed_found"):
+        return ("the basis claims the channel is absent by construction while listing %s as present"
+                % basis["insert_tokens_not_allowed_found"])
+    want = {"prior": ("licenses_prior_file_sha16", prior_sha16),
+            "current": ("licenses_current_file_sha16", current_sha16)}[side]
+    if not want[1] or basis.get(want[0]) != want[1]:
+        return ("the basis licenses %s %r, not the %s file being compared (%r)"
+                % (want[0], basis.get(want[0]), side, want[1]))
+    claimed = basis.get("record_sha16")
+    body = {k: v for k, v in basis.items() if k not in ("record_sha16", "record_sha16_rule")}
+    got = sha16(json.dumps(body, indent=1, ensure_ascii=True, sort_keys=True).encode("utf-8"))
+    if claimed != got:
+        return "the basis record was altered after it was written (claims %r, is %r)" % (claimed, got)
+    return ""
+
+
+def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16="", channel_basis=None):
     """Every tile whose (shown, verdict, chose) changed and every insertion whose (chose, verdict) changed,
     for each span in `current_rows`, against `prior_rows`. Raises ResignDiffError unless crop_sha16 and
     candidate_sha16 are identical for every compared span (a diff only means something over the same
     pixels), the tile index sets agree, and BOTH exports carry an `insertions` channel at all -- an
-    absent channel is not an empty one. Returns the report; `adjudication` is None on every entry."""
+    absent channel is not an empty one. An absent channel is read as empty ONLY against a
+    `channel_basis` record that names the absent side and the exact file by hash, carries the commit
+    whose source has no such UI, and verifies against its own hash rule; the basis rides into
+    `diff_sha16`, so it cannot be attached to a diff afterwards. Returns the report; `adjudication` is None on every entry."""
     prior = {r["span_id"]: r for r in prior_rows}
     if len(prior) != len(prior_rows):
         raise ResignDiffError("duplicate span_id in the prior export")
@@ -157,12 +208,22 @@ def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
         # that that signer looked at the span and made no insertions, which the file does not say.
         missing = [w for w, d in (("current", r), ("prior", p)) if "insertions" not in d]
         if missing:
-            raise ResignDiffError(
-                "%s: the %s export has no 'insertions' channel at all. An absent channel is not an "
-                "empty channel: reading it as [] would assert that signer made no insertions, which "
-                "the file does not say. Diff against a signature taken on a console that HAD the "
-                "insertion channel, or rule on the row without a diff."
-                % (sid, " and ".join(missing)))
+            why = _rs_basis_fault(channel_basis, missing, current_sha16, prior_sha16)
+            if why:
+                raise ResignDiffError(
+                    "%s: the %s export has no 'insertions' channel at all. An absent channel is not "
+                    "an empty channel: reading it as [] would assert that signer made no insertions, "
+                    "which the file does not say. %s" % (
+                        sid, " and ".join(missing),
+                        ("No channel basis was given. Supply a channel_absent_by_construction record "
+                         "naming the build whose source has no insertion UI, or rule on the row "
+                         "without a diff." if channel_basis is None
+                         else "A channel basis was given and does NOT license this comparison: %s."
+                              % why)))
+            # Licensed: the named build could not emit an insertion, so there was none to record.
+            # Read as empty HERE ONLY, never written back into anybody's file.
+            r = dict(r, insertions=r.get("insertions") or [])
+            p = dict(p, insertions=p.get("insertions") or [])
 
         def ikey(x):
             return (x.get("seq"), x.get("after_i"), x.get("kind"))
@@ -180,7 +241,14 @@ def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
                             "reversal_corrected_to_confirmed": False, "adjudication": None})
                 n_ins += 1
                 rows_touched.add(sid)
+    basis_out = None
+    if channel_basis:
+        basis_out = {"kind": channel_basis.get("kind"), "channel": channel_basis.get("channel"),
+                     "side": channel_basis.get("side"), "commit": channel_basis.get("commit"),
+                     "record_sha16": channel_basis.get("record_sha16"),
+                     "verdict": channel_basis.get("verdict")}
     return {"current_file_sha16": current_sha16, "prior_file_sha16": prior_sha16,
+            "channel_basis": basis_out,
             "spans_compared": cur_ids,
             "pixels": {r["span_id"]: [r["crop_sha16"], r["candidate_sha16"]] for r in current_rows},
             "disagreements": dis,
@@ -188,7 +256,7 @@ def diff_resigned(current_rows, prior_rows, current_sha16="", prior_sha16=""):
                      "tiles_compared": sum(len(r["tiles"]) for r in current_rows), "tiles_changed": n_tiles,
                      "insertions_changed": n_ins, "reversals_corrected_to_confirmed": n_rev,
                      "reversal_rows": sorted(reversal_rows)},
-            "diff_sha16": _rs_digest(dis, current_sha16, prior_sha16, cur_ids)}
+            "diff_sha16": _rs_digest(dis, current_sha16, prior_sha16, cur_ids, channel_basis)}
 
 
 def admit_resigned(row, report, adjudications=None):
@@ -204,7 +272,8 @@ def admit_resigned(row, report, adjudications=None):
     if report["pixels"][sid] != [row.get("crop_sha16"), row.get("candidate_sha16")]:
         raise ResignDiffError("%s: the row's pixels are not the ones the diff compared" % sid)
     if report["diff_sha16"] != _rs_digest(report["disagreements"], report["current_file_sha16"],
-                                          report["prior_file_sha16"], report["spans_compared"]):
+                                          report["prior_file_sha16"], report["spans_compared"],
+                                          report.get("channel_basis")):
         raise ResignDiffError("the diff report was altered after it was produced")
     adjudications = adjudications or {}
     for d in report["disagreements"]:
@@ -216,6 +285,16 @@ def admit_resigned(row, report, adjudications=None):
                                   "verdict from a human" % key)
     out = dict(row)
     out["resign_diff_sha16"] = report["diff_sha16"]
+    if report.get("channel_basis"):
+        # The row names its own licence. A row admitted over an ABSENT channel must carry what made
+        # that admissible, or a later reader sees a clean diff and no sign that one axis of it was
+        # read as empty by construction rather than measured.
+        b = report["channel_basis"]
+        out["channel_read_as_empty_by_construction"] = {
+            "channel": b["channel"], "side": b["side"], "commit": b["commit"],
+            "basis_record_sha16": b["record_sha16"],
+            "means": "the build named above could not emit this channel, so its absence is not a "
+                     "signer's silence; nothing on this axis was compared"}
     return out
 
 
@@ -233,12 +312,17 @@ def format_resign_diff(rep):
              "%d corrected->confirmed reversal(s) in row(s) %s" % (
                  r["tiles_changed"], r["tiles_compared"], r["insertions_changed"], r["rows_touched"],
                  r["rows_compared"], r["reversals_corrected_to_confirmed"], r["reversal_rows"]))
+    b = rep.get("channel_basis")
+    if b:
+        L.append("channel basis: the %s side's `%s` channel read as EMPTY BY CONSTRUCTION -- %s, "
+                 "commit %s, record %s" % (b["side"], b["channel"], b["verdict"], b["commit"][:12],
+                                           b["record_sha16"]))
     L.append("pixels identical for all %d span(s); diff_sha16 %s; every verdict (keep/take/neither) is "
              "still a human's" % (r["rows_compared"], rep["diff_sha16"]))
     return "\n".join(L)
 
 
-EXPECTED_CHECKS_RESIGN = 13
+EXPECTED_CHECKS_RESIGN = 21
 
 
 def resign_selftest():
@@ -257,13 +341,14 @@ def resign_selftest():
         return {"span_id": sid, "crop_sha16": crop, "candidate_sha16": cand,
                 "tiles": [dict(t) for t in tiles], "insertions": [dict(x) for x in ins]}
 
-    def refuses(cur, pri, want, label):
+    def refuses(cur, pri, want, label, basis_arg=None):
         # An untyped blow-up is NOT a refusal. `KeyError: 'insertions'` is what the pass-1 diff
         # actually printed, and no caller could read what had been refused or why. Catch anything,
         # name the type, and require the refusal to be the typed one.
         msg, typed = "", False
         try:
-            diff_resigned(cur, pri, "cur", "pri")
+            diff_resigned(cur, pri, "CUR16" if basis_arg else "cur",
+                          "PRI16" if basis_arg else "pri", basis_arg)
         except ResignDiffError as e:
             msg, typed = str(e), True
         except Exception as e:
@@ -325,6 +410,63 @@ def resign_selftest():
     check(rep is not None and all(d["adjudication"] is None for d in dis),
           "a disagreement came out of the diff pre-adjudicated: %s" % (why or dis))
 
+    # 9. the channel basis: the refusal is lifted by a CITED record, and by nothing else.
+    def basis(**over):
+        b = {"kind": "channel_absent_by_construction", "verdict": "insertions channel absent by "
+             "construction", "channel": "insertions", "side": "prior",
+             "licenses_prior_file_sha16": "PRI16", "commit": "a" * 40,
+             "insert_tokens_not_allowed_found": []}
+        b.update(over)
+        body = {k: v for k, v in b.items() if k not in ("record_sha16", "record_sha16_rule")}
+        b["record_sha16"] = sha16(json.dumps(body, indent=1, ensure_ascii=True,
+                                             sort_keys=True).encode("utf-8"))
+        b.update((k, v) for k, v in over.items() if k == "record_sha16")
+        return b
+
+    pass1 = {k: v for k, v in base.items() if k != "insertions"}      # the prior with NO channel
+    cur1 = row("p1:n0", T)                                           # the current, with one
+
+    def with_basis(b):
+        try:
+            return diff_resigned([cur1], [pass1], "CUR16", "PRI16", b), ""
+        except Exception as e:
+            return None, "REFUSED %s: %s" % (type(e).__name__, e)
+
+    rep, why = with_basis(basis())
+    check(rep is not None and rep["disagreements"] == []
+          and (rep.get("channel_basis") or {}).get("commit") == "a" * 40,
+          "a correct basis did not license the comparison: %s" % (why or rep))
+    # The basis is INSIDE the digest. Recomputed without it, the id must differ -- otherwise a basis
+    # could be bolted onto a report that was produced without one.
+    check(rep is not None and rep["diff_sha16"] != _rs_digest(
+        rep["disagreements"], "CUR16", "PRI16", rep["spans_compared"], None),
+        "the diff id does not cover the basis, so a basis could be attached after the fact")
+    # ... and the door notices if it is taken away again.
+    stripped, admitted = dict(rep, channel_basis=None), None
+    try:
+        admit_resigned(cur1, rep)
+        admitted = True
+    except ResignDiffError as e:
+        admitted = "REFUSED: %s" % e
+    strip_ok = False
+    try:
+        admit_resigned(cur1, stripped)
+    except ResignDiffError:
+        strip_ok = True
+    check(admitted is True and strip_ok,
+          "admit: with the basis %r; stripping it refused: %s" % (admitted, strip_ok))
+
+    refuses([cur1], [pass1], ("not the prior file being compared",), "basis names another file",
+            basis(licenses_prior_file_sha16="SOMEONEELSE"))
+    refuses([cur1], [pass1], ("licenses the current side",), "basis names the wrong side",
+            basis(side="current", licenses_current_file_sha16="CUR16"))
+    refuses([cur1], [pass1], ("altered after it was written",), "basis record altered",
+            basis(record_sha16="0" * 16))
+    refuses([cur1], [pass1], ("while listing",), "basis lists insertion machinery",
+            basis(insert_tokens_not_allowed_found=["insertRow"]))
+    refuses([cur1], [pass1], ("not insertions",), "basis is about another channel",
+            basis(channel="tiles"))
+
     check(CHECKS + 1 == EXPECTED_CHECKS_RESIGN, "ran %d checks before the final count, expected %d"
           % (CHECKS + 1, EXPECTED_CHECKS_RESIGN))
     print("resign-diff refusal selftest: PASS %d/%d  (no data file read, nothing written)"
@@ -337,11 +479,18 @@ if len(sys.argv) > 1 and sys.argv[1] == "--resign-selftest":
 
 
 if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
-    _cur, _pri = sys.argv[2], sys.argv[3]
+    # --resign-diff <current> <prior> [report_out] [--basis <channel_basis.json>]
+    _argv = list(sys.argv)
+    _basis = None
+    if "--basis" in _argv:
+        _bi = _argv.index("--basis")
+        _basis = json.load(io.open(_argv[_bi + 1], encoding="utf-8"))
+        del _argv[_bi:_bi + 2]
+    _cur, _pri = _argv[2], _argv[3]
     try:
         _rep = diff_resigned([json.loads(l) for l in io.open(_cur, encoding="utf-8") if l.strip()],
                              [json.loads(l) for l in io.open(_pri, encoding="utf-8") if l.strip()],
-                             _rs_file_sha16(_cur), _rs_file_sha16(_pri))
+                             _rs_file_sha16(_cur), _rs_file_sha16(_pri), _basis)
     except ResignDiffError as _e:
         # A refusal is an ANSWER, not a crash: a traceback buries it under a stack. No report is
         # written either -- a build that refuses must leave nothing behind, and `admit_resigned`
@@ -350,8 +499,8 @@ if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
         print("no report written; no row is admitted without one")
         sys.exit(2)
     print(format_resign_diff(_rep))
-    if len(sys.argv) > 4:
-        io.open(sys.argv[4], "w", encoding="utf-8").write(json.dumps(_rep, indent=1, ensure_ascii=True))
+    if len(_argv) > 4:
+        io.open(_argv[4], "w", encoding="utf-8").write(json.dumps(_rep, indent=1, ensure_ascii=True))
     sys.exit(0)
 
 

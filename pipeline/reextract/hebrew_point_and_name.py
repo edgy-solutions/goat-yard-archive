@@ -353,7 +353,7 @@ def blocked_letters():
     return [(k, sorted(need[k]["rivals"])) for k in sorted(need) if need[k]["least"] == 0]
 
 
-def census_pages(letter, rivals, want=3):
+def census_pages(letter, rivals, want=12):
     """(rows, n_words_total) -- file pages whose stored text holds `letter` in a rival-free word.
 
     The rule, which the page prints beside the table so it can be argued with:
@@ -361,7 +361,12 @@ def census_pages(letter, rivals, want=3):
       - a word whose whole SPAN is also free of every rival ranks first -- the span is the unit a
         reader's eye takes in, so a rival three words away is still a rival;
       - then the shortest word, because every glyph is a box he has to draw;
-      - then the lowest file page. One row per page, `want` rows.
+      - then the lowest file page.
+    One row per FILE PAGE first, since a different page is a different printing and a different
+    chance the glyph is clean. Then, only if that ran out before `want` rows, the remaining words
+    are topped up in the same rank order, deduped on (page, word) and FLAGGED `same_page` -- a
+    letter whose rival-free words all sit on three pages should still give him twelve things to
+    look at, and he should be able to see which rows are not a fresh page.
     The POSITION of the letter in the word is computed here and deliberately NOT returned: it is
     the one thing on this page that would do his counting for him, and the geometry gate exists
     because that count is the claim.
@@ -390,14 +395,22 @@ def census_pages(letter, rivals, want=3):
             hits.append((0 if span_clean else 1, len(w), int(s["page"]), w,
                          s["span_id"], has_nikud(wraw)))
     hits.sort()
-    out, pages = [], set()
-    for h in hits:
+    out, pages, taken = [], set(), set()
+    for h in hits:                                   # pass 1: a different page every row
         if h[2] in pages:
             continue
         pages.add(h[2])
-        out.append(h)
+        taken.add((h[2], h[3], h[4]))
+        out.append(h + (False,))
         if len(out) == want:
             break
+    for h in hits:                                   # pass 2: top up, flagged, never a repeat row
+        if len(out) >= want:
+            break
+        if (h[2], h[3], h[4]) in taken:
+            continue
+        taken.add((h[2], h[3], h[4]))
+        out.append(h + (True,))
     return out, len(hits)
 
 
@@ -422,11 +435,12 @@ def stuck_section():
         rows, total = census_pages(letter, rivals)
         rv = " ".join(LETTER[x] for x in rivals) or "&mdash;"
         cell = []
-        for _r, _n, pg, w, sid, nik in rows:
+        for _r, _n, pg, w, sid, nik, same in rows:
             cell.append('<b>p%d</b> <span class="mut">(printed %d)</span> '
-                        '<span class="heb">%s</span> <span class="mut">%d glyph%s, %s, in %s</span>'
+                        '<span class="heb">%s</span> <span class="mut">%d glyph%s, %s, in %s%s</span>'
                         % (pg, pg - 88, w, len(w), "" if len(w) == 1 else "s",
-                           "pointed" if nik else "unpointed", sid))
+                           "pointed" if nik else "unpointed", sid,
+                           ", <b>same page</b>" if same else ""))
         h.append('<tr><td><span class="heb">%s</span> %s</td><td><span class="heb">%s</span> '
                  '<span class="mut">%s</span></td><td>%s</td><td>%s</td></tr>'
                  % (LETTER[letter], letter, rv, ", ".join(rivals) or "nothing named",
@@ -436,7 +450,11 @@ def stuck_section():
     h.append('<div class="mut">The ranking rule, so it can be argued with: a word containing the '
              'letter and none of its rivals; a word whose whole span is also rival-free first, '
              'since the span is what the eye takes in; then the shortest word, because every glyph '
-             'is a box to draw; then the lowest page. One page per row, three rows. A pointed word '
+             'is a box to draw; then the lowest page. A different file page every row for as long '
+             'as there are different pages; after that the list is topped up from the words left '
+             'over, each marked <b>same page</b>, up to twelve rows. A letter with fewer rows than '
+             'that has no more rival-free words in the census at all &mdash; the count beside it is '
+             'the whole supply. A pointed word '
              'carries nikud: box the <b>consonants</b> only &mdash; the points are not glyphs and '
              'the loader compares the consonants.</div>')
     h.append("</section>")
