@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hebrew_aperture_diag as HAD                                        # noqa: E402
 from clean_run import git_state, provisional                              # noqa: E402
 import apparatus_signature_rule as RULE                                   # noqa: E402  one source of the rule
+import glyph_abstention as GA                                              # noqa: E402  item 4
 import signature_attestation as SA                                        # noqa: E402  second-look marker only
 
 SET, SET_N = "0401b636ffa7bf1a", 26
@@ -339,6 +340,11 @@ def admit_resigned(row, report, adjudications=None, sitting=None):
     provenance field is a constant. A record that withholds truth standing REFUSES here, which in the
     round-2 shape puts the row in `held_rows` with the reason, where a reader looks.
 
+    A row whose NOTE abstains about a letter one of its tiles presents is refused too, until a human
+    gives that tile a keep/take/neither verdict under the key (span_id, "glyph_abstention", i). The
+    signer's "could be vav or nun" is a verdict of its own, and a pipeline that reads only the
+    structural channels turns their honesty into its own confident letter.
+
     There is deliberately NO door for a later sitting's confirmation: the second sitting produces its
     own file, with its own provenance record, and that file is then the current side of its own diff.
     A confirmation format nobody has written yet would be a door with no key and a hole for a weak
@@ -380,8 +386,28 @@ def admit_resigned(row, report, adjudications=None, sitting=None):
         if adjudications.get(key) not in ADJUDICATIONS:
             raise ResignDiffError("%s %s %s changed over identical pixels and has no keep/take/neither "
                                   "verdict from a human" % key)
+    # The signer's own doubt about WHICH LETTER the ink is. Computed from the row (note + tiles),
+    # not from the diff, so it stands whether or not anything changed between sittings. Placed after
+    # the adjudication loop so no refusal that exists today changes what it reports.
+    _abst = GA.verdict(row)
+    if _abst is not None:
+        for _t in _abst["tiles_presenting_a_rival"]:
+            _key = (sid, "glyph_abstention", _t["i"])
+            if adjudications.get(_key) not in ADJUDICATIONS:
+                raise ResignDiffError(
+                    "%s tile %d presents %s while the signer's note abstains between %s -- %r. An "
+                    "abstention is a verdict, not a silence: the row has no keep/take/neither "
+                    "verdict for it from a human. What would lift it: %s"
+                    % (sid, _t["i"], _t["presents"], "/".join(_abst["names"]), _abst["reason"],
+                       _abst["what_would_lift_it"]))
     out = dict(row)
     out["resign_diff_sha16"] = report["diff_sha16"]
+    if _abst is not None:
+        # Kept even once adjudicated: the doubt was real and a human overruled it. A row that dropped
+        # the record on decision would present the same unqualified letter the ruling objected to.
+        out["glyph_abstention"] = dict(_abst, adjudicated={
+            str(_t["i"]): adjudications.get((sid, "glyph_abstention", _t["i"]))
+            for _t in _abst["tiles_presenting_a_rival"]})
     if sitting is not None:
         # The row names how its own sitting was conducted. Reached only when the record does NOT
         # withhold truth standing; a withheld row raised above and is never stamped as admitted.
@@ -429,7 +455,7 @@ def format_resign_diff(rep):
     return "\n".join(L)
 
 
-EXPECTED_CHECKS_RESIGN = 32          # 21 diff/basis refusals + 11 sitting-gate cases
+EXPECTED_CHECKS_RESIGN = 35          # 21 diff/basis + 11 sitting-gate + 3 abstention
 
 
 def resign_selftest():
@@ -655,6 +681,46 @@ def resign_selftest():
                 "by vacuity", "record covers no rows")
     sit_refuses(sitting(standing=True, lift="   "),
                 "names nothing that would lift it", "withheld with no way out")
+
+    # ------------------------------------------------- (l-n) the glyph abstention, item 4
+    # Hebrew tiles, so none of this reaches the cases above: every row there shows Latin placeholders.
+    VAV, NUNF, BET, DALET = u"\u05d5", u"\u05df", u"\u05d1", u"\u05d3"
+
+    def doubt_row(note, chose=VAV):
+        return dict(cur1, span_id="p628:n2", note=note,
+                    tiles=[{"i": 0, "kind": "consonant", "shown": BET, "verdict": "confirmed",
+                            "chose": ""},
+                           {"i": 1, "kind": "consonant", "shown": NUNF, "verdict": "corrected",
+                            "chose": chose}])
+
+    def adm_doubt(note, adjs=None, chose=VAV):
+        r = doubt_row(note, chose)
+        rep2 = diff_resigned([r], [r], "ABST16", "PRI16")
+        try:
+            return admit_resigned(r, rep2, adjs or {}, None)
+        except ResignDiffError as e:
+            return "REFUSED: %s" % e
+
+    # (l) the real row: the note abstains, tile 1 presents one of the two letters, nobody decided
+    got = adm_doubt("could be vav or nun")
+    check(isinstance(got, str) and "the signer's note abstains between vav/nun" in got
+          and "'could be vav or nun'" in got and "no keep/take/neither verdict" in got,
+          "an abstained glyph was admitted, or refused without its stated reason: %r" % got)
+
+    # (m) a human decides the tile the signer could not: admitted, and the doubt stays on the row
+    got = adm_doubt("could be vav or nun", {("p628:n2", "glyph_abstention", 1): "take"})
+    check(isinstance(got, dict) and (got.get("glyph_abstention") or {}).get("verdict")
+          == "abstain_glyph_doubt"
+          and (got.get("glyph_abstention") or {}).get("adjudicated") == {"1": "take"}
+          and got["glyph_abstention"]["reason"] == "could be vav or nun",
+          "an adjudicated abstention did not admit, or dropped the record: %r" % got)
+
+    # (n) THE DISCRIMINATING CASE, inside the real door: doubt about letters this row does not
+    # present is not a contradiction of this row, and must not hold it. Without this, every note
+    # with a hedge and two letter names in it would become a veto over any row.
+    got = adm_doubt("could be dalet or resh")
+    check(isinstance(got, dict) and "glyph_abstention" not in got,
+          "doubt about dalet/resh held a row presenting neither: %r" % got)
 
     check(CHECKS + 1 == EXPECTED_CHECKS_RESIGN, "ran %d checks before the final count, expected %d"
           % (CHECKS + 1, EXPECTED_CHECKS_RESIGN))
