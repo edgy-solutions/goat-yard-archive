@@ -42,6 +42,19 @@ class RunFault(RuntimeError):
     suspect, abort and write nothing -- never an item error, never retried."""
 
 
+class SignatureFault(RunFault):
+    """A run fault carrying a named model-failure SIGNATURE: `repeat_abort` (done not True, content
+    a non-empty run of ONE character), `done_false_other` (done not True, anything else) or `echo`
+    (a done reply that begins with a copy of the prompt sent). `raw` is the content (first 400
+    chars); `where` is free text the caller sets (e.g. "body read pool 3 / page 91")."""
+
+    def __init__(self, message, signature, raw="", where=""):
+        super().__init__(message)
+        self.signature = signature
+        self.raw = (raw or "")[:400]
+        self.where = where
+
+
 def _ink_lines(gray, box):
     """Printed line bands of the crop `box`, in PAGE rows: [(y0, y1), ...]."""
     x0, y0, x1, y1 = box
@@ -177,10 +190,27 @@ def classify_body_reply(text, done_reason, n_lines):
     return kept, n, classify_read(kept, done_reason, n_lines)
 
 
+def detect_signature(body_json, prompt):
+    """Pure. None | "repeat_abort" | "echo" | "done_false_other" for one /api/chat reply body.
+    done not True: repeat_abort when the content is a non-empty string of copies of ONE character,
+    else done_false_other. done True: echo when the content begins with >= 1 copy of `prompt` (the
+    prompt that was SENT on that call; strip_echo's rule), whether or not text remains."""
+    body = body_json if isinstance(body_json, dict) else {}
+    content = (body.get("message") or {}).get("content")
+    if body.get("done") is not True:
+        if isinstance(content, str) and content and len(set(content)) == 1:
+            return "repeat_abort"
+        return "done_false_other"
+    if isinstance(content, str) and strip_echo(content, prompt)[1] >= 1:
+        return "echo"
+    return None
+
+
 def read_chunk(client, png_bytes):
     """One native /api/chat call (think False, stream False, temperature 0, num_predict 2048).
-    -> {"text","done_reason","eval_count","http_status"}. Any non-200 status (429, 5xx, ...) or a
-    reply without done:true raises RunFault; transport exceptions propagate unchanged."""
+    -> {"text","done_reason","eval_count","http_status"}. Any non-200 status (429, 5xx, ...) raises
+    RunFault; a reply without done:true, or a done reply that echoes BODY_PROMPT, raises
+    SignatureFault (detect_signature); transport exceptions propagate unchanged."""
     b64 = base64.b64encode(png_bytes).decode("ascii")
     payload = {
         "model": getattr(client, "model", VHR.DEFAULT_MODEL),
@@ -194,13 +224,15 @@ def read_chunk(client, png_bytes):
     if status != 200:
         raise RunFault(f"HTTP {status} from {client.base_url}")
     body = resp.json()
-    if body.get("done") is not True:
-        # A non-streamed reply that is not done is the server cutting generation off, not a read:
-        # on 2026-11-08 endpoint D degraded mid-run and every call (the canary chunk too) came back
-        # HTTP 200, done:false, no done_reason, text ending in '/' x 31. As an item `truncated` it
-        # took 3 calls to abort and the fault named "HTTP/timeout".
-        raise RunFault(f"partial reply from {client.base_url}: done={body.get('done')!r}, "
-                       f"done_reason={body.get('done_reason')!r}")
+    sig = detect_signature(body, BODY_PROMPT)
+    if sig is not None:
+        # done:false is the server cutting generation off, not a read (2026-11-08 endpoint D: HTTP
+        # 200, done:false, no done_reason, '/' x 31); an echo is the model answering with the prompt.
+        # Both are named signatures and abort the run.
+        raw = (body.get("message") or {}).get("content") or ""
+        raise SignatureFault(f"partial reply from {client.base_url}: signature={sig}, "
+                             f"done={body.get('done')!r}, done_reason={body.get('done_reason')!r}",
+                             sig, raw)
     return {"text": (body.get("message") or {}).get("content", ""),
             "done_reason": body.get("done_reason"),
             "eval_count": body.get("eval_count"),

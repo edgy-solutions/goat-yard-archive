@@ -160,8 +160,9 @@ def read_head(client, png_bytes):
     "raw","ver_case"} -- the model TRANSCRIBES (TRANSCRIBE_PROMPT), code alone parses it via
     verse_regions.parse_ver_head (one code-owned parser, never a second one here).
 
-    Raises DegenerateReplyError for an explicit done:false, or an empty/whitespace/'/'-only reply
-    -- never a silent abstain. Transport failures (timeout, connection error, non-2xx) still
+    Raises body_read.SignatureFault for a named signature (done not True -> repeat_abort /
+    done_false_other; any leading echo of TRANSCRIBE_PROMPT -> echo), a run fault; raises
+    DegenerateReplyError for an empty/whitespace/'/'-only done reply -- never a silent abstain. Transport failures (timeout, connection error, non-2xx) still
     propagate as exceptions, exactly as before. Both raise paths are counted identically by
     build_verse_regions.run_reads's consecutive-error counter."""
     raw_text = client(png_bytes) if callable(client) and not hasattr(client, "post") else None
@@ -176,9 +177,19 @@ def read_head(client, png_bytes):
         }
         resp = client.post(client.base_url.rstrip("/") + "/api/chat", json=payload, timeout=READ_TIMEOUT_S)
         body = resp.json()
+        import body_read  # lazy: body_read imports this module
+        sig = body_read.detect_signature(body, TRANSCRIBE_PROMPT)
+        if sig is not None:
+            raw = (body.get("message") or {}).get("content") or ""
+            raise body_read.SignatureFault(f"head read signature {sig}: {raw[:80]!r}", sig, raw)
         if body.get("done") is False:
             raise DegenerateReplyError(f"model reply had done:false: {body!r}")
         raw_text = (body.get("message") or {}).get("content", "")
+    if not hasattr(client, "post") and isinstance(raw_text, str):
+        import body_read  # plain-callable fake: no done flag, only the echo check applies
+        if body_read.strip_echo(raw_text, TRANSCRIBE_PROMPT)[1] >= 1:
+            raise body_read.SignatureFault(f"head read signature echo: {raw_text[:80]!r}",
+                                           "echo", raw_text)
     if _is_degenerate_content(raw_text):
         raise DegenerateReplyError(f"degenerate model reply: {raw_text!r}")
     import verse_regions
@@ -297,6 +308,9 @@ def run_canary(client, load_gray, batch, at_read):
             if not match:
                 ok = False
         except Exception as e:
+            import body_read  # lazy: body_read imports this module
+            if isinstance(e, body_read.RunFault):
+                raise  # a run fault (signature, reload, pinned options) is never a canary mismatch
             crops_out.append({"file_page": crop["file_page"], "col": crop["col"],
                                "status": f"error:{e}", "match": False})
             ok = False

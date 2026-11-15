@@ -7,7 +7,7 @@ import numpy as np
 
 import body_read as BR
 
-EXPECTED_TESTS = 22
+EXPECTED_TESTS = 25
 
 
 def page45():
@@ -250,6 +250,53 @@ def test_read_chunk_partial_reply_is_a_runfault_not_an_item():
             assert "partial reply" in str(e)
         else:
             raise AssertionError(f"must raise RunFault: {body!r}")
+
+
+def _b(content, done):
+    return {"done": done, "message": {"content": content}}
+
+
+def test_detect_signature_body_prompt_cases():
+    P, D = BR.BODY_PROMPT, BR.detect_signature
+    assert D(_b("/" * 31, False), P) == "repeat_abort"
+    assert D(_b("abc", False), P) == "done_false_other"
+    assert D(_b("", False), P) == "done_false_other"
+    assert D(_b(None, False), P) == "done_false_other"
+    assert D({"message": {"content": "Line one"}}, P) == "done_false_other"     # no done key
+    assert D(_b("ab" * 9, False), P) == "done_false_other"                      # two characters
+    assert D(_b(P + chr(10) + "In the beginning", True), P) == "echo"
+    assert D(_b(P, True), P) == "echo"
+    assert D(_b(P + chr(10) + P, True), P) == "echo"
+    assert D(_b("In the beginning", True), P) is None
+    assert D(_b("In the beginning " + P, True), P) is None   # prompt not at the start
+    assert D(_b("", True), P) is None                         # empty done reply: classify_read's job
+    assert D(_b("/" * 31, True), P) is None                   # done, so not repeat_abort
+
+
+def test_detect_signature_head_prompt_variant():
+    H, D = BR.VHR.TRANSCRIBE_PROMPT, BR.detect_signature
+    assert D(_b(H + chr(10) + "Ver. 1.", True), H) == "echo"
+    assert D(_b(H, True), H) == "echo"
+    assert D(_b("Ver. 1. " + H, True), H) is None
+    assert D(_b("Ver. 1.", True), H) is None
+    assert D(_b(BR.BODY_PROMPT, True), H) is None            # the OTHER prompt is not this call's echo
+    assert D(_b("/" * 31, False), H) == "repeat_abort"
+    assert D(_b("abc", False), H) == "done_false_other"
+
+
+def test_read_chunk_signature_fault_carries_signature_raw_and_where():
+    P = BR.BODY_PROMPT
+    for body, sig in ((_b("/" * 31, False), "repeat_abort"), (_b("abc", False), "done_false_other"),
+                      (_b(P + chr(10) + "text", True), "echo")):
+        try:
+            BR.read_chunk(FakeClient(FakeResp(200, body)), b"x")
+        except BR.SignatureFault as e:
+            assert e.signature == sig and isinstance(e, BR.RunFault)
+            assert e.raw == body["message"]["content"][:400] and e.where == ""
+            e.where = "w"
+            assert e.where == "w"
+        else:
+            raise AssertionError(sig)
 
 
 if __name__ == "__main__":

@@ -20,10 +20,12 @@ load_duration: the first call must trigger the load (> RELOAD_S), no later call 
 is a RunFault). The options actually sent are recorded in the summary (realized, not requested).
 
 Prompt echo (decision a, Chris 2026-11-12): every reply is passed through body_read.strip_echo; the
-stored text is the remainder, echo_stripped records the copies removed, an echo-only reply is the
-item error `echo`.
+stored text is the reply, echo_stripped stays 0 on every kept reply. A leading echo is now a RUN FAULT (SignatureFault, signature "echo"), on every body read and the
+body canary, whether or not text remains; so is any reply without done:true (signature
+"repeat_abort" for a one-character run, else "done_false_other"). body_read.detect_signature owns
+both; OUT.fault.json records signature, raw (first 400 chars) and where.
 
-Run-level fault (RunFault = HTTP 429/5xx/non-200/transport, CanaryFault, a degenerate or echo-only
+Run-level fault (RunFault = HTTP 429/5xx/non-200/transport, SignatureFault, CanaryFault, a degenerate
 body canary, a body canary whose echo-stripped text differs from batch 0's, or 3 consecutive item
 errors): write OUT.fault.json with the cause, delete the temp file, exit 3,
 write NO OUT. A rerun starts from the top; nothing is spliced. Item errors (empty / truncated /
@@ -262,8 +264,10 @@ def main(argv=None):
         "canary_every": CANARY_EVERY,
         "body_canary": {"file_page": BODY_CANARY_PAGE, "col": BODY_CANARY_COL, "box": canary_box},
         "guard_refusals": list(GUARD_REFUSALS),
-        "echo_rule": "strip every leading BODY_PROMPT copy; echo-only = item error 'echo'; "
-                     "body canary echo-only or not identical to batch 0 = BodyCanaryFault",
+        "echo_rule": "any leading BODY_PROMPT copy (echo) = run fault SignatureFault 'echo', on every "
+                     "body read and the body canary; body canary not identical to batch 0 = "
+                     "BodyCanaryFault",
+        "signature_abort": "repeat_abort|done_false_other|echo, v1",
         "unloaded_before": True,
         "pinned_options": dict(PINNED_OPTIONS), "keep_alive": KEEP_ALIVE, "reload_s": RELOAD_S,
         "body_read_sha256": sha256_file(BR.__file__),
@@ -281,12 +285,15 @@ def main(argv=None):
     refusals = Counter()
     item_errors = Counter()
     canaries = []
-    state = {"ref_sha": None}
+    state = {"ref_sha": None, "where": ""}
     counter = VHR.ConsecutiveErrorCounter(limit=CONSECUTIVE_ITEM_ERRORS)
 
     def transport(fn, *a):
         try:
             return fn(*a)
+        except BR.SignatureFault as e:
+            e.where = e.where or state["where"]
+            raise
         except (BR.RunFault, VHR.ConsecutiveReadErrorFault, VHR.CanaryFault):
             raise
         except Exception as e:  # a timeout or connection failure is a run fault, never an item
@@ -295,10 +302,14 @@ def main(argv=None):
     def canary(batch, at_read):
         try:
             head = VHR.run_canary(client, load, batch, at_read)  # CanaryFault aborts
+        except BR.SignatureFault as e:
+            e.where = e.where or f"head canary batch {batch}"
+            raise
         except VHR.CanaryFault:
             if client.fault:  # a load-trace fault inside a head crop is the run's fault, not a mismatch
                 raise BR.RunFault(client.fault)
             raise
+        state["where"] = f"body canary batch {batch}"
         res = transport(BR.read_chunk, client, canary_png)
         kept, n_echo, err = BR.classify_body_reply(res["text"], res["done_reason"], canary_n_lines)
         if err:
@@ -337,6 +348,7 @@ def main(argv=None):
                         continue
                     if counts["reads"] % CANARY_EVERY == 0:
                         canary(counts["reads"] // CANARY_EVERY, counts["reads"])
+                    state["where"] = f"body read pool {counts['reads']} / page {fp}"
                     res = transport(BR.read_chunk, client, crop_png_bytes(gray, box))
                     counts["reads"] += 1
                     kept, n_echo, err = BR.classify_body_reply(res["text"], res["done_reason"], nl)
@@ -376,13 +388,15 @@ def main(argv=None):
     except (BR.RunFault, VHR.ConsecutiveReadErrorFault, VHR.CanaryFault, BodyCanaryFault) as e:
         fh.close()
         os.remove(tmp_path)
-        fault_path.write_text(json.dumps({
+        fault = {
             "kind": "run_fault", "cause": str(e), "type": type(e).__name__,
             "config_hash": chash, "reads_before_fault": counts["reads"],
             "item_errors": dict(item_errors), "canaries": canaries,
             "options_sent": [json.loads(o) for o in client.options_sent],
-            "load_trace": client.load_trace()}, ensure_ascii=False, indent=1),
-            encoding="utf-8")
+            "load_trace": client.load_trace()}
+        if isinstance(e, BR.SignatureFault):
+            fault.update({"signature": e.signature, "raw": e.raw, "where": e.where})
+        fault_path.write_text(json.dumps(fault, ensure_ascii=False, indent=1), encoding="utf-8")
         print(f"RUN FAULT: {type(e).__name__}: {e}", file=sys.stderr)
         return 3
     except BaseException:

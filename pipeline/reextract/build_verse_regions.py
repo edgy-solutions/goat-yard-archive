@@ -190,6 +190,7 @@ def build_config(args, module_sha256, git_head, git_dirty):
         base["pinned_options"] = dict(PC.PINNED_OPTIONS)
         base["keep_alive"] = PC.KEEP_ALIVE
         base["reload_s"] = PC.RELOAD_S
+        base["signature_abort"] = "repeat_abort|done_false_other|echo, v1"
     cfg = dict(base)
     cfg["hash"] = config_hash(base)
     return cfg
@@ -334,6 +335,9 @@ def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client
             try:
                 result = VHR.guarded_read_head(client, gray, box, (H, W))
                 counter.record_success()
+            except BR.SignatureFault as e:
+                e.where = e.where or f"head read page {fp} col {c['col']} y0 {c['y0']}"
+                raise
             except BR.RunFault:
                 raise  # a run fault (pinned-options / mid-run reload) is never a read error
             except Exception:
@@ -533,7 +537,11 @@ def main(argv=None):
         next_batch = [0]
 
         def _do_canary(at_read):
-            rec = VHR.run_canary(client, load_gray, next_batch[0], at_read)
+            try:
+                rec = VHR.run_canary(client, load_gray, next_batch[0], at_read)
+            except BR.SignatureFault as e:
+                e.where = e.where or f"head canary batch {next_batch[0]}"
+                raise
             canary_log.append(rec)
             records[0]["canary"] = canary_log
             next_batch[0] += 1
@@ -551,6 +559,9 @@ def main(argv=None):
         def _abort_run_fault(e):
             records[0]["status"] = "aborted"
             records[0]["abort_reason"] = f"run_fault: {client.fault or str(e)}"
+            if isinstance(e, BR.SignatureFault):
+                records[0]["abort_reason"] = f"run_fault: signature {e.signature}: {e}"
+                records[0].update({"signature": e.signature, "raw": e.raw, "where": e.where})
             records[0]["canary"] = canary_log
             records[0]["options_sent"] = [json.loads(o) for o in client.options_sent]
             records[0]["load_trace"] = client.load_trace()
@@ -562,6 +573,8 @@ def main(argv=None):
         # Canary batch 0: before the first head read.
         try:
             _do_canary(0)
+        except BR.RunFault as e:
+            return _abort_run_fault(e)
         except VHR.CanaryFault as e:
             if client.fault:
                 return _abort_run_fault(e)
@@ -591,6 +604,8 @@ def main(argv=None):
         # inside run_reads above -- a harmless redundant check, never skipped for that reason).
         try:
             _do_canary(n_reads)
+        except BR.RunFault as e:
+            return _abort_run_fault(e)
         except VHR.CanaryFault as e:
             if client.fault:
                 return _abort_run_fault(e)

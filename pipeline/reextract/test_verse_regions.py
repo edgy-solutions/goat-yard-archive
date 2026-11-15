@@ -9,8 +9,9 @@ import numpy as np
 
 import verse_regions as VR
 import verse_head_read as VHR
+import body_read as BR
 
-EXPECTED_TESTS = 127
+EXPECTED_TESTS = 131
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -1259,9 +1260,9 @@ def test_read_head_degenerate_reply_raises():
 
     try:
         VHR.read_head(FakeClient(), b"png")
-        assert False, "expected DegenerateReplyError for done:false"
-    except VHR.DegenerateReplyError:
-        pass
+        assert False, "expected SignatureFault for done:false"
+    except BR.SignatureFault as e:       # was DegenerateReplyError (an item error); now a run fault
+        assert e.signature == "done_false_other" and isinstance(e, BR.RunFault)
 
 
 # 12b. endpoint canary -- abort, never retry -------------------------------------------------------
@@ -2355,8 +2356,9 @@ class _FakeR:
 class _FakeInner:
     """Fake HTTP layer for build_verse_regions._RequestsClient: no network, ever."""
 
-    def __init__(self, base_url, model, reload_at=None):
+    def __init__(self, base_url, model, reload_at=None, sig_at=None):
         self.base_url, self.model, self.reload_at = base_url, model, reload_at
+        self.sig_at = sig_at or {}      # chat call index -> "repeat_abort"|"done_false_other"|"echo"
         self.log, self.chat_payloads, self.n_chat = [], [], 0
         self.ps_after_unload_lists_model = False
 
@@ -2369,6 +2371,14 @@ class _FakeInner:
         n = self.n_chat
         self.n_chat += 1
         ld = 2e9 if (n == 0 or n == self.reload_at) else 1e8
+        sig = self.sig_at.get(n)
+        if sig == "repeat_abort":
+            return _FakeR({"message": {"content": "/" * 31}, "done": False, "load_duration": ld})
+        if sig == "done_false_other":
+            return _FakeR({"message": {"content": "Ver. 2"}, "done": False, "load_duration": ld})
+        if sig == "echo":
+            return _FakeR({"message": {"content": VHR.TRANSCRIBE_PROMPT + chr(10) + "Ver. 21."},
+                           "done": True, "done_reason": "stop", "load_duration": ld})
         return _FakeR({"message": {"content": "Ver. 21."}, "done": True, "load_duration": ld})
 
     def get(self, url, timeout=None):
@@ -2377,7 +2387,7 @@ class _FakeInner:
         return _FakeR({"models": [{"name": self.model}] if self.ps_after_unload_lists_model else []})
 
 
-def _read_on_main(reload_at=None, n_heads=3, ps_keeps_model=False):
+def _read_on_main(reload_at=None, n_heads=3, ps_keeps_model=False, sig_at=None):
     import json
     import tempfile
     from pathlib import Path
@@ -2396,7 +2406,7 @@ def _read_on_main(reload_at=None, n_heads=3, ps_keeps_model=False):
         {"col": "left", "box": [0, 0, 200, 300]}, {"col": "right", "box": [200, 0, 400, 300]}]}) + "\n",
         encoding="utf-8")
     out_path = tmpdir / "out" / "run.jsonl"
-    fake = _FakeInner("http://fake-host:11434", "fake-model", reload_at=reload_at)
+    fake = _FakeInner("http://fake-host:11434", "fake-model", reload_at=reload_at, sig_at=sig_at)
     fake.ps_after_unload_lists_model = ps_keeps_model
     cands = [{"file_page": 1, "col": "left", "y0": 60 + 50 * i, "y1": 72 + 50 * i,
               "box": [0, 60 + 50 * i, 200, 72 + 50 * i], "kind": "verse", "signature": {},
@@ -2475,6 +2485,95 @@ def test_read_on_header_load_trace_calls_one_per_chat_call():
     assert len(calls) == fake.n_chat and fake.n_chat >= 5
     assert [c["n"] for c in calls] == list(range(fake.n_chat))
     assert isinstance(recs[0]["options_sent"], list) and recs[0]["options_sent"]
+
+
+def test_read_head_signatures_raise_signature_fault_and_done_true_degenerate_stays_item_error():
+    class Resp:
+        def __init__(self, b):
+            self.b = b
+
+        def json(self):
+            return self.b
+
+    class Client:
+        base_url, model = "http://example:11434", "m"
+
+        def __init__(self, b):
+            self.b = b
+
+        def post(self, url, json=None, timeout=None):
+            return Resp(self.b)
+
+    P = VHR.TRANSCRIBE_PROMPT
+    cases = [({"done": False, "message": {"content": "/" * 31}}, "repeat_abort"),
+             ({"done": False, "message": {"content": "abc"}}, "done_false_other"),
+             ({"done": True, "message": {"content": P + chr(10) + "Ver. 1."}}, "echo"),
+             ({"done": True, "message": {"content": P}}, "echo")]
+    for body, sig in cases:
+        try:
+            VHR.read_head(Client(body), b"png")
+            assert False, sig
+        except BR.SignatureFault as e:
+            assert e.signature == sig and e.raw == body["message"]["content"][:400]
+    # plain-callable fake: no done flag, only the echo check
+    try:
+        VHR.read_head(lambda b: P + chr(10) + "Ver. 1.", b"x")
+        assert False, "echo via callable"
+    except BR.SignatureFault as e:
+        assert e.signature == "echo"
+    # done:true '/'-only and empty stay item errors (DegenerateReplyError), unchanged
+    for bad in ("/" * 31, ""):
+        try:
+            VHR.read_head(Client({"done": True, "message": {"content": bad}}), b"png")
+            assert False, bad
+        except VHR.DegenerateReplyError:
+            pass
+
+
+def test_run_canary_lets_a_signature_fault_propagate_not_canary_fault():
+    def load_gray(fp):
+        return np.full((10, 10), 255, dtype=np.uint8)
+
+    orig = VHR.guarded_read_head
+
+    def sig_guarded(client, gray, box, page_shape, blank_floor=0.01, uniform_std=2.0):
+        raise BR.SignatureFault("sig", "echo", "raw")
+
+    VHR.guarded_read_head = sig_guarded
+    try:
+        VHR.run_canary(client=None, load_gray=load_gray, batch=0, at_read=0)
+        assert False, "must raise"
+    except BR.SignatureFault as e:
+        assert e.signature == "echo"
+    except VHR.CanaryFault:
+        assert False, "SignatureFault was swallowed into CanaryFault"
+    finally:
+        VHR.guarded_read_head = orig
+
+
+def test_read_on_each_signature_aborts_run_header_only_rc4_naming_it():
+    # chat calls: 0 batch-0 canary, 1-3 head reads, 4 final canary
+    for sig in ("repeat_abort", "done_false_other", "echo"):
+        for n, where in ((2, "head read page 1 col left"), (0, "head canary batch 0"),
+                         (4, "head canary batch 1")):
+            rc, recs, fake = _read_on_main(sig_at={n: sig})
+            assert rc == 4, (sig, n, rc)
+            assert len(recs) == 1 and recs[0]["status"] == "aborted", (sig, n)
+            h = recs[0]
+            assert h["abort_reason"].startswith("run_fault") and sig in h["abort_reason"], h["abort_reason"]
+            assert h["signature"] == sig and h["where"].startswith(where), (sig, n, h["where"])
+            assert h["raw"] and len(h["raw"]) <= 400
+
+
+def test_read_on_config_carries_signature_abort_and_read_off_does_not():
+    rc, recs, fake = _read_on_main()
+    assert rc == 0
+    cfg = recs[0]["config"]
+    assert cfg["signature_abort"] == "repeat_abort|done_false_other|echo, v1"
+    import build_verse_regions as BVR
+    base = {k: v for k, v in cfg.items() if k != "hash"}
+    assert BVR.config_hash(base) == cfg["hash"]
+    assert BVR.config_hash({k: v for k, v in base.items() if k != "signature_abort"}) != cfg["hash"]
 
 
 def test_read_off_config_has_no_pinned_keys_and_hash_is_of_the_rest():

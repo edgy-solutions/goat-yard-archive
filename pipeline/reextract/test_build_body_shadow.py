@@ -15,7 +15,7 @@ import numpy as np
 import body_read as BR
 import build_body_shadow as BSB
 
-EXPECTED_TESTS = 28
+EXPECTED_TESTS = 32
 
 RUN_HOST = "192.168.1.169:11434"   # C (ruling 2026-11-14)
 D_HOST = "192.168.1.169:11435"
@@ -69,6 +69,15 @@ class FakeResp:
         return self._b
 
 
+def sig_reply(sig, prompt):
+    """A reply body showing the named signature (done:false shapes carry no done_reason)."""
+    if sig == "repeat_abort":
+        return {"message": {"content": "/" * 31}, "done": False}
+    if sig == "done_false_other":
+        return {"message": {"content": "In the begin"}, "done": False}
+    return {"message": {"content": prompt + chr(10) + "In the beginning"}, "done": True, "done_reason": "stop"}
+
+
 class FakeClient:
     base_url = "http://" + RUN_HOST
     model = BSB.VHR.DEFAULT_MODEL
@@ -86,6 +95,8 @@ class FakeClient:
         self.degenerate_first = False
         self.echo_prefix = False      # every body reply starts with BODY_PROMPT (D, 2026-11-08)
         self.echo_only_at = ()        # body call indices answered with the prompt twice, nothing else
+        self.body_sig_at = {}         # body call index -> "repeat_abort"|"done_false_other"|"echo"
+        self.head_sig_at = {}         # head call index -> same
         self.ps_keeps_model = False   # /api/ps still lists the model after the unload
         self.chat_payloads = []       # every /api/chat payload as SENT (after PinnedClient)
         self.reload_at = None         # chat call index whose reply reports a fresh load
@@ -130,6 +141,8 @@ class FakeClient:
                 return FakeResp({"message": {"content": "12 34"}, "done": True, "done_reason": "stop"})
             if self.empty_from is not None and idx >= self.empty_from:
                 return FakeResp({"message": {"content": ""}, "done": True, "done_reason": "stop"})
+            if idx in self.body_sig_at:
+                return FakeResp(sig_reply(self.body_sig_at[idx], BR.BODY_PROMPT))
             text = f"Body {sha[:6]}"
             if sha == self.canary_sha:
                 text += f" call{idx}"
@@ -141,6 +154,8 @@ class FakeClient:
         idx = self.head_calls
         self.head_calls += 1
         self.log.append(("head",))
+        if idx in self.head_sig_at:
+            return FakeResp(sig_reply(self.head_sig_at[idx], BSB.VHR.TRANSCRIBE_PROMPT))
         if self.head_wrong_from is not None and idx >= self.head_wrong_from:
             txt = "Ver. 99."
         else:
@@ -320,43 +335,94 @@ def test_body_canary_mismatch_aborts(env):
     assert fault["reads_before_fault"] == 3
 
 
+def read_fault(env):
+    fault_path = Path(str(env.out) + ".fault.json")
+    assert fault_path.exists() and not env.out.exists()
+    assert not Path(str(env.out) + ".tmp").exists()
+    return json.loads(fault_path.read_text(encoding="utf-8"))
+
+
 @with_env()
-def test_echo_prefix_is_stripped_recorded_and_canary_compares_the_remainder(env):
+def test_echo_on_every_reply_is_a_run_fault_at_the_body_canary(env):
+    # was test_echo_prefix_is_stripped_recorded...: a leading echo is no longer stripped and kept
     env.fake.echo_prefix = True
-    assert env.run() == 0
-    recs = env.records()
-    chunks = [c for r in recs if r["kind"] == "body_region" for c in r["chunks"] if c["guard"] == "ok"]
-    assert len(chunks) == 8
-    for c in chunks:
-        assert c["echo_stripped"] == 1 and c["error"] is None
-        assert c["text"].startswith("Body ") and "Transcribe" not in c["text"]
-        assert c["sha256"] == hashlib.sha256(c["text"].encode()).hexdigest() != c["raw_sha256"]
-    s = recs[-1]
-    assert s["counts"]["canary_identical"] == "2/2"
-    assert all(c["echo_stripped"] == 1 for c in s["canaries"])
-    assert all("Transcribe" not in r.get("body_raw", "") for r in recs if r["kind"] == "body_region")
+    assert env.run() == 3
+    fault = read_fault(env)
+    assert fault["type"] == "SignatureFault" and fault["signature"] == "echo"
+    assert fault["where"] == "body canary batch 0" and fault["reads_before_fault"] == 0
 
 
 @with_env()
-def test_echo_only_read_is_item_error_echo_never_a_read(env):
+def test_echo_only_read_is_a_run_fault_not_an_item_error(env):
+    # was test_echo_only_read_is_item_error_echo_never_a_read
     env.fake.echo_only_at = (2,)     # body call 0 = canary, 1 = read 0, 2 = read 1
-    assert env.run() == 0
-    recs = env.records()
-    chunks = [c for r in recs if r["kind"] == "body_region" for c in r["chunks"] if c["guard"] == "ok"]
-    bad = [c for c in chunks if c["error"]]
-    assert len(bad) == 1 and bad[0]["error"] == "echo" and bad[0]["echo_stripped"] == 2
-    assert recs[-1]["counts"]["item_errors"] == {"echo": 1}
-    region = [r for r in recs if r["kind"] == "body_region" and bad[0] in r["chunks"]][0]
-    assert region["body_status"] == "incomplete" and "Transcribe" not in region["body_raw"]
+    assert env.run() == 3
+    fault = read_fault(env)
+    assert fault["signature"] == "echo" and fault["where"].startswith("body read pool 1 / page ")
+    assert fault["reads_before_fault"] == 1 and fault["item_errors"] == {}
 
 
 @with_env()
 def test_echo_only_body_canary_aborts(env):
     env.fake.echo_only_at = (0,)
     assert env.run() == 3
-    fault = json.loads(Path(str(env.out) + ".fault.json").read_text(encoding="utf-8"))
-    assert fault["type"] == "BodyCanaryFault" and "echo" in fault["cause"]
+    fault = read_fault(env)
+    assert fault["type"] == "SignatureFault" and fault["signature"] == "echo"
     assert fault["reads_before_fault"] == 0
+
+
+def _sig_run(sig, body_at=None, head_at=None):
+    env = Env()
+    try:
+        if body_at is not None:
+            env.fake.body_sig_at = {body_at: sig}
+        if head_at is not None:
+            env.fake.head_sig_at = {head_at: sig}
+        rc = env.run()
+        return rc, read_fault(env)
+    finally:
+        env.close()
+
+
+@with_env()
+def test_each_signature_on_a_body_read_aborts_with_it_named(env):
+    for sig in ("repeat_abort", "done_false_other", "echo"):
+        rc, fault = _sig_run(sig, body_at=2)     # body call 2 = the second body read
+        assert rc == 3, sig
+        assert fault["signature"] == sig and fault["type"] == "SignatureFault", sig
+        assert fault["where"].startswith("body read pool 1 / page "), fault["where"]
+        assert fault["raw"] and len(fault["raw"]) <= 400
+        assert fault["item_errors"] == {}
+
+
+@with_env()
+def test_each_signature_on_the_body_canary_aborts_with_it_named(env):
+    for sig in ("repeat_abort", "done_false_other", "echo"):
+        rc, fault = _sig_run(sig, body_at=0)
+        assert rc == 3 and fault["signature"] == sig, sig
+        assert fault["where"] == "body canary batch 0" and fault["reads_before_fault"] == 0
+
+
+@with_env()
+def test_each_signature_on_the_head_canary_aborts_with_it_named(env):
+    for sig in ("repeat_abort", "done_false_other", "echo"):
+        rc, fault = _sig_run(sig, head_at=0)
+        assert rc == 3 and fault["signature"] == sig, sig
+        assert fault["type"] == "SignatureFault" and fault["where"] == "head canary batch 0"
+    # a signature on a LATER periodic head canary (second canary: head calls 2-3) also aborts
+    rc, fault = _sig_run("echo", head_at=2)
+    assert rc == 3 and fault["signature"] == "echo" and fault["where"] == "head canary batch 1"
+
+
+@with_env()
+def test_signature_rule_is_in_the_hashed_config(env):
+    assert env.run() == 0
+    hdr = env.records()[0]
+    cfg = hdr["config"]
+    assert cfg["signature_abort"] == "repeat_abort|done_false_other|echo, v1"
+    assert "run fault" in cfg["echo_rule"] and "item error" not in cfg["echo_rule"]
+    assert BSB.BVR.config_hash(cfg) == hdr["config_hash"]
+    assert BSB.BVR.config_hash({k: v for k, v in cfg.items() if k != "signature_abort"}) != hdr["config_hash"]
 
 
 @with_env()
