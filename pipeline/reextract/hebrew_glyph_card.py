@@ -256,6 +256,9 @@ def resign_state(sid, basis):
     return ("landed" if BATCH_TAG in (basis or "") else "pending"), claim
 
 
+# The hand-written entries. These carry the rulings and the reasons, and p895:n0 is a ruled span
+# that is NOT one of the cards -- so a pure derivation would LOSE it. Every card's asked positions
+# are UNIONED in below, right after `ask_positions` exists to read them.
 DISPUTED = {
     "p217:n2": [(1, 3)],        # mem vs pe -- barred as an exemplar for mem AND for pe
     "p423:n3": [(2, 3)],        # bet vs gimel, RULED gimel 2026-09-27; barred until the batch lands
@@ -347,13 +350,17 @@ CARDS = [
                           "insertion seq 1 after tile 0 (this one) and seq 0 after tile 3 (position "
                           "6, not disputed). A disagreement with the signature at this glyph is "
                           "on record in the 2026-10-25 audit. " + READS_WITHHELD,
-                    note="There is <b>no zayin exemplar anywhere in the signed corpus</b>. The "
-                         "count in the zayin panel below is a measured zero, and the audit says as "
-                         "much in its own words: <i>no zayin exemplar on the card, so it cannot be "
-                         "settled</i>. What it asks for is <i>zayin exemplars from this fount</i>, "
-                         "and the route to those is a point-and-name sitting on any page in the "
-                         "volume &mdash; not a model, and not this card.",
-                    cites=("exemplar:zayin",))],
+                    note="There is now <b>exactly one zayin exemplar</b> in the signed corpus, "
+                         "and it is a pointed one: Chris, file p264 (printed 176), the word "
+                         "&#1494;&#1492;, glyph 1 from the right, 2026-11-15. No SPAN exemplar "
+                         "exists and none can be built &mdash; the span rule excludes any word "
+                         "that also holds a vav, and no span in the set shows both letters. "
+                         "<b>One impression is one impression.</b> The audit asked for <i>zayin "
+                         "exemplars from this fount</i>, plural, and the recorded need is met at "
+                         "one, so this card no longer refuses on exemplar grounds. Whether one is "
+                         "enough to settle the glyph is the signer's call and nothing here makes "
+                         "it: if it is not, point more zayins before signing this row.",
+                    cites=())],
          verdict="NO VERDICT, and this card cannot reach one as it stands. The audit's recorded "
                  "verdict is <code>signature_suspect_unsettled</code>. Note what it also says: "
                  "<i>the signed string is not a word</i> &mdash; that is an argument from context, "
@@ -637,6 +644,36 @@ def ask_positions(ask):
     """`pos` as a tuple, whether it was written as an int or a tuple."""
     p = ask["pos"]
     return tuple(p) if isinstance(p, (tuple, list)) else (p,)
+
+
+def _disputed_from_cards():
+    """{span_id: [(word, pos)]} for every glyph a card actually asks about.
+
+    DERIVED, because the hand list above was a snapshot and went stale: it covered 2 of the 10
+    letter-cards, so `sig_load`'s "an exemplar may not be the glyph under dispute" check could not
+    see the other eight. The measured consequence was that the final-nun census offered p628:n2's
+    own word -- the span whose glyph 2 is the question "final nun or vav?" -- as a page to point a
+    final nun on, and the loader would have taken it.
+
+    `card_asks` is the general form and `pos` may be a tuple (p831:n2 cuts a PAIR, both resh), so
+    both are read through the same two helpers the cards themselves are read through. Nothing is
+    typed here that a card does not already say.
+    """
+    out = {}
+    for c in CARDS:
+        for a in card_asks(c):
+            if not (a.get("candidates") or ()):
+                continue
+            w = a.get("word", c.get("word"))
+            for p in ask_positions(a):
+                out.setdefault(c["span_id"], []).append((w, p))
+    return {k: sorted(set(v)) for k, v in out.items()}
+
+
+# UNION, never replacement: the hand list holds rulings and a non-card span, the derivation holds
+# the seven cards nobody added. A position in either is a position no exemplar may come from.
+for _sid, _pp in _disputed_from_cards().items():
+    DISPUTED[_sid] = sorted(set(DISPUTED.get(_sid, [])) | set(_pp))
 
 
 def glyphs_at(truth, ask):
@@ -1480,6 +1517,35 @@ def partner_prose(partners):
     if len(ps) == 1:
         return ps[0]
     return ", ".join(ps[:-1]) + " or " + ps[-1]
+
+
+def sig_context_tiles(letter):
+    """[(file_page, word, index_from_right)] -- `letter` as a CONTEXT tile in a pointed word.
+
+    A signature records one letter at a named index AND a box for every other glyph in the word, so
+    a pointed dalet on p386 also carries boxes for the yods and the final nun around it. Those
+    boxes are drawn and indexed by the same hand in the same sitting.
+
+    THEY ARE NOT EXEMPLARS HERE. `sig_exemplars` filters on the record's `letter`, so a context tile
+    is invisible to every card today, and this function does not change that -- it REPORTS what
+    exists so the capture page can say "one context tile, no pointed record" instead of "none".
+    Whether a context tile should count is a live question: the module docstring's reason that a
+    signed exemplar skips rule 2 is that the signer named an index, and a context tile has one --
+    but the letter the signer was ATTESTING is the pointed one, and that asymmetry is Chris's to
+    rule on, not this function's to assume.
+    """
+    if "good" not in _SIGCACHE:
+        _SIGCACHE["good"], _SIGCACHE["bad"] = sig_load()
+    out = []
+    for r in _SIGCACHE["good"]:
+        for lb in r.get("letter_boxes") or ():
+            if lb.get("letter") != letter:
+                continue
+            if (lb.get("index_from_right") == r.get("letter_index_from_right")
+                    and r.get("letter") == letter):
+                continue        # the pointed one; sig_exemplars owns it
+            out.append((r["file_page"], r["word"], lb.get("index_from_right")))
+    return out
 
 
 def exemplars(letter, partner, want=4, exclude=()):
@@ -3217,18 +3283,42 @@ def selftest():
         want = "absent" if sid == "p596:n2" else "present"
         ck("%s's Latin gloss is %s" % (sid, want), _ls == want, (_ls, (_lw or _lt)[:60]))
 
-    # THE FIRST OUTPUT RULING 4 ASKED FOR DOES NOT EXIST IN THE CORPUS. Zayin exemplars were the
-    # named first deliverable; there are none, from either source, and no code can make one. The
-    # count is asserted so that the day one is pointed and named this check goes red and the card's
-    # refusal comes off the page.
-    ck("the zayin exemplar count is still a measured zero from both sources",
-       len(sig_exemplars("zayin")) == 0 and len(exemplars("zayin", None)) == 0,
+    # RULING 4'S FIRST DELIVERABLE NOW EXISTS, AND THIS CHECK IS WHAT SAID SO. It used to assert a
+    # measured zero from both sources, with the comment that the day one was pointed and named it
+    # would go red and the card's refusal would come off the page. That day was 2026-11-15: Chris
+    # pointed a zayin on file p264. The precondition is restated rather than the assertion relaxed.
+    # Both sources are still counted separately, because they are different kinds of evidence: a
+    # POINTED exemplar is admissible because the signer named an index, while a SPAN exemplar has
+    # to pass rule 2, and no span can -- no word in the set holds a zayin without a vav.
+    # THE NOTE IS CHECKED AGAINST THE RECORD IT DESCRIBES. It was written with the wrong index --
+    # "glyph 2 from the right" of a two-letter word whose zayin is at 1 -- and a card's note is what
+    # a human reads instead of the tally, so a misnamed glyph points a signer at the rival's
+    # neighbour. Fails in both directions: a wrong note, or a note left behind by a re-signing.
+    _z = sig_exemplars("zayin")
+    _znote = [a.get("note", "") for c in CARDS if c["span_id"] == "p233:n4" for a in card_asks(c)]
+    ck("p233:n4's note names the signed zayin's own page, word and index",
+       len(_z) == 1 and any(("file p%d" % _z[0]["file_page"]) in nt
+                            and ("glyph %d from the right" % _z[0]["letter_index_from_right"]) in nt
+                            and ("&#%d;" % ord(_z[0]["word"][0])) in nt
+                            for nt in _znote),
+       (_z[0] if _z else None, [nt[:120] for nt in _znote]))
+    ck("zayin has exactly one exemplar, the pointed one, and no span exemplar can be built",
+       len(sig_exemplars("zayin")) == 1 and len(exemplars("zayin", None)) == 0,
        (len(sig_exemplars("zayin")), len(exemplars("zayin", None))))
+    # The check above reads the note only if the note exists to be read; this one says the card is
+    # still there to have a note. A card whose ask vanished would make it vacuous.
+    ck("p233:n4 still asks something, so the note check above has a subject",
+       bool(_znote) and all(isinstance(nt, str) for nt in _znote), len(_znote))
+    # The card's face must agree with the count, whatever the count is -- a page saying "0" with one
+    # signature on disk is the shape of defect this section exists to catch, in either direction.
     if OUTHTML.exists():
-        ck("the zayin card says so on its face",
-           "only 0 exemplar(s) of zayin are available" in t2)
+        ck("the zayin card's face agrees with the measured count",
+           ("only %d exemplar(s) of zayin are available"
+            % (len(sig_exemplars("zayin")) + len(exemplars("zayin", None)))) in t2,
+           (len(sig_exemplars("zayin")), "only 0 exemplar(s) of zayin are available" in t2))
     else:
-        ck("the zayin card says so on its face", True, "no rendered page to scan")
+        ck("the zayin card's face agrees with the measured count", True,
+           "no rendered page to scan")
 
     # Section 8's draw-pool caption check was live-counting ZERO before these cards landed, which it
     # printed. Pinning the number here is what turns that printed zero into something that cannot
@@ -3278,7 +3368,9 @@ def selftest():
     # in its own total -- `ck`'s condition is evaluated before `ck` increments -- which is also how
     # section (10)'s count works. Written out because a count recomputed from the loops it counts
     # asserts nothing; it went red at 35 and that is what the line is for.
-    ck("section 11 ran every one of its checks", n[0] - _c0 == 36, n[0] - _c0)
+    # 38 since 2026-11-15: the zayin arrival added a check that the card's NOTE agrees with the
+    # signed record's page, word and index (the note had the index wrong), plus its liveness sibling.
+    ck("section 11 ran every one of its checks", n[0] - _c0 == 38, n[0] - _c0)
 
     print("")
     print("(12) item 5: the line strip and its derived baseline")
@@ -3424,8 +3516,22 @@ def selftest():
     _met_cited = [(sid, k, need_met(sid, k)[1]) for sid, k in _cited if need_met(sid, k)[0]]
     ck("no card cites a need that is already met", not _met_cited, _met_cited)
     # LIVENESS. Without this, deleting every `cites` would make the check above green forever.
-    ck("at least one card cites a need, so the check above has a subject",
-       any(ks for _s, ks in _cites), _cites)
+    # RESTATED 2026-11-15: the pointed zayin met p233:n4's only need, both cards now cite nothing
+    # legitimately, and a guard that demanded a subject fired on the honest state. It asserts the
+    # REASON there is none instead -- every need of a span a card asks about is met -- which goes
+    # red on the real defect in this direction: a card whose own need is unmet and whose note says
+    # nothing about it.
+    _card_spans_asking = set(sid for sid, _ks in _cites)
+    _unmet_of_cards = [(s_, k) for s_, ks in NEEDS.items() for k, _x in ks
+                       if s_ in _card_spans_asking and not need_met(s_, k)[0]]
+    ck("a card cites a need, or every need of a card's own span is met and that is why none does",
+       any(ks for _s, ks in _cites) or not _unmet_of_cards, (_cites, _unmet_of_cards))
+    # DISCRIMINATION. The clause above is satisfied for free if `need_met` has got stuck answering
+    # True. Some need in the registry must still be unmet, or it is not a predicate.
+    _unmet_any = [(s_, k) for s_, ks in NEEDS.items() for k, _x in ks if not need_met(s_, k)[0]]
+    ck("need_met still answers both ways: some declared need is unmet",
+       bool(_unmet_any) and bool([1 for s_, ks in NEEDS.items() for k, _x in ks
+                                  if need_met(s_, k)[0]]), (_unmet_any, len(NEEDS)))
     # And the key has to be a RECORDED one: `need_met` answers an unknown key False, so an invented
     # key reads as unmet and would pass the check indefinitely.
     _ghost = [(sid, k) for sid, k in _cited if k not in [x[0] for x in NEEDS.get(sid, ())]]
@@ -3434,9 +3540,11 @@ def selftest():
     # ---- item 3's rule, on the rows it decides -------------------------------------------------
     ck("p628:n2 cites nothing and is signable",
        dict(_cites).get("p628:n2") == () and signable("p628:n2")[0], signable("p628:n2"))
-    ck("p233:n4's zayin is unmet, so the card is not signable and says which need",
-       unmet("p233:n4") == ["exemplar:zayin"] and signable("p233:n4") ==
-       (False, "needs unmet: exemplar:zayin"), signable("p233:n4"))
+    # Restated 2026-11-15, when the pointed zayin met the need. The row this section was built
+    # around is now the row that shows the need-clause CLEARING -- which is the direction nothing
+    # had ever exercised, and the reason the predicate is read rather than the note.
+    ck("p233:n4's zayin need is met by the pointed exemplar, so the card is signable",
+       unmet("p233:n4") == [] and signable("p233:n4")[0], (unmet("p233:n4"), signable("p233:n4")))
     # `not_adjudicated` and `absent from the audit` are not near misses to be waved through: they
     # record that nobody decided, which is the opposite of a verdict.
     ck("not_adjudicated does not qualify (p910:n3)",
@@ -3451,8 +3559,11 @@ def selftest():
     # sheet cannot disagree about one span.
     _pop = sorted(set(r["span_id"] for r in _AUD.AUDIT) | set(NEEDS))
     _sign = sorted(s for s in _pop if signable(s)[0])
-    ck("the signable set is exactly the five rows measured on 2026-11-01",
-       _sign == ["p254:n1", "p442:n0", "p628:n2", "p798:n0", "p831:n2"], _sign)
+    # SIX since 2026-11-15, not the five measured on 2026-11-01, and the sixth is named with its
+    # cause: p233:n4 joined when Chris's pointed zayin met `exemplar:zayin`. A set, not a count, so
+    # one span cannot swap for another silently.
+    ck("the signable set is the five of 2026-11-01 plus p233:n4, whose zayin need was met",
+       _sign == ["p233:n4", "p254:n1", "p442:n0", "p628:n2", "p798:n0", "p831:n2"], _sign)
     # The complement, BY CAUSE. The first draft of this check asserted the held-back set was the
     # three rows the cards cover; the population is the whole audit -- fourteen spans over twenty
     # rows -- so nine are held, and the check named a subset of the complement and called it the
@@ -3466,15 +3577,21 @@ def selftest():
     ck("the rows held on the verdict clause are the eight nobody asked to re-sign",
        _held.get("verdict") == ["p326:n11", "p428:n0", "p558:n3", "p594:n0", "p596:n2",
                                 "p622:n0", "p735:n0", "p910:n3"], _held.get("verdict"))
-    ck("exactly one row is held on an unmet need, and it is p233:n4",
-       _held.get("need") == ["p233:n4"], _held.get("need"))
+    # Was "exactly one row is held on an unmet need, and it is p233:n4". It is nobody now: every
+    # declared need in the registry is met. Kept as a check on the EMPTY state rather than deleted,
+    # because a need that silently reappears is exactly what this row's history is about.
+    ck("no row is held on an unmet need any more -- every declared need is met",
+       _held.get("need") is None, _held.get("need"))
     # NAMED RESIDUAL: this section governs DECLARED citations. A note that claims insufficiency and
     # declares no `cites` is invisible to it -- only a reader catches that, and the reason the check
     # is scoped this way is that a card's prose cannot be parsed for a claim. What it does kill is
     # the shape the p628:n2 defect actually took: a named need, satisfied, still cited.
     #
-    # 15 checks. This line is not in its own total: `ck` increments after evaluating.
-    ck("section 13 ran every one of its checks", n[0] - _e0 == 15, n[0] - _e0)
+    # 16 checks since 2026-11-15: the cites-liveness guard was restated when the pointed zayin
+    # emptied every `cites`, and it gained a DISCRIMINATION sibling -- the restated clause is
+    # satisfied for free if `need_met` stops answering False. This line is not in its own total:
+    # `ck` increments after evaluating.
+    ck("section 13 ran every one of its checks", n[0] - _e0 == 16, n[0] - _e0)
 
     # ---------------------------------------------------------------- (14) directed inclusions
     # Chris, 2026-11-08: "p596:n2 goes on the next sheet by hash; no audit rows written by hand."
@@ -3602,8 +3719,8 @@ def selftest():
     ck("p596:n2 is NOT signable -- by BOTH clauses, audit and needs (overdetermined)",
        not signable("p596:n2")[0] and not audit_qualifies("p596:n2")[0]
        and bool(unmet("p596:n2")), (signable("p596:n2"), unmet("p596:n2")))
-    ck("the signable set is still exactly the five measured on 2026-11-01",
-       sorted(s for s in _pop14 if signable(s)[0]) == ["p254:n1", "p442:n0", "p628:n2",
+    ck("the signable set is the five of 2026-11-01 plus p233:n4 (pointed zayin, 2026-11-15)",
+       sorted(s for s in _pop14 if signable(s)[0]) == ["p233:n4", "p254:n1", "p442:n0", "p628:n2",
                                                        "p798:n0", "p831:n2"],
        sorted(s for s in _pop14 if signable(s)[0]))
     ck("nothing signable is excluded from sheetable",
@@ -3635,6 +3752,53 @@ def selftest():
     # reaches the collision row, so the row he asked be kept needs a driver that is not a
     # live span.
     ck("section 14 ran every one of its checks", n[0] - _e14 == 27, n[0] - _e14)
+
+    # ---------------------------------------------------------------- (15) the disputed list
+    # `DISPUTED` is what `sig_load` and rule 2b read to refuse an exemplar drawn on the glyph under
+    # dispute. It was hand-typed and covered 2 of the 10 letter-cards, and the measured consequence
+    # was that the final-nun census offered p628:n2's own word -- the span whose glyph 2 IS the
+    # question "final nun or vav?" -- as a page to go and point a final nun on, and this loader
+    # would have accepted the record.
+    _e15 = n[0]
+    # RE-DERIVED HERE, from CARDS, and NOT by calling `_disputed_from_cards`. Mutation proved the
+    # first version of these two checks dead: they compared the producer against the producer, so a
+    # derivation returning {} made the left side vacuous and one barring five positions a span made
+    # the right side as wide as the defect. Both passed through the change they were written to
+    # catch. This is the same arithmetic in different code, which is enough to fail a mutation of
+    # the producer or of the union loop -- and it is the test's own statement of what a card asks.
+    _asked = {}
+    for _c in CARDS:
+        for _a in card_asks(_c):
+            if not (_a.get("candidates") or ()):
+                continue
+            for _p in ask_positions(_a):
+                _asked.setdefault(_c["span_id"], set()).add((_a.get("word", _c.get("word")), _p))
+    ck("every glyph a card asks about is a glyph no exemplar may come from",
+       bool(_asked) and all(_asked[s] <= set(DISPUTED.get(s, ())) for s in _asked),
+       sorted(s for s in _asked if not _asked[s] <= set(DISPUTED.get(s, ()))) or len(_asked))
+    # The seven that were missing. Named, so that a derivation quietly narrowing back to the old
+    # three cannot pass this section by deriving nothing.
+    ck("the seven stale spans are in it, not just the two that were typed",
+       all(s in DISPUTED for s in ("p233:n4", "p254:n1", "p442:n0", "p596:n2", "p628:n2",
+                                   "p798:n0", "p831:n2")),
+       [s for s in ("p233:n4", "p254:n1", "p442:n0", "p596:n2", "p628:n2", "p798:n0", "p831:n2")
+        if s not in DISPUTED])
+    # The union, in the direction a pure derivation would have broken: p895:n0 is a RULED span and
+    # not one of the cards, so nothing in CARDS can put it back.
+    ck("the hand list's non-card span survives the union",
+       DISPUTED.get("p895:n0") == [(1, 4)], DISPUTED.get("p895:n0"))
+    # The other direction. An over-exclusion is not the safe way to be wrong: every position barred
+    # here is an exemplar this lane cannot draw, out of a supply that is 26 words wide for final nun.
+    _hand = {"p217:n2": [(1, 3)], "p423:n3": [(2, 3)], "p895:n0": [(1, 4)]}
+    ck("nothing is barred that neither a card nor the hand list names",
+       all(set(DISPUTED[s]) <= _asked.get(s, set()) | set(_hand.get(s, ())) for s in DISPUTED),
+       sorted(s for s in DISPUTED
+              if not set(DISPUTED[s]) <= _asked.get(s, set()) | set(_hand.get(s, ()))))
+    # p831:n2 cuts a PAIR -- `pos` is a tuple there -- so a derivation reading `pos` as a number
+    # would store one position and drop the other, and the dropped one is a resh under dispute.
+    ck("a card whose pos is a tuple contributes BOTH of its positions",
+       sorted(DISPUTED.get("p831:n2", ())) == [(1, 2), (1, 3)], DISPUTED.get("p831:n2"))
+    ck("section 15 ran every one of its checks", n[0] - _e15 == 5, n[0] - _e15)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))

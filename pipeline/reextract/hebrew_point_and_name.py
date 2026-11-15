@@ -52,8 +52,8 @@ import sys
 
 import hebrew_aperture_diag as D
 from write_scope import assert_inside
-from hebrew_glyph_card import (CARDS, LETTER, RERAT, SIG_REQUIRED, SIGS, card_asks, exemplars,
-                               has_nikud, sig_exemplars, strip_nikud)
+from hebrew_glyph_card import (CARDS, DISPUTED, LETTER, RERAT, SIG_REQUIRED, SIGS, card_asks,
+                               exemplars, has_nikud, sig_context_tiles, sig_exemplars, strip_nikud)
 
 OUT = D.DATA / "hebrew_point_and_name.html"
 # The page images are not copied into this file and never will be: a capture surface that embeds
@@ -354,6 +354,104 @@ def blocked_letters():
     return [(k, sorted(need[k]["rivals"])) for k in sorted(need) if need[k]["least"] == 0]
 
 
+# The four axes Chris named for the second sitting's legend (item 2a, 2026-11-15). They are NOT
+# the same thing as the cards' rivals: final_mem is on one of them and no card asks it, and zayin's
+# card rivals do not include final_nun while this axis does. Both are unioned where a letter sits on
+# both, because rule 2 holds against every rival or it does not hold.
+LEGEND_AXES = (("dalet", "resh"), ("vav", "zayin", "final_nun"), ("he", "tav"),
+               ("mem", "final_mem", "samekh"))
+
+
+def axis_rivals():
+    """letter -> (rivals, from_card, from_axis). The two sources kept apart, because they answer
+    different questions: a card rival is a letter some card actually argues against, an axis rival
+    is one Chris named as confusable. A letter with axis rivals and no card rival has a VACUOUS
+    rule 2 in the cards' sense, and the page has to say so rather than print "nothing named"."""
+    card = {}
+    for c in CARDS:
+        for a in card_asks(c):
+            cands = tuple(a.get("candidates") or ())
+            for x in cands:
+                card.setdefault(x, set()).update(y for y in cands if y != x)
+    out = {}
+    for ax in LEGEND_AXES:
+        for l in ax:
+            out[l] = (set(card.get(l, ())), set(y for y in ax if y != l))
+    for l, rv in card.items():
+        if l not in out:
+            out[l] = (set(rv), set())
+    return dict((l, (sorted(c | a), sorted(c), sorted(a - c))) for l, (c, a) in out.items())
+
+
+def signed_supply(letter):
+    """What SIGNED evidence exists for `letter`, each item marked by kind and by rule 2.
+
+    [(kind, file_page, word, index_from_right, dirty_rivals)] where kind is "pointed" or "context".
+    `dirty_rivals` is the rivals present in the same word -- empty means rule-2 clean. A pointed
+    record is reported with its rule-2 state too, not exempted from the test: the cards exempt it
+    (a named index cannot beg the question) but the SITTING is choosing what to print as a specimen
+    beside a rival, and a specimen whose own word holds the rival is a worse picture whatever its
+    provenance. Both facts are shown; neither is collapsed into the other.
+    """
+    rivals = axis_rivals().get(letter, ((), (), ()))[0]
+    out = []
+    for r in sig_exemplars(letter):
+        bad = sorted(p for p in rivals if LETTER[p] in r["word"])
+        out.append(("pointed", r["file_page"], r["word"], r.get("letter_index_from_right"), bad))
+    for pg, word, idx in sig_context_tiles(letter):
+        bad = sorted(p for p in rivals if LETTER[p] in word)
+        out.append(("context", pg, word, idx, bad))
+    return out
+
+
+def legend_letters():
+    """[(letter, rivals, state)] -- every letter on one of the sitting's legend axes.
+
+    ALL of them, gaps included, because the sitting page has to show an exemplar for each and
+    "gaps shown as gaps" is the instruction. `state` carries what exists so the page states rather
+    than decides: the signed supply by kind with rule 2 run over each item, the span count, whether
+    the clean signed supply is a single instance, and `gap` -- no rule-2-clean SIGNED exemplar at
+    all, which is the twelve-page ask.
+    """
+    ar = axis_rivals()
+    out = []
+    for ax in LEGEND_AXES:
+        for letter in ax:
+            rivals, from_card, from_axis = ar[letter]
+            sup = signed_supply(letter)
+            clean = [x for x in sup if not x[4]]
+            out.append((letter, rivals, {
+                "from_card": from_card, "from_axis": from_axis, "axis": ax,
+                "signed": sup, "clean": clean,
+                "span_exemplars": len(exemplars(letter, rivals)),
+                "single": len(clean) == 1, "gap": not clean}))
+    return out
+
+
+def card_axis_thin():
+    """[(letter, rivals, signed_supply)] -- card-argued letters with no rule-2-clean SIGNED exemplar
+    that are NOT on a legend axis.
+
+    Reported, never asked for. The sitting's legend covers the four axes Chris named, and widening a
+    human's sitting by nine letters on this lane's own authority is not this function's business.
+    But one of them is in a state the legend page would never reveal: yod has no pointed record and
+    BOTH its context tiles sit in p386's yod-dalet-yod-final-nun, each dirtied by the final nun --
+    and yod is a rival on three separate card asks. That belongs in a report with the reason it is
+    not in the ask.
+    """
+    on_legend = set(l for ax in LEGEND_AXES for l in ax)
+    ar = axis_rivals()
+    out = []
+    for letter in sorted(ar):
+        if letter in on_legend:
+            continue
+        sup = signed_supply(letter)
+        if any(not x[4] for x in sup):
+            continue
+        out.append((letter, ar[letter][0], sup))
+    return out
+
+
 def census_pages(letter, rivals, want=12):
     """(rows, n_words_total) -- file pages whose stored text holds `letter` in a rival-free word.
 
@@ -370,7 +468,11 @@ def census_pages(letter, rivals, want=12):
     look at, and he should be able to see which rows are not a fresh page.
     The POSITION of the letter in the word is computed here and deliberately NOT returned: it is
     the one thing on this page that would do his counting for him, and the geometry gate exists
-    because that count is the claim.
+    because that count is the claim. It IS used for one thing: an occurrence that is itself a
+    DISPUTED glyph is not offered. Measured: this list used to hand back p628:n2's own word as a
+    page to point a final nun on, and p628:n2 is the card asking whether that glyph is a final nun
+    or a vav. Excluded by POSITION and not by span, because a disputed span's other glyphs are
+    ordinary print -- the hand list's own comment says the rest of the phrase is unaffected.
 
     Returns ([], 0) when the census is not on disk. A page that invented candidates because its
     source was missing would be the exact fabrication this lane keeps a blank channel for.
@@ -390,8 +492,14 @@ def census_pages(letter, rivals, want=12):
         toks, rawtoks = t.split(), raw.split()
         if len(toks) != len(rawtoks):
             rawtoks = toks
-        for w, wraw in zip(toks, rawtoks):
+        dis = DISPUTED.get(s["span_id"], [])
+        for wi, (w, wraw) in enumerate(zip(toks, rawtoks), start=1):
             if ch not in w or any(p in w for p in rv):
+                continue
+            # Every occurrence of `ch` in this word is a disputed glyph -> the word has nothing
+            # clean to point at. One clean occurrence is enough to offer it.
+            if dis and all((wi, ci) in dis
+                           for ci, c in enumerate(w, start=1) if c == ch):
                 continue
             hits.append((0 if span_clean else 1, len(w), int(s["page"]), w,
                          s["span_id"], has_nikud(wraw)))
@@ -415,13 +523,56 @@ def census_pages(letter, rivals, want=12):
     return out, len(hits)
 
 
+def offer_letters():
+    """[(letter, rivals, tier, why)] -- every letter this page asks Chris to point, both tiers.
+
+    tier "blocked": no exemplar from ANY source, so a card prints NO VERDICT. tier "gap": on one of
+    the sitting's legend axes with no rule-2-clean SIGNED exemplar, so the legend cannot show a
+    specimen beside its rival. The tiers stay labelled all the way to the page -- they are different
+    states with different consequences, and a reader who cannot tell them apart cannot tell what his
+    pointing would buy.
+
+    A letter in both tiers appears once, as "blocked", because that is the stronger statement.
+    """
+    out, seen = [], set()
+    for letter, rivals in blocked_letters():
+        out.append((letter, rivals, "blocked",
+                    "no exemplar of any kind: a card prints NO VERDICT until one is pointed"))
+        seen.add(letter)
+    for letter, rivals, st in legend_letters():
+        if letter in seen or not st["gap"]:
+            continue
+        sup = st["signed"]
+        if not sup:
+            why = ("no signed exemplar at all; %d span exemplar(s) exist but the legend needs a "
+                   "hand-drawn specimen" % st["span_exemplars"])
+        else:
+            why = ("the only signed impression(s) are rule-2 dirty: %s"
+                   % "; ".join("p%d %s (%s, holds %s)" % (pg, w, k, ",".join(bad))
+                               for k, pg, w, _i, bad in sup))
+        out.append((letter, rivals, "gap", why))
+        seen.add(letter)
+    return out
+
+
 def stuck_section():
     """The rivals and the pages, as one section of the page. Items 2 and 3 of the 2026-11-15 note."""
-    h = ['<section><h2>What the cards have no exemplar of &mdash; and some pages to look at</h2>',
-         '<div class="mut">The letters below are derived from the cards\' own questions: each is a '
-         'candidate some card asks about, and no exemplar of it exists anywhere &mdash; not signed '
-         'from the volume, not from a signed span. Pointing one unblocks a card that currently '
-         'prints NO VERDICT.</div>',
+    OFF = offer_letters()
+    _n1 = len([1 for r in OFF if r[2] == "blocked"])
+    h = ['<section><h2>What has no exemplar &mdash; and some pages to look at</h2>',
+         '<div class="mut">Two tiers, labelled on every row, because they are different states. '
+         '<b>blocked</b>: no exemplar of the letter exists anywhere &mdash; not signed from the '
+         'volume, not built from a signed span &mdash; so a card asking about it prints NO VERDICT '
+         'until one is pointed. <b>gap</b>: the letter is on one of the four axes the sitting\'s '
+         'legend covers, and it has no <b>signed</b> exemplar that is rule-2 clean, so the legend '
+         'cannot show you a specimen of it beside the letter it is confused with. A gap letter may '
+         'still have span exemplars; the reason that is not enough is in its own row.</div>',
+         '<div class="%s">There %s <b>%d</b> blocked letter%s today%s</div>'
+         % ("mut" if _n1 == 0 else "warn", "is" if _n1 == 1 else "are", _n1,
+            "" if _n1 == 1 else "s",
+            " &mdash; every card candidate has an exemplar from some source. That is not the same "
+            "as every legend letter having a signed one, which is what the gap rows below are."
+            if _n1 == 0 else "."),
          '<div class="warn">The words and pages are the <b>stored machine extraction</b> '
          '(<span class="k">%s</span>), which is <b>unsigned</b>. They are <b>navigation, not a '
          'reading</b>: nothing here is asserted to you. If the glyph under your box is not that '
@@ -429,10 +580,11 @@ def stuck_section():
          'page in the row is there for exactly that reason. <b>Where the letter sits in the word is '
          'deliberately not printed.</b> That count is the claim you are signing, and you make it by '
          'boxing the glyphs.</div>' % CENSUS.name,
-         '<table class="sug"><tr><th>letter</th><th>the word must NOT contain</th>'
+         '<table class="sug"><tr><th>letter</th><th>tier</th>'
+         '<th>the word must NOT contain</th>'
          '<th>rival-free words<br>in all 696 spans</th><th>file pages (printed = file &minus; 88)'
          '</th></tr>']
-    for letter, rivals in blocked_letters():
+    for letter, rivals, tier, why in OFF:
         rows, total = census_pages(letter, rivals)
         rv = " ".join(LETTER[x] for x in rivals) or "&mdash;"
         cell = []
@@ -442,9 +594,12 @@ def stuck_section():
                         % (pg, pg - 88, w, len(w), "" if len(w) == 1 else "s",
                            "pointed" if nik else "unpointed", sid,
                            ", <b>same page</b>" if same else ""))
-        h.append('<tr><td><span class="heb">%s</span> %s</td><td><span class="heb">%s</span> '
+        h.append('<tr><td><span class="heb">%s</span> %s</td>'
+                 '<td><b>%s</b><div class="mut">%s</div></td>'
+                 '<td><span class="heb">%s</span> '
                  '<span class="mut">%s</span></td><td>%s</td><td>%s</td></tr>'
-                 % (LETTER[letter], letter, rv, ", ".join(rivals) or "nothing named",
+                 % (LETTER[letter], letter, tier, why, rv,
+                    ", ".join(rivals) or "nothing named",
                     total if total else "<b>none</b>",
                     "<br>".join(cell) or "<b>no rival-free word in the census</b>"))
     h.append("</table>")
@@ -558,7 +713,10 @@ if __name__ == "__main__":
         # Derived once here and compared against the PAGE, so a check cannot pass by asking the
         # same function the page asked. CANDS is independent of the exemplar count: it is just
         # which letters the cards argue about.
-        BLOCKED = blocked_letters()
+        # BOTH tiers, so every check over the suggestion table runs over the gap rows too.
+        OFFER = offer_letters()
+        BLOCKED = [(k, rv) for k, rv, _t, _w in OFFER]
+        TIER = dict((k, t) for k, _rv, t, _w in OFFER)
         SUG = dict((k, census_pages(k, rv)) for k, rv in BLOCKED)
         CANDS = set(x for c in CARDS for a in card_asks(c) for x in (a.get("candidates") or ()))
         # The exemplar record's object literal ALONE. Scoped because the re-ratification record
@@ -574,8 +732,52 @@ if __name__ == "__main__":
                 for _r in re.findall(r"<tr><td><span class=\"heb\">.</span> (\w+)</td>"
                                      r"<td>.*?</td><td>(.*?)</td><td>(.*?)</td></tr>", t, re.S)]
         RIV = dict(BLOCKED)
+        # (offer, total) for two letters, with the disputed-glyph exclusion ON and then OFF. Taken
+        # here rather than inside the tuple so the toggle happens once and is restored once; the
+        # card suite toggles DISPUTED the same way.
+        _sv = dict(DISPUTED)
+        _CENS = [census_pages("final_nun", ["nun", "vav", "yod"], want=16)]
+        _CENS.append(None)
+        _CENS.append(census_pages("bet", ["gimel"], want=16))
+        _CENS.append(None)
+        DISPUTED.clear()
+        _CENS[1] = census_pages("final_nun", ["nun", "vav", "yod"], want=16)
+        _CENS[3] = census_pages("bet", ["gimel"], want=16)
+        DISPUTED.update(_sv)
+        assert DISPUTED == _sv, "the exclusion was not restored"
         n = f = 0
         for name, cond in (
+                # The navigation half of the derived disputed list. A page that offers the glyph
+                # under dispute as a place to point its own answer begs the question, and the
+                # loader used to take the signature.
+                #
+                # NOT asserted over the parsed page rows, deliberately, and the reason is a limit
+                # worth writing down: a row only reaches the page while its letter is BLOCKED, and
+                # the letter this defect was live on (final_nun) is not blocked today. A page-level
+                # check would therefore pass on an empty set -- a probe that misses passes on
+                # nothing. So it is asserted against the function, with a liveness count beside it.
+                #
+                # The NAMED INSTANCE, and the one that was live: p628:n2's own word was offered as
+                # a final-nun exemplar. Checked against the function with its real rivals, because
+                # the row only reaches the page while final_nun is blocked, and it is not today.
+                ("the final-nun offer does not contain p628:n2, the span that asks the question",
+                 all(r[4] != "p628:n2"
+                     for r in census_pages("final_nun", ["nun", "vav", "yod"], want=16)[0])),
+                # Liveness, and the over-exclusion direction in one pair. Both sides are
+                # MEASURED IN THIS RUN -- the exclusion is lifted and re-applied -- so nothing is
+                # pinned to a count that goes stale when the corpus does.
+                #
+                # A >= 12 threshold was the first version of this, and mutation proved it dead: only
+                # ONE disputed span holds a rival-free final-nun word at all, so barring the glyph
+                # and barring the whole span both give 25 and the threshold cannot tell them apart.
+                # The discrimination is the OTHER letter.
+                ("the exclusion drops the final-nun word that has nothing clean left in it",
+                 _CENS[0][1] == _CENS[1][1] - 1 and len(_CENS[0][0]) >= 12),
+                # p423:n3's disputed glyph is a word-2 gimel/bet, and word 1 of that span shows an
+                # undisputed impression of the same letter. That word is ordinary print and must
+                # still be offered -- every position barred is an exemplar this lane cannot draw.
+                ("a word whose other impression is undisputed is still offered",
+                 _CENS[2][1] == _CENS[3][1]),
                 ("no page image is embedded in the capture page", "base64," not in t),
                 ("the images are referenced by relative path", IMGREL in t),
                 # The one piece of arithmetic on this page that a reader cannot check by eye is the
@@ -608,11 +810,46 @@ if __name__ == "__main__":
                 # arithmetic: every letter the page says is blocked must really have no signed
                 # exemplar and must really be a candidate on a card, and every word it suggests
                 # must really be free of that letter's rivals on a page that really exists.
-                ("every letter the page calls blocked has no signed exemplar",
-                 all(not sig_exemplars(k) for k, _r in BLOCKED)),
-                ("every letter the page calls blocked is a candidate on some card",
-                 all(k in CANDS for k, _r in BLOCKED)),
-                ("the rivals of every blocked letter are printed", bool(BLOCKED) and
+                # Tier-scoped, and the scoping is itself asserted below rather than left as a
+                # quietly loosened conjunct. A tier-1 letter has no exemplar of any kind; a tier-2
+                # letter may have span exemplars (tav has three) and what it lacks is a signed one
+                # that is rule-2 clean.
+                ("every letter the page calls blocked has no exemplar from any source",
+                 all(not sig_exemplars(k) and not exemplars(k, rv)
+                     for k, rv in BLOCKED if TIER[k] == "blocked")),
+                ("every letter the page calls a gap has no rule-2-clean signed exemplar",
+                 all(not [1 for x in signed_supply(k) if not x[4]]
+                     for k, _rv in BLOCKED if TIER[k] == "gap")),
+                ("every blocked letter is a candidate on some card",
+                 all(k in CANDS for k, _r in BLOCKED if TIER[k] == "blocked")),
+                # The reason the clause above is tier-1 only, stated as a fact rather than implied
+                # by its absence: final_mem is on the mem/final mem/samekh axis the legend covers
+                # and NO card asks about it, so rule 2 is vacuous for it in the cards' sense.
+                ("a gap letter on no card exists, which is why that clause is tier-1 only",
+                 any(k not in CANDS for k, _r in BLOCKED if TIER[k] == "gap")),
+                ("the page offers something to point, in at least one tier",
+                 bool(BLOCKED)),
+                # THE OTHER DIRECTION. Every clause above is of the form "no gap letter has a clean
+                # exemplar", which a SHRINKING gap tier satisfies just as well -- the empty set
+                # satisfies it best. This one fails when rule 2 stops being applied: a letter whose
+                # every signed impression is dirty must be IN the ask. Derived over all the legend
+                # letters, naming none, so a new signature does not break it.
+                ("a legend letter whose every signed impression is rule-2 dirty is in the ask",
+                 all(k in TIER for k, _rv, st in legend_letters()
+                     if st["signed"] and not [1 for x in st["signed"] if not x[4]])),
+                # And the subject for it, so the clause is not satisfied by there being no such
+                # letter: final nun is one today, its only tile dirtied by the yod beside it.
+                ("some legend letter is in that state, so the clause above has a subject",
+                 any(st["signed"] and not [1 for x in st["signed"] if not x[4]]
+                     for _k, _rv, st in legend_letters())),
+                # A row with no rival to avoid teaches the wrong thing, and the for-all above is
+                # satisfied vacuously by one. final_mem gets its rivals from the legend axis, not
+                # from a card ask, and a scoping mutation would empty them silently.
+                ("every offered letter has at least one rival named",
+                 all(rv for _k, rv in BLOCKED)),
+                ("every row's tier is printed on the page beside its letter",
+                 all(("<b>%s</b>" % TIER[k]) in t for k, _r in BLOCKED)),
+                ("the rivals of every offered letter are printed", bool(BLOCKED) and
                  all(LETTER[x] in t for _k, rv in BLOCKED for x in rv)),
                 ("the suggestion table has one row per blocked letter, by name",
                  [r[0] for r in ROWS] == [k for k, _rv in BLOCKED]),
