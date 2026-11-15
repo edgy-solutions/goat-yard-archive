@@ -4,19 +4,22 @@
 happens when it is **deployed**, written for whoever runs the upgrade. Same
 split as 0.3.2 (`798baa4`).
 
-**The 0.3.2 deploy record is not on this branch.** `798baa4` is on
-`release-0.3.2` and `main`, never merged into `release-0.3.3`, so
-`docs/releases/RELEASE_0.3.2.md` is absent here and cannot be found by looking.
-Read it with:
-
-```
-git show 798baa4:docs/releases/RELEASE_0.3.2.md
-```
+**The 0.3.2 deploy record is on this branch as of 2026-11-15.** It arrived
+with the forward-merge of `release-0.3.2` (`05ecd79`), so
+`docs/releases/RELEASE_0.3.2.md` is readable at its own path here. Until that
+merge it was absent and this file named `798baa4` instead, which remains its
+provenance on `release-0.3.2` and `main`.
 
 Its §"The pre-upgrade rule from here on" is the authoritative definition of the
 standing drift gate, and its §Acceptance is the output this release's acceptance
-extends. Naming the sha rather than the path because the path does not exist
-from here.
+extends.
+
+**Why the merge happened, because it is the reason this release did not deploy
+on 2026-11-15.** `release-0.3.3` was branched before 0.3.2's two deploy fixes
+and never took them: `529484f` (minio `requests.memory: 4Gi` and
+`deploymentUpdate.type: Recreate`) and `a674cd2` (the minio post-install job
+disabled with `buckets: []` and `users: []`). The step-1 gate caught it. See
+§Prediction for what it printed and for what the old prediction got wrong.
 
 ---
 
@@ -24,7 +27,7 @@ from here.
 
 | | |
 |---|---|
-| chart tip | `release-0.3.3`, chart subtree `c56791ea` (chart `version: 0.3.0`, unchanged) |
+| chart tip | `release-0.3.3`, chart subtree `ac4c3282` (chart `version: 0.3.0`, unchanged) |
 | api image | `ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:2fce1e34…b11433` |
 | ui image | `ghcr.io/edgy-solutions/goat-yard-archive/frontend@sha256:f386254e…96da4` |
 | flag | `GILL_STRUCTURED_ANSWER: "1"` (ConfigMap key, from `api.env`) |
@@ -59,14 +62,16 @@ checked something other than the upgrade.
 rm -rf  ~/.gya/chart-0.3.3
 mkdir -p ~/.gya/chart-0.3.3
 git -C ~/git/goatyard-rel033 rev-parse release-0.3.3:charts/goat-yard-archive
-# must print c56791ea5cab9414fb2bac3fde90ac45cdf8ee77
+# must print ac4c3282acc7e60c11325b75a49c93205677467d
 git -C ~/git/goatyard-rel033 archive release-0.3.3:charts/goat-yard-archive \
   | tar -x -C ~/.gya/chart-0.3.3
 helm dependency update ~/.gya/chart-0.3.3
 ```
 
-**The sha named is the chart SUBTREE, not a commit.** The chart was last touched
-at `b8288d7` and the branch tip has moved past it since -- this deploy record is
+**The sha named is the chart SUBTREE, not a commit.** The chart was last
+touched by the `release-0.3.2` forward-merge (`05ecd79`), which moved the subtree
+from `c56791ea` to `ac4c3282` by restoring the three minio values; the branch
+tip moves past it again with every later commit -- this deploy record is
 itself a commit -- so naming a commit would make this file stale the moment it
 was written. `c56791ea` is what `git archive` actually extracts, and it is stable
 under every later commit that does not touch `charts/`. If `rev-parse` prints
@@ -91,12 +96,15 @@ deploying that nothing in this repo asked for.
 Then confirm the copy is the commit it claims to be:
 
 ```sh
-git -C ~/git/goatyard-rel033 diff --no-index --stat \
-  <(git -C ~/git/goatyard-rel033 show release-0.3.3:charts/goat-yard-archive/values-frontend.yaml) \
-  ~/.gya/chart-0.3.3/values-frontend.yaml
+git -C ~/git/goatyard-rel033 show \
+  release-0.3.3:charts/goat-yard-archive/values-frontend.yaml \
+  | diff - ~/.gya/chart-0.3.3/values-frontend.yaml
 ```
 
-Empty output is the pass. This check exists because last week's
+Empty output is the pass. **`git diff --no-index` with a `<( … )` argument does
+not run in Git Bash on Windows** (Chris, measured 2026-11-15) -- hence the pipe
+into plain `diff`, which reads the committed side on stdin and needs no process
+substitution at all. This check exists because last week's
 `~/.gya/chart-0.3.2/values-frontend.yaml` was edited in place after the copy was
 made (mtime 19:34 against the copy's 14:11) — it happened to end up byte-identical
 to the committed `release-0.3.2` file, which is luck, not a procedure. **Nothing
@@ -117,7 +125,7 @@ helm template gya-frontend ~/.gya/chart-0.3.3 -n gya-frontend \
   -f ~/.gya/secrets-prod.yaml \
   > rendered.yaml
 
-kubectl -n gya-frontend get \
+kubectl --context edge -n gya-frontend get \
   secret/gya-frontend-secrets \
   secret/gya-frontend-minio \
   configmap/gya-frontend-config \
@@ -127,7 +135,7 @@ kubectl -n gya-frontend get \
   deploy/gya-frontend-ui \
   -o yaml > live_objects.yaml
 
-python ~/.gya/drift_hash.py rendered.yaml live_objects.yaml
+/c/Users/cnogr/AppData/Local/Programs/Python/Python311/python.exe ~/.gya/drift_hash.py rendered.yaml live_objects.yaml
 ```
 
 **`deploy/gya-frontend-ui` is in that capture on purpose, and it is new.**
@@ -137,6 +145,12 @@ that line the *second* image line this release changes is invisible to the gate 
 the probe would miss, and report no drift on a key it never looked at. Capturing
 more than `EXPECTED` is safe: the completeness check only asserts that the
 `EXPECTED` five are present on both sides.
+
+**`--context edge` is not optional and is not the default.** Without the
+right context selected the `get` either fails or, worse, answers from another
+cluster and the gate compares prod's render against something else entirely. It
+is written into the command rather than left to the shell's current context
+(Chris, 2026-11-15).
 
 Rendered-against-**LIVE**, never against `helm get manifest`. That rehearsal is
 withdrawn as a gate: both of its sides derive from helm's *stored* values, so it
@@ -158,7 +172,7 @@ Both overlays passed explicitly, so there is nothing for the upgrade to revert.
 ### 3 — acceptance
 
 ```sh
-python ~/git/goatyard-rel033/evals/accept_0_3_3.py
+/c/Users/cnogr/AppData/Local/Programs/Python/Python311/python.exe ~/git/goatyard-rel033/evals/accept_0_3_3.py
 ```
 
 Run it after the revision records `deployed`. Exit `0` means every item passed
@@ -188,57 +202,96 @@ week — the first 0.3.2 acceptance run read all-false on a cold pod.
 
 ---
 
-## Prediction — written before the run
+## Prediction — restated 2026-11-15, after the first gate run
 
-### The drift gate will exit **1**, and that is the gate working
+### What the first run printed, and why it stopped
 
-`drift_hash.py` hardcodes its intended-change set as
-`r.endswith("image[api]") or "GYA_DEBUG_STAGES" in r` — 0.3.2's two intended
-changes. 0.3.3's three do not match that pair, so **two of them classify as
-UNINTENDED REVERTS and the script returns 1.** Predicted verdict block:
+The step-1 gate ran on 2026-11-15 against `release-0.3.3` **before** the
+forward-merge, and Chris stopped the release at step 1. Names only, as reported:
 
 ```
-intended changes (the 0.3.2 upgrade): 1
-  Deployment/gya-frontend-api image[api]
-UNINTENDED REVERTS -- live value helm would overwrite: 2
-  Deployment/gya-frontend-ui image[ui]
-  ConfigMap/gya-frontend-config GILL_STRUCTURED_ANSWER
+37 same, every secret same
+DIFFERENT  image[api]                0.3.2  -> 2fce1e34   (intended)
+DIFFERENT  image[ui]                 0.3.0  -> f386254e   (intended)
+DIFFERENT  minio requests.memory     live 4Gi -> rendered 16Gi   (NOT intended)
+           GILL_STRUCTURED_ANSWER    only in RENDERED
+           env[MINIO_HTTP_ENDPOINT]  only in LIVE
+rendered objects 19   (0.3.2 final rendered 18)
 ```
 
-**Do not read exit 1 as STOP here, and do not whitelist the two lines.** The
-0.3.2 record settled this: the intended set is deliberately not parameterised,
-because a gate that learns each release's exceptions stops being a gate. The
-adjudication is the printed **direction**, not the exit code. All three keys are
-`plain()` — `image[` prefix, and `GILL_STRUCTURED_ANSWER` is in `SAFE_PRINT` — so
-all three print their literal values:
+**The cause is confirmed, by render rather than by reading.** `release-0.3.3`
+lacked `529484f` and `a674cd2`. Rendering the pre-merge
+`values-frontend.yaml` reproduces all of it: `requests.memory: 16Gi`,
+`strategy.type: RollingUpdate`, 19 objects, and the 19th is
+`Job/gya-frontend-minio-post-job`. Rendering the merged file gives `4Gi`,
+`Recreate`, 18 objects, no Job.
+
+**Three ways the old prediction was wrong.** Stated as the prediction being
+wrong, not as the run being surprising:
+
+1. It said *"Nothing else prints `DIFFERENT`. Any fourth line is either
+   pre-existing out-of-band drift on prod or something this edit did not
+   intend."* The fourth line was **neither**. It was a fix that existed, was
+   deployed to prod, and was missing from this branch -- a third category the
+   disjunction did not name. The live 4Gi was not drift; it was the correct
+   value, and the render was the thing that was wrong.
+2. It predicted the flag as `live='0' -> rendered='1'`, a changed value, and
+   explicitly retracted an earlier prediction that the render would *gain* the
+   key. The retracted prediction was the right one: the flag came in as **only
+   in RENDERED**, because prod runs the 0.3.2 chart, whose `values.yaml` has no
+   such key (it arrives with `a81b98b`). This file's own Prediction B named that
+   fork correctly and then picked the wrong branch of it. A correction is a
+   claim too, and this one was held to a lower bar than the thing it corrected.
+3. It said this edit changes the `only-rendered` and `only-live` counts *"by
+   exactly zero"*, on the basis that the render diff was three changed values
+   and no added key. That basis was file-scoped and could not see that the LIVE
+   side lacks the key entirely, so `only-rendered` moved by +1.
+
+**What was right:** both image lines, in direction and in value; every secret
+`same`; and the `only in LIVE` env key being unpredictable from the chart.
+
+### The restated prediction for the re-run, post-merge
+
+Chart subtree `ac4c3282`. Each line falsifiable:
 
 ```
-Deployment/gya-frontend-api
-  image[api]               DIFFERENT  live='…/backend:0.3.2' -> rendered='…/backend@sha256:2fce1e34…'
-Deployment/gya-frontend-ui
-  image[ui]                DIFFERENT  live='…/frontend:0.3.0' -> rendered='…/frontend@sha256:f386254e…'
-ConfigMap/gya-frontend-config
-  GILL_STRUCTURED_ANSWER   DIFFERENT  live='0' -> rendered='1'
+SAME            38        (37 + minio requests.memory, which moves out of DIFFERENT)
+DIFFERENT        2        image[api] and image[ui], nothing else
+only-rendered    1        GILL_STRUCTURED_ANSWER, same as the first run
+only-live        1        env[MINIO_HTTP_ENDPOINT], same as the first run
+rendered objects 18       the hook job is gone
+exit             1
 ```
 
-Three predictions inside that, each falsifiable:
-
-- **The two live image strings are `tag`s, not digests.** `release-0.3.2`'s
-  `values-frontend.yaml` has no `digest:` key for api or ui (lines 25-27, 197-199):
-  it shipped `backend:0.3.2` and `frontend:0.3.0`. So the direction here is
-  tag → digest, which is a *pin*, not a version bump for the ui.
-- **The flag line reads `live='0' -> rendered='1'`, a changed value, not an
-  addition.** `values.yaml:101` carries the key at `"0"` as the chart default and
-  is always merged under the overlay. **If it prints as "only in RENDERED
-  (upgrade would ADD it)", prod is running a chart older than `a81b98b`** — which
-  is Prediction B's condition firing, and worth knowing before the upgrade. This
-  is a correction of my own earlier prediction: I predicted the render would
-  *gain* the key, from a file-scoped read of two values files, and a file-scoped
-  assertion cannot see a two-file merge — only the render can. Chris's wording
-  ("flag line DIFFERENT") was right and mine was not.
-- **Nothing else prints `DIFFERENT`.** Any fourth line is either pre-existing
-  out-of-band drift on prod or something this edit did not intend, and either way
-  it is new information to read before upgrading, not noise to step over.
+- **`minio resources[…requests.memory]` reads `same = 4Gi`.** It prints its
+  literal value: `plain()` covers keys starting `resources[`. This is the line
+  the merge was for, and `same` is the whole point -- the live value was right
+  all along.
+- **`strategy` does not appear at all, and that is the hole this release leaves
+  open.** `Recreate` is restored in the chart, but `strategy` is not among
+  `drift_hash.py`'s compared keys, so the gate neither confirms nor denies it.
+  The regression that would have hung the upgrade was invisible to the gate on
+  the first run and is invisible to it now. It is covered instead by
+  `charts/test_image_helper.py::test_values_frontend_minio_strategy_is_recreate`,
+  which fails on the pre-merge file for exactly that reason. This residual was
+  already written in §"What this deploy does NOT solve" before the first gate
+  run -- naming it there did not stop the branch shipping without the fix, which
+  is why it is now a test and not a note.
+- **Exit is still `1`, and that is still the gate working.** `reverts` is built
+  from `DIFFERENT` lines only, and the intended set is hardcoded as
+  `r.endswith("image[api]") or "GYA_DEBUG_STAGES" in r`. So `image[ui]` scores as
+  one UNINTENDED REVERT and `GILL_STRUCTURED_ANSWER`, being `only-rendered`,
+  scores as none. The old prediction said two unintended reverts; one of those
+  two was the flag, which cannot be a revert because it is not a `DIFFERENT`
+  line. **Do not whitelist `image[ui]`.** The adjudication is the printed
+  direction: `tag -> digest` is a pin, not a revert.
+- **Any `DIFFERENT` line beyond those two, any secret difference, or any object
+  count other than 18 is a STOP**, and this time the disjunction is named in
+  full: it is out-of-band change on prod, something this edit did not intend, or
+  a fix on `main` or `release-0.3.2` that this branch still does not carry. The
+  third is the one that was missed, so it is checked first --
+  `git log --oneline release-0.3.3..release-0.3.2` and the same against `main`
+  must both be empty before the gate is read.
 
 ### `secrets same`, with the unknown named
 
@@ -266,12 +319,14 @@ saying so.
 
 What I can predict, and it is the part that matters:
 
-> **This edit changes the `only-rendered` and `only-live` counts by exactly
-> zero.** The render diff of the edit is three *changed values* and no added or
-> removed key (measured, `PROD_FLIP_PREDICTION…20261101.md` § MEASURED: six
-> lines, three hunks). So if either count differs from last week's run, the cause
-> is not this edit — it is something that changed on prod since 2026-10-25, or
-> the ui deployment now being in the capture for the first time.
+> **CORRECTED 2026-11-15, this claim was wrong.** As written it predicted that
+> this edit changes the `only-rendered` and `only-live` counts by exactly zero,
+> on the basis that the render diff is three *changed values* and no added or
+> removed key (`PROD_FLIP_PREDICTION…20261101.md` § MEASURED: six lines, three
+> hunks). `only-rendered` came in at +1: `GILL_STRUCTURED_ANSWER` is absent from
+> the LIVE side because prod runs the 0.3.2 chart. The basis was a read of this
+> repo's own files, and no read of this repo can tell you which keys the live
+> object carries. The measured counts for the re-run are in §Prediction.
 
 That last clause is a real caveat about this run specifically: the ui deployment
 was **never compared before**, so whatever `only in LIVE` keys it carries will
@@ -309,7 +364,19 @@ The gate's whole purpose is the content the chart cannot account for.
 - **The drift gate still does not watch deployment-level fields** (`strategy` is
   the live example), and `crossref_env.py` still answers "does any captured
   source carry this key with this value", not "does *this container's* source
-  carry it".
+  carry it". Partly covered since 2026-11-15: five render-scoped checks in
+  `charts/test_image_helper.py` assert the minio memory request, the `Recreate`
+  strategy, the absence of the post-install job and the full rendered object set,
+  each paired with a mutation control that puts the subchart default back and
+  requires the check to fire. They run at commit time on any branch, where the
+  gate runs once per deploy against one cluster. **They do not replace the
+  gate**: they can only see what the chart renders, never what prod carries.
+- **Nothing checks that a release branch carries `main`'s deploy fixes.** The
+  2026-11-15 stop was a branch three weeks behind on exactly the two commits
+  that made the 0.3.2 upgrade survivable. The new chart tests catch the three
+  symptoms; they do not catch the general case of a release branch missing a
+  fix that nothing renders. The `git log release-0.3.3..main` check in
+  §Prediction is a manual step, not a gate.
 - **The gate-run launcher's pod filter fix (ruling 4) is not exercised by this
   deploy.** It lands before the *next* gate run and nothing in this path depends
   on it.

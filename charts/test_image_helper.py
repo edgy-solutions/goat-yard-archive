@@ -20,6 +20,11 @@ import subprocess
 import sys
 import traceback
 
+try:
+    import yaml
+except ImportError:  # named as a precondition in __main__, never skipped
+    yaml = None
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CHART = os.path.join(_HERE, "goat-yard-archive")
 
@@ -230,6 +235,154 @@ def test_values_yaml_default_stays_off():
     assert flags == ['GILL_STRUCTURED_ANSWER: "0"'], flags
 
 
+
+# ---- the minio deploy shape (ruling 13 item 5) --------------------------
+#
+# 529484f and a674cd2 carried three fixes into prod's values-frontend.yaml for
+# 0.3.2, and release-0.3.3 was branched without them. The 2026-11-15 drift gate
+# caught ONE of the three -- requests.memory 4Gi live against 16Gi rendered --
+# and the object count caught a second as 19 rendered against 18. It could not
+# see the third at all: `strategy` is not among drift_hash.py's compared keys,
+# so a RollingUpdate regression on a one-replica ReadWriteOnce volume would have
+# reached the upgrade and hung it with no gate line anywhere. These checks sit
+# at the earliest point their inputs exist, which is the render, not the cluster.
+
+MINIO_MEMORY = "4Gi"          # subchart default is 16Gi; worker5 cannot fit it
+MINIO_STRATEGY = "Recreate"   # one replica on a RWO local-path volume
+
+
+def _docs(out):
+    return [d for d in yaml.safe_load_all(out) if isinstance(d, dict)]
+
+
+def _kinds(docs):
+    return sorted("%s/%s" % (d.get("kind"), d.get("metadata", {}).get("name"))
+                  for d in docs)
+
+
+def _minio_deployment(docs):
+    """The minio Deployment, or an AssertionError naming its absence.
+
+    A guard whose subject did not render would pass on nothing, so the absence
+    is a failure of the guard rather than a vacuous success.
+    """
+    found = [d for d in docs
+             if d.get("kind") == "Deployment"
+             and d.get("metadata", {}).get("name", "").endswith("-minio")]
+    assert len(found) == 1, (
+        "expected exactly one minio Deployment in the render, found %d -- these "
+        "guards assert a property OF that object and cannot pass without it"
+        % len(found))
+    return found[0]
+
+
+def _minio_container(dep):
+    cs = dep["spec"]["template"]["spec"]["containers"]
+    found = [c for c in cs if c.get("name", "").endswith("minio")]
+    assert len(found) == 1, [c.get("name") for c in cs]
+    return found[0]
+
+
+def test_values_frontend_minio_requests_4gi():
+    _, out, _ = _render(values="values-frontend.yaml")
+    c = _minio_container(_minio_deployment(_docs(out)))
+    got = c.get("resources", {}).get("requests", {}).get("memory")
+    assert got == MINIO_MEMORY, (
+        "minio requests.memory rendered %r, expected %r. The subchart default is "
+        "16Gi and k3s-worker5 has 20968Mi allocatable against 10016Mi of "
+        "requests, so 16Gi leaves the pod Pending on Insufficient memory -- the "
+        "pod is pinned to that node by the local-path PV, not by the dmz label."
+        % (got, MINIO_MEMORY))
+
+
+def test_values_frontend_minio_strategy_is_recreate():
+    _, out, _ = _render(values="values-frontend.yaml")
+    got = _minio_deployment(_docs(out))["spec"].get("strategy", {}).get("type")
+    assert got == MINIO_STRATEGY, (
+        "minio strategy.type rendered %r, expected %r. RollingUpdate with "
+        "maxUnavailable 0 asks a second pod to go Ready before the first is "
+        "removed, which one replica on a 50Gi ReadWriteOnce local-path volume "
+        "cannot do. THE DRIFT GATE CANNOT SEE THIS KEY: `strategy` is not in "
+        "drift_hash.py's compared set, so this check is the only thing between a "
+        "branch that lacks the override and an upgrade that hangs."
+        % (got, MINIO_STRATEGY))
+
+
+def test_values_frontend_renders_no_minio_hook_job():
+    _, out, _ = _render(values="values-frontend.yaml")
+    jobs = [d for d in _docs(out) if d.get("kind") == "Job"]
+    assert jobs == [], (
+        "the minio post-install/post-upgrade hook job rendered: %s. It needs "
+        "minio.buckets AND minio.users overridden with EMPTY LISTS -- the parent "
+        "values.yaml sets buckets and the subchart's own values.yaml ships a "
+        "truthy users default, so omitting either leaves the job in the render. "
+        "That job is mc-image ImagePullBackOff on prod and it failed the 0.3.2 "
+        "upgrade at revision 31."
+        % [d.get("metadata", {}).get("name") for d in jobs])
+
+
+def test_each_minio_guard_can_fail():
+    """The mutation control: put the three subchart defaults back and require
+    each assertion above to fire. A guard proved only by a green suite is not
+    proved -- the suite would be just as green with all three deleted."""
+    _, out, _ = _render(values="values-frontend.yaml", sets=(
+        "minio.resources.requests.memory=16Gi",
+        "minio.deploymentUpdate.type=RollingUpdate",
+        "minio.users[0].accessKey=console",
+        "minio.users[0].secretKey=console123",
+        "minio.users[0].policy=consoleAdmin",
+    ))
+    docs = _docs(out)
+    dep = _minio_deployment(docs)
+    got_mem = _minio_container(dep).get("resources", {}).get("requests", {}).get("memory")
+    assert got_mem == "16Gi", (
+        "control did not restore the 16Gi default (got %r), so the memory guard "
+        "is not shown to read the place that moves" % (got_mem,))
+    got_strat = dep["spec"].get("strategy", {}).get("type")
+    assert got_strat == "RollingUpdate", (
+        "control did not restore RollingUpdate (got %r), so the strategy guard "
+        "is not shown to read the place that moves" % (got_strat,))
+    jobs = [d for d in docs if d.get("kind") == "Job"]
+    assert len(jobs) == 1, (
+        "control did not produce the hook job (%d found), so the no-Job guard is "
+        "not shown to be able to fail" % len(jobs))
+
+
+def test_values_frontend_renders_the_expected_object_set():
+    """A release-branch pin on WHICH objects render, not on how many.
+
+    The 2026-11-15 gate read 19 rendered objects against 0.3.2's 18, and the one
+    extra was the hook job. A bare count would have said a number moved; this
+    says which object arrived. It is a deliberate pin: a legitimate new object
+    updates this list in the same commit that adds it.
+    """
+    _, out, _ = _render(values="values-frontend.yaml")
+    expected = sorted([
+        "ConfigMap/gya-frontend-config",
+        "ConfigMap/gya-frontend-minio",
+        "ConfigMap/litellm-config",
+        "Deployment/gya-frontend-api",
+        "Deployment/gya-frontend-cloudflared",
+        "Deployment/gya-frontend-minio",
+        "Deployment/gya-frontend-ui",
+        "Deployment/litellm",
+        "Ingress/gya-frontend",
+        "PersistentVolumeClaim/gya-frontend-minio",
+        "Secret/gya-frontend-minio",
+        "Secret/gya-frontend-secrets",
+        "Service/gya-frontend-api",
+        "Service/gya-frontend-minio",
+        "Service/gya-frontend-minio-console",
+        "Service/gya-frontend-ui",
+        "Service/litellm-service",
+        "ServiceAccount/minio-sa",
+    ])
+    got = _kinds(_docs(out))
+    assert got == expected, (
+        "rendered object set moved.\n  only rendered: %s\n  only expected: %s"
+        % (sorted(set(got) - set(expected)), sorted(set(expected) - set(got))))
+
+
 if __name__ == "__main__":
     if shutil.which("helm") is None:
         print("UNRUN  helm is not on PATH -- these checks did not run")
@@ -238,8 +391,11 @@ if __name__ == "__main__":
         print("UNRUN  chart dependencies absent -- run `helm dependency build %s`"
               % _CHART)
         sys.exit(2)
+    if yaml is None:
+        print("UNRUN  PyYAML absent -- the minio shape checks parse the render and did not run")
+        sys.exit(2)
 
-    EXPECTED_TEST_COUNT = 17
+    EXPECTED_TEST_COUNT = 22
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     if len(tests) != EXPECTED_TEST_COUNT:
         print("FAIL  expected %d tests, collected %d -- a test silently disappeared"
