@@ -488,11 +488,32 @@ if len(sys.argv) > 1 and sys.argv[1] == "--resign-diff":
         _bi = _argv.index("--basis")
         _basis = json.load(io.open(_argv[_bi + 1], encoding="utf-8"))
         del _argv[_bi:_bi + 2]
+    _only = None
+    if "--only" in _argv:
+        _oi = _argv.index("--only")
+        _only = [s for s in _argv[_oi + 1].split(",") if s.strip()]
+        del _argv[_oi:_oi + 2]
     _cur, _pri = _argv[2], _argv[3]
     try:
-        _rep = diff_resigned([json.loads(l) for l in io.open(_cur, encoding="utf-8") if l.strip()],
+        _crows = [json.loads(l) for l in io.open(_cur, encoding="utf-8") if l.strip()]
+        if _only is not None:
+            # A span named but not present is a REFUSAL, never a quietly smaller run: the whole point
+            # of naming the population is that the report's denominator is the one that was asked for.
+            _have = set(r.get("span_id") for r in _crows)
+            _absent = [s for s in _only if s not in _have]
+            if _absent:
+                raise ResignDiffError("--only names %s, which %s does not contain"
+                                      % (", ".join(_absent), os.path.basename(_cur)))
+            _crows = [r for r in _crows if r["span_id"] in set(_only)]
+        _rep = diff_resigned(_crows,
                              [json.loads(l) for l in io.open(_pri, encoding="utf-8") if l.strip()],
                              _rs_file_sha16(_cur), _rs_file_sha16(_pri), _basis)
+        if _only is not None:
+            _rep["population"] = {
+                "named_on_the_command_line": sorted(_only),
+                "rows_in_the_current_file": len(_have),
+                "why": "the current file holds more rows than this diff covers; the rest have a "
+                       "different latest prior and are not scored here"}
     except ResignDiffError as _e:
         # A refusal is an ANSWER, not a crash: a traceback buries it under a stack. No report is
         # written either -- a build that refuses must leave nothing behind, and `admit_resigned`
