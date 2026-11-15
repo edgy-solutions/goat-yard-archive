@@ -1048,7 +1048,7 @@ def strip_image(sp):
 # a capture surface that drops a mis-drawn box in silence would put the signer back where the four
 # wrong truth rows came from -- a plausible picture with nothing checking that it is the right one.
 SIG_REQUIRED = ("file_page", "box", "coord_space", "word", "letter",
-                "letter_index_from_right", "signer", "date")
+                "letter_index_from_right", "letter_boxes", "signer", "date")
 RERAT_REQUIRED = ("span_id", "file_page", "new_box", "coord_space", "text", "signer", "date",
                   "old_box_state")
 
@@ -1102,6 +1102,89 @@ def _one_band(im):
     return band_geometry(im)[0] in ("one-band", "merged-top-edge")
 
 
+def letter_boxes_fault(word, letter, idx, box, lboxes):
+    """Why the per-glyph boxes do not support the claim, or None.  Pure geometry: no images.
+
+    THE INDEX CHECK CAN NO LONGER DO THIS WORK.  While the word was typed, "the named letter is at
+    the claimed index of the named word" tied together two independent acts -- a reading of the
+    whole word and a count -- so a typo or an off-by-one showed up as a disagreement between them.
+    Chris does not read Hebrew and does not sign by typing (advisor, 2026-11-15), so the word is now
+    ASSEMBLED from the letter tiles he clicks: the string and the letter name come out of the same
+    clicks and cannot disagree.  A verifier that calls the producer is not a verifier, and leaving
+    that check as the gate would have been exactly that.
+
+    What is NOT by construction is the geometry.  He draws one box per glyph, in reading order, and
+    these checks are about those boxes: that there are as many of them as the word has glyphs, that
+    they run right to left in the order claimed, that no two are the same box or sit inside one
+    another, that they are all on one line of type, and that the box signed as the exemplar IS the
+    box at the claimed index.  Every one of those can be false while each tile click is the letter
+    he meant -- which is the point: it is a claim the naming act does not produce.
+
+    What it still cannot see is whether the glyph inside a box is the letter he named.  Nothing on a
+    capture surface can see that.  It is why the crop is shown magnified before the record is added,
+    and why the page proposes no reading of its own.
+    """
+    glyphs = strip_nikud(word or "")
+    if not glyphs:
+        return "the assembled word is empty"
+    if " " in glyphs:
+        return ("the assembled word %r holds a space -- an exemplar is ONE word, because the index "
+                "is counted in word 1" % glyphs)
+    lboxes = list(lboxes or ())
+    if len(lboxes) != len(glyphs):
+        return ("%d glyph box(es) for a %d-glyph word -- one box per glyph, or the index counts "
+                "nothing" % (len(lboxes), len(glyphs)))
+    seen = {}
+    for e in lboxes:
+        if not isinstance(e, dict):
+            return "a glyph box entry is a %s, not an object" % type(e).__name__
+        for k in ("index_from_right", "letter", "box"):
+            if e.get(k) in (None, ""):
+                return "a glyph box entry has no %s" % k
+        i = int(e["index_from_right"])
+        if not 1 <= i <= len(glyphs):
+            return "glyph box index %d is outside 1..%d" % (i, len(glyphs))
+        if i in seen:
+            return "two glyph boxes both claim index %d" % i
+        if e["letter"] not in LETTER:
+            return "unknown letter name %r on the glyph box at index %d" % (e["letter"], i)
+        b = [int(round(v)) for v in e["box"]]
+        if b[2] - b[0] < 2 or b[3] - b[1] < 2:
+            return ("the glyph box at index %d is %dx%d -- that is not a box"
+                    % (i, b[2] - b[0], b[3] - b[1]))
+        seen[i] = (e["letter"], b)
+    built = "".join(LETTER[seen[i][0]] for i in sorted(seen))
+    if built != glyphs:
+        return "the glyph boxes spell %r, the word is %r" % (built, glyphs)
+    for i in range(1, len(glyphs)):
+        a, b = seen[i][1], seen[i + 1][1]
+        if (a[0] + a[2]) <= (b[0] + b[2]):
+            return ("glyph %d is not to the right of glyph %d -- Hebrew is boxed right to left and "
+                    "position 1 is the rightmost glyph" % (i, i + 1))
+        ov = min(a[2], b[2]) - max(a[0], b[0])
+        if ov > 0.5 * min(a[2] - a[0], b[2] - b[0]):
+            return ("the boxes for glyphs %d and %d overlap by %dpx -- one box per glyph, not one "
+                    "box signed twice" % (i, i + 1, ov))
+    ks = sorted(seen)
+    for n_, i in enumerate(ks):
+        for j in ks[n_ + 1:]:
+            a, b = seen[i][1], seen[j][1]
+            ov = min(a[3], b[3]) - max(a[1], b[1])
+            if ov < 0.5 * min(a[3] - a[1], b[3] - b[1]):
+                return ("the boxes for glyphs %d and %d are not on one line of type (%dpx of "
+                        "shared height) -- a word sits on one line" % (i, j, max(0, ov)))
+    i = int(idx)
+    if i not in seen:
+        return "the record claims index %d and there is no glyph box there" % i
+    if seen[i][0] != letter:
+        return ("the glyph box at index %d was named %s, the record is signed for %s"
+                % (i, seen[i][0], letter))
+    if [int(round(v)) for v in box] != seen[i][1]:
+        return ("the signed box %s is not the glyph box at index %d, which is %s"
+                % ([int(round(v)) for v in box], i, seen[i][1]))
+    return None
+
+
 def sig_load(path=None):
     """(good, refused) exemplar signatures. Validation is the whole point of this function.
 
@@ -1109,12 +1192,19 @@ def sig_load(path=None):
       - every required field present, and `coord_space` == "native" (the other space exists);
       - the box cuts a real, non-blank, in-bounds crop -- D.crop_fault, the outbound gate;
       - the crop holds exactly ONE text line, so the exemplar is a letter and not a paragraph;
-      - the named letter really is at the named index of the named word. The word text is provenance,
-        the (box, letter, index) triple is the claim, and this check is what ties them: a typo in the
-        word or an off-by-one in the index is caught here rather than pointing a signer at the glyph
-        next door;
-      - the box does not overlap a card's own DISPUTED span on the same page. An exemplar may not be
-        the thing it is evidence about, and that guard cannot be left to memory."""
+      - the named letter really is at the named index of the named word. Since 2026-11-15 this is
+        ARITHMETIC OVER ONE ACT: the word is assembled from the signer's own tile clicks, so the
+        string and the letter name have a single source and cannot disagree. It is kept because a
+        malformed emitter can still break it, but the claim it used to carry has moved to
+        `letter_boxes_fault` -- the geometry of one drawn box per glyph, right to left, on one line,
+        with the signed box at the claimed index, which is the part the naming act does not produce;
+      - every glyph box cuts a real, non-blank, in-bounds crop: the same outbound gate as the signed
+        box, applied to every box in the record rather than to one of them;
+      - no box in the record overlaps a card's own DISPUTED span on the same page. An exemplar may
+        not be the thing it is evidence about, and that guard cannot be left to memory. It is now
+        tested against every glyph box and not only the signed one -- the word is as much part of
+        the record as the letter, and a discriminator applied on one axis and not the other is how
+        one record came to hold a true and a false verdict about the same thing."""
     good, bad = [], []
     dis = _disputed_native()
     for r in _jsonl(path or SIGS):
@@ -1144,10 +1234,27 @@ def sig_load(path=None):
                            % (r["letter"], idx, r["word"],
                               positions(r["word"], LETTER[r["letter"]]) or "no occurrence"))
                 else:
-                    for sid, rect in dis:
-                        if _overlaps(r["box"], rect):
-                            why = ("box overlaps the disputed span %s on this page -- an exemplar "
-                                   "may not be the glyph under dispute" % sid)
+                    gf = letter_boxes_fault(r["word"], r["letter"], idx, r["box"],
+                                            r.get("letter_boxes"))
+                    if gf:
+                        why = "glyph boxes: %s" % gf
+                if not why:
+                    for e in r["letter_boxes"]:
+                        _gim, gfault = cut_native(r["file_page"], e["box"])
+                        if gfault:
+                            why = ("glyph box at index %s: crop fault: %s"
+                                   % (e["index_from_right"], gfault))
+                            break
+                if not why:
+                    for lbl, bx in ([("the signed box", r["box"])]
+                                    + [("glyph box %s" % e["index_from_right"], e["box"])
+                                       for e in r["letter_boxes"]]):
+                        for sid, rect in dis:
+                            if _overlaps(bx, rect):
+                                why = ("%s overlaps the disputed span %s on this page -- an "
+                                       "exemplar may not be the glyph under dispute" % (lbl, sid))
+                                break
+                        if why:
                             break
             if not why:
                 r["_crop"] = im
@@ -2753,19 +2860,58 @@ def selftest():
     sp = {x["span_id"]: x for x in D.build_set(include_sealed=True)}["p491:n1"]
     _i, _r = cut(sp["page"], sp["span_box"], D.PAD, sp["column_bands"])
     _v, _g, _fo, _wb = find_ink(sp["page"], _r, grow=80)
-    okbox = candidate_band_box(sp["page"], _wb)
+    bandbox = candidate_band_box(sp["page"], _wb)
+    # One box per glyph is now part of the record, so the fixture needs them -- the band split into
+    # as many columns as the word has glyphs, RIGHT TO LEFT, since position 1 is the rightmost. They
+    # are synthetic columns and not letter segmentation: this module rejected segmenting letters,
+    # and the geometry gate asks about order, overlap and line, which columns of a real inked band
+    # answer honestly. The signed box is the column at the claimed index, because the gate requires
+    # it to be.
+    _rev = {v: k for k, v in LETTER.items()}
+    _glyphs = strip_nikud(sp["truth"])
+    _names = [_rev.get(c) for c in _glyphs]
+    ck("the fixture word is one word of known letters, so columns can stand for its glyphs",
+       " " not in _glyphs and len(_glyphs) >= 2 and None not in _names, (_glyphs, _names))
+    _w = (bandbox[2] - bandbox[0]) / float(max(1, len(_glyphs)))
+
+    def _col(i):
+        """The column standing for glyph `i`, counted from the RIGHT edge of the band."""
+        x1 = int(round(bandbox[2] - (i - 1) * _w))
+        return [int(round(bandbox[2] - i * _w)), bandbox[1], x1, bandbox[3]]
+
+    def _lb(over=None):
+        out = []
+        for i, nm in enumerate(_names, start=1):
+            out.append({"index_from_right": i, "letter": nm,
+                        "box": (over or {}).get(i) or _col(i)})
+        return out
+
+    okbox = _col(1)
     base = dict(file_page=sp["page"], box=okbox, coord_space="native", word=sp["truth"],
-                letter="bet", letter_index_from_right=1, signer="TEST", date="2026-09-27")
+                letter=_names[0], letter_index_from_right=1, letter_boxes=_lb(),
+                signer="TEST", date="2026-09-27")
     ck("the fixture names a real letter at a real index",
-       (1, 1) in positions(sp["truth"], LETTER["bet"]), positions(sp["truth"], LETTER["bet"]))
+       (1, 1) in positions(sp["truth"], LETTER[_names[0]]),
+       positions(sp["truth"], LETTER[_names[0]]))
     cases = [("a well-formed signature is accepted", dict(base), True),
              ("a strip-coordinate box is refused", dict(base, coord_space="strip"), False),
              ("an off-by-one letter index is refused",
               dict(base, letter_index_from_right=2), False),
              ("a box off the page is refused",
-              dict(base, box=[okbox[0], okbox[1] + 90000, okbox[2], okbox[3] + 90000]), False),
+              dict(base, box=[okbox[0], okbox[1] + 90000, okbox[2], okbox[3] + 90000],
+                   letter_boxes=_lb({1: [okbox[0], okbox[1] + 90000,
+                                         okbox[2], okbox[3] + 90000]})), False),
              ("a box holding more than one text line is refused",
-              dict(base, box=[okbox[0], okbox[1] - 120, okbox[2], okbox[3] + 120]), False),
+              dict(base, box=[okbox[0], okbox[1] - 120, okbox[2], okbox[3] + 120],
+                   letter_boxes=_lb({1: [okbox[0], okbox[1] - 120,
+                                         okbox[2], okbox[3] + 120]})), False),
+             ("a record with no glyph boxes at all is refused",
+              dict(base, letter_boxes=[]), False),
+             ("a glyph box on another line of type is refused",
+              dict(base, letter_boxes=_lb({2: [_col(2)[0], _col(2)[1] + 400,
+                                               _col(2)[2], _col(2)[3] + 400]})), False),
+             ("a signed box that is not the glyph box at the claimed index is refused",
+              dict(base, box=[okbox[0] + 3, okbox[1], okbox[2] + 3, okbox[3]]), False),
              ("a signature with no signer is refused", dict(base, signer=""), False),
              ("an unknown letter name is refused", dict(base, letter="aleph"), False)]
     fd, tmp = tempfile.mkstemp(suffix=".jsonl")
@@ -2783,6 +2929,59 @@ def selftest():
            not g_ and len(b_) == 1 and "unparseable" in b_[0]["_refused"])
     finally:
         os.unlink(tmp)
+
+    print("")
+    print("(6b) the glyph-box geometry gate, by mutation: what the index check can no longer say")
+    # Pure numbers, no page: the gate is geometry, and a guard is proved live by breaking it, never
+    # by a green run over the one record that satisfies it. Each case names the refusal it is for.
+    _G = "\u05d1\u05e9\u05de\u05e2"          # bet shin mem ayin -- 4 glyphs, 1 is the RIGHTMOST
+    _GN = ["bet", "shin", "mem", "ayin"]
+
+    def _gb(over=None):
+        """Four boxes on one line, marching leftwards as the index rises."""
+        out = []
+        for i, nm in enumerate(_GN, start=1):
+            x1 = 400 - 30 * (i - 1)
+            out.append({"index_from_right": i, "letter": nm,
+                        "box": (over or {}).get(i) or [x1 - 25, 100, x1, 130]})
+        return out
+
+    _good = _gb()
+    for name, args, want in (
+            ("a well-formed set of glyph boxes passes",
+             (_G, "bet", 1, _good[0]["box"], _good), None),
+            ("one box short of the word is refused", (_G, "bet", 1, _good[0]["box"], _good[:3]),
+             "one box per glyph"),
+            ("two boxes claiming one index is refused",
+             (_G, "bet", 1, _good[0]["box"],
+              [dict(e, index_from_right=2) if e["index_from_right"] == 4 else e for e in _gb()]),
+             "both claim index"),
+            ("glyphs out of right-to-left order are refused",
+             (_G, "bet", 1, _good[0]["box"], _gb({2: [500, 100, 525, 130]})),
+             "right to left"),
+            ("one box signed twice is refused",
+             (_G, "bet", 1, _good[0]["box"], _gb({2: [350, 100, 394, 130]})),
+             "overlap"),
+            ("a glyph on another line of type is refused",
+             (_G, "bet", 1, _good[0]["box"], _gb({3: [315, 200, 340, 230]})),
+             "one line of type"),
+            ("boxes that spell a different word are refused",
+             (_G, "bet", 1, _good[0]["box"],
+              [dict(e, letter="vav") if e["index_from_right"] == 3 else e for e in _gb()]),
+             "spell"),
+            ("a signed box that is not the box at the claimed index is refused",
+             (_G, "bet", 1, [1, 2, 30, 40], _good), "is not the glyph box at index"),
+            ("a letter named differently from the box at that index is refused",
+             (_G, "shin", 1, _good[0]["box"], _good), "signed for shin"),
+            ("a zero-width glyph box is refused",
+             (_G, "bet", 1, [370, 100, 370, 130], _gb({1: [370, 100, 370, 130]})),
+             "not a box"),
+            ("a word with a space in it is refused",
+             (_G[:2] + " " + _G[2:], "bet", 1, _good[0]["box"], _good), "ONE word"),
+    ):
+        _f = letter_boxes_fault(*args)
+        ck(name, (_f is None) if want is None else (_f is not None and want in _f), _f)
+    ck("section 6b ran every one of its checks", True)
 
     print("")
     print("(7) ruling 2: signing from the neighbourhood re-ratifies the box in ONE record")
