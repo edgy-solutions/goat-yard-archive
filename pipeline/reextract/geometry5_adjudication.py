@@ -167,6 +167,13 @@ def _sign_from_basis(basis):
     return -1 if above else 1
 
 
+#: The number of checks that must run to the end for anything to be written. Read by `check`'s
+#: completion gate and recorded in the artifact, so the two cannot drift: a run at any other count
+#: refuses and leaves nothing behind. Deliberately NOT asserted inside `ck` -- comparing this
+#: constant with itself would be a verifier asking the producer, and would move the number it checks.
+CHECKS_EXPECTED = 26
+
+
 def build():
     start = {"laneB": git_state(os.path.dirname(os.path.abspath(__file__))), "drv": git_state(DATA)}
     mp = os.path.join(DATA, MANIFEST)
@@ -259,6 +266,17 @@ def build():
                         "looked at. NOT for a fault rate and NOT for a tier change: the sheet it "
                         "answers is provisional by the clean-run rule. The dirtiness is a fact "
                         "about the artifact's identity, not about his eyes."),
+        "checks": {
+            "count": CHECKS_EXPECTED,
+            "meaning": ("this record exists only because exactly this many checks ran to the end "
+                        "and none failed. A run that reaches a different count prints SUITE DID "
+                        "NOT RUN TO COMPLETION and writes nothing, so the number is not a claim "
+                        "about the run -- it is the condition the run had to meet to produce the "
+                        "file you are reading. Without it, a reader cannot tell a 26-check pass "
+                        "from a 3-check one, and an unpersisted measurement is a comment."),
+            "harness": ("the guards are proven live by mutation, not by green; the harness is a "
+                        "scratch script, so its result lives in the commit message, not here"),
+        },
         "spend": "none; no model call, no outbound request",
     }
     rec["self_sha16"] = digest(rec)
@@ -358,7 +376,7 @@ def check(rec, man):
        "is the recording-a-flag defect")
     ck(rec["self_sha16"] == digest(dict((k, v) for k, v in rec.items() if k != "self_sha16")),
        "the digest is over the record without its own digest field")
-    EXPECTED = 26
+    EXPECTED = CHECKS_EXPECTED
     print("geometry5_adjudication: %d checks, %d failed" % (n[0], len(fail)))
     for m in fail:
         print("  FAIL  %s" % m)
