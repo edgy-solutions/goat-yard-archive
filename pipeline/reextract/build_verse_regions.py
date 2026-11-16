@@ -253,6 +253,31 @@ def load_page_gray(volume_dir, file_page):
     return np.asarray(Image.open(path).convert("L"))
 
 
+class PageStore:
+    """Streaming page store: keeps a bit-packed ink mask per page (np.packbits of VR.page_ink) plus
+    its shape, never the ~19 MB gray array. .ink(fp) unpacks to the bool mask (equal to
+    VR.page_ink(gray)); .gray(fp) reloads from disk and caches only the most recent page."""
+
+    def __init__(self, volume_dir):
+        self.volume_dir = volume_dir
+        self._packed = {}
+        self._last = (None, None)
+
+    def add(self, fp, gray):
+        ink = VR.page_ink(gray)
+        self._packed[fp] = (np.packbits(ink), ink.shape)
+
+    def ink(self, fp):
+        packed, shape = self._packed[fp]
+        n = shape[0] * shape[1]
+        return np.unpackbits(packed, count=n).reshape(shape).astype(bool)
+
+    def gray(self, fp):
+        if self._last[0] != fp:
+            self._last = (fp, load_page_gray(self.volume_dir, fp))
+        return self._last[1]
+
+
 def load_witness(witness_dir, file_page):
     if not witness_dir:
         return None
@@ -315,7 +340,7 @@ class _RequestsClient:
         return requests.get(url, timeout=timeout)
 
 
-def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client, counter,
+def run_reads(candidates_by_page, store, geom_by_page, s1_by_page, client, counter,
               canary_hook=None):
     """Guarded read_head over every 'verse'-kind candidate. Returns head_reads keyed exactly as
     verse_regions.confirm_candidates expects: {(file_page,col,y0): {...}}. Raises
@@ -333,7 +358,7 @@ def run_reads(candidates_by_page, gray_by_page, geom_by_page, s1_by_page, client
     head_reads = {}
     n_reads = 0
     for fp, cands in candidates_by_page.items():
-        gray = gray_by_page[fp]
+        gray = store.gray(fp)
         H, W = gray.shape
         col_boxes = s1_by_page[fp]["col_boxes"]
         for c in cands:
@@ -431,7 +456,7 @@ def main(argv=None):
 
     pages_requested = sorted(set(args.pages))
     invalid_records = []
-    geom_by_page, gray_by_page = {}, {}
+    geom_by_page, store = {}, PageStore(args.volume_dir)
     for fp in pages_requested:
         geom = geom_all.get(fp)
         if geom is None:
@@ -444,7 +469,8 @@ def main(argv=None):
                                      "reason": "image_missing"})
             continue
         geom_by_page[fp] = geom
-        gray_by_page[fp] = gray
+        store.add(fp, gray)
+        del gray
 
     usable_pages = sorted(geom_by_page.keys())
 
@@ -464,7 +490,7 @@ def main(argv=None):
     #             no derived full_gap_thr), then derive inset_thr -------------------------------
     s1_by_page = {}
     for fp in usable_pages:
-        ink = VR.page_ink(gray_by_page[fp])
+        ink = store.ink(fp)
         s1_by_page[fp] = VR.analyze_page_s1(ink, geom_by_page[fp])
         geom_by_page[fp]["_s1"] = s1_by_page[fp]  # consumed by check_region_rects (running_head)
 
@@ -590,7 +616,7 @@ def main(argv=None):
             return 3
 
         try:
-            head_reads, n_reads = run_reads(candidates_by_page, gray_by_page, geom_by_page,
+            head_reads, n_reads = run_reads(candidates_by_page, store, geom_by_page,
                                              s1_by_page, client, counter, canary_hook=_do_canary)
         except BR.RunFault as e:
             return _abort_run_fault(e)
@@ -647,17 +673,17 @@ def main(argv=None):
     # run-level cutoff; pass B computes each rect's ink_box with it. `box` is never written.
     pop = []
     for fp in usable_pages:
-        pop.extend(VR.stroke_population_page(VR.page_ink(gray_by_page[fp]), s1_by_page[fp]))
+        pop.extend(VR.stroke_population_page(store.ink(fp), s1_by_page[fp]))
     stroke_cutoff = VR.derive_stroke_cutoff(VR.stroke_floors(pop))
     stroke_cutoff["n_pop"] = len(pop)
     records[0]["stroke_cutoff"] = stroke_cutoff
     ink_box_counts = Counter()
     for fp in usable_pages:
-        ink_box_counts.update(VR.apply_ink_box_page(regions, fp, s1_by_page[fp], VR.page_ink(gray_by_page[fp]),
+        ink_box_counts.update(VR.apply_ink_box_page(regions, fp, s1_by_page[fp], store.ink(fp),
                                                     stroke_cutoff))
     records[0]["ink_box_counts"] = dict(ink_box_counts)
 
-    guard_ink_box_overlap(records, regions, s1_by_page, lambda fp: VR.page_ink(gray_by_page[fp]),
+    guard_ink_box_overlap(records, regions, s1_by_page, lambda fp: store.ink(fp),
                           stroke_cutoff, out_path)
 
     VR.assert_numbering_invariant(regions)

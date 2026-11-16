@@ -11,7 +11,7 @@ import verse_regions as VR
 import verse_head_read as VHR
 import body_read as BR
 
-EXPECTED_TESTS = 134
+EXPECTED_TESTS = 136
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -2626,6 +2626,45 @@ def test_load_geometry_original_format_unchanged():
     import build_verse_regions as BVR
     pages = [{"file_page": 5, "a": [1]}, {"file_page": 3, "a": [2]}]
     assert BVR.load_geometry(_geom_tmp(pages)) == {5: pages[0], 3: pages[1]}
+
+
+def _store_png_dir(td, fp, arr):
+    from pathlib import Path
+    from PIL import Image
+    Image.fromarray(arr).save(Path(td) / f"page{fp}_image1.png")
+
+
+def test_page_store_ink_roundtrip_odd_width():
+    import tempfile
+    import build_verse_regions as BVR
+    rng = np.random.RandomState(7)
+    arr = rng.randint(0, 256, size=(37, 101)).astype(np.uint8)  # odd width, odd pixel count
+    with tempfile.TemporaryDirectory() as td:
+        store = BVR.PageStore(td)
+        store.add(5, arr)
+        got = store.ink(5)
+        assert got.dtype == bool and got.shape == arr.shape
+        assert np.array_equal(got, VR.page_ink(arr))
+        assert np.array_equal(store.ink(5), got)  # repeatable
+
+
+def test_page_store_gray_reload_equals_disk_and_caches_last_only():
+    import tempfile
+    import build_verse_regions as BVR
+    rng = np.random.RandomState(8)
+    a = rng.randint(0, 256, size=(20, 33)).astype(np.uint8)
+    b = rng.randint(0, 256, size=(20, 33)).astype(np.uint8)
+    with tempfile.TemporaryDirectory() as td:
+        _store_png_dir(td, 1, a)
+        _store_png_dir(td, 2, b)
+        store = BVR.PageStore(td)
+        store.add(1, BVR.load_page_gray(td, 1))
+        store.add(2, BVR.load_page_gray(td, 2))
+        assert np.array_equal(store.gray(1), a)
+        assert store._last[0] == 1
+        assert np.array_equal(store.gray(2), b)
+        assert store._last[0] == 2 and len(store._packed) == 2
+        assert np.array_equal(store.ink(1), VR.page_ink(a))
 
 
 if __name__ == "__main__":
