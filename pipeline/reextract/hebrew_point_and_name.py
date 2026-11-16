@@ -428,18 +428,39 @@ def legend_letters():
     return out
 
 
+#: Chris's roster for the second pointing sitting (2026-11-15), in the order he named it. The
+#: value is how many pages to offer: 12 where the supply allows, and None for "all remaining".
+#: A ROSTER, NOT A DERIVATION -- see this patch's own reasoning in the commit. The derived tiers
+#: give five of these six and would also give bet, gimel, lamed, final kaf and pe. yod is here
+#: because Chris put it here after this lane reported it and declined to add it; zayin is here
+#: although it is not a gap at all.
+SITTING = (("final_nun", 12), ("tav", 12), ("mem", 12), ("final_mem", 12), ("yod", 12),
+           ("zayin", None))
+
+
+def already_signed(letter):
+    """{(file_page, word)} already carrying a signed impression of `letter`, of either kind.
+
+    "All REMAINING rival-free zayin pages" is Chris's word, and remaining means remaining after the
+    one he did. Offering a signer the glyph he has already attested is not a second exemplar; it is
+    a second act with no second specimen at the end of it. Scoped to the letter, because a page
+    pointed for a dalet is still a fresh page for a tav.
+    """
+    return set((r["file_page"], r["word"]) for r in sig_exemplars(letter, want=10 ** 6))
+
+
 def card_axis_thin():
     """[(letter, rivals, signed_supply)] -- card-argued letters with no rule-2-clean SIGNED exemplar
     that are NOT on a legend axis.
 
-    Reported, never asked for. The sitting's legend covers the four axes Chris named, and widening a
-    human's sitting by nine letters on this lane's own authority is not this function's business.
-    But one of them is in a state the legend page would never reveal: yod has no pointed record and
-    BOTH its context tiles sit in p386's yod-dalet-yod-final-nun, each dirtied by the final nun --
-    and yod is a rival on three separate card asks. That belongs in a report with the reason it is
-    not in the ask.
+    Reported, never asked for, and now scoped to what is NOT in the sitting: yod was the one letter
+    this function existed to surface -- no pointed record, BOTH context tiles dirty in p386's
+    yod-dalet-yod-final-nun, and a rival on four separate card asks -- and Chris put it on the
+    roster, so it belongs in the ask and not in this remainder. What is left is the five card-argued
+    letters nobody has asked for: bet, gimel, lamed, final kaf and pe. They stay named, because a
+    scope decision that leaves no trace is indistinguishable from an oversight.
     """
-    on_legend = set(l for ax in LEGEND_AXES for l in ax)
+    on_legend = set(l for ax in LEGEND_AXES for l in ax) | set(k for k, _w in SITTING)
     ar = axis_rivals()
     out = []
     for letter in sorted(ar):
@@ -452,7 +473,7 @@ def card_axis_thin():
     return out
 
 
-def census_pages(letter, rivals, want=12):
+def census_pages(letter, rivals, want=12):   # want=None -> every rival-free word there is
     """(rows, n_words_total) -- file pages whose stored text holds `letter` in a rival-free word.
 
     The rule, which the page prints beside the table so it can be argued with:
@@ -479,6 +500,13 @@ def census_pages(letter, rivals, want=12):
     """
     if not CENSUS.exists():
         return [], 0
+    # A page already carrying a signed impression of THIS letter is not offered. "All remaining
+    # rival-free zayin pages" is Chris's instruction and remaining means remaining after the one he
+    # did; a row sending him back to the glyph he has already attested spends a signing act and
+    # produces no second specimen. Scoped to the letter: a page pointed for a dalet is still a
+    # fresh page for a tav. It only bites for zayin today, because the other five rostered letters
+    # have no signature of any kind.
+    done = already_signed(letter)
     rows = (json.loads(io.open(CENSUS, encoding="utf-8").read()) or {}).get("rows") or []
     ch = LETTER[letter]
     rv = [LETTER[x] for x in rivals]
@@ -501,9 +529,16 @@ def census_pages(letter, rivals, want=12):
             if dis and all((wi, ci) in dis
                            for ci, c in enumerate(w, start=1) if c == ch):
                 continue
+            if (int(s["page"]), w) in done or (int(s["page"]), wraw) in done:
+                continue
             hits.append((0 if span_clean else 1, len(w), int(s["page"]), w,
                          s["span_id"], has_nikud(wraw)))
     hits.sort()
+    # None is "every rival-free word there is", not "none" and not a default. It is Chris's
+    # instruction for zayin, whose whole remaining supply is smaller than one page of twelve, and a
+    # falsy `want` silently collapsing to zero rows would read on the page as a letter with no
+    # supply at all -- the same absence as a letter nobody can point.
+    want = len(hits) if want is None else want
     out, pages, taken = [], set(), set()
     for h in hits:                                   # pass 1: a different page every row
         if h[2] in pages:
@@ -524,49 +559,99 @@ def census_pages(letter, rivals, want=12):
 
 
 def offer_letters():
-    """[(letter, rivals, tier, why)] -- every letter this page asks Chris to point, both tiers.
+    """[(letter, rivals, tier, why, want)] -- every letter this page asks Chris to point.
 
-    tier "blocked": no exemplar from ANY source, so a card prints NO VERDICT. tier "gap": on one of
-    the sitting's legend axes with no rule-2-clean SIGNED exemplar, so the legend cannot show a
-    specimen beside its rival. The tiers stay labelled all the way to the page -- they are different
-    states with different consequences, and a reader who cannot tell them apart cannot tell what his
-    pointing would buy.
+    Three tiers, labelled all the way to the page because they are different states with different
+    consequences, and a reader who cannot tell them apart cannot tell what his pointing would buy:
 
-    A letter in both tiers appears once, as "blocked", because that is the stronger statement.
+      "blocked"    no exemplar from ANY source, so a card prints NO VERDICT. Offered whether or not
+                   it is on the roster: this outranks a sitting's scope.
+      "gap"        on the roster, and measured to have no rule-2-clean SIGNED exemplar, so the
+                   legend cannot show a specimen of it beside its rival.
+      "reinforce"  on the roster AND already has one. zayin. The row says so instead of claiming an
+                   absence over a signature -- Chris asked for a second impression, not a first.
+
+    The roster is the authority for membership and the measurement is its witness, never the other
+    way round. `want` is his number: 12, or None for "all remaining rival-free pages".
+
+    A letter in two tiers appears once, as "blocked", because that is the stronger statement.
     """
     out, seen = [], set()
     for letter, rivals in blocked_letters():
         out.append((letter, rivals, "blocked",
-                    "no exemplar of any kind: a card prints NO VERDICT until one is pointed"))
+                    "no exemplar of any kind: a card prints NO VERDICT until one is pointed", 12))
         seen.add(letter)
-    for letter, rivals, st in legend_letters():
-        if letter in seen or not st["gap"]:
+    leg = dict((k, (rv, st)) for k, rv, st in legend_letters())
+    ar = axis_rivals()
+    for letter, want in SITTING:
+        if letter in seen:
             continue
-        sup = st["signed"]
-        if not sup:
-            why = ("no signed exemplar at all; %d span exemplar(s) exist but the legend needs a "
-                   "hand-drawn specimen" % st["span_exemplars"])
+        rivals, st = leg.get(letter, (ar[letter][0], None))
+        sup = st["signed"] if st else signed_supply(letter)
+        clean = [x for x in sup if not x[4]]
+        nspan = st["span_exemplars"] if st else len(exemplars(letter, rivals))
+        if clean:
+            tier = "reinforce"
+            why = ("ALREADY has a rule-2-clean signed exemplar (%s); Chris asked for one more, so "
+                   "the cards stop resting on a single impression. This row is not an absence."
+                   % "; ".join("p%d %s (%s)" % (pg, w, k) for k, pg, w, _i, _b in clean))
+        elif not sup:
+            tier = "gap"
+            why = ("no signed exemplar at all; %d span exemplar(s) exist but a legend needs a "
+                   "hand-drawn specimen" % nspan)
         else:
+            tier = "gap"
             why = ("the only signed impression(s) are rule-2 dirty: %s"
                    % "; ".join("p%d %s (%s, holds %s)" % (pg, w, k, ",".join(bad))
                                for k, pg, w, _i, bad in sup))
-        out.append((letter, rivals, "gap", why))
+        out.append((letter, rivals, tier, why, want))
         seen.add(letter)
+    return out
+
+
+def offer_remainder():
+    """[(letter, rivals, why)] -- letters MEASURED to be in a gap state and not in this sitting.
+
+    A roster that silently swallows its remainder is how a scope decision becomes invisible, and
+    this lane has already been wrong once in that direction: yod was reported here rather than
+    asked for, and Chris read the report and put it on the roster. So the remainder is printed.
+    """
+    ros = set(k for k, _w in SITTING)
+    out = []
+    for letter, rivals, st in legend_letters():
+        if letter in ros or not st["gap"]:
+            continue
+        out.append((letter, rivals, "on a legend axis with no rule-2-clean signed exemplar, and "
+                                    "not on the roster for this sitting"))
+    for letter, rivals, sup in card_axis_thin():
+        out.append((letter, rivals,
+                    "argued on a card with no rule-2-clean signed exemplar (%d span exemplar(s), "
+                    "%d signed impression(s), all rule-2 dirty); not on a legend axis and not on "
+                    "the roster" % (len(exemplars(letter, rivals)), len(sup))))
     return out
 
 
 def stuck_section():
     """The rivals and the pages, as one section of the page. Items 2 and 3 of the 2026-11-15 note."""
     OFF = offer_letters()
+    REM = offer_remainder()
     _n1 = len([1 for r in OFF if r[2] == "blocked"])
-    h = ['<section><h2>What has no exemplar &mdash; and some pages to look at</h2>',
-         '<div class="mut">Two tiers, labelled on every row, because they are different states. '
+    h = ['<section><h2>The six letters to point &mdash; and some pages to look at</h2>',
+         '<div class="mut">Your roster for this sitting, in the order you named it: '
+         '<b>final nun, tav, mem, final mem, yod</b> and <b>one more zayin</b>. Three tiers, '
+         'labelled on every row, because they are different states. '
          '<b>blocked</b>: no exemplar of the letter exists anywhere &mdash; not signed from the '
          'volume, not built from a signed span &mdash; so a card asking about it prints NO VERDICT '
-         'until one is pointed. <b>gap</b>: the letter is on one of the four axes the sitting\'s '
-         'legend covers, and it has no <b>signed</b> exemplar that is rule-2 clean, so the legend '
-         'cannot show you a specimen of it beside the letter it is confused with. A gap letter may '
-         'still have span exemplars; the reason that is not enough is in its own row.</div>',
+         'until one is pointed. Offered whether or not it is on your roster, because a card that '
+         'cannot answer at all outranks a sitting&rsquo;s scope. '
+         '<b>gap</b>: on the roster, and measured to have no <b>signed</b> exemplar that is rule-2 '
+         'clean, so a legend cannot show you a specimen of it beside the letter it is confused '
+         'with. A gap letter may still have span exemplars; the reason that is not enough is in '
+         'its own row. <b>reinforce</b>: on the roster and it <b>already has</b> a clean signed '
+         'exemplar &mdash; that is zayin, and the row says so rather than claiming an absence over '
+         'your own signature. The roster is yours and this page does not second-guess it; the '
+         'state beside each letter is measured, so a letter signed since you wrote the list '
+         'cannot sit here asking to be pointed again.</div>',
          '<div class="%s">There %s <b>%d</b> blocked letter%s today%s</div>'
          % ("mut" if _n1 == 0 else "warn", "is" if _n1 == 1 else "are", _n1,
             "" if _n1 == 1 else "s",
@@ -584,8 +669,8 @@ def stuck_section():
          '<th>the word must NOT contain</th>'
          '<th>rival-free words<br>in all 696 spans</th><th>file pages (printed = file &minus; 88)'
          '</th></tr>']
-    for letter, rivals, tier, why in OFF:
-        rows, total = census_pages(letter, rivals)
+    for letter, rivals, tier, why, want in OFF:
+        rows, total = census_pages(letter, rivals, want=want)
         rv = " ".join(LETTER[x] for x in rivals) or "&mdash;"
         cell = []
         for _r, _n, pg, w, sid, nik, same in rows:
@@ -603,6 +688,23 @@ def stuck_section():
                     total if total else "<b>none</b>",
                     "<br>".join(cell) or "<b>no rival-free word in the census</b>"))
     h.append("</table>")
+    # THE REMAINDER, printed. A roster that silently swallows what it leaves out is how a scope
+    # decision becomes invisible -- and this lane has already been wrong in that direction once:
+    # yod was reported rather than asked for, Chris read the report, and put it on the roster.
+    h.append('<h3>Measured to be in the same state, and <b>not</b> in this sitting</h3>')
+    if REM:
+        h.append('<div class="mut">Not an oversight and not an ask: letters this page measured to '
+                 'have no rule-2-clean signed exemplar either, and that you did not put on the '
+                 'roster. Printed so the scope of the sitting is visible rather than implied.'
+                 '</div><ul>')
+        for _l, _rv, _why in REM:
+            h.append('<li><span class="heb">%s</span> <b>%s</b> &mdash; %s. '
+                     '<span class="mut">rivals: %s</span></li>'
+                     % (LETTER[_l], _l, _why, ", ".join(_rv) or "nothing named"))
+        h.append("</ul>")
+    else:
+        h.append('<div class="mut">None: every letter measured to be in a gap state is on the '
+                 'roster. A measured zero, shown as a zero.</div>')
     h.append('<div class="mut">The ranking rule, so it can be argued with: a word containing the '
              'letter and none of its rivals; a word whose whole span is also rival-free first, '
              'since the span is what the eye takes in; then the shortest word, because every glyph '
@@ -610,7 +712,11 @@ def stuck_section():
              'as there are different pages; after that the list is topped up from the words left '
              'over, each marked <b>same page</b>, up to twelve rows. A letter with fewer rows than '
              'that has no more rival-free words in the census at all &mdash; the count beside it is '
-             'the whole supply. A pointed word '
+             'the whole supply. <b>zayin is different on your instruction</b>: every '
+             '<b>remaining</b> rival-free word is offered rather than twelve, and the word you '
+             'already pointed is excluded &mdash; remaining means remaining after the one you did, '
+             'and a row sending you back to a glyph you have already attested spends a signing act '
+             'and produces no second specimen. A pointed word '
              'carries nikud: box the <b>consonants</b> only &mdash; the points are not glyphs and '
              'the loader compares the consonants.</div>')
     h.append("</section>")
@@ -713,11 +819,15 @@ if __name__ == "__main__":
         # Derived once here and compared against the PAGE, so a check cannot pass by asking the
         # same function the page asked. CANDS is independent of the exemplar count: it is just
         # which letters the cards argue about.
-        # BOTH tiers, so every check over the suggestion table runs over the gap rows too.
+        # ALL THREE tiers, so every check over the suggestion table runs over the gap and
+        # reinforce rows too. `want` is carried through: the page asks for zayin's whole remaining
+        # supply and the default is twelve, so a suite deriving the table with the default would
+        # disagree with the page for one letter and the disagreement would read as a page defect.
         OFFER = offer_letters()
-        BLOCKED = [(k, rv) for k, rv, _t, _w in OFFER]
-        TIER = dict((k, t) for k, _rv, t, _w in OFFER)
-        SUG = dict((k, census_pages(k, rv)) for k, rv in BLOCKED)
+        BLOCKED = [(k, rv) for k, rv, _t, _w, _n in OFFER]
+        TIER = dict((k, t) for k, _rv, t, _w, _n in OFFER)
+        WANT = dict((k, n) for k, _rv, _t, _w, n in OFFER)
+        SUG = dict((k, census_pages(k, rv, want=WANT[k])) for k, rv in BLOCKED)
         CANDS = set(x for c in CARDS for a in card_asks(c) for x in (a.get("candidates") or ()))
         # The exemplar record's object literal ALONE. Scoped because the re-ratification record
         # carries some of the same field names, and a page-wide scan for `coord_space:` was
@@ -829,6 +939,83 @@ if __name__ == "__main__":
                  any(k not in CANDS for k, _r in BLOCKED if TIER[k] == "gap")),
                 ("the page offers something to point, in at least one tier",
                  bool(BLOCKED)),
+                # ---------------------------------------------------------- THE ROSTER (2026-11-15)
+                # Membership is CHRIS'S, by equality. The derivation is the witness, never the
+                # author: it would give five of his six and would also give bet, gimel, lamed,
+                # final kaf and pe. A threshold could be fitted to reproduce his list -- yod is a
+                # rival on four asks and the others on one or two -- and fitting one would be a
+                # rule written from its own answer.
+                # CHRIS'S WORDS, as literals. This is the only check in the suite that can
+                # witness the roster, because both sides of the equality below come out of the
+                # module: dropping yod from SITTING moves them together and it passes. His
+                # instruction, verbatim: "So your next pointing round is six letters: final nun,
+                # tav, mem, final mem, yod and one more zayin." The names live here because they
+                # are an instruction and not a measurement -- nothing in the corpus can be
+                # consulted to find out whether they are right.
+                ("the roster constant is the six letters Chris named, in his order",
+                 [k for k, _w in SITTING]
+                 == ["final_nun", "tav", "mem", "final_mem", "yod", "zayin"]),
+                ("zayin alone is uncapped, which is the one place he gave a different number",
+                 [w for _k, w in SITTING] == [12, 12, 12, 12, 12, None]),
+                # And that offer_letters HONOURS the constant rather than deriving its own set.
+                # Both sides are the module's, so this cannot see a wrong roster -- it sees a
+                # roster that is not being read.
+                ("offer_letters reads the roster: the ask is the roster plus whatever is blocked",
+                 sorted(k for k, _rv in BLOCKED)
+                 == sorted(set(k for k, _w in SITTING) | set(k for k, _rv in blocked_letters()))),
+                ("every rostered letter is in the ask, in the order Chris named it",
+                 [k for k, _rv in BLOCKED if k in dict(SITTING)]
+                 == [k for k, _w in SITTING]),
+                # The subject for the clause above, and the reason the roster is the authority: the
+                # derivation really does disagree with it, in both directions.
+                ("the derived set differs from the roster, which is why the roster is the author",
+                 set(k for k, _rv, _s in offer_remainder()) - set(k for k, _w in SITTING)
+                 == set(["bet", "gimel", "lamed", "final_kaf", "pe"])),
+                ("yod is in the ask and NOT in the remainder, because Chris moved it there",
+                 "yod" in TIER and "yod" not in set(k for k, _rv, _s in offer_remainder())),
+                # REINFORCE. zayin has a clean pointed exemplar, so a row calling it a gap would
+                # claim an absence over Chris's own signature. The tier says what it is instead.
+                ("a rostered letter that already has a clean signed exemplar is reinforce, not gap",
+                 TIER.get("zayin") == "reinforce"
+                 and [1 for x in signed_supply("zayin") if not x[4]]),
+                ("no reinforce letter is missing an exemplar, and no gap letter has one",
+                 all(bool([1 for x in signed_supply(k) if not x[4]]) == (TIER[k] == "reinforce")
+                     for k, _rv in BLOCKED if TIER[k] in ("gap", "reinforce"))),
+                ("both tiers are populated, so the clause above is not a for-all over one state",
+                 len(set(TIER[k] for k, _rv in BLOCKED if TIER[k] in ("gap", "reinforce"))) == 2),
+                # ALREADY SIGNED. "All REMAINING rival-free zayin pages" -- remaining after the one
+                # he did. The excluded word must EXIST, or the exclusion is a probe that misses.
+                ("the word Chris already pointed for zayin is known to this page",
+                 bool(already_signed("zayin"))),
+                # .get, not [], all through the zayin clauses: a roster that loses the letter
+                # must FAIL a named check, not raise -- a raise in this file aborts the whole run
+                # and takes every other verdict with it.
+                ("no zayin row sends him back to a word he has already signed",
+                 bool(SUG.get("zayin", ([], 0))[0])
+                 and all((pg, w) not in already_signed("zayin")
+                         for _r, _n, pg, w, _s, _nik, _sm in SUG.get("zayin", ([], 0))[0])),
+                ("the exclusion is scoped to the letter: a page signed for zayin is fresh for tav",
+                 already_signed("tav") == set() and already_signed("zayin") != set()),
+                # WANT=None is "all remaining", not "none". A falsy want collapsing to zero rows
+                # would print as a letter with no supply at all -- the same absence on the page as
+                # a letter nobody can point.
+                ("zayin is offered its whole remaining supply, not twelve and not zero",
+                 "zayin" in WANT and WANT.get("zayin") is None
+                 and len(SUG.get("zayin", ([], 0))[0]) == SUG.get("zayin", ([], 0))[1]
+                 and SUG.get("zayin", ([], 0))[1] > 0),
+                ("the twelve-row cap still applies to the letters Chris capped",
+                 all(WANT[k] == 12 for k, _rv in BLOCKED if k != "zayin")
+                 and all(len(SUG[k][0]) <= 12 for k, _rv in BLOCKED)),
+                # THE REMAINDER, on the page. A roster that silently swallows what it leaves out is
+                # how a scope decision becomes indistinguishable from an oversight.
+                ("the remainder is printed and names every letter in it",
+                 bool(offer_remainder())
+                 and all(("<b>%s</b>" % k) in t for k, _rv, _s in offer_remainder())),
+                ("the remainder section says it is not an ask",
+                 "Not an oversight and not an ask" in t
+                 and "and <b>not</b> in this sitting" in t),
+                ("the page names the roster as Chris's, not as a derived list",
+                 "Your roster for this sitting" in t and "The roster is yours" in t),
                 # THE OTHER DIRECTION. Every clause above is of the form "no gap letter has a clean
                 # exemplar", which a SHRINKING gap tier satisfies just as well -- the empty set
                 # satisfies it best. This one fails when rule 2 stops being applied: a letter whose
