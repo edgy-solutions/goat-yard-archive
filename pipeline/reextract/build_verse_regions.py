@@ -180,6 +180,7 @@ def build_config(args, module_sha256, git_head, git_dirty):
         "straddle_core_min_rows": VHR.STRADDLE_CORE_MIN_ROWS,
         "align_sim_mid": VR.ALIGN_SIM_MID,
         "align_key_chars": VR.ALIGN_KEY_CHARS,
+        "ink_overlap": args.ink_overlap,
         "module_sha256": module_sha256,
         "box_sanity_sha256": compute_module_sha256(box_sanity.__file__),
         "git_head": git_head,
@@ -408,32 +409,69 @@ def build_arg_parser():
                      help="off (default): no model calls, every verse head is head_unconfirmed "
                           "unless rejected is impossible without a read. on: guarded reads via "
                           "endpoint_guard -- never defaults, refuses the reserved .179/.188 pair.")
+    ap.add_argument("--ink-overlap", choices=["refuse", "hold"], default="refuse",
+                     help="refuse (default, the 1 Nov guard): an ink_box overlap over T refuses the whole "
+                          "build. hold: the over pairs are held (header held_pairs, both regions marked "
+                          "held) and the build completes.")
     ap.add_argument("--host", default=None, help="Ollama endpoint, required when --read on.")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--endpoint-id", default=None, help="Recorded in config for provenance only.")
     return ap
 
 
-def guard_ink_box_overlap(records, regions, s1_by_page, ink_by_page_fn, stroke_cutoff, out_path):
+def guard_ink_box_overlap(records, regions, s1_by_page, ink_by_page_fn, stroke_cutoff, out_path,
+                          policy="refuse"):
     """substrate-v1.1 guard (PREDICTION_inkbox_overlap_guard_v1_1_20261101.md): record every adjacent
-    ink_box pair's overlap and T in records[0]["ink_box_overlap"]; if any overlap exceeds a determined
-    T, rewrite out_path as the header ONLY (the header is already on disk before the first call;
-    no page or region record), status "refused", then raise VR.InkBoxOverlapRefused. An undetermined
-    T (d abstained) never refuses."""
+    ink_box pair's overlap and T in records[0]["ink_box_overlap"]. `over` = the pairs with a determined
+    T and overlap_px > T. An undetermined T (d abstained) is never over.
+
+    policy "refuse" (default; the 1 Nov behaviour, kept for earlier locks): if any pair is over,
+    rewrite out_path as the header ONLY (the header is already on disk before the first call; no page
+    or region record), status "refused", then raise VR.InkBoxOverlapRefused.
+
+    policy "hold" (advisor ruling 2026-11-16 item 1: whole-build refusal withdrawn for volume runs
+    (hold); refuse stays the default for earlier locks; PREDICTION_guard_hold_addendum_20261116.md):
+    nothing is raised or rewritten. records[0]["ink_box_overlap"] gains held_pairs (the over pairs, all
+    fields) and n_held_pairs; its "status" stays as ink_box_overlap() returned it. Both regions of each
+    over pair get region["held"] = {"reason": "ink_box_overlap_exceeds_T", "pairs": [...]} and the flag
+    "held_ink_box_overlap" (once). The consumer helper VR.assert_ink_box_overlap_bounded is unchanged
+    and still raises on this output.
+
+    Under BOTH policies records[0]["held"] = {"ink_box_overlap": {"n_pairs", "n_regions"}} (0/0 when
+    none; n_regions = distinct regions in the over pairs)."""
+    if policy not in ("refuse", "hold"):
+        raise ValueError(f"unknown ink-overlap policy {policy!r}")
     records[0]["ink_box_overlap"] = VR.ink_box_overlap(regions, s1_by_page, ink_by_page_fn, stroke_cutoff)
     over = [p for p in records[0]["ink_box_overlap"]["pairs"]
             if p["T"] is not None and p["overlap_px"] > p["T"]]
-    if over:
-        records[0]["ink_box_overlap"]["status"] = "refused"
-        records[0]["ink_box_overlap"]["refused_pairs"] = over
-        records[0]["status"] = "refused"
-        records[0]["abort_reason"] = f"ink_box_overlap_exceeds_T: {len(over)} pair(s)"
-        records[0]["finished_utc"] = now_utc_iso()
-        _write(out_path, records[:1])
-        raise VR.InkBoxOverlapRefused(
-            "ink_box overlap exceeds T: " + "; ".join(
-                f"p{p['file_page']} {p['a_col']}/{p['b_col']} y{p['a_y']}/{p['b_y']} "
-                f"overlap {p['overlap_px']} > T {p['T']}" for p in over))
+    held_idx = sorted({p[k] for p in over for k in ("a_idx", "b_idx")})
+    records[0]["held"] = {"ink_box_overlap": {"n_pairs": len(over), "n_regions": len(held_idx)}}
+    if not over:
+        return
+    if policy == "hold":
+        records[0]["ink_box_overlap"]["held_pairs"] = over
+        records[0]["ink_box_overlap"]["n_held_pairs"] = len(over)
+        for p in over:
+            entry = {k: p[k] for k in ("file_page", "a_col", "b_col", "a_y", "b_y",
+                                        "overlap_px", "T", "T_source")}
+            for idx in (p["a_idx"], p["b_idx"]):
+                region = regions[idx]
+                region.setdefault("held", {"reason": "ink_box_overlap_exceeds_T", "pairs": []})
+                region["held"]["pairs"].append(dict(entry))
+                flags = region.setdefault("flags", [])
+                if "held_ink_box_overlap" not in flags:
+                    flags.append("held_ink_box_overlap")
+        return
+    records[0]["ink_box_overlap"]["status"] = "refused"
+    records[0]["ink_box_overlap"]["refused_pairs"] = over
+    records[0]["status"] = "refused"
+    records[0]["abort_reason"] = f"ink_box_overlap_exceeds_T: {len(over)} pair(s)"
+    records[0]["finished_utc"] = now_utc_iso()
+    _write(out_path, records[:1])
+    raise VR.InkBoxOverlapRefused(
+        "ink_box overlap exceeds T: " + "; ".join(
+            f"p{p['file_page']} {p['a_col']}/{p['b_col']} y{p['a_y']}/{p['b_y']} "
+            f"overlap {p['overlap_px']} > T {p['T']}" for p in over))
 
 
 def main(argv=None):
@@ -684,7 +722,7 @@ def main(argv=None):
     records[0]["ink_box_counts"] = dict(ink_box_counts)
 
     guard_ink_box_overlap(records, regions, s1_by_page, lambda fp: store.ink(fp),
-                          stroke_cutoff, out_path)
+                          stroke_cutoff, out_path, policy=args.ink_overlap)
 
     VR.assert_numbering_invariant(regions)
     VR.check_region_rects(regions, geom_by_page)
@@ -750,6 +788,7 @@ def main(argv=None):
         "col_split": col_split_summary,
         "thresholds": records[0]["thresholds"],
         "config_hash": config["hash"],
+        "held": records[0]["held"],
         "read": args.read,
         "output": str(out_path),
     }

@@ -11,7 +11,7 @@ import verse_regions as VR
 import verse_head_read as VHR
 import body_read as BR
 
-EXPECTED_TESTS = 136
+EXPECTED_TESTS = 140
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -2582,13 +2582,19 @@ def test_read_off_config_has_no_pinned_keys_and_hash_is_of_the_rest():
     import tempfile
     d = tempfile.mkdtemp(prefix="a2_cfg_")
     args = argparse.Namespace(pages=[1], geometry=d + "/g.jsonl", volume_dir=d, metadata_dir=None,
-                              witness_dir=None, read="off", model="m", endpoint_id=None)
+                              witness_dir=None, read="off", model="m", endpoint_id=None,
+                              ink_overlap="refuse")
     cfg = BVR.build_config(args, "x", "h", False)
     assert not ({"pinned_options", "keep_alive", "reload_s"} & set(cfg)), sorted(cfg)
     assert cfg["hash"] == BVR.config_hash({k: v for k, v in cfg.items() if k != "hash"})
     args.read = "on"
     cfg_on = BVR.build_config(args, "x", "h", False)
     assert cfg_on["hash"] != cfg["hash"] and "pinned_options" in cfg_on
+    args.read = "off"
+    args.ink_overlap = "hold"
+    cfg_hold = BVR.build_config(args, "x", "h", False)
+    assert cfg["ink_overlap"] == "refuse" and cfg_hold["ink_overlap"] == "hold"
+    assert cfg_hold["hash"] != cfg["hash"]
 
 
 def _geom_tmp(lines):
@@ -2665,6 +2671,98 @@ def test_page_store_gray_reload_equals_disk_and_caches_last_only():
         assert np.array_equal(store.gray(2), b)
         assert store._last[0] == 2 and len(store._packed) == 2
         assert np.array_equal(store.ink(1), VR.page_ink(a))
+
+
+def test_ig_hold_marks_both_regions_and_writes_no_refusal():
+    import copy
+    import json
+    import tempfile
+    from pathlib import Path
+    import build_verse_regions as B
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 90)  # overlap 26 > T 16
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "run.jsonl"
+        records = [{"kind": "run_header", "status": "running"}, {"kind": "page"}]
+        B.guard_ink_box_overlap(records, regions, s1, fn, sc, out, policy="hold")  # must not raise
+        assert not out.exists(), "hold rewrites nothing"
+        h = records[0]
+        ibo = h["ink_box_overlap"]
+        assert ibo["status"] != "refused" and h["status"] == "running" and "abort_reason" not in h, h
+        assert "refused_pairs" not in ibo
+        assert ibo["n_held_pairs"] == 1 and [(p["overlap_px"], p["T"]) for p in ibo["held_pairs"]] == [(26, 16)]
+        assert h["held"] == {"ink_box_overlap": {"n_pairs": 1, "n_regions": 2}}, h["held"]
+        for r in regions:
+            assert r["held"]["reason"] == "ink_box_overlap_exceeds_T" and len(r["held"]["pairs"]) == 1, r
+            hp = r["held"]["pairs"][0]
+            assert (hp["file_page"], hp["a_col"], hp["b_col"], hp["overlap_px"], hp["T"], hp["T_source"]) == \
+                (1, "left", "left", 26, 16, "floor"), hp
+            assert r["flags"].count("held_ink_box_overlap") == 1
+        # output is written with region records (the caller proceeds): simulate the writer
+        B._write(out, records + [{"kind": "region", **r} for r in regions])
+        lines = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+        assert sum(1 for l in lines[1:] if l.get("held")) == 2
+        # the unchanged consumer helper still refuses: with the held regions, and with them filtered out
+        for regs in (regions, [r for r in regions if not r.get("held")]):
+            try:
+                VR.assert_ink_box_overlap_bounded(h, regs)
+            except AssertionError:
+                continue
+            raise RuntimeError("helper must raise on hold output")
+
+
+def test_ig_hold_region_in_two_pairs_gets_both_and_flag_once():
+    import tempfile
+    from pathlib import Path
+    import build_verse_regions as B
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 90)
+    # a third region below, overlapping the lower rect's ink_box too
+    lower = regions[1]["rects"][0]
+    lower["ink_box"] = [0, 90, 1200, 130]
+    third = {"kind": "verse", "rects": [{"file_page": 1, "col": "left", "box": [0, 140, 1200, 160],
+                                         "ink_box": [0, 100, 1200, 160]}]}
+    regions.append(third)
+    s1[1]["left"].append({"x0": 0, "x1": 1200, "y0": 140, "y1": 160})
+    with tempfile.TemporaryDirectory() as td:
+        records = [{"kind": "run_header"}]
+        B.guard_ink_box_overlap(records, regions, s1, fn, sc, Path(td) / "o.jsonl", policy="hold")
+    n = records[0]["held"]["ink_box_overlap"]
+    assert n["n_pairs"] == len(records[0]["ink_box_overlap"]["held_pairs"]) >= 2, records[0]["held"]
+    mid = regions[1]
+    assert len(mid["held"]["pairs"]) == 2 and mid["flags"].count("held_ink_box_overlap") == 1, mid
+    assert n["n_regions"] == 3
+
+
+def test_ig_held_is_zero_when_nothing_is_over_under_both_policies():
+    import tempfile
+    from pathlib import Path
+    import build_verse_regions as B
+    for policy in ("refuse", "hold"):
+        regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 105)  # overlap 11 <= T 16
+        with tempfile.TemporaryDirectory() as td:
+            records = [{"kind": "run_header"}]
+            B.guard_ink_box_overlap(records, regions, s1, fn, sc, Path(td) / "o.jsonl", policy=policy)
+        assert records[0]["held"] == {"ink_box_overlap": {"n_pairs": 0, "n_regions": 0}}, (policy, records[0])
+        assert "held_pairs" not in records[0]["ink_box_overlap"]
+        assert all("held" not in r and "flags" not in r for r in regions)
+
+
+def test_ig_refuse_policy_also_records_held_counts_in_header():
+    import tempfile
+    import json
+    from pathlib import Path
+    import build_verse_regions as B
+    regions, s1, fn, sc = _ig_synth(_IG_BIMODAL, 116, 90)
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "o.jsonl"
+        records = [{"kind": "run_header"}, {"kind": "page"}]
+        try:
+            B.guard_ink_box_overlap(records, regions, s1, fn, sc, out, policy="refuse")
+            raise RuntimeError("expected refusal")
+        except VR.InkBoxOverlapRefused:
+            pass
+        assert records[0]["held"] == {"ink_box_overlap": {"n_pairs": 1, "n_regions": 2}}
+        assert all("held" not in r for r in regions)  # refuse marks no region
+        assert json.loads(out.read_text(encoding="utf-8").splitlines()[0])["status"] == "refused"
 
 
 if __name__ == "__main__":
