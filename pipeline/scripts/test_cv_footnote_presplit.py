@@ -155,7 +155,7 @@ def test_existing_info_keys_unchanged_for_real_page():
     for k in original_keys:
         assert new_info[k] == base_info[k], f"{k} changed: {new_info[k]} != baseline {base_info[k]}"
     # new keys are appended after, in the specified order
-    assert list(new_info.keys())[4:] == ["page", "coord", "body_regions"]
+    assert list(new_info.keys())[4:] == ["page", "coord", "body_regions", "upscale", "band_coord", "bands", "strip_size"]
 
 
 # ---------------------------------------------------------------------------
