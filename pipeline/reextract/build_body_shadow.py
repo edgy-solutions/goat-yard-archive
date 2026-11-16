@@ -178,6 +178,8 @@ def build_arg_parser():
     ap.add_argument("--model", default=VHR.DEFAULT_MODEL)
     ap.add_argument("--pages", type=int, nargs="+", required=True)
     ap.add_argument("--max-lines", type=int, default=BR.MAX_LINES)
+    ap.add_argument("--body-bottom", default=None,
+                    help="derived body_bottom.py file: clamp each unit rect's y1 to its column's bottom")
     return ap
 
 
@@ -208,6 +210,14 @@ def main(argv=None):
     units = build_units(stage1, pages)
     if not units:
         return _refuse("no stage-1 units on the requested pages")
+
+    bottoms = bb_sha = bb_chash = None
+    if args.body_bottom:
+        import body_bottom as BB
+        try:
+            bottoms, bb_sha, bb_chash = BB.load_bottoms(args.body_bottom, sorted(set(pages)))
+        except (BB.Refused, OSError, ValueError) as e:
+            return _refuse(f"--body-bottom: {e}")
 
     gray_cache = {}
 
@@ -273,6 +283,9 @@ def main(argv=None):
         "body_read_sha256": sha256_file(BR.__file__),
         "builder_sha256": sha256_file(__file__),
     }
+    if bottoms is not None:   # only when the flag is given: absent, the config (and its hash) is unchanged
+        config["body_bottom_sha256"] = bb_sha
+        config["body_bottom_config_hash"] = bb_chash
     chash = BVR.config_hash(config)
     header = {"kind": "run_header", "tier": "best_effort", "config": config,
               "config_hash": chash, "api_ps_before_unload": ps_before, "api_ps": ps,
@@ -329,16 +342,34 @@ def main(argv=None):
             gray = load(fp)
             chunks = []
             for rect_idx, rect in rects:
-                boxes, nls, flag = BR.chunk_rect(gray, rect["box"], args.max_lines)
+                rect_box, bb_info = rect["box"], None
+                if bottoms is not None:
+                    new_box, bb_info = BB.clamp_rect(rect["box"], rect["col"], fp, bottoms)
+                    if new_box is None:   # wholly below the bottom: recorded, never sent, never dropped
+                        counts["excluded_below_body_bottom"] += 1
+                        chunks.append({"file_page": fp, "col": rect["col"], "rect_idx": rect_idx,
+                                       "chunk_idx": 0, "box": None, "rect_box_prior": rect["box"],
+                                       "n_lines": 0, "guard": "excluded:below_body_bottom",
+                                       "guard_raw": None, "text": None, "sha256": None,
+                                       "done_reason": None, "eval_count": None, "error": None,
+                                       "body_bottom": bb_info})
+                        continue
+                    if bb_info["clamped"]:
+                        counts["rects_clamped"] += 1
+                        rect_box = new_box
+                boxes, nls, flag = BR.chunk_rect(gray, rect_box, args.max_lines)
                 for ci, (box, nl) in enumerate(zip(boxes, nls)):
                     counts["chunks"] += 1
                     c = {"file_page": fp, "col": rect["col"], "rect_idx": rect_idx,
                          "chunk_idx": ci, "box": list(box), "n_lines": nl, "guard": "ok",
                          "guard_raw": None, "text": None, "sha256": None, "done_reason": None,
                          "eval_count": None, "error": None}
+                    if bb_info is not None and bb_info["clamped"]:
+                        c["rect_box_prior"] = rect["box"]
+                        c["body_bottom"] = bb_info
                     if flag:
                         c["flags"] = [flag]
-                    reason, raw = chunk_guard(gray, box, rect["box"])
+                    reason, raw = chunk_guard(gray, box, rect_box)
                     if raw != "ok":
                         c["guard_raw"] = raw
                     if reason is not None:
@@ -379,6 +410,9 @@ def main(argv=None):
                    "counts": {"chunks": counts["chunks"], "reads": counts["reads"],
                               "guard_refusals": dict(refusals),
                               "item_errors": dict(item_errors),
+                              **({"rects_clamped": counts["rects_clamped"],
+                                  "excluded_below_body_bottom": counts["excluded_below_body_bottom"]}
+                                 if bottoms is not None else {}),
                               "canary_batches": len(canaries),
                               "canary_identical": f"{n_ident}/{max(0, len(canaries) - 1)}",
                               "elapsed_s": round(time.monotonic() - t_start, 1)},

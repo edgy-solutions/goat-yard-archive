@@ -29,10 +29,12 @@ TIER = "best_effort"
 RULE_MARKS = "marker_format_v1"
 RULE_SEMI = "space_before_semicolon_v1"
 RULE_CHAIN = "marker_chain_v1"
+RULE_SIG = "signature_tail_v1"
 RULES = {
     RULE_MARKS: "canonical ^x^ attached to the preceding token; letter never changed",
     RULE_SEMI: "exactly one space before every ';' not at the start of a line",
     RULE_CHAIN: "marker_ledger.reconcile over the body series only; flags and proposals, never edits",
+    RULE_SIG: "last line of a column's lowest chunk is a printer's signature / gathering mark; flag only",
 }
 
 # Order matters: A (closed), B (unclosed single), C (bare caret before punctuation), D (any other ^).
@@ -114,6 +116,48 @@ def normalize(text):
     for e in e2:
         e["step"] = 2
     return t2, e1 + e2
+
+
+# ---------------------------------------------------------------------------
+# signature tail (flag only)
+# ---------------------------------------------------------------------------
+
+_SIG_VOL_RE = re.compile(r"\bVOL\.?\s*[IVX]+\b", re.I)
+_SIG_GATHERING_RE = re.compile(r"\d{0,2}\s?[A-Z]{1,2}(\s?\d{1,2})?")
+
+
+def signature_line(text):
+    """The last non-empty line of text, stripped, if it is a signature form, else None."""
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    if not lines:
+        return None
+    line = lines[-1]
+    if _SIG_VOL_RE.search(line) and len(line) <= 40:
+        return line
+    if _SIG_GATHERING_RE.fullmatch(line):
+        return line
+    return None
+
+
+def signature_tail_flags(entries):
+    """signature_tail_v1. entries: [(derived_chunk_record, file_page, col, box_y1 | None)]. For each
+    (file_page, col) the chunk with the largest box y1 (null box, refused and empty chunks ignored) is
+    the column foot; a signature-form last line puts a flag on that record. Returns the hit list
+    [[file_page, col], ...]. Flags only; text_out is never touched."""
+    foot = {}
+    for rec, fp, col, y1 in entries:
+        if y1 is None or rec.get("text_out") is None:
+            continue
+        k = (fp, col)
+        if k not in foot or y1 > foot[k][0]:
+            foot[k] = (y1, rec)
+    hits = []
+    for (fp, col), (_y1, rec) in foot.items():
+        line = signature_line(rec["text_out"])
+        if line is not None:
+            rec["flags"] = [{"rule": RULE_SIG, "line": line}]
+            hits.append([fp, col])
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +260,7 @@ def derive(body_path):
     raw = Path(body_path).read_bytes()
     recs = [json.loads(l) for l in raw.decode("utf-8").splitlines() if l.strip()]
     header = next((r for r in recs if r.get("kind") == "run_header"), {})
-    chunk_recs, page_text, page_order = [], {}, []
+    chunk_recs, page_text, page_order, sig_entries = [], {}, [], []
     by_rule = {}
     n_changed = n_refused = 0
     for r in recs:
@@ -252,6 +296,9 @@ def derive(body_path):
                     page_order.append(ifp)
                 page_text[ifp].append(out)
             chunk_recs.append(rec)
+            bx = ch.get("box")
+            sig_entries.append((rec, fp, ch.get("col"), bx[3] if bx else None))
+    sig_hits = signature_tail_flags(sig_entries)
     chain = chain_check([{"file_page": fp, "text": "\n".join(page_text[fp])} for fp in page_order])
     summary = {"kind": "derived_summary", "tier": TIER, "chunks_total": len(chunk_recs),
                "chunks_changed": n_changed, "chunks_refused_or_empty": n_refused,
@@ -260,7 +307,8 @@ def derive(body_path):
                "pages_checked": len(chain),
                "pages_with_chain_flags": sum(1 for c in chain if c["flags"]),
                "proposals": sum(len(c["proposals"]) for c in chain),
-               "resets": "not_supplied", "notes_series": "absent"}
+               "resets": "not_supplied", "notes_series": "absent",
+               "signature_tail_flags": len(sig_hits), "signature_tail_hits": sig_hits}
     return raw, header, chunk_recs, chain, summary
 
 

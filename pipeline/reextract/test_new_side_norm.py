@@ -12,7 +12,7 @@ from pathlib import Path
 
 import new_side_norm as N
 
-EXPECTED_TESTS = 21
+EXPECTED_TESTS = 24
 
 
 def _canon(t):
@@ -191,6 +191,57 @@ def test_cli_refusals_leave_no_file():
         assert sorted(p.name for p in Path(d).iterdir()) == ["body.jsonl", "exists.jsonl"]
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+# ---- signature_tail_v1 -------------------------------------------------------
+
+def test_signature_line_hits_and_non_hits():
+    assert N.signature_line("text above\n5 O 2") == "5 O 2"
+    assert N.signature_line("text above\nVOL. I.—OLD TEST.\n") == "VOL. I.—OLD TEST."
+    assert N.signature_line("x\nVOL IV") == "VOL IV"
+    for t in ("an ordinary line of the commentary text", "Ver. 5.", "x\n  Ver. 5.  ", "", None,
+              "a long line mentioning VOL. II. and then much more text than forty characters"):
+        assert N.signature_line(t) is None, t
+
+
+def _sig_body(d):
+    def ch(fp, col, ci, y1, text, **kw):
+        c = {"file_page": fp, "col": col, "rect_idx": 0, "chunk_idx": ci, "guard": "ok", "error": None,
+             "box": None if y1 is None else [0, 0, 10, y1], "text": text}
+        c.update(kw)
+        return c
+    chunks = [ch(5, "left", 0, 500, "foo\n5 O 2"),                      # matches, but NOT the lowest
+              ch(5, "left", 1, 900, "bar\nan ordinary line"),           # the lowest: no match
+              ch(5, "right", 0, 600, "baz\nVOL. I.—OLD TEST."),     # the lowest and a match
+              ch(5, "right", 1, 2000, None, guard="guard_refused:blank"),   # refused: ignored
+              ch(5, "right", 2, None, "q\n5 O 2"),                      # null box: ignored
+              ch(6, "left", 0, 700, "x\nVer. 5.")]                      # a non-hit
+    recs = [{"kind": "run_header", "config_hash": "abc"},
+            {"kind": "body_region", "file_page": 5, "key": [5, "left", 1], "chunks": chunks}]
+    p = Path(d) / "sig_body.jsonl"
+    p.write_text("".join(json.dumps(r) + "\n" for r in recs), encoding="utf-8")
+    return p
+
+
+def test_signature_tail_flags_only_the_columns_lowest_chunk_and_never_edits():
+    d = tempfile.mkdtemp()
+    try:
+        _raw, _h, chunk_recs, _chain, summary = N.derive(_sig_body(d))
+        flagged = [r for r in chunk_recs if r.get("flags")]
+        assert len(flagged) == 1 and (flagged[0]["file_page"], flagged[0]["chunk_idx"]) == (5, 0)
+        assert flagged[0]["flags"] == [{"rule": "signature_tail_v1", "line": "VOL. I.—OLD TEST."}]
+        assert flagged[0]["text_out"] == "baz\nVOL. I.—OLD TEST."          # flag only, never an edit
+        assert summary["signature_tail_flags"] == 1 and summary["signature_tail_hits"] == [[5, "right"]]
+        # the left column's chunk 0 matches the form but is not the column's lowest chunk
+        left0 = [r for r in chunk_recs if r["file_page"] == 5 and r["chunk_idx"] == 0 and r["text_out"].startswith("foo")]
+        assert len(left0) == 1 and "flags" not in left0[0]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_signature_tail_rule_is_registered_in_the_hashed_rules():
+    assert N.RULES["signature_tail_v1"].startswith("last line of a column's lowest chunk")
+    assert N.RULE_SIG == "signature_tail_v1"
 
 
 if __name__ == "__main__":

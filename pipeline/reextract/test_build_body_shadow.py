@@ -15,7 +15,7 @@ import numpy as np
 import body_read as BR
 import build_body_shadow as BSB
 
-EXPECTED_TESTS = 32
+EXPECTED_TESTS = 37
 
 RUN_HOST = "192.168.1.169:11434"   # C (ruling 2026-11-14)
 D_HOST = "192.168.1.169:11435"
@@ -177,14 +177,14 @@ class Env:
         self.every = every
         self.saved = (BSB.make_client, BSB.load_page_gray, BSB.png_sha256, BSB.CANARY_EVERY)
 
-    def run(self, pages=(91, 90, 92), host=RUN_HOST):
+    def run(self, pages=(91, 90, 92), host=RUN_HOST, extra=()):
         BSB.make_client = lambda base_url, model: self.fake
         BSB.load_page_gray = lambda vd, fp: self.pages.get(fp)
         BSB.png_sha256 = lambda vd, fp: f"sha-page-{fp}"
         BSB.CANARY_EVERY = self.every
         argv = ["--stage1", str(self.s1), "--volume-dir", str(self.dir), "--out", str(self.out),
                 "--host", host, "--pages", *[str(p) for p in pages],
-                "--max-lines", str(self.max_lines)]
+                "--max-lines", str(self.max_lines), *extra]
         return BSB.main(argv)
 
     def records(self):
@@ -626,6 +626,104 @@ def test_endpoint_D_is_now_refused_before_any_call(env):
     assert env.run(host="http://" + D_HOST) == 2
     assert env.fake.log == [] and env.fake.chat_payloads == []
     assert not env.out.exists() and not Path(str(env.out) + ".tmp").exists()
+
+
+# ---- --body-bottom (ruling #8 item 1) ----------------------------------------------------------
+
+def bb_file(env, limits, pages=(90, 91, 92), name="bb.jsonl", header=True):
+    """A derived body_bottom file: limits {(fp, col): y1}; any other (page, col) gets 3000."""
+    p = env.dir / name
+    recs = [{"kind": "run_header", "config_hash": "bbhash"}] if header else []
+    for fp in pages:
+        recs.append({"file_page": fp, "body_regions": [
+            {"col": c, "box": [0, 0, 10, limits.get((fp, c), 3000)]} for c in ("left", "right")]})
+    p.write_text("".join(json.dumps(r) + "\n" for r in recs), encoding="utf-8")
+    return p
+
+
+def ok_chunks(env):
+    return [c for r in env.records() if r["kind"] == "body_region" for c in r["chunks"] if c["guard"] == "ok"]
+
+
+@with_env()
+def test_body_bottom_clamp_moves_chunk_boxes_and_records_the_prior(env):
+    bb = bb_file(env, {(90, "left"): 200})
+    assert env.run(extra=["--body-bottom", str(bb)]) == 0
+    recs = env.records()
+    r0 = [r for r in recs if r["kind"] == "body_region" and r["stage1_line"] == 2][0]
+    assert r0["chunks"] and all(c["box"][3] <= 200 for c in r0["chunks"])
+    assert all(c["rect_box_prior"] == [0, 100, 500, 300] and c["body_bottom"] == {"limit": 200, "clamped": True}
+               for c in r0["chunks"])
+    other = [c for r in recs if r["kind"] == "body_region" and r["stage1_line"] != 2 for c in r["chunks"]]
+    assert all("rect_box_prior" not in c for c in other)       # an unclamped rect is not annotated
+    assert recs[-1]["counts"]["rects_clamped"] == 1 and recs[-1]["counts"]["excluded_below_body_bottom"] == 0
+
+
+@with_env()
+def test_body_bottom_rect_wholly_below_is_one_excluded_record_and_zero_reads(env):
+    bb = bb_file(env, {(90, "right"): 340})                      # R1's p90 rect starts at y 350
+    assert env.run(extra=["--body-bottom", str(bb)]) == 0
+    recs = env.records()
+    reg = [r for r in recs if r["kind"] == "body_region" and r["stage1_line"] == 3 and r["file_page"] == 90][0]
+    assert len(reg["chunks"]) == 1
+    c = reg["chunks"][0]
+    assert c["guard"] == "excluded:below_body_bottom" and c["box"] is None and c["n_lines"] == 0
+    assert c["rect_box_prior"] == [500, 350, 1000, 450] and c["body_bottom"] == {"limit": 340, "clamped": True}
+    assert c["text"] is None and c["sha256"] is None and c["error"] is None
+    s = recs[-1]["counts"]
+    assert s["excluded_below_body_bottom"] == 1 and s["guard_refusals"] == {"blank": 1}
+    assert s["reads"] == len(ok_chunks(env))                     # never sent: reads == the ok chunks alone
+    base = Env()
+    try:
+        assert base.run() == 0
+        assert len(ok_chunks(base)) - len(ok_chunks(env)) == 2   # that rect had two chunks, none was read
+    finally:
+        base.close()
+
+
+@with_env()
+def test_body_bottom_full_rect_uses_the_min_of_the_two_columns(env):
+    recs = stage1_records()
+    recs.append({"kind": "verse", "file_page_first": 91, "verse": [9], "head_status": "shipped",
+                 "head": {"col": "left", "y0": 390},
+                 "rects": [{"file_page": 91, "col": "full", "box": [0, 400, 1000, 600]}]})
+    env.s1.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    bars(env.pages[91], (0, 400, 1000, 600), 9)
+    bb = bb_file(env, {(91, "left"): 520, (91, "right"): 480})
+    assert env.run(extra=["--body-bottom", str(bb)]) == 0
+    reg = [r for r in env.records() if r["kind"] == "body_region" and r["stage1_line"] == len(recs) - 1][0]
+    assert reg["chunks"] and all(c["box"][3] <= 480 for c in reg["chunks"])
+    assert all(c["body_bottom"]["limit"] == 480 for c in reg["chunks"])
+
+
+@with_env()
+def test_body_bottom_missing_page_is_a_refusal_with_nothing_behind(env):
+    bb = bb_file(env, {}, pages=(90, 91))                        # page 92 is requested but absent
+    assert env.run(extra=["--body-bottom", str(bb)]) == 2
+    assert not env.out.exists() and not Path(str(env.out) + ".tmp").exists()
+    assert env.fake.log == [] and env.fake.chat_payloads == []
+    bb2 = bb_file(env, {}, header=False, name="bb2.jsonl")
+    assert env.run(extra=["--body-bottom", str(bb2)]) == 2 and not env.out.exists()
+
+
+def test_body_bottom_absent_leaves_config_and_hash_unchanged():
+    a, b = Env(), Env()
+    try:
+        assert a.run() == 0
+        ha = a.records()[0]
+        assert "body_bottom_sha256" not in ha["config"] and "body_bottom_config_hash" not in ha["config"]
+        assert ha["config_hash"] == BSB.BVR.config_hash(ha["config"])
+        assert "rects_clamped" not in a.records()[-1]["counts"]
+        assert b.run(extra=["--body-bottom", str(bb_file(b, {}))]) == 0
+        hb = b.records()[0]
+        assert hb["config"]["body_bottom_config_hash"] == "bbhash" and len(hb["config"]["body_bottom_sha256"]) == 64
+        stripped = {k: v for k, v in hb["config"].items() if not k.startswith("body_bottom")}
+        assert stripped == ha["config"] and hb["config_hash"] != ha["config_hash"]
+        assert BSB.BVR.config_hash(stripped) == ha["config_hash"]
+        assert [c["box"] for c in ok_chunks(a)] == [c["box"] for c in ok_chunks(b)]   # nothing clamped
+    finally:
+        a.close()
+        b.close()
 
 
 if __name__ == "__main__":
