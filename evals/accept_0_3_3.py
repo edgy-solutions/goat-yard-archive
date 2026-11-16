@@ -87,9 +87,84 @@ def record(name, ok, detail):
     print("[%-14s] %s\n                 %s\n" % (flag, name, detail))
 
 
+class Run(object):
+    """One subprocess attempt, with a THIRD state.
+
+    `stdout` and `stderr` are always str -- never None. `fault` is non-empty
+    exactly when the attempt did not SPEAK: the binary is absent, it timed out,
+    or its output could not be decoded. A fault is NOT OBSERVABLE at every call
+    site. It is never a FAIL -- that would blame the cluster for a defect in
+    this script's reading -- and never a pass.
+    """
+
+    def __init__(self, returncode, stdout, stderr, fault=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.fault = fault
+
+
+def decode(raw, stream):
+    """bytes|str|None -> (str, fault). Both faults here crashed the prod run.
+
+    1.  THE PLATFORM CODEC. `text=True` with no `encoding=` decodes with
+        `locale.getpreferredencoding(False)`, which is cp1252 on this host.
+        Byte 0x9d is UNDEFINED in cp1252, so a response body carrying a curly
+        quote out of Gill's text (U+201D is e2 80 9d in UTF-8) raised
+        UnicodeDecodeError inside `subprocess.run` -- before any check could
+        read a byte of it. The pipes carry UTF-8 and this decodes UTF-8
+        explicitly and strictly.
+
+        `errors="replace"` is deliberately NOT used. A replacement character
+        would turn a JSON body into "unparseable", which records as a release
+        FAULT when the fault is in the reading. Abstain over silent repair.
+
+    2.  A STREAM THAT IS None. `TimeoutExpired.stdout` is bytes OR None. A
+        stream that was never captured is not an empty stream: empty means the
+        command printed nothing, None means nobody looked.
+    """
+    if raw is None:
+        return "", ("%s was never captured (None) -- which is not the same as "
+                    "empty" % stream)
+    if isinstance(raw, str):
+        return raw, ""
+    try:
+        return raw.decode("utf-8"), ""
+    except UnicodeDecodeError as exc:
+        bad = raw[exc.start:exc.start + 1]
+        return "", ("%s is not valid UTF-8: byte 0x%02x at offset %d (%s). "
+                    "NOT re-read with the platform codec -- that is the defect "
+                    "this replaced." % (stream, bad[0] if bad else 0,
+                                        exc.start, exc.reason))
+
+
+def run(argv, timeout=None):
+    """`subprocess.run` that returns a Run and raises nothing a check can hit.
+
+    Bytes out of the pipes, decoded here, rather than `text=True` with an
+    `encoding=`: a strict decode inside `subprocess.run` still raises, and an
+    exception at item 5 left items 5 and 6 with no verdict at all.
+    """
+    try:
+        p = subprocess.run(argv, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        out, _ = decode(exc.stdout, "stdout")
+        err, _ = decode(exc.stderr, "stderr")
+        return Run(-1, out, err,
+                   "timed out after %ss (partial output is not a verdict)"
+                   % timeout)
+    except FileNotFoundError:
+        return Run(-1, "", "", "%s is not on PATH" % argv[0])
+    except OSError as exc:
+        return Run(-1, "", "", "could not run %s: %r" % (argv[0], exc))
+    out, ofault = decode(p.stdout, "stdout")
+    err, efault = decode(p.stderr, "stderr")
+    return Run(p.returncode, out, err, ofault or efault)
+
+
 def kubectl(*args, **kw):
-    return subprocess.run(["kubectl", "-n", NS] + list(args),
-                          capture_output=True, text=True, **kw)
+    return run(["kubectl", "-n", NS] + list(args), **kw)
 
 
 def image_id_check(name, selector_name, repo, digest):
@@ -99,6 +174,9 @@ def image_id_check(name, selector_name, repo, digest):
                       "app.kubernetes.io/instance=gya-frontend" % selector_name,
                 "-o", "jsonpath={range .items[*]}{.metadata.name}"
                       "{\" \"}{.status.containerStatuses[*].imageID}{\"|\"}{end}")
+    if r.fault:
+        record(name, None, "could not read the imageID: " + r.fault)
+        return
     if r.returncode != 0:
         record(name, False, "kubectl failed: " + r.stderr.strip()[:300])
         return
@@ -119,7 +197,12 @@ def image_id_check(name, selector_name, repo, digest):
 
 
 def in_pod_http(path, method="GET", body=None, timeout=120):
-    """One python one-liner inside the api container. Returns (status, text)."""
+    """One python one-liner inside the api container.
+
+    Returns `(status, text, fault)`. A non-empty `fault` means the probe never
+    reached the endpoint, and then `status is None` -- so a caller that forgets
+    the fault gets a TypeError on the comparison rather than a wrong verdict.
+    """
     script = (
         "import json,urllib.request,urllib.error,sys\n"
         "url='http://localhost:8000%s'\n"
@@ -134,17 +217,27 @@ def in_pod_http(path, method="GET", body=None, timeout=120):
         "except Exception as e:\n"
         "    print(-1); print(repr(e))\n"
     ) % (path, repr(body), method, timeout - 10)
-    r = None
+    r, faults = None, []
     for interp in ("python", "python3"):
         r = kubectl("exec", API_DEPLOY, "-c", API_CONTAINER, "--",
                     interp, "-c", script, timeout=timeout)
+        if r.fault:
+            # The attempt did not speak. Try the other interpreter name, but
+            # keep the reason: if neither speaks there is no status to report,
+            # and -1 would be read as "the endpoint answered badly".
+            faults.append("%s: %s" % (interp, r.fault))
+            continue
         if r.returncode == 0 and r.stdout.strip():
             head, _, rest = r.stdout.partition("\n")
             try:
-                return int(head.strip()), rest.strip()
+                return int(head.strip()), rest.strip(), ""
             except ValueError:
-                return -1, r.stdout.strip()
-    return -1, ((r.stderr or r.stdout).strip()[:500] if r else "no kubectl run")
+                return -1, r.stdout.strip(), ""
+    if faults and (r is None or r.fault):
+        # A non-empty fault means status is None. No caller may compare it.
+        return None, "", "; ".join(faults)
+    return -1, ((r.stderr or r.stdout).strip()[:500] if r
+                else "no kubectl run"), ""
 
 
 def context_sids(doc):
@@ -234,8 +327,11 @@ def main(argv=None):
     # the container's own environment.
     r = kubectl("exec", API_DEPLOY, "-c", API_CONTAINER, "--",
                 "sh", "-c", "printenv " + FLAG)
-    val = r.stdout.strip()
-    if r.returncode != 0 and not val:
+    val = "" if r.fault else r.stdout.strip()
+    if r.fault:
+        record("flag landed in the running container", None,
+               "could not read the container's own environment: " + r.fault)
+    elif r.returncode != 0 and not val:
         record("flag landed in the running container", None,
                "could not exec into %s: %s" % (API_DEPLOY, (r.stderr or "").strip()[:200]))
     elif val == "":
@@ -254,9 +350,12 @@ def main(argv=None):
                "own environment, not from the ConfigMap)" % FLAG)
 
     # --- 4. debug captures refuse by default -------------------------------
-    status, text = in_pod_http("/api/search", "POST",
-                               {"query": "faith", "debug": True})
-    if status == 403:
+    status, text, fault = in_pod_http("/api/search", "POST",
+                                      {"query": "faith", "debug": True})
+    if fault:
+        record("debug 403 by default", None,
+               "the probe never reached the debug gate: " + fault)
+    elif status == 403:
         names_var = "GYA_DEBUG_STAGES" in text
         record("debug 403 by default", names_var,
                "403 and the refusal names the variable" if names_var else
@@ -283,8 +382,15 @@ def main(argv=None):
     else:
         faults, obs, aborted = [], [], None
         for i in range(args.draws):
-            status, text = in_pod_http("/api/search", "POST",
-                                       {"query": WITNESS_QUERY})
+            status, text, fault = in_pod_http("/api/search", "POST",
+                                              {"query": WITNESS_QUERY})
+            if fault:
+                # Run-level, exactly like the 429 below: every remaining draw
+                # would measure the same dead channel. Abort, report
+                # inconclusive, never splice a short run into a pass.
+                aborted = ("draw %d of %d never ran: %s"
+                           % (i + 1, args.draws, fault))
+                break
             if status == 429:
                 # A rate limit is a RUN-level fault, not an item error: the
                 # remaining draws would measure the limiter. Abort, report
@@ -332,8 +438,10 @@ def main(argv=None):
             record(name, True, "\n".join(lines))
 
     # --- 6. /health/stages, read LAST (D-004) ------------------------------
-    status, text = in_pod_http("/health/stages")
-    if status != 200:
+    status, text, fault = in_pod_http("/health/stages")
+    if fault:
+        record("/health/stages", None, "the probe never ran: " + fault)
+    elif status != 200:
         record("/health/stages", False, "status %s: %s" % (status, text[:300]))
     else:
         try:
