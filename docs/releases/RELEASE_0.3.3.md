@@ -195,7 +195,10 @@ draw count weakens the witness and should be recorded if used.
 The six items, in the order the script runs them:
 
 1. **api `imageID`** against `sha256:2fce1e34…`
-2. **ui `imageID`** against `sha256:f386254e…`
+2. **ui `imageID`** against `sha256:f386254e…` — this is the **in-cluster** ui
+   pod, which no public request reaches (§Which UI the public reaches). The
+   public page's build identifier is a separate item, in
+   `RELEASE_PROCESS.md` § Step 5.
 3. **the flag landed in the running container.** Reads
    `printenv GILL_STRUCTURED_ANSWER` *inside* the api container — not the
    ConfigMap, not the pod spec. See D-007 for why those two answer a different
@@ -395,19 +398,130 @@ The gate's whole purpose is the content the chart cannot account for.
 
 ---
 
-# MEASURED — fill in after the run
+## Which UI the public reaches — and what the in-cluster ui pod is for
 
-Not filled in. The commands above have not been run by this lane and will not
-be: steps 1 and 2 read `~/.gya/secrets-prod.yaml` and write secret values to
-disk, which is operator-only under the standing law of 2026-10-18. `kubectl` is
-also not reachable from this lane's shell.
+Recorded here because the 0.3.3 deploy was accepted against the wrong UI for
+about an hour: the pinned ui digest rolled in the cluster, and the page Chris
+checked in a private window was **not served by that pod**.
 
-Record here, after the run:
+| | serves | deployed by | at |
+|---|---|---|---|
+| **what the public reaches** | `goatyardarchive.org` — the whole page, from `frontend/dist` baked into a Cloudflare Workers bundle | `wrangler deploy`, by hand, from a laptop | last deployed ~2026-08 (Cloudflare version `cb7ca83c`) |
+| **the in-cluster `gya-frontend-ui` pod** | the same SPA, behind the cluster Ingress for host `goatyardarchive.org` path `/` | this chart, by digest | revision 33 |
 
-- the drift gate's verdict block, as printed, both runs;
-- whether the three predicted `DIFFERENT` lines were the only ones, and what the
-  `only-rendered` / `only-live` counts were against last week's;
-- the helm revision number and its status;
-- `accept_0_3_3.py`'s output and exit code;
-- anything the prediction got wrong, stated as the prediction being wrong rather
-  than as the run being surprising.
+The Worker (root `wrangler.jsonc`, `main: worker.js`) answers `/` out of its own
+`ASSETS` binding and forwards **only** `/api/*` and `/scans/*` to
+`TUNNEL_HOST = origin.goatyardarchive.org`. So of the three Ingress paths in
+`values-frontend.yaml`, two are reached through the tunnel (api, minio) and the
+third is not: **no public request reaches the `gya-frontend-ui` pod.** It is not
+dead — it is the origin-side copy, reachable directly at the Ingress host and
+the thing that would serve the page if the Worker were removed — but it is not
+what a user sees, and pinning its digest proved nothing about the live page.
+
+The frontend is **byte-identical between tag `0.3.0` and `release-0.3.3`** (`git
+diff --stat 0.3.0 release-0.3.3 -- frontend/` is empty; zero commits touch
+`frontend/` in that span). That is why the structured answer rendered correctly
+on a three-month-old bundle: nothing client-side was needed for it. It is not
+evidence that the deploy reached the page.
+
+The public deploy is its own step. It is written up in
+`RELEASE_PROCESS.md` § Step 5, because it is not a 0.3.3-specific command.
+
+---
+
+# MEASURED
+
+Everything in this section is dated and attributed. The gate rows that are not
+here are **not here** — they are not reconstructed from §Prediction, because a
+prediction written into a MEASURED block is prose wearing a number's clothes.
+
+## The deploy
+
+| | |
+|---|---|
+| helm revision | **32 → 33** |
+| deployed | 2026-11-15 20:15 CST |
+| api image | `ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:2fce1e3467d5f53e4f0700cdd51530db86cc85c8ef7231f091c6e69509b11433` |
+| ui image | `ghcr.io/edgy-solutions/goat-yard-archive/frontend@sha256:f386254ee465b77ceee57b3f11ad8f1742e8f6d671e1fa71452aa819c1996da4` |
+| public page | renders the structured answer correctly (Chris, private window, 2026-11-15) |
+
+Both digests are the artefacts the gate run scored. Nothing was rebuilt.
+
+## The drift gate — NOT RECORDED HERE YET
+
+The second gate run's verdict block has not reached this lane. What is recorded
+is the first run's, in §Prediction, **as a prediction**. The rows this section
+needs, by key name:
+
+- `SAME` / `DIFFERENT` / `only-rendered` / `only-live` counts, as printed;
+- the `DIFFERENT` keys by name (predicted: exactly `image[api]` and `image[ui]`);
+- the `only-rendered` keys by name (predicted: `GILL_STRUCTURED_ANSWER`);
+- the `only-live` keys by name (predicted: `env[MINIO_HTTP_ENDPOINT]`);
+- the rendered object count (predicted 18) and the gate's exit code
+  (predicted 1, on the two intended reverts).
+
+A paste of the block fills this in. Until then this release has a deploy record
+and no gate record, and the difference between the two is the whole reason the
+gate exists.
+
+## Acceptance
+
+`accept_0_3_3.py`, run by the operator against prod, 2026-11-15:
+
+| item | result |
+|---|---|
+| 1. api `imageID` | **PASS** |
+| 2. ui `imageID` | **PASS** |
+| 3. flag landed in the running container | **PASS** |
+| 4. debug 403 by default | **PASS** |
+| 5. cited-SID witness x5 | **NOT OBSERVED** — the script crashed here |
+| 6. `/health/stages` | **NOT OBSERVED** — never reached |
+
+Items 5 and 6 have **no verdict**, and a crash is not a partial pass: four of
+six items were observed and the acceptance is incomplete. The cause was in the
+script, not the cluster — `subprocess` output was decoded with the Windows
+platform codec (cp1252) and died on byte `0x9d`, the third byte of a curly quote
+in Gill's text. Fixed in `bc0ba3b`; items 5 and 6 need a rerun, and the rows
+above are to be replaced by a complete run, not appended to.
+
+What the four observed items establish, stated narrowly: the kubelet resolved
+both signed digests, the running api container's **own environment** carries
+`GILL_STRUCTURED_ANSWER=1` (not the ConfigMap's claim about it), and the debug
+capture channel refuses by default. What they do not establish is that the
+cited-answer path works on prod's corpus — that is item 5, and it is unobserved.
+
+## The named regression
+
+`corpus_ingestion_sha` on `/search` Langfuse traces. The 0.3.3 api image is
+built from `a81b98b`, which does not contain the four backend files that landed
+on `main` in `bf15b9d` / `a7bb044` / `aa46490`; the attribute is one of them
+(`backend/main.py`, 4 lines). Ruling 15 has the file-by-file decomposition.
+
+**Chris reports `INGESTION_SHA` is unset in prod** (2026-11-15). On that basis
+the attribute prod loses carries the literal `"unstamped"`
+(`os.getenv("INGESTION_SHA", "unstamped")`) and the regression is a missing
+field with no content, not a lost corpus version. The basis is his read of
+`~/.gya/secrets-prod.yaml`, which is operator-only; this lane did not read it
+and cannot confirm it. My own earlier inference of the same conclusion **from
+the gate's `only-live` env keys does not hold** and is withdrawn: the api takes
+its environment via `envFrom: secretRef`, so a key in that file need not appear
+as an env line at all.
+
+gya-test has been without the attribute since 2026-10-18 — 28 days, through the
+0.3.3 soak week, which was reported as liveness with the attribute missing and
+nothing noticing.
+
+## What the prediction got wrong
+
+Stated as the prediction being wrong, not the run being surprising.
+
+- **"Both `git log` ranges are empty" was wrong for `main`.** The STOP clause
+  above requires `release-0.3.3..main` and `release-0.3.3..release-0.3.2` both
+  empty. Only the second was run. The first is 86 commits, 4 of them merges.
+  The branch shipped behind `main` by four backend files, which is the named
+  regression above. A checklist authored in the same session as the branch
+  (`RELEASE_PROCESS.md` § Step 0) and not applied to it.
+- **The acceptance script was never run on this host before prod.** Its
+  `text=True` defect is a Windows-only, content-dependent crash: it needs a
+  response body carrying a non-cp1252 byte, which is every real Gill answer and
+  no test fixture. Item 5 was the first time the script saw one.

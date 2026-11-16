@@ -64,6 +64,75 @@ touches the chart, so every pin in the runbook is re-derived from the merged tre
 git -C ~/git/goatyard-relXXX rev-parse release-X.Y.Z:charts/goat-yard-archive
 ```
 
+---
+
+## Step 5 — the public UI is a SEPARATE deploy, by hand, outside the cluster
+
+**This step exists because 0.3.3 was accepted without it.** The chart's ui
+digest rolled; the page the public reaches did not change, because it is not
+served by the cluster. See `RELEASE_0.3.3.md` § Which UI the public reaches.
+
+The public site is a **Cloudflare Workers** project named `goat-yard-archive`.
+Its config is `wrangler.jsonc` **at the repo root** — not in `frontend/` — and
+it serves `/` from the `frontend/dist` build baked into the bundle, forwarding
+only `/api/*` and `/scans/*` to `origin.goatyardarchive.org`. **No CI workflow
+deploys it**: neither `build-containers.yml` nor `eval.yml` mentions wrangler,
+pages or workers. Every deploy it has ever had was a hand-run command.
+
+### The commands
+
+```sh
+# 1. build the bundle the Worker will serve
+cd ~/git/goatyard-relXXX/frontend
+npm ci                      # package-lock.json IS tracked; use ci, not install
+npm run build               # tsc && vite build -> frontend/dist (gitignored)
+
+# 2. deploy from the REPO ROOT, where wrangler.jsonc lives
+cd ~/git/goatyard-relXXX
+npx wrangler deploy
+```
+
+Cloudflare credentials are the operator's. Nothing in this repo holds them and
+no agent runs step 2.
+
+**`wrangler` is not pinned anywhere in this repo.** There is no root
+`package.json`, so `npx wrangler` resolves whatever is current that day — and
+`wrangler.jsonc`'s own `$schema` points at `node_modules/wrangler/`, which is
+never installed. Record the wrangler version the deploy printed. Pinning it is
+0.3.4 scope.
+
+### The acceptance item: read the public page's build identifier
+
+The deployed bundle is identified by the content-hashed entry script that the
+served `index.html` references, `/assets/index-<hash>.js`. Vite derives that
+hash from content, and `frontend/package-lock.json` is tracked, so a local
+`npm ci && npm run build` of the release tree reproduces it.
+
+```sh
+# what the public is being served
+curl -s https://goatyardarchive.org/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
+
+# what the release tree builds
+ls ~/git/goatyard-relXXX/frontend/dist/assets/index-*.js
+```
+
+**Each command must print exactly one string. A `grep` that matches nothing
+prints nothing and exits 1, and a check that reads nothing has not passed —
+record it as NOT OBSERVABLE and say which side was silent.** The entry name is
+vite's default (`assets/index-<hash>.js`) and is not asserted anywhere; if a
+config change renames it, the grep misses and must abstain rather than agree
+with an empty counterpart.
+
+Equal means the public page is this release's frontend. **Record both strings
+either way**, and record the node and wrangler versions beside them: the hash is
+reproducible across a lockfile, not across a toolchain, so a mismatch is a
+question ("which tree, which toolchain?") and not by itself a verdict. An
+unequal pair with a known-stale Worker is the expected reading, which is what
+0.3.3 had and did not notice.
+
+This item answers a question the in-cluster `ui imageID` check cannot: that
+check reads a pod no public request reaches.
+
 ## What this checklist does NOT solve
 
 - **Nothing enforces it.** These are commands a human can skip, which is exactly
@@ -73,3 +142,8 @@ git -C ~/git/goatyard-relXXX rev-parse release-X.Y.Z:charts/goat-yard-archive
   case of a release branch missing a deploy fix.
 - Step 2 compares two renders. Neither is prod. The drift gate against a live
   capture is still the only thing that compares a release to the cluster.
+- **Step 5 is not automated and the Worker has no CI.** A release can still ship
+  a backend and leave the public page three months old, which is what 0.3.1,
+  0.3.2 and 0.3.3 each did. Nothing fails when it happens.
+- Step 5's build-identifier comparison is reproducible across a lockfile, not
+  across a toolchain. It is a recorded pair of strings, not a gate.
