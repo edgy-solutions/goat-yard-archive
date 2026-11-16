@@ -64,6 +64,24 @@ SHEET_DIGEST = "3f6b0357a850548e"
 MANIFEST = "GEOMETRY5_sheet_%s.json" % SHEET_DIGEST
 SHEET = "GEOMETRY5_sheet_%s.html" % SHEET_DIGEST
 RELAY = r"C:\tmp\a2\RELAY_chris_geometry5_verdicts_20261115.md"
+#: The archived copy, beside the record in the private data repo. `C:\tmp` is outside both repos
+#: and will not outlive the machine; a record whose central claim is "these are his words verbatim"
+#: must keep the document those words came from, or the claim is unfalsifiable the first time the
+#: temp directory is cleared.
+RELAY_ARCHIVED = "RELAY_chris_geometry5_verdicts_20261115.md"
+
+
+def relay_lines(path=None):
+    """The verbatim block's lines, in order, from the archived relay. Raises if it is not there.
+
+    The block is the one fenced section of the relay: Chris's five sentences and nothing else. The
+    prose around it is A2's, and a comparison that let prose in would pass on a paraphrase."""
+    p = path or os.path.join(DATA, RELAY_ARCHIVED)
+    txt = io.open(p, encoding="utf-8").read()
+    parts = txt.split("```")
+    if len(parts) < 3:
+        raise ValueError("%s holds no fenced verbatim block" % p)
+    return [l.strip() for l in parts[1].split("\n") if l.strip()]
 
 #: Verdict vocabulary, typed by WHAT IS BEING ASSERTED rather than by a number.
 #:
@@ -87,7 +105,8 @@ SIGN_RULE = ("negative = the stored box is ABOVE the Hebrew; positive = BELOW. D
 #: Chris's verdicts, 2026-11-15, relayed via the Lane A2 session. `basis` is his sentence verbatim.
 AUDIT = [
     {"span_id": "p107:n3", "verdict": "box_off_by_lines", "lines_from_hebrew": -1,
-     "basis": u'107:n3 \u2014 red box 1 line above the Hebrew. Box is on roman type '
+     "basis_is_his_words": True,
+     "basis": u'p107:n3 \u2014 red box 1 line above the Hebrew. Box is on roman type '
               u'("Paradise Lost.", note x); the Hebrew is in note y. Blue tick is on the '
               u"Hebrew's line.",
      # The only span for which he stated anything about the blue witness tick. For this one the
@@ -101,20 +120,25 @@ AUDIT = [
                       "span as a confirmed instance on 2026-11-15",
      "box_is_on": u'roman type, "Paradise Lost." in note x; the Hebrew is in note y'},
     {"span_id": "p133:n1", "verdict": "box_off_by_lines", "lines_from_hebrew": -1,
+     "basis_is_his_words": True,
      "basis": u"p133:n1 - red box 1 line above the Hebrew",
      "witness_agrees_with_eye": None, "confirms_debt": None, "box_is_on": None},
     {"span_id": "p144:n0", "verdict": "box_off_by_lines", "lines_from_hebrew": 2,
+     "basis_is_his_words": True,
      "basis": u"p144:n0 - red box 2 lines below the hebrew",
      "witness_agrees_with_eye": None, "confirms_debt": None, "box_is_on": None},
     # No line count, by rule: there is no Hebrew on the crop to be a distance from.
     {"span_id": "p256:n3", "verdict": "no_hebrew_on_crop",
+     "basis_is_his_words": True,
      "basis": u"p256:n3 - no hebrew on crop",
      "witness_agrees_with_eye": None, "confirms_debt": None, "box_is_on": None},
     {"span_id": "p306:n1", "verdict": "box_off_by_lines", "lines_from_hebrew": 2,
+     "basis_is_his_words": True,
      "basis": u"p306:n1 - red box 2 lines below the hebrew",
      "witness_agrees_with_eye": None, "confirms_debt": None, "box_is_on": None},
     # The sheet's control. A row, not an absence -- see the module docstring.
     {"span_id": "p92:n1", "verdict": "not_adjudicated",
+     "basis_is_his_words": False,
      "basis": u"the sheet's control (`control_not_adjudicated`); not put in front of Chris in this "
               u"sitting, so nothing here is a claim about it. It is the span whose crop was found "
               u"three lines off while a byte-identity comparison reported 74/74.",
@@ -171,7 +195,9 @@ def _sign_from_basis(basis):
 #: completion gate and recorded in the artifact, so the two cannot drift: a run at any other count
 #: refuses and leaves nothing behind. Deliberately NOT asserted inside `ck` -- comparing this
 #: constant with itself would be a verifier asking the producer, and would move the number it checks.
-CHECKS_EXPECTED = 26
+# 26 -> 32: six for provenance. The record claimed Chris's words verbatim and named the relay in
+# prose without ever opening it, and a transcription lost a character of his span id.
+CHECKS_EXPECTED = 32
 
 
 def build():
@@ -180,6 +206,13 @@ def build():
     man = json.load(io.open(mp, encoding="utf-8"))
     with io.open(os.path.join(DATA, SHEET), "rb") as fh:
         sheet_sha = hashlib.sha256(fh.read()).hexdigest()[:16]
+    # HIS WORDS, FROM THE DOCUMENT THEY ARE IN. Read before the rows are built, so a missing or
+    # malformed archive stops the record being written rather than producing one whose provenance
+    # claim is untestable.
+    relay_path = os.path.join(DATA, RELAY_ARCHIVED)
+    with io.open(relay_path, "rb") as fh:
+        relay_sha = hashlib.sha256(fh.read()).hexdigest()[:16]
+    quoted = relay_lines()
     rows = []
     for r in AUDIT:
         r = dict(r)
@@ -229,6 +262,18 @@ def build():
             "no_hebrew_on_crop": "no line on the crop can be the Hebrew. NOT an offset of any "
                                  "size; carries no line count, by rule",
             "not_adjudicated": "not put in front of him; claims nothing"},
+        "relay": {
+            "archived": RELAY_ARCHIVED,
+            "sha256_16": relay_sha,
+            "source_path_at_build": RELAY,
+            "verbatim_lines": quoted,
+            "means": ("the document Chris's words reached Lane B in, archived beside this record "
+                      "and hashed here. Every row flagged `basis_is_his_words` is byte-identical "
+                      "to one of these lines, and every line is claimed by a row -- checked both "
+                      "ways, because a verdict dropped in transcription is invisible to a per-row "
+                      "comparison. The transcription of p107:n3 lost the leading 'p' of its span "
+                      "id and nothing could see it until this comparison existed."),
+        },
         "sign_rule": SIGN_RULE,
         "hash_rule": ("sha256[:16] over the UTF-8 bytes of this record serialised with "
                       "ensure_ascii=False, sort_keys=True, indent=1, with the self_sha16 field "
@@ -305,6 +350,36 @@ def check(rec, man):
     ck(all(r["page_printed"] == r["page_file"] - 88 for r in rows),
        "the printed page is derived, never typed")
     ck(all(r["basis"] for r in rows), "every row carries a basis, including the unadjudicated one")
+
+    # ------------------------------------------------- THE BASIS IS HIS SENTENCE, OR IT IS NOT HIS
+    _his = [r for r in rows if r.get("basis_is_his_words")]
+    _ours = [r for r in rows if not r.get("basis_is_his_words")]
+    _quoted = rec["relay"]["verbatim_lines"]
+    ck(all("basis_is_his_words" in r for r in rows),
+       "every row says whose sentence its basis is, rather than leaving it to the verdict")
+    ck([r["span_id"] for r in _ours] == ["p92:n1"]
+       and all(r["verdict"] == "not_adjudicated" for r in _ours),
+       "the only basis that is not his is the control's, which is Lane B's own description")
+    _unquoted = [r["span_id"] for r in _his if r["basis"] not in _quoted]
+    ck(not _unquoted,
+       "every his-words basis is byte-identical to a line of the relay: %s" % _unquoted)
+    # THE OTHER DIRECTION. A row can only be wrong about a line it has; a line with no row is a
+    # verdict dropped in transcription, and nothing in a per-row comparison can see one.
+    _unclaimed = [l for l in _quoted if l not in [r["basis"] for r in _his]]
+    ck(not _unclaimed,
+       "every line of the relay's verbatim block is claimed by a row: %s" % _unclaimed)
+    ck(len(_his) == len(_quoted) == 5,
+       "five sentences, five rows that quote them (%d, %d)" % (len(_his), len(_quoted)))
+    # The archive is the thing being compared against, so its bytes are checked too: a record that
+    # verified itself against a file it had rewritten would agree by construction.
+    _ap = os.path.join(DATA, rec["relay"]["archived"])
+    _live_relay = None
+    if os.path.exists(_ap):
+        with io.open(_ap, "rb") as _fh:
+            _live_relay = hashlib.sha256(_fh.read()).hexdigest()[:16]
+    ck(_live_relay == rec["relay"]["sha256_16"],
+       "the archived relay on disk is the one this record was built from (%s vs %s)"
+       % (_live_relay, rec["relay"]["sha256_16"]))
     # ---- the typed classes assert what they claim and nothing else
     ck(all("lines_from_hebrew" not in r for r in rows if r["verdict"] == "no_hebrew_on_crop"),
        "a no_hebrew_on_crop row carries NO line count: there is no Hebrew to be a distance from, "
