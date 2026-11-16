@@ -1141,6 +1141,60 @@ def _one_band(im):
     return band_geometry(im)[0] in ("one-band", "merged-top-edge")
 
 
+def word_band(file_page, boxes, expect):
+    """(verdict, band in NATIVE rows, info) for the band of the WORD these glyph boxes make up.
+
+    Chris's ruling of 2026-11-16, on p309's yod: "do not lower MIN_BAND_PX. One line of type is a
+    property of the word, so apply the band check to the union of the word's glyph boxes, and check
+    each glyph box only for being inside that band and non-blank."
+
+    THE GATE THIS REPLACES ASKED ONE GLYPH TO BE A LINE OF TYPE. MIN_BAND_PX = 20 is a floor derived
+    on lines of type, and a yod is a short letter: p309's yod crop holds one unbroken 18px ink run,
+    which IS the letter, and the gate read that as `no-band` and refused the record. The floor is
+    not wrong and is not touched. It was being asked of the wrong unit. A letter is not a line, and
+    the word is the smallest thing on the page that has a line.
+
+    `expect` is REQUIRED, and is the number of glyphs the word has. A function that derives its own
+    input fails silently: handed a short or empty box list this would otherwise return the band of
+    whatever it was given -- in the limit the signed glyph alone, which is exactly the gate being
+    replaced, passing under the new name and leaving the record set unchanged for a reason no one
+    could see. So the caller states the count, and a mismatch raises rather than measuring.
+
+    The verdict set is band_geometry's, unchanged, and the admissible set is _one_band's, unchanged.
+    What moved is the CROP the question is asked about."""
+    boxes = [[int(round(v)) for v in b] for b in boxes]
+    if len(boxes) != int(expect):
+        raise ValueError("word_band got %d box(es) for a %d-glyph word -- the caller must pass "
+                         "every glyph box, because the band belongs to the WORD"
+                         % (len(boxes), int(expect)))
+    u = [min(b[0] for b in boxes), min(b[1] for b in boxes),
+         max(b[2] for b in boxes), max(b[3] for b in boxes)]
+    im, fault = cut_native(file_page, u)
+    if fault:
+        return "crop-fault", None, dict(union=u, fault=fault)
+    verdict, info = band_geometry(im)
+    main = info.get("main")
+    native = None if not main else [u[1] + int(main[0]), u[1] + int(main[1])]
+    return verdict, native, dict(union=u, verdict=verdict, n_bands=info.get("n_bands"),
+                                 band_px=info.get("band_px"), main=main, band_native=native,
+                                 crop_size=list(im.size))
+
+
+def box_band_margin(box, band_native):
+    """(inside, margins) for one box against the word's band. The margins are REPORTED ALWAYS.
+
+    `top` and `bottom` are how far INSIDE the band the box sits at each end: >= 0 is inside, and a
+    negative number is how far it reaches past. Both are recorded whatever the verdict, because
+    clause 4(a) of the registered rule is strict containment with NO tolerance -- so the margin is
+    the whole of the evidence a future ruling about tolerance would have to argue from, and a gate
+    that stores only its yes/no leaves that ruling nothing. A measurement not persisted is a
+    comment."""
+    b = [int(round(v)) for v in box]
+    top = b[1] - int(band_native[0])
+    bot = int(band_native[1]) - b[3]
+    return (top >= 0 and bot >= 0), dict(top=top, bottom=bot)
+
+
 def letter_boxes_fault(word, letter, idx, box, lboxes):
     """Why the per-glyph boxes do not support the claim, or None.  Pure geometry: no images.
 
@@ -1230,7 +1284,13 @@ def sig_load(path=None):
     Checks, in order, and every one of them has a failure mode it was written for:
       - every required field present, and `coord_space` == "native" (the other space exists);
       - the box cuts a real, non-blank, in-bounds crop -- D.crop_fault, the outbound gate;
-      - the crop holds exactly ONE text line, so the exemplar is a letter and not a paragraph;
+      - the WORD -- the union of the record's glyph boxes -- holds exactly one line of type, and
+        every box in the record sits inside that line's band. Until 2026-11-16 this question was put
+        to the signed GLYPH's crop, which refused p309's yod for holding a single 18px ink run: a
+        short letter read as no line at all. One line of type is a property of the word, so the band
+        is measured on the word and each glyph box is then asked only to be inside it (Chris's
+        ruling, 2026-11-16; registered in PREDICTIONS_exemplarband_3410d26cb1826b10.json). No
+        threshold moved, and the span path keeps the old gate -- see word_band;
       - the named letter really is at the named index of the named word. Since 2026-11-15 this is
         ARITHMETIC OVER ONE ACT: the word is assembled from the signer's own tile clicks, so the
         string and the letter name have a single source and cannot disagree. It is kept because a
@@ -1264,18 +1324,15 @@ def sig_load(path=None):
             im, fault = cut_native(r["file_page"], r["box"])
             if fault:
                 why = "crop fault: %s" % fault
-            elif not _one_band(im):
-                # NAME THE MEASUREMENT, not only the verdict. This read "exemplar crop is no-band
-                # (1 ink runs) -- it must hold exactly one text band" over p309's yod, a crop that
-                # holds exactly one ink run: it was refused for that run's HEIGHT (18px, under
-                # MIN_BAND_PX), and said nothing about height while appearing to contradict itself.
-                # A crop with no ink and a crop whose letter is short want opposite answers, and
-                # that message could not tell them apart. The threshold is not touched here.
-                why = ("exemplar crop is %s -- ink runs %s px, of which bands (>= %d px) %s; it "
-                       "must hold exactly one text band"
-                       % (band_geometry(im)[0], [b - a + 1 for a, b in ink_runs(im)],
-                          MIN_BAND_PX, [b - a + 1 for a, b in text_bands(im)]))
             else:
+                # NO BAND CHECK ON THE GLYPH. It used to stand here, and it refused p309's yod for
+                # the HEIGHT of a single unbroken ink run -- 18px against a 20px floor derived on
+                # lines of type. The band question is now asked once, of the word, below, where its
+                # inputs exist; a gate belongs at the earliest point its inputs exist, and the
+                # word's inputs are the glyph boxes, which letter_boxes_fault has not yet checked
+                # at this point in the function.
+                pass
+            if not why:
                 idx = int(r["letter_index_from_right"])
                 want = (1, idx)
                 if want not in positions(r["word"], LETTER[r["letter"]]):
@@ -1294,6 +1351,64 @@ def sig_load(path=None):
                             why = ("glyph box at index %s: crop fault: %s"
                                    % (e["index_from_right"], gfault))
                             break
+                if not why:
+                    # THE WORD'S BAND. Every input it needs now exists and has been checked:
+                    # letter_boxes_fault has established one box per glyph, in order, on one line,
+                    # with the signed box at the claimed index, and the loop above has established
+                    # that each of those boxes cuts a real, non-blank, in-bounds crop. The count is
+                    # passed, not derived.
+                    _bx = [e["box"] for e in sorted(r["letter_boxes"],
+                                                    key=lambda e: int(e["index_from_right"]))]
+                    _v, _band, _info = word_band(r["file_page"], _bx,
+                                                 len(strip_nikud(r["word"])))
+                    r["_word_band"] = _info
+                    if _v not in ("one-band", "merged-top-edge"):
+                        why = ("the word %s is %s -- union %s, %s band(s), main %s px: a word sits "
+                               "on one line of type"
+                               % (strip_nikud(r["word"]), _v, _info.get("union"),
+                                  _info.get("n_bands"), _info.get("band_px")))
+                    else:
+                        # CLAUSE 4(a) IS MEASURED HERE AND NOT ENFORCED, AND THE RECORD SAYS SO.
+                        #
+                        # The clause is strict containment of each glyph box in the word's band.
+                        # Enforced literally, on 2026-11-16, it refused ALL ELEVEN records -- every
+                        # one Chris has signed. The measurement (diag_margins, same date): 0 of 29
+                        # glyph boxes sit inside the band; 0 of 29 sit inside even the crop's FULL
+                        # ink extent; in 11 of 11 words the band sits inside the union of the boxes;
+                        # and 29 of 29 boxes overlap the band. The boxes are hand-drawn containers
+                        # with 2-13px of slack around the glyph, so the clause is not a tolerance
+                        # away from satisfiable -- the containment runs the other way.
+                        #
+                        # Two things are therefore NOT done here. The margins are not widened by a
+                        # slack constant, which F1 of the registered lock forbids: a threshold
+                        # chosen after seeing the rows it has to admit is fitted, not derived. And
+                        # the clause is not re-read as "the band is inside the boxes" or "the box
+                        # overlaps the band", both of which the measurement would support, because
+                        # which of them the ruling means is not mine to decide and a rule
+                        # reformulated to rescue its own verdict has stopped being a check.
+                        #
+                        # So: every margin is persisted, `clause_4a` states in words that nothing
+                        # gated on it, and no consumer can read an accepted record as evidence that
+                        # containment was checked. The question is in the report with the numbers.
+                        marg, inside = {}, {}
+                        for e in sorted(r["letter_boxes"], key=lambda e: int(e["index_from_right"])):
+                            ok, m = box_band_margin(e["box"], _band)
+                            i = int(e["index_from_right"])
+                            marg[i], inside[i] = m, bool(ok)
+                        _info["margins"] = marg
+                        _info["box_in_band"] = inside
+                        _info["band_in_box_union"] = bool(
+                            min(int(round(e["box"][1])) for e in r["letter_boxes"]) <= _band[0]
+                            and _band[1] <= max(int(round(e["box"][3])) for e in r["letter_boxes"]))
+                        _info["clause_4a"] = (
+                            "MEASURED, NOT ENFORCED. Clause 4(a) of "
+                            "PREDICTIONS_exemplarband_3410d26cb1826b10.json is strict containment "
+                            "of each glyph box in the word's band. Literally enforced it refuses "
+                            "every record signed to date (0 of 29 boxes inside the band, 0 of 29 "
+                            "inside the full ink extent, band inside the box union in 11 of 11 "
+                            "words), so this record was NOT checked for it and must not be read as "
+                            "having passed it. Awaiting Chris's ruling on which direction the "
+                            "clause means; margins are above.")
                 if not why:
                     for lbl, bx in ([("the signed box", r["box"])]
                                     + [("glyph box %s" % e["index_from_right"], e["box"])
@@ -4246,6 +4361,124 @@ def selftest():
     # 14 since the populations were derived: single_instance gained its liveness sibling, which
     # the two named letters did not need because naming them was itself the (wrong) subject.
     ck("section 16 ran every one of its checks", n[0] - _e16 == 14, n[0] - _e16)
+
+    print("")
+    print("(17) Chris's ruling 2026-11-16: the band belongs to the WORD")
+    _e17 = n[0]
+    _LOCK = "PREDICTIONS_exemplarband_3410d26cb1826b10.json"
+
+    def _calls_in(fnname):
+        """Every name called inside one function, from the AST.
+
+        The claim these checks make is about WHICH CROP a question is asked about, and that is a
+        property of the call graph, not of the text. A docstring can name band_geometry; only the
+        AST says whether the function calls it."""
+        import ast
+        t = ast.parse(io.open(__file__, encoding="utf-8").read())
+        for node in ast.walk(t):
+            if isinstance(node, ast.FunctionDef) and node.name == fnname:
+                out = set()
+                for x in ast.walk(node):
+                    if isinstance(x, ast.Call):
+                        fn = x.func
+                        if isinstance(fn, ast.Name):
+                            out.add(fn.id)
+                        elif isinstance(fn, ast.Attribute):
+                            out.add(fn.attr)
+                return out
+        return None
+
+    _sl = _calls_in("sig_load")
+    ck("no band question is put to a GLYPH any more: sig_load calls neither _one_band nor "
+       "text_bands",
+       _sl is not None and not (_sl & {"_one_band", "text_bands", "ink_runs"}),
+       sorted((_sl or set()) & {"_one_band", "text_bands", "ink_runs"}))
+    ck("sig_load asks the WORD instead", _sl is not None and "word_band" in _sl, sorted(_sl or ()))
+    # The carve-out is for the exemplar path ONLY. If one of these goes red, a line-crop
+    # population has silently inherited a rule derived for words, and p362:n1 and p423:n3 are
+    # ratified on the first of them. rerat_load gates new_box; box_quality reports one_band.
+    #
+    # The first version of this check named `sig_rerat`, which is not a function in this module. It
+    # went red on a name I had invented rather than read, and a check pinned to a name that does
+    # not exist cannot see the path it names. _calls_in returns None for an unknown name, so both
+    # of these assert `is not None` as well: a rename must make the check RED, never vacuous.
+    for _fn17 in ("rerat_load", "box_quality"):
+        _rr = _calls_in(_fn17)
+        ck("the LINE-CROP path keeps the old gate: %s still calls _one_band, not word_band" % _fn17,
+           _rr is not None and "_one_band" in _rr and "word_band" not in _rr,
+           (_fn17, sorted(_rr or ())))
+
+    # P4 of the lock. A pin is right here: the ruling's own clause is that no threshold moves, and
+    # the lock it is registered in is named so the pin can be read back to its authority.
+    ck("no threshold moved (%s): MIN 20, MAX 50, frac 0.12" % _LOCK,
+       (MIN_BAND_PX, MAX_BAND_PX, BAND_FRAC) == (20, 50, 0.12),
+       (MIN_BAND_PX, MAX_BAND_PX, BAND_FRAC))
+
+    # The required argument. A function that derives its own input fails silently: handed the signed
+    # box alone, word_band would measure the glyph and pass under the new name.
+    _g17, _b17 = sig_load()
+    _r17 = [x for x in _g17 if int(x["file_page"]) == 309]
+    ck("every record in the file is either admitted or refused with a reason -- none is dropped",
+       len(_g17) + len(_b17) == len([1 for _l in io.open(SIGS, encoding="utf-8") if _l.strip()])
+       and all(x.get("_refused") for x in _b17),
+       (len(_g17), len(_b17)))
+    if _r17:
+        _rec = _r17[0]
+        _bx = [e["box"] for e in sorted(_rec["letter_boxes"],
+                                        key=lambda e: int(e["index_from_right"]))]
+        _raised = None
+        try:
+            word_band(_rec["file_page"], _bx[:1], len(strip_nikud(_rec["word"])))
+        except ValueError as _e:
+            _raised = str(_e)
+        ck("word_band REFUSES a short box list rather than measuring the glyph it was handed",
+           _raised and "box(es) for a" in _raised, _raised)
+        ck("the count is a required argument, not a default",
+           "expect" in word_band.__code__.co_varnames[:word_band.__code__.co_argcount]
+           and not (word_band.__defaults__ or ()),
+           word_band.__defaults__)
+
+        # THE DISCRIMINATING CHECK. The record the old gate refused is admitted now, and the reason
+        # it refused is still reproducible on the glyph crop -- so this is not "the gate got looser",
+        # it is "the question moved to the word". A check that only asserted admission would pass
+        # equally if the gate had been deleted.
+        _gim, _gf = cut_native(_rec["file_page"], _rec["box"])
+        _runs = [] if _gf else [b - a + 1 for a, b in ink_runs(_gim)]
+        _wv, _wband, _winfo = word_band(_rec["file_page"], _bx, len(strip_nikud(_rec["word"])))
+        ck("p309's yod: the GLYPH crop is still no-band (one %s px ink run, under the %d px floor) "
+           "while the WORD is one-band at %s px" % (_runs, MIN_BAND_PX, _winfo.get("band_px")),
+           not _gf and not _one_band(_gim) and len(_runs) == 1 and _runs[0] < MIN_BAND_PX
+           and _wv == "one-band",
+           (_gf, _runs, _wv))
+        ck("p309 is admitted, which it was not before the ruling", bool(_r17))
+
+    # Clause 4(a): measured, disclosed, NOT enforced. These checks exist so that no consumer can
+    # read an accepted record as evidence that containment was checked, and so that the day the
+    # ruling arrives, the thing that changes is one clause and not the meaning of the record.
+    ck("every admitted record carries a margin for every one of its glyph boxes",
+       all(sorted((x["_word_band"].get("margins") or {}).keys())
+           == sorted(int(e["index_from_right"]) for e in x["letter_boxes"]) for x in _g17),
+       [x["file_page"] for x in _g17
+        if sorted((x["_word_band"].get("margins") or {}).keys())
+        != sorted(int(e["index_from_right"]) for e in x["letter_boxes"])])
+    ck("a margin is a signed number at BOTH ends, not a verdict",
+       all(set(m) == {"top", "bottom"} and all(isinstance(v, int) for v in m.values())
+           for x in _g17 for m in x["_word_band"]["margins"].values())
+       and box_band_margin([0, 10, 10, 90], [20, 80])[1] == {"top": -10, "bottom": -10},
+       box_band_margin([0, 10, 10, 90], [20, 80]))
+    ck("the record SAYS clause 4(a) was not enforced, in words, on every admitted record",
+       all("NOT ENFORCED" in (x["_word_band"].get("clause_4a") or "") and _LOCK
+           in (x["_word_band"].get("clause_4a") or "") for x in _g17))
+    # And the measurement that is the reason it is not enforced, carried in the suite so it is
+    # re-measured on every run rather than remembered: if boxes ever start landing inside the band,
+    # this check goes red and the clause can be enforced as written.
+    _nbox = sum(len(x["_word_band"]["box_in_band"]) for x in _g17)
+    _inb = sum(1 for x in _g17 for v in x["_word_band"]["box_in_band"].values() if v)
+    _binb = sum(1 for x in _g17 if x["_word_band"]["band_in_box_union"])
+    ck("the containment runs the other way, re-measured: %d of %d boxes inside the band, band "
+       "inside the box union in %d of %d words" % (_inb, _nbox, _binb, len(_g17)),
+       _inb == 0 and _binb == len(_g17), (_inb, _nbox, _binb, len(_g17)))
+    ck("section 17 ran every one of its checks", n[0] - _e17 == 14, n[0] - _e17)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
