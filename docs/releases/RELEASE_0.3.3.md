@@ -163,11 +163,20 @@ is structurally blind to out-of-band cluster change — which is exactly what th
 helm upgrade gya-frontend ~/.gya/chart-0.3.3 -n gya-frontend \
   -f ~/.gya/chart-0.3.3/values-frontend.yaml \
   -f ~/.gya/secrets-prod.yaml \
+  --kube-context edge \
   --wait --timeout 10m
 ```
 
 Both overlays passed explicitly, so there is nothing for the upgrade to revert.
 **Never add `--reuse-values` to this release's upgrade.**
+
+**`--kube-context edge` is not optional here either.** `helm upgrade` takes the ambient
+context exactly as `kubectl` does, and it is the one command in this runbook that
+*changes* a cluster. A capture run against the wrong context produces a wrong gate
+verdict; an upgrade run against the wrong context installs this release somewhere
+it was never meant to go. `helm template` above is left without a context flag on
+purpose: it has no `--validate`, so it contacts no cluster, and a flag there would
+assert a connection that is not made.
 
 ### 3 — acceptance
 
@@ -376,7 +385,10 @@ The gate's whole purpose is the content the chart cannot account for.
   that made the 0.3.2 upgrade survivable. The new chart tests catch the three
   symptoms; they do not catch the general case of a release branch missing a
   fix that nothing renders. The `git log release-0.3.3..main` check in
-  §Prediction is a manual step, not a gate.
+  §Prediction is a manual step, not a gate. It is now step 0 of
+  `docs/releases/RELEASE_PROCESS.md`, which is still a checklist and still
+  not a gate; a CI check on `release-*` branches is 0.3.4 scope
+  (`docs/releases/0.3.4.md`).
 - **The gate-run launcher's pod filter fix (ruling 4) is not exercised by this
   deploy.** It lands before the *next* gate run and nothing in this path depends
   on it.
