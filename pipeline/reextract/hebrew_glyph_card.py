@@ -350,16 +350,18 @@ CARDS = [
                           "insertion seq 1 after tile 0 (this one) and seq 0 after tile 3 (position "
                           "6, not disputed). A disagreement with the signature at this glyph is "
                           "on record in the 2026-10-25 audit. " + READS_WITHHELD,
-                    note="There is now <b>exactly one zayin exemplar</b> in the signed corpus, "
-                         "and it is a pointed one: Chris, file p264 (printed 176), the word "
-                         "&#1494;&#1492;, glyph 1 from the right, 2026-11-15. No SPAN exemplar "
-                         "exists and none can be built &mdash; the span rule excludes any word "
-                         "that also holds a vav, and no span in the set shows both letters. "
-                         "<b>One impression is one impression.</b> The audit asked for <i>zayin "
-                         "exemplars from this fount</i>, plural, and the recorded need is met at "
-                         "one, so this card no longer refuses on exemplar grounds. Whether one is "
-                         "enough to settle the glyph is the signer's call and nothing here makes "
-                         "it: if it is not, point more zayins before signing this row.",
+                    # DERIVED, not typed. The sentence that stood here stated a count, and the
+                    # count changed the same day it was written. Everything left in this string is
+                    # count-free: the span-side impossibility, what the audit asked for, and whose
+                    # call it is.
+                    note="{{SIGNED:zayin}} No SPAN exemplar exists and none can be built "
+                         "&mdash; the span rule excludes any word that also holds a vav, and no "
+                         "span in the set shows both letters. The audit asked for <i>zayin "
+                         "exemplars from this fount</i>, plural, and the supply named above is "
+                         "what answers it, so this card no longer refuses on exemplar grounds. "
+                         "Whether it is enough to settle the glyph is the signer's call and "
+                         "nothing here makes it: if it is not, point more zayins before signing "
+                         "this row.",
                     cites=())],
          verdict="NO VERDICT, and this card cannot reach one as it stands. The audit's recorded "
                  "verdict is <code>signature_suspect_unsettled</code>. Note what it also says: "
@@ -1237,7 +1239,9 @@ def sig_load(path=None):
         with the signed box at the claimed index, which is the part the naming act does not produce;
       - every glyph box cuts a real, non-blank, in-bounds crop: the same outbound gate as the signed
         box, applied to every box in the record rather than to one of them;
-      - no box in the record overlaps a card's own DISPUTED span on the same page. An exemplar may
+      - no box in the record overlaps a card's own DISPUTED span ON THE SAME PAGE -- and the page
+        is checked since 2026-11-15, having been absent from the comparison since the guard was
+        written. An exemplar may
         not be the thing it is evidence about, and that guard cannot be left to memory. It is now
         tested against every glyph box and not only the signed one -- the word is as much part of
         the record as the letter, and a discriminator applied on one axis and not the other is how
@@ -1261,8 +1265,16 @@ def sig_load(path=None):
             if fault:
                 why = "crop fault: %s" % fault
             elif not _one_band(im):
-                why = ("exemplar crop is %s (%d ink runs) -- it must hold exactly one text band"
-                       % (band_geometry(im)[0], n_lines(im)))
+                # NAME THE MEASUREMENT, not only the verdict. This read "exemplar crop is no-band
+                # (1 ink runs) -- it must hold exactly one text band" over p309's yod, a crop that
+                # holds exactly one ink run: it was refused for that run's HEIGHT (18px, under
+                # MIN_BAND_PX), and said nothing about height while appearing to contradict itself.
+                # A crop with no ink and a crop whose letter is short want opposite answers, and
+                # that message could not tell them apart. The threshold is not touched here.
+                why = ("exemplar crop is %s -- ink runs %s px, of which bands (>= %d px) %s; it "
+                       "must hold exactly one text band"
+                       % (band_geometry(im)[0], [b - a + 1 for a, b in ink_runs(im)],
+                          MIN_BAND_PX, [b - a + 1 for a, b in text_bands(im)]))
             else:
                 idx = int(r["letter_index_from_right"])
                 want = (1, idx)
@@ -1286,7 +1298,13 @@ def sig_load(path=None):
                     for lbl, bx in ([("the signed box", r["box"])]
                                     + [("glyph box %s" % e["index_from_right"], e["box"])
                                        for e in r["letter_boxes"]]):
-                        for sid, rect in dis:
+                        for sid, dpage, rect in dis:
+                            # ON THIS PAGE, which is what the message has always claimed and what
+                            # the comparison did not check. An exemplar drawn on p503 cannot be the
+                            # glyph under dispute on p895, and refusing it as though it could threw
+                            # away two of six signatures in one sitting.
+                            if dpage != int(r["file_page"]):
+                                continue
                             if _overlaps(bx, rect):
                                 why = ("%s overlaps the disputed span %s on this page -- an "
                                        "exemplar may not be the glyph under dispute" % (lbl, sid))
@@ -1307,14 +1325,31 @@ def _overlaps(a, b):
 
 
 def _disputed_native():
-    """(span_id, native rect) for every span holding a DISPUTED glyph, so no exemplar can come from one."""
+    """(span_id, FILE PAGE, native rect) for every span holding a DISPUTED glyph.
+
+    The page is in the tuple and not in a lookup beside it, deliberately. It used to be absent
+    altogether: this returned (span_id, rect), sig_load compared every box in a record against
+    every rect on any page, and the refusal it emitted said "on this page" about a page it had
+    never consulted. Two of Chris's six signatures of 2026-11-15 were refused that way -- p503's
+    kaf box against a rect on p895, p577's tav box against the same one -- and a third would have
+    been, p309's yod against a rect on p423.
+
+    It will not stay rare, which is why the shape changes rather than the call site. Every footnote
+    in this volume sits in the same band at the foot of the page (all eleven signed boxes fall
+    between y=4385 and y=4707) and the disputed rects sit in that band too, so a signature collides
+    whenever its x happens to land inside one. Three of eleven did.
+
+    A rect test cannot see a mapping error -- containment arithmetic will compare two boxes that
+    were never in the same frame and report a confident refusal of good work. So a consumer that
+    drops the page now gets a TypeError instead of a wrong answer.
+    """
     out = []
     for s in D.build_set(include_sealed=True):
         if s["span_id"] not in DISPUTED or not s["span_box"]:
             continue
         _im, rects = cut(s["page"], s["span_box"], D.PAD, s["column_bands"])
         for rr in rects:
-            out.append((s["span_id"], rr["box"]))
+            out.append((s["span_id"], int(s["page"]), rr["box"]))
     return out
 
 
@@ -1576,6 +1611,86 @@ def partner_prose(partners):
     if len(ps) == 1:
         return ps[0]
     return ", ".join(ps[:-1]) + " or " + ps[-1]
+
+
+COUNT_WORD = ("no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+SIGN_TOKEN = re.compile(r"\{\{SIGNED:([a-z_]+)\}\}")
+
+
+def _heb_entities(s):
+    """A Hebrew string as numeric character references, which is how the card notes are written."""
+    return "".join("&#%d;" % ord(ch) for ch in s)
+
+
+def signed_impressions_sentence(letter, partners=None):
+    """The signed supply of `letter` as prose, derived from the records at every render.
+
+    This sentence used to be typed by hand into p233:n4's note: "There is now exactly one zayin
+    exemplar in the signed corpus, and it is a pointed one: Chris, file p264". True when it was
+    written on 2026-11-15, false later the same day when Chris pointed p534 -- the second zayin the
+    roster asked him for. A card's note is what a human reads INSTEAD of the tally, so a count in a
+    note has to recompute itself or it is a claim with nobody watching it.
+
+    Every impression is named -- page, printed page, word, index, signer, date -- for two reasons. A
+    signer deciding whether the supply is enough has to be able to go and look at each one; and a
+    note saying "two" without saying which two cannot be checked against the records at all.
+
+    The arithmetic clause is derived with the count, because it is an argument FROM the count: "one
+    impression is one impression" is a true and useful thing to say about one impression and a false
+    thing to say about three.
+    """
+    rs = sig_exemplars(letter, want=10 ** 6, partners=partners)
+    if not rs:
+        return ("<b>No signed exemplar of %s exists</b> in the corpus: nobody has pointed one and "
+                "no box drawn around a neighbouring glyph has been admitted, so there is nothing "
+                "here to compare an impression against." % letter)
+    kinds = set(r.get("kind") for r in rs)
+    nm = (COUNT_WORD[len(rs)] if len(rs) < len(COUNT_WORD) else str(len(rs)))
+    named = []
+    for r in rs:
+        named.append('%s, file p%s (printed %s), the word <span class="heb" dir="auto">%s</span>, '
+                     'glyph %s from the right, %s%s'
+                     % (r["signer"], r["file_page"], int(r["file_page"]) - 88,
+                        _heb_entities(r["word"]), r["letter_index_from_right"], r["date"],
+                        "" if r.get("kind") != "context" else
+                        " &mdash; from context, not the letter he named"))
+    if len(rs) == 1:
+        head = ("There is <b>exactly one signed %s exemplar</b> in the corpus, and it is a %s one: "
+                % (letter, "pointed" if "context" not in kinds else "context"))
+        tail = " <b>One impression is one impression.</b>"
+    else:
+        head = ("There are <b>%s signed %s exemplars</b> in the corpus, %s: "
+                % (nm, letter,
+                   ("both" if len(rs) == 2 else "all") + " of them "
+                   + ("pointed" if kinds == set(["pointed"])
+                      else "from context" if kinds == set(["context"])
+                      else "pointed or from context")))
+        # HOW MANY INDEPENDENT SPECIMENS, which is not the same question as how many impressions.
+        # yod's two are two glyphs of one word on one page: a reader who takes "two" as two
+        # specimens is reading more independence into the supply than it has, and this is the same
+        # point the single-exemplar clause makes one step further down.
+        _pgs = set(r["file_page"] for r in rs)
+        _wds = set((r["file_page"], r["word"]) for r in rs)
+        if len(_wds) == 1:
+            tail = (" <b>%s impressions &mdash; but all of them glyphs of the same word, on file "
+                    "p%s. One word is one word.</b>" % (nm.capitalize(), sorted(_pgs)[0]))
+        elif len(_pgs) == 1:
+            tail = (" <b>%s impressions, all on file p%s.</b>" % (nm.capitalize(), sorted(_pgs)[0]))
+        else:
+            tail = (" <b>%s impressions, on %d different pages.</b>"
+                    % (nm.capitalize(), len(_pgs)))
+    return head + "; and ".join([", ".join(named[:-1]), named[-1]] if len(named) > 1
+                                else named) + "." + tail
+
+
+def fill_note(s):
+    """Fill every {{SIGNED:letter}} token in a card note from the measured supply.
+
+    Filled wherever a note is READ -- on the page and in the suite's own field scan -- so the thing
+    checked is the thing a human sees. An unfilled token is visible garbage inside a warnbox, and
+    the suite looks for one.
+    """
+    return SIGN_TOKEN.sub(lambda m: signed_impressions_sentence(m.group(1)), s or "")
 
 
 def sig_context_tiles(letter):
@@ -2405,7 +2520,7 @@ def build(out=None):
             if _ask.get("basis"):
                 h.append('<div class="feat"><b>Why this position.</b> %s</div>' % _ask["basis"])
             if _ask.get("note"):
-                h.append('<div class="warnbox">%s</div>' % _ask["note"])
+                h.append('<div class="warnbox">%s</div>' % fill_note(_ask["note"]))
 
         bands = s["column_bands"]
         a2, r2 = cut(pg, s["span_box"], D.PAD, bands) if s["span_box"] else (None, [])
@@ -2991,6 +3106,7 @@ def selftest():
 
     print("")
     print("(6) the record gate: a bad signature is refused, not shown")
+    _b6 = n[0]
     # Every check here is a refusal that has a failure mode behind it. The fixtures are synthesized
     # from a REAL span so the geometry is real, and they are written to a temp file -- a born-test
     # never writes to the evidence store.
@@ -3025,6 +3141,18 @@ def selftest():
         return out
 
     okbox = _col(1)
+    # A box that really holds two lines of type. Grown UPWARD ONLY, and 200px, neither of which is
+    # arbitrary: okbox is the rightmost glyph column at the FOOT of page 491, so downward is blank
+    # paper, and 120px upward stops in the leading short of the line above. The old fixture grew
+    # 120 both ways, measured one-band [24], and was refused only because a box on page 491 was
+    # being compared against a disputed rect on page 423 -- the band gate was never asked. The
+    # subject check below counts the bands from the pixels, so the clause cannot pass vacuously
+    # again.
+    twoline = [okbox[0], okbox[1] - 200, okbox[2], okbox[3]]
+    _tim, _tfault = cut_native(sp["page"], twoline)
+    ck("the multi-line fixture really does hold more than one text band",
+       _tfault is None and _tim is not None and len(text_bands(_tim)) >= 2,
+       (_tfault, None if _tim is None else [b[1] - b[0] for b in text_bands(_tim)]))
     base = dict(file_page=sp["page"], box=okbox, coord_space="native", word=sp["truth"],
                 letter=_names[0], letter_index_from_right=1, letter_boxes=_lb(),
                 signer="TEST", date="2026-09-27")
@@ -3039,10 +3167,12 @@ def selftest():
               dict(base, box=[okbox[0], okbox[1] + 90000, okbox[2], okbox[3] + 90000],
                    letter_boxes=_lb({1: [okbox[0], okbox[1] + 90000,
                                          okbox[2], okbox[3] + 90000]})), False),
+             # And it names the refusal it is for. A count of refusals cannot tell this gate
+             # firing from any other gate firing, which is how a cross-page rect collision stood in
+             # for the band gate from the day this clause was written until 2026-11-15.
              ("a box holding more than one text line is refused",
-              dict(base, box=[okbox[0], okbox[1] - 120, okbox[2], okbox[3] + 120],
-                   letter_boxes=_lb({1: [okbox[0], okbox[1] - 120,
-                                         okbox[2], okbox[3] + 120]})), False),
+              dict(base, box=twoline, letter_boxes=_lb({1: twoline})), False,
+              "multi-band"),
              ("a record with no glyph boxes at all is refused",
               dict(base, letter_boxes=[]), False),
              ("a glyph box on another line of type is refused",
@@ -3055,16 +3185,112 @@ def selftest():
     fd, tmp = tempfile.mkstemp(suffix=".jsonl")
     os.close(fd)
     try:
-        for name, rec, want_ok in cases:
+        for case in cases:
+            name, rec, want_ok = case[0], case[1], case[2]
+            # Optional 4th element: a substring of the refusal this case exists to exercise. Where a
+            # case names one, accepted/refused is not enough -- the named gate has to be the one
+            # that spoke.
+            need = case[3] if len(case) > 3 else None
             io.open(tmp, "w", encoding="utf-8", newline="\n").write(
                 json.dumps(rec, ensure_ascii=False) + "\n")
             g_, b_ = sig_load(Path(tmp))
-            ck(name, (len(g_) == 1) if want_ok else (len(b_) == 1 and not g_),
-               (len(g_), [x.get("_refused") for x in b_]))
+            good = (len(g_) == 1) if want_ok else (len(b_) == 1 and not g_)
+            if good and need is not None:
+                good = any(need in (x.get("_refused") or "") for x in b_)
+            ck(name, good, (len(g_), [x.get("_refused") for x in b_]))
         io.open(tmp, "w", encoding="utf-8", newline="\n").write("{not json\n")
         g_, b_ = sig_load(Path(tmp))
         ck("an unparseable line is refused and reported, not skipped",
            not g_ and len(b_) == 1 and "unparseable" in b_[0]["_refused"])
+
+        # ------------------------------------------------ THE DISPUTED-SPAN GUARD, ON BOTH AXES
+        # This guard had no check at all, which is how it ran page-blind from the day it was
+        # written until 2026-11-15, when it refused two of Chris's six signatures and said "on
+        # this page" about a page it had never consulted. The fixture is DERIVED from
+        # `_disputed_native()`, so a span that stops being disputed moves it instead of breaking
+        # it, and the record is built from that span's own truth so it reaches the overlap test
+        # rather than dying at the word or the index.
+        _rev6 = {v: k for k, v in LETTER.items()}
+        _cs6 = card_spans()[0]
+        _dfix = None
+        for _sid, _dpg, _drect in _disputed_native():
+            _s6 = _cs6.get(_sid)
+            if not _s6:
+                continue
+            _g6 = strip_nikud(_s6["truth"])
+            _n6 = [_rev6.get(ch) for ch in _g6]
+            if " " in _g6 or None in _n6 or len(_g6) < 2:
+                continue
+            _w6 = (_drect[2] - _drect[0]) / float(len(_g6))
+
+            def _c6(i, _r=_drect, _wi=_w6):
+                return [int(round(_r[2] - i * _wi)), _r[1],
+                        int(round(_r[2] - (i - 1) * _wi)), _r[3]]
+            _lb6 = [{"index_from_right": i, "letter": nm, "box": _c6(i)}
+                    for i, nm in enumerate(_n6, start=1)]
+            _dfix = (_sid, _dpg, dict(file_page=_dpg, box=_c6(1), coord_space="native",
+                                      word=_s6["truth"], letter=_n6[0],
+                                      letter_index_from_right=1, letter_boxes=_lb6,
+                                      signer="TEST", date="2026-09-27"))
+            break
+        # THE OTHER AXIS IS A LIVE RECORD, not a synthetic box on a clean page. That is what this
+        # clause used to be, and `mutate_card_sig.py` case 1 proved it blind: restore the
+        # page-blindness and the clause still passes, because the synthetic box lands on blank paper
+        # on another page and `sig_load` refuses it with `exemplar crop is no-band` before the
+        # overlap test is reached. "Not refused for THIS reason" is then true whatever the overlap
+        # test does. A subject that dies at an earlier gate asserts nothing about the gate it names.
+        # The records that DO pass every other gate and overlap a disputed rect on another page are
+        # the two the page-blind guard actually refused: p503's final nun and p577's tav, each
+        # against p895:n0, a footnote band 300 pages away.
+        # THE POPULATION MUST NOT COME FROM THE GATE. This clause first drew its subject from
+        # `sig_load()[0]`, the admitted set -- and page-blind, these records are precisely the ones
+        # the guard refuses, so the population emptied, the clause was skipped, and the mutant
+        # walked. It stayed DEAD through that repair for no other reason. The subject is therefore
+        # every record that passes every gate OTHER than this one: admitted, or refused WITH a
+        # disputed-span reason. p503's final nun is in the first list when the guard is right and in
+        # the second when it is page-blind, so it is a subject either way.
+        _raw6 = [json.loads(_l) for _l in io.open(SIGS, encoding="utf-8") if _l.strip()]
+        _good6, _bad6 = sig_load()
+
+        def _key6(x):
+            return (str(x.get("file_page")), x.get("letter"), x.get("word"),
+                    str(x.get("letter_index_from_right")))
+        _gk6 = set(_key6(g) for g in _good6)
+        _dk6 = set(_key6(b) for b in _bad6
+                   if "disputed span" in (b.get("_refused") or ""))
+        _cross = []
+        for _r6 in _raw6:
+            _h6 = [(s, p) for s, p, rect in _disputed_native()
+                   if p != int(_r6["file_page"])
+                   and any(_overlaps(lb["box"], rect) for lb in _r6.get("letter_boxes") or ())]
+            if _h6 and _key6(_r6) in (_gk6 | _dk6):
+                _cross.append((_r6, _h6))
+        ck("a disputed span gives a usable same-page fixture, and a signature that clears every"
+           " other gate really does overlap a disputed rect on another page (%d of %d records)"
+           % (len(_cross), len(_raw6)),
+           _dfix is not None and bool(_cross),
+           (None if not _dfix else _dfix[0],
+            [(r["file_page"], r["letter"], h) for r, h in _cross]))
+        if _dfix:
+            _sid6, _pg6, _rec6 = _dfix
+            io.open(tmp, "w", encoding="utf-8", newline="\n").write(
+                json.dumps(_rec6, ensure_ascii=False) + "\n")
+            _g6b, _b6b = sig_load(Path(tmp))
+            ck("a box on a disputed span's own page is refused, and the span is named",
+               not _g6b and any(("disputed span %s" % _sid6) in (x.get("_refused") or "")
+                                for x in _b6b),
+               (_pg6, len(_g6b), [x.get("_refused") for x in _b6b]))
+        if _cross:
+            _r6, _h6 = _cross[0]
+            io.open(tmp, "w", encoding="utf-8", newline="\n").write(
+                json.dumps(_r6, ensure_ascii=False) + "\n")
+            _g6c, _b6c = sig_load(Path(tmp))
+            ck("a signature overlapping a disputed span on ANOTHER page is admitted"
+               " (file p%s, %s, vs %s)" % (_r6["file_page"], _r6["letter"], _h6[0][0]),
+               len(_g6c) == 1 and not [x for x in _b6c
+                                       if ("disputed span %s" % _h6[0][0])
+                                       in (x.get("_refused") or "")],
+               (len(_g6c), [x.get("_refused") for x in _b6c]))
     finally:
         os.unlink(tmp)
 
@@ -3119,7 +3345,15 @@ def selftest():
     ):
         _f = letter_boxes_fault(*args)
         ck(name, (_f is None) if want is None else (_f is not None and want in _f), _f)
-    ck("section 6b ran every one of its checks", True)
+    # A COUNT, not `True`. It read `ck("section 6b ran every one of its checks", True)` -- a
+    # count check that asserted nothing, in the two sections where a guard with no check of its own
+    # was refusing good signatures. Covers 6 and 6b together, which is where `_b6` is taken.
+    # 28 = 3 fixture subjects + 10 record-gate cases + 1 unparseable line + 3 disputed-span
+    # clauses + 11 letter-box faults in 6b. Read off the run and written out, because a count
+    # recomputed from the loops it counts asserts nothing -- and because this line read `True` for
+    # its whole life, in the two sections where a guard that had no check was refusing good work.
+    # 29 until the vacuous clean-page clause came out: it could not see a page-blind overlap test.
+    ck("sections 6 and 6b ran every one of their checks", n[0] - _b6 == 28, n[0] - _b6)
 
     print("")
     print("(7) ruling 2: signing from the neighbourhood re-ratifies the box in ONE record")
@@ -3366,31 +3600,49 @@ def selftest():
     # "glyph 2 from the right" of a two-letter word whose zayin is at 1 -- and a card's note is what
     # a human reads instead of the tally, so a misnamed glyph points a signer at the rival's
     # neighbour. Fails in both directions: a wrong note, or a note left behind by a re-signing.
-    _z = sig_exemplars("zayin")
-    _znote = [a.get("note", "") for c in CARDS if c["span_id"] == "p233:n4" for a in card_asks(c)]
-    ck("p233:n4's note names the signed zayin's own page, word and index",
-       len(_z) == 1 and any(("file p%d" % _z[0]["file_page"]) in nt
-                            and ("glyph %d from the right" % _z[0]["letter_index_from_right"]) in nt
-                            and ("&#%d;" % ord(_z[0]["word"][0])) in nt
-                            for nt in _znote),
-       (_z[0] if _z else None, [nt[:120] for nt in _znote]))
-    ck("zayin has exactly one exemplar, the pointed one, and no span exemplar can be built",
-       len(sig_exemplars("zayin")) == 1 and len(exemplars("zayin", None)) == 0,
-       (len(sig_exemplars("zayin")), len(exemplars("zayin", None))))
+    # EVERY impression, not the one that existed when this was written. The note is filled from
+    # the records, so the check reads what the signer reads and the count comes from the data.
+    _z = sig_exemplars("zayin", want=10 ** 6)
+    _znote = [fill_note(a.get("note", "")) for c in CARDS if c["span_id"] == "p233:n4"
+              for a in card_asks(c)]
+    ck("p233:n4's note names every signed zayin impression: page, word and index",
+       bool(_z) and any(all(("file p%s" % r["file_page"]) in nt
+                            and ("glyph %s from the right" % r["letter_index_from_right"]) in nt
+                            and _heb_entities(r["word"]) in nt
+                            for r in _z)
+                        for nt in _znote),
+       ([(r["file_page"], r["letter_index_from_right"]) for r in _z],
+        [nt[:160] for nt in _znote]))
+    # The subject for the clause above. Without it, a supply that went to zero would make the
+    # for-all true and the note could say anything.
+    ck("the signed zayin supply is non-zero, so the clause above is not a for-all over nothing",
+       len(_z) >= 1, len(_z))
+    # What is actually invariant here, and the reason the note's span sentence is count-free: no
+    # word in the set holds a zayin without a vav, so no SPAN exemplar can be built at any supply.
+    ck("no span exemplar of zayin can be built, which is what the note says",
+       len(exemplars("zayin", None)) == 0, len(exemplars("zayin", None)))
     # The check above reads the note only if the note exists to be read; this one says the card is
     # still there to have a note. A card whose ask vanished would make it vacuous.
     ck("p233:n4 still asks something, so the note check above has a subject",
        bool(_znote) and all(isinstance(nt, str) for nt in _znote), len(_znote))
-    # The card's face must agree with the count, whatever the count is -- a page saying "0" with one
-    # signature on disk is the shape of defect this section exists to catch, in either direction.
     if OUTHTML.exists():
+        # THE PAGE'S OWN NUMBER, parsed. The previous version looked for the warnbox sentence
+        # "only N exemplar(s) of zayin are available" -- which the page prints only while the
+        # supply is under three, so it would have gone red at the third zayin for the opposite
+        # reason, when the sentence legitimately disappears. The count line below is printed for
+        # every candidate panel at every supply.
+        _m = re.search(r"zayin &mdash; . &mdash; (\d+) exemplar\(s\): (\d+) signed from the "
+                       r"volume, (\d+) from signed spans", t2)
         ck("the zayin card's face agrees with the measured count",
-           ("only %d exemplar(s) of zayin are available"
-            % (len(sig_exemplars("zayin")) + len(exemplars("zayin", None)))) in t2,
-           (len(sig_exemplars("zayin")), "only 0 exemplar(s) of zayin are available" in t2))
+           bool(_m) and int(_m.group(2)) == len(sig_exemplars("zayin")),
+           (None if not _m else _m.group(0), len(sig_exemplars("zayin"))))
+        # An unfilled token is visible garbage in a warnbox a human is being asked to act on.
+        ck("no unfilled {{SIGNED:...}} token reaches the page",
+           not SIGN_TOKEN.search(t2), SIGN_TOKEN.findall(t2)[:3])
     else:
         ck("the zayin card's face agrees with the measured count", True,
            "no rendered page to scan")
+        ck("no unfilled {{SIGNED:...}} token reaches the page", True, "no rendered page to scan")
 
     # Section 8's draw-pool caption check was live-counting ZERO before these cards landed, which it
     # printed. Pinning the number here is what turns that printed zero into something that cannot
@@ -3414,7 +3666,9 @@ def selftest():
         _fields.append((c["span_id"], "verdict", str(c.get("verdict") or "")))
         for a in card_asks(c):
             _fields.append((c["span_id"], "basis", a.get("basis") or ""))
-            _fields.append((c["span_id"], "note", a.get("note") or ""))
+            # FILLED: the no-reading scan has to see what a human sees, and a derived sentence
+            # is as capable of naming an arm as a typed one.
+            _fields.append((c["span_id"], "note", fill_note(a.get("note") or "")))
     _ARMS = ("opus", "qwen", "gemma", "astra", "sonnet", "gpt-", "claude-", "gemini", "deepseek")
     _armhit = [(sid, k, t_) for sid, k, v in _fields for t_ in _ARMS if t_ in v.lower()]
     ck("no card names the arm that produced a reading (%d field(s) scanned)" % len(_fields),
@@ -3442,7 +3696,9 @@ def selftest():
     # asserts nothing; it went red at 35 and that is what the line is for.
     # 38 since 2026-11-15: the zayin arrival added a check that the card's NOTE agrees with the
     # signed record's page, word and index (the note had the index wrong), plus its liveness sibling.
-    ck("section 11 ran every one of its checks", n[0] - _c0 == 38, n[0] - _c0)
+    # 40 later the same day, when the second zayin landed and the pinned "exactly one" went red: the
+    # supply floor and the span-side zero are now separate clauses, and the token guard is new.
+    ck("section 11 ran every one of its checks", n[0] - _c0 == 40, n[0] - _c0)
 
     print("")
     print("(12) item 5: the line strip and its derived baseline")
@@ -3890,25 +4146,46 @@ def selftest():
     # REFUSED, in the same breath. final nun's only impression anywhere is the p386 tile, and the
     # word holds a yod -- its own lookalike on card p254:n1. Admitting it would have put the glyph
     # under dispute on the card as the specimen of the answer.
-    ck("a rule-2-DIRTY context tile is NOT an exemplar",
-       sig_exemplars("final_nun") == [] and sig_exemplars("yod") == [],
-       (len(sig_exemplars("final_nun")), len(sig_exemplars("yod"))))
-    ck("such a tile exists, so the refusal above has a subject",
-       bool(sig_context_tiles("final_nun")) and bool(sig_context_tiles("yod")),
-       (sig_context_tiles("final_nun"), sig_context_tiles("yod")))
+    # OVER EVERY LETTER, because the rule is about tiles and not about letters. This clause used
+    # to read "final_nun and yod have no exemplar at all", which was true on the day it was written
+    # and false the moment Chris pointed a final nun on p503 and a mem on p150 whose word carries
+    # two clean yods. The dirty tile is still refused; the letter it belongs to simply got supply
+    # from somewhere else, which is precisely what naming a letter could not express.
+    _dirty, _admitted = [], []
+    for _k in sorted(LETTER):
+        _adm = set((r["file_page"], r["word"], r["letter_index_from_right"])
+                   for r in sig_exemplars(_k, want=10 ** 6) if r["kind"] == "context")
+        _admitted.extend(sorted(_adm))
+        for _t in sig_context_tiles(_k):
+            if _rule2_dirt(_t[1], _k, card_rivals_union(_k)):
+                _dirty.append((_k, _t, _t in _adm))
+    ck("no rule-2-dirty context tile is admitted as an exemplar, for any letter",
+       not [x for x in _dirty if x[2]], [x for x in _dirty if x[2]][:4])
+    ck("dirty tiles exist, so the refusal above has a subject (%d of them)" % len(_dirty),
+       bool(_dirty) and bool(_admitted),
+       ([(k, t) for k, t, _in in _dirty][:4], len(_admitted)))
     # The two states must stay DISTINGUISHABLE. "refused, and here is the rival" and "nobody ever
     # drew one" send a signer to different work, and a page printing both as absence is the
     # represent-nothing-here defect.
+    # The word is a literal because it is a fixed printed word; the letter with NO tile is not,
+    # because that population moves with every signature. tav stood here and passed only because
+    # nobody has yet signed a word containing a tav he did not point.
+    _notile = sorted(k for k in LETTER if not sig_context_tiles(k))
     ck("a refused tile is still reported, with the rival that refused it named",
        _rule2_dirt(u"\u05d9\u05d3\u05d9\u05df", "final_nun", card_rivals_union("final_nun"))
-       == ("yod",) and not sig_context_tiles("tav"),
+       == ("yod",) and bool(_notile),
        (_rule2_dirt(u"\u05d9\u05d3\u05d9\u05df", "final_nun", card_rivals_union("final_nun")),
-        sig_context_tiles("tav")))
+        _notile[:6]))
     # THE EXEMPTION, under a standard that would refuse the word. The pointed zayin sits in a word
     # holding a he; scored against he it survives, because the signer named the index.
+    # EVERY zayin admitted under a standard that refuses its word is pointed, and there is at
+    # least one. Pinned to a list of one, this went red when the second zayin arrived -- the second
+    # impression of the letter the roster asked for, i.e. the check broke on the work succeeding.
+    _zhe = sig_exemplars("zayin", want=10 ** 6, partners=("he",))
     ck("a POINTED exemplar survives a standard that refuses its word",
-       [r["kind"] for r in sig_exemplars("zayin", partners=("he",))] == ["pointed"],
-       [(r["kind"], r["word"]) for r in sig_exemplars("zayin", partners=("he",))])
+       bool(_zhe) and all(r["kind"] == "pointed" for r in _zhe)
+       and all(u"\u05d4" in r["word"] for r in _zhe),   # the he that refuses the word
+       [(r["kind"], r["word"]) for r in _zhe])
     ck("the same kind of standard DOES refuse a context tile, so the exemption is not vacuous",
        sig_exemplars("resh", partners=("samekh",)) == [] and len(_resh) == 1,
        (len(sig_exemplars("resh", partners=("samekh",))), len(_resh)))
@@ -3918,14 +4195,23 @@ def selftest():
        sorted(card_rivals_union("resh")) == ["dalet"]
        and sorted(card_rivals_union("dalet")) == ["final_kaf", "resh", "samekh"],
        (sorted(card_rivals_union("resh")), sorted(card_rivals_union("dalet"))))
-    # SINGLE INSTANCE, both directions. One zayin makes p233:n4 signable and the card has to say so;
-    # dalet has two, and a card claiming "single exemplar" over two would be understating its basis.
-    ck("the only impression of a letter is marked single_instance",
-       [r["single_instance"] for r in sig_exemplars("zayin")] == [True],
-       [(r["kind"], r["single_instance"]) for r in sig_exemplars("zayin")])
-    ck("a letter with more than one is NOT marked single_instance",
-       [r["single_instance"] for r in sig_exemplars("dalet")] == [False, False],
-       [(r["kind"], r["single_instance"]) for r in sig_exemplars("dalet")])
+    # SINGLE INSTANCE, both directions, over the POPULATIONS and not two named letters. zayin
+    # stood for the single and dalet for the multiple; zayin has two now and dalet three, so both
+    # literals went red while the labelling they test stayed correct. The flag is a property of the
+    # CALL -- `want` truncates before it is computed -- so these use the renderer's own default,
+    # which is the call whose output a human reads.
+    _sing = sorted(k for k in LETTER if len(sig_exemplars(k)) == 1)
+    _many = sorted(k for k in LETTER if len(sig_exemplars(k)) > 1)
+    ck("a letter with one admitted impression has it marked single_instance",
+       all(sig_exemplars(k)[0]["single_instance"] for k in _sing),
+       [(k, sig_exemplars(k)[0]["single_instance"]) for k in _sing
+        if not sig_exemplars(k)[0]["single_instance"]] or _sing)
+    ck("a letter with more than one has none of them marked single_instance",
+       all(not r["single_instance"] for k in _many for r in sig_exemplars(k)),
+       [(k, [r["single_instance"] for r in sig_exemplars(k)]) for k in _many
+        if any(r["single_instance"] for r in sig_exemplars(k))] or _many)
+    ck("both populations exist, so neither clause above is a for-all over nothing",
+       bool(_sing) and bool(_many), (len(_sing), len(_many)))
     # The labels are added to COPIES. A record relabelled in the cache would arrive at the next
     # caller already carrying another caller's standard, and a context tile whose `letter` was
     # overwritten in place would stop being findable as the letter its signer actually pointed at.
@@ -3943,14 +4229,23 @@ def selftest():
         # weaker kind was for.
         ck("the page labels a context exemplar as coming from context",
            "a box the signer drew around another glyph" in _t16, "a box the signer drew" in _t16)
+        # EVERY single-instance letter a card actually shows -- the renderer only reaches the
+        # letters that are candidates on some card, so the population is the intersection. zayin
+        # was named here as a literal and stopped being single-instance the same day.
+        _cands16 = set(x for c in CARDS for a in card_asks(c) for x in a["candidates"])
+        _shown = sorted(set(_sing) & _cands16)
         ck("the page states where a comparison rests on one specimen, and names the letter",
-           "single exemplar:" in _t16 and "the only signed impression of zayin" in _t16,
-           ("single exemplar:" in _t16, "the only signed impression of zayin" in _t16))
+           bool(_shown) and "single exemplar:" in _t16
+           and all(("the only signed impression of %s" % k) in _t16 for k in _shown),
+           (_shown, [k for k in _shown
+                     if ("the only signed impression of %s" % k) not in _t16]))
     else:
         ck("the page labels a context exemplar as coming from context", False, "no page")
         ck("the page states where a comparison rests on one specimen, and names the letter",
            False, "no page")
-    ck("section 16 ran every one of its checks", n[0] - _e16 == 13, n[0] - _e16)
+    # 14 since the populations were derived: single_instance gained its liveness sibling, which
+    # the two named letters did not need because naming them was itself the (wrong) subject.
+    ck("section 16 ran every one of its checks", n[0] - _e16 == 14, n[0] - _e16)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
