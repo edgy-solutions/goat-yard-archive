@@ -444,6 +444,7 @@ prediction written into a MEASURED block is prose wearing a number's clothes.
 | api image | `ghcr.io/edgy-solutions/goat-yard-archive/backend@sha256:2fce1e3467d5f53e4f0700cdd51530db86cc85c8ef7231f091c6e69509b11433` |
 | ui image | `ghcr.io/edgy-solutions/goat-yard-archive/frontend@sha256:f386254ee465b77ceee57b3f11ad8f1742e8f6d671e1fa71452aa819c1996da4` |
 | public page | renders the structured answer correctly (Chris, private window, 2026-11-15) |
+| public UI (Cloudflare Worker) | **NOT redeployed.** Last Wrangler deploy ~2026-08, version `cb7ca83c` — see below, and § Step 5 of `RELEASE_PROCESS.md` |
 
 Both digests are the artefacts the gate run scored. Nothing was rebuilt.
 
@@ -493,31 +494,77 @@ A paste of the block fills this in. Until then this release has a deploy record
 and no gate record, and the difference between the two is the whole reason the
 gate exists.
 
+**2026-11-15, after the acceptance:** Chris reports the 20:14 verdict block is
+coming. It had not reached this lane when this section was written, and the
+acceptance paste that did arrive contains no gate rows. Still open, still named.
+
 ## Acceptance
 
-`accept_0_3_3.py`, run by the operator against prod, 2026-11-15:
+`accept_0_3_3.py`, run by the operator against prod, 2026-11-15, from the pasted
+output. **pass 6, fail 0, not-observable 0.**
 
-| item | result |
-|---|---|
-| 1. api `imageID` | **PASS** |
-| 2. ui `imageID` | **PASS** |
-| 3. flag landed in the running container | **PASS** |
-| 4. debug 403 by default | **PASS** |
-| 5. cited-SID witness x5 | **NOT OBSERVED** — the script crashed here |
-| 6. `/health/stages` | **NOT OBSERVED** — never reached |
+Run with `PYTHONUTF8=1` — the interpreter-level workaround for the cp1252 crash,
+applied before the fix in `bc0ba3b` landed. So this run exercised the OLD
+subprocess layer under a UTF-8 default, which is why the fix is still needed: a
+script whose correctness depends on how the operator launched it has not been
+fixed, it has been avoided.
 
-Items 5 and 6 have **no verdict**, and a crash is not a partial pass: four of
-six items were observed and the acceptance is incomplete. The cause was in the
-script, not the cluster — `subprocess` output was decoded with the Windows
-platform codec (cp1252) and died on byte `0x9d`, the third byte of a curly quote
-in Gill's text. Fixed in `bc0ba3b`; items 5 and 6 need a rerun, and the rows
-above are to be replaced by a complete run, not appended to.
+| item | result | what it observed |
+|---|---|---|
+| 1. api `imageID` | **PASS** | 1/1 pods on the signed api digest (`gya-frontend-api-6686c54d4c-724xs`) |
+| 2. ui `imageID` | **PASS** | 1/1 pods on the signed ui digest (`gya-frontend-ui-7644cb5cf9-vwqb6`) — the **in-cluster** pod, which no public request reaches |
+| 3. flag landed in the running container | **PASS** | `GILL_STRUCTURED_ANSWER=1`, read from the container's own environment, not from the ConfigMap |
+| 4. debug 403 by default | **PASS** | 403, and the refusal names the variable |
+| 5. cited-SID witness ×5 | **PASS** | 5 draws on `predestination_001`; `verified=True refused=False` on all five; every cited SID inside that draw's own retrieved context |
+| 6. `/health/stages` | **PASS** | `stages={"entity_lookup": true, "expansion": true}`, `not_observable=['answer','verifier']` |
 
-What the four observed items establish, stated narrowly: the kubelet resolved
-both signed digests, the running api container's **own environment** carries
-`GILL_STRUCTURED_ANSWER=1` (not the ConfigMap's claim about it), and the debug
-capture channel refuses by default. What they do not establish is that the
-cited-answer path works on prod's corpus — that is item 5, and it is unobserved.
+Items 5 and 6 are now **observed**; the earlier NOT OBSERVED rows are replaced,
+not appended to, and the run that produced them was not scored.
+
+### What item 5 actually establishes, and the variation inside it
+
+The cited-answer path **works on prod's corpus with the flag on**: the verifier
+passed on every draw and no draw cited outside its context. That is the whole
+assertion, and it held five times.
+
+The draws were **not identical** — five distinct cited-SID sets, `context_sids`
+33 to 37, `JOHN_6_37_S00` and `JOHN_6_39_S00` in all five. The script reports
+that as `cited-SID set identical across draws: False (OBSERVED, not asserted)`,
+which is the right register: **no release claimed answer-level determinism.**
+The 0.3.1 determinism work (`c9186b1`) covered the tier-2 **entity manifest**
+only, and its own measurement records *zero variation inside any process* — the
+axis it fixed is cross-process, and these five draws hit one pod.
+
+From the code path, decomposed in
+[`docs/audits/X5_WITNESS_VARIATION_laneA1_20261115.md`](../audits/X5_WITNESS_VARIATION_laneA1_20261115.md):
+the response's evidence is built from `raw_results` **before** generation runs
+(`main.py:793-809`, `if bot:` at 811), so three different context sizes are
+three different retrieved chunk sets and **the variation is at or before
+retrieval, proven.** Whether it originates in the expansion LLM
+(`OptimizeSearchQuery` on `LocalRouter`, `temperature 0.0`, which fixes the
+sampling rule and not the logits) or in hybrid score drift across the rank-5 cut
+is **open**. Generation is **unmeasured**: the witness prints `len(ctx)`, and
+two contexts of equal size need not be the same set.
+
+### What the run names as not checked
+
+Carried from the script's own output, because it is the honest half:
+
+- **nested-quote citation pairing, and the entity manifest ×5** — both read
+  `available_entities` / the per-stage capture, which `main.py` populates only
+  when the debug gate allows it. Observing them on prod means setting
+  `GYA_DEBUG_STAGES=1` there, opening the exposure channel item 4 exists to keep
+  shut. The script refuses. Item 5 is the half of that pair needing no debug
+  channel, because cited SIDs are in the ordinary response body.
+- **that the flip is a quality WIN.** The gate run passed the pre-registered
+  ratchet; its effect clause abstained. Item 5 witnesses that the path *works*,
+  not that it is *better*.
+- **prod's corpus against gya-test's.** The witness query's twelve-for-twelve
+  record is on gya-test. `refused` and `context_sids` are printed per draw
+  rather than folded into the verdict precisely so that a corpus difference
+  would not read as a flag failure.
+- **D-004, D-005 and D-006** ride to prod unfixed; all three are 0.3.4. D-006 is
+  pre-existing on prod, so it is not a 0.3.3 regression.
 
 ## The named regression
 
