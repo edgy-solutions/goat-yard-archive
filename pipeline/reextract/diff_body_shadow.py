@@ -270,6 +270,7 @@ def load_body_units(body_path):
                     "key": rec["key"], "stage1_line": rec["stage1_line"],
                     "stage1_kind": rec["stage1_kind"], "head_status": rec["head_status"],
                     "head_unit": rec["key"][0] == fp,
+                    "held": rec.get("body_status") == "held",
                     "chunks": [{"chunk_idx": c["chunk_idx"], "rect_idx": c["rect_idx"],
                                 "col": c["col"], "box": c["box"], "text": c["text"],
                                 "usable": c["guard"] == "ok" and not c["error"]}
@@ -305,8 +306,11 @@ def load_old_body(witness_dir, file_page):
     return body
 
 
-def summarize(hunks, vnums, head_status_changed=()):
-    out = {"kind": "diff_summary", "classes": Counter(), "per_page": {},
+def summarize(hunks, vnums, head_status_changed=(), held=()):
+    """`held`: [{"file_page", "key"}] for every body_region with body_status "held" (stage 1 held it
+    on an ink_box overlap; stage 2 read nothing). A held unit has no usable chunk, so it contributes
+    no new tokens and owns no hunk; it is listed here instead."""
+    out = {"kind": "diff_summary", "held": {"n": len(held), "regions": [dict(h) for h in held]}, "classes": Counter(), "per_page": {},
            "head_status_changed_vs_body": sorted(head_status_changed), "flags_per_class": {},
            "verse_agreement": {"n": 0, "head_read_eq_witness": 0, "body_read_eq_witness": 0},
            "verse_agreement_per_page": {}}
@@ -389,6 +393,7 @@ def main(argv=None):
     records = [{"kind": "diff_header", "tier": "best_effort", "config": config,
                 "config_hash": chash}]
     hunks, vnums = [], []
+    held = [{"file_page": fp, "key": u["key"]} for fp in order for u in by_page[fp] if u.get("held")]
     for fp in order:
         units = by_page[fp]
         for h in diff_page(fp, load_old_body(args.witness_dir, fp), units):
@@ -400,7 +405,7 @@ def main(argv=None):
                 vnums.append({**verse_number_record(fp, rec, line_no, unit), "config_hash": chash})
     records.extend(hunks)
     records.extend(vnums)
-    records.append({**summarize(hunks, vnums, changed), "tier": "best_effort", "config_hash": chash})
+    records.append({**summarize(hunks, vnums, changed, held), "tier": "best_effort", "config_hash": chash})
     tmp = Path(str(out_path) + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         for r in records:

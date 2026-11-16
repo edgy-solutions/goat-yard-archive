@@ -15,7 +15,7 @@ import numpy as np
 import body_read as BR
 import build_body_shadow as BSB
 
-EXPECTED_TESTS = 37
+EXPECTED_TESTS = 41
 
 RUN_HOST = "192.168.1.169:11434"   # C (ruling 2026-11-14)
 D_HOST = "192.168.1.169:11435"
@@ -724,6 +724,81 @@ def test_body_bottom_absent_leaves_config_and_hash_unchanged():
     finally:
         a.close()
         b.close()
+
+
+HELD = {"reason": "ink_box_overlap_exceeds_T",
+        "pairs": [{"file_page": 90, "a_col": "right", "b_col": "right", "a_y": [350, 450],
+                   "b_y": [440, 500], "overlap_px": 10, "T": 4, "T_source": "floor"}]}
+
+
+def held_stage1(line):
+    recs = stage1_records()
+    recs[line] = dict(recs[line], held=HELD)
+    return recs
+
+
+@with_env()
+def test_held_region_is_recorded_per_rect_and_never_read(env):
+    env.s1.write_text("\n".join(json.dumps(r) for r in held_stage1(3)) + "\n", encoding="utf-8")
+    assert env.run() == 0
+    recs = env.records()
+    regs = [r for r in recs if r["kind"] == "body_region" and r["stage1_line"] == 3]
+    assert sorted(r["file_page"] for r in regs) == [90, 91]      # one unit per page, as for any region
+    for r in regs:
+        assert r["body_status"] == "held" and r["body_raw"] == "" and len(r["chunks"]) == 1
+        c = r["chunks"][0]
+        assert c["guard"] == "excluded:held_ink_box_overlap" and c["box"] is None and c["n_lines"] == 0
+        assert c["text"] is None and c["sha256"] is None and c["error"] is None and c["held"] == HELD
+        assert c["chunk_idx"] == 0 and c["rect_box_prior"] in ([500, 350, 1000, 450], [0, 100, 500, 300])
+    s = recs[-1]["counts"]
+    assert s["excluded_held"] == 2
+    assert s["reads"] == len(ok_chunks(env))
+    # zero reads for the held rects: the same run without the hold reads exactly 4 more chunks
+    base = Env()
+    try:
+        assert base.run() == 0
+        assert len(ok_chunks(base)) - len(ok_chunks(env)) == 4   # R1: 2 chunks on p90 + 2 on p91
+        assert base.fake.body_calls - env.fake.body_calls >= 4
+        assert all(r["body_status"] != "held" for r in base.records() if r["kind"] == "body_region")
+        assert base.records()[-1]["counts"]["excluded_held"] == 0   # always present
+    finally:
+        base.close()
+
+
+@with_env()
+def test_held_region_is_not_clamped_by_body_bottom(env):
+    env.s1.write_text("\n".join(json.dumps(r) for r in held_stage1(3)) + "\n", encoding="utf-8")
+    bb = bb_file(env, {(90, "right"): 340})   # would exclude the p90 rect below the bottom if it were examined
+    assert env.run(extra=["--body-bottom", str(bb)]) == 0
+    recs = env.records()
+    reg = [r for r in recs if r["kind"] == "body_region" and r["stage1_line"] == 3 and r["file_page"] == 90][0]
+    assert reg["chunks"][0]["guard"] == "excluded:held_ink_box_overlap" and "body_bottom" not in reg["chunks"][0]
+    s = recs[-1]["counts"]
+    assert s["excluded_held"] == 2 and s["excluded_below_body_bottom"] == 0 and s["rects_clamped"] == 0
+
+
+@with_env()
+def test_held_body_canary_region_is_ignored_and_only_candidate_raises(env):
+    env.s1.write_text("\n".join(json.dumps(r) for r in held_stage1(2)) + "\n", encoding="utf-8")
+    try:
+        env.run()
+    except ValueError as e:
+        assert "no body canary" in str(e), str(e)
+    else:
+        raise AssertionError("a held only-candidate canary region must raise the existing ValueError")
+    assert env.fake.body_calls == 0 and env.fake.chat_payloads == []
+
+
+@with_env()
+def test_held_body_canary_falls_to_next_unheld_candidate(env):
+    recs = stage1_records()
+    recs[2] = dict(recs[2], held=HELD)
+    recs.append({"kind": "verse", "file_page_first": 90, "verse": [3], "head_status": "shipped",
+                 "head": {"col": "left", "y0": 90},
+                 "rects": [{"file_page": 90, "col": "left", "box": [0, 100, 500, 300]}]})
+    env.s1.write_text("\n".join(json.dumps(r) for r in recs) + "\n", encoding="utf-8")
+    assert env.run() == 0
+    assert env.records()[0]["config"]["body_canary"]["box"] is not None
 
 
 if __name__ == "__main__":

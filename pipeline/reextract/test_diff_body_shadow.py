@@ -10,7 +10,7 @@ from pathlib import Path
 
 import diff_body_shadow as DBS
 
-EXPECTED_TESTS = 41
+EXPECTED_TESTS = 43
 
 
 def unit(chunk_texts, key=(90, "left", 10), kind="verse", status="shipped", head=True, line=1):
@@ -458,6 +458,55 @@ def test_old_normalisation_rules_in_config():
         assert recs[0]["config"]["old_normalisation_rules"] == ["marker_only_v1", "chapter_heading_v1"]
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def test_held_body_region_makes_no_hunk_and_is_listed_in_the_summary():
+    d = Path(tempfile.mkdtemp(prefix="dbs_held_"))
+    try:
+        (d / "page90_image1_normalized.md").write_text(
+            "Ver. 1. In the beginning God\nmade the heavens.\n", encoding="utf-8")
+        s1 = [{"kind": "run_header"},
+              {"kind": "verse", "file_page_first": 90, "head_status": "shipped",
+               "head": {"col": "left", "y0": 10},
+               "number_sources": {"count": [1], "read": [1], "witness": [1]}},
+              {"kind": "verse", "file_page_first": 90, "head_status": "shipped",
+               "head": {"col": "right", "y0": 400}, "held": {"reason": "ink_box_overlap_exceeds_T"},
+               "number_sources": {"count": [2], "read": [2], "witness": [2]}}]
+        (d / "s1.jsonl").write_text("\n".join(json.dumps(r) for r in s1) + "\n", encoding="utf-8")
+        ok = {"file_page": 90, "col": "left", "rect_idx": 0, "chunk_idx": 0, "box": [0, 0, 10, 10],
+              "n_lines": 2, "guard": "ok", "text": "Ver. 1. In the beginning God\nmade the heavens.",
+              "error": None}
+        hc = {"file_page": 90, "col": "right", "rect_idx": 0, "chunk_idx": 0, "box": None, "n_lines": 0,
+              "guard": "excluded:held_ink_box_overlap", "text": None, "error": None}
+        body = [{"kind": "run_header", "config_hash": "abc"},
+                {"kind": "body_region", "file_page": 90, "key": [90, "left", 10], "stage1_line": 1,
+                 "stage1_kind": "verse", "head_status": "shipped", "chunks": [ok],
+                 "body_status": "complete"},
+                {"kind": "body_region", "file_page": 90, "key": [90, "right", 400], "stage1_line": 2,
+                 "stage1_kind": "verse", "head_status": "shipped", "chunks": [hc],
+                 "body_status": "held"}]
+        (d / "body.jsonl").write_text("\n".join(json.dumps(r) for r in body) + "\n", encoding="utf-8")
+        out = d / "diff.jsonl"
+        assert DBS.main(["--body", str(d / "body.jsonl"), "--stage1", str(d / "s1.jsonl"),
+                         "--witness-dir", str(d), "--out", str(out)]) == 0
+        recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        hunks = [r for r in recs if r["kind"] == "hunk"]
+        assert all(DBS_key_of(h) != [90, "right", 400] for h in hunks)
+        assert hunks == []                                          # old equals the unheld region's text; held adds none
+        summ = recs[-1]
+        assert summ["held"] == {"n": 1, "regions": [{"file_page": 90, "key": [90, "right", 400]}]}, summ["held"]
+        vn = [r for r in recs if r["kind"] == "verse_numbers" and r["stage1_line"] == 2][0]
+        assert vn["body_read"] is None and not vn["body_read_eq_witness"]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def DBS_key_of(h):
+    return (h.get("regions") or [None])[0] if len(h.get("regions") or []) == 1 else None
+
+
+def test_summarize_held_defaults_to_zero():
+    assert DBS.summarize([], [])["held"] == {"n": 0, "regions": []}
 
 
 if __name__ == "__main__":

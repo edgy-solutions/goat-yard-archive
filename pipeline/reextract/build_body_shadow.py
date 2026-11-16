@@ -232,7 +232,7 @@ def main(argv=None):
     # The body canary chunk: chunk 0 of the first verse region's rect on page 90, left column.
     canary_png = canary_n_lines = None
     for rec in stage1:
-        if rec.get("kind") != "verse":
+        if rec.get("kind") != "verse" or rec.get("held"):  # a held region is never the canary
             continue
         hit = [r for r in (rec.get("rects") or [])
                if r["file_page"] == BODY_CANARY_PAGE and r["col"] == BODY_CANARY_COL]
@@ -339,8 +339,21 @@ def main(argv=None):
 
     try:
         for line_no, rec, rects, fp in units:
-            gray = load(fp)
             chunks = []
+            if rec.get("held"):
+                # stage-1 held region (guard_hold addendum 2026-11-16): not chunked, not clamped, not
+                # read; every rect on this page is recorded with its prior box.
+                for rect_idx, rect in rects:
+                    counts["excluded_held"] += 1
+                    chunks.append({"file_page": fp, "col": rect["col"], "rect_idx": rect_idx,
+                                   "chunk_idx": 0, "box": None, "rect_box_prior": rect["box"],
+                                   "n_lines": 0, "guard": "excluded:held_ink_box_overlap",
+                                   "guard_raw": None, "text": None, "sha256": None,
+                                   "done_reason": None, "eval_count": None, "error": None,
+                                   "held": rec["held"]})
+                rects = []
+            else:
+                gray = load(fp)
             for rect_idx, rect in rects:
                 rect_box, bb_info = rect["box"], None
                 if bottoms is not None:
@@ -404,12 +417,14 @@ def main(argv=None):
                 "stage1_kind": rec["kind"], "verse": rec.get("verse"),
                 "head_status": rec.get("head_status"), "chunks": chunks,
                 "body_raw": body_raw, "body_text": BR.join_wordbreaks(body_raw),
-                "body_status": "complete" if complete else "incomplete"})
+                "body_status": ("held" if rec.get("held") else
+                                "complete" if complete else "incomplete")})
         n_ident = sum(1 for c in canaries[1:] if c["identical"])
         _emit(fh, {"kind": "run_summary", "tier": "best_effort", "config_hash": chash,
                    "counts": {"chunks": counts["chunks"], "reads": counts["reads"],
                               "guard_refusals": dict(refusals),
                               "item_errors": dict(item_errors),
+                              "excluded_held": counts["excluded_held"],
                               **({"rects_clamped": counts["rects_clamped"],
                                   "excluded_below_body_bottom": counts["excluded_below_body_bottom"]}
                                  if bottoms is not None else {}),
