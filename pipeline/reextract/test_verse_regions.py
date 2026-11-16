@@ -11,7 +11,7 @@ import verse_regions as VR
 import verse_head_read as VHR
 import body_read as BR
 
-EXPECTED_TESTS = 131
+EXPECTED_TESTS = 134
 
 # one (book, chapter) on every page: existing fixtures never change chapter by metadata
 _CM = {fp: ("Gen", 1) for fp in range(0, 2000)}
@@ -2589,6 +2589,43 @@ def test_read_off_config_has_no_pinned_keys_and_hash_is_of_the_rest():
     args.read = "on"
     cfg_on = BVR.build_config(args, "x", "h", False)
     assert cfg_on["hash"] != cfg["hash"] and "pinned_options" in cfg_on
+
+
+def _geom_tmp(lines):
+    import json
+    import tempfile
+    d = tempfile.mkdtemp(prefix="a2_geom_")
+    p = d + "/g.jsonl"
+    with open(p, "w", encoding="utf-8") as f:
+        for r in lines:
+            f.write(json.dumps(r) + "\n")
+    return p
+
+
+def test_load_geometry_skips_run_header_and_summary():
+    import build_verse_regions as BVR
+    pages = [{"file_page": 1, "x": 1}, {"file_page": 2, "x": 2}]
+    plain = BVR.load_geometry(_geom_tmp(pages))
+    derived = BVR.load_geometry(_geom_tmp([{"kind": "run_header", "h": 1}] + pages +
+                                          [{"kind": "run_summary", "n": 2}]))
+    assert derived == plain and sorted(derived) == [1, 2]
+
+
+def test_load_geometry_refuses_unknown_kind_without_file_page():
+    import build_verse_regions as BVR
+    p = _geom_tmp([{"file_page": 1}, {"kind": "bogus"}])
+    try:
+        BVR.load_geometry(p)
+    except ValueError as e:
+        assert "line 2" in str(e) and "bogus" in str(e), str(e)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_load_geometry_original_format_unchanged():
+    import build_verse_regions as BVR
+    pages = [{"file_page": 5, "a": [1]}, {"file_page": 3, "a": [2]}]
+    assert BVR.load_geometry(_geom_tmp(pages)) == {5: pages[0], 3: pages[1]}
 
 
 if __name__ == "__main__":

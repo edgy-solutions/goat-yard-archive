@@ -17,7 +17,7 @@ from PIL import Image
 
 import render_verse_truth as RVT
 
-EXPECTED_TESTS = 43
+EXPECTED_TESTS = 44
 
 
 # 1. crop_with_clamp -- left/top edge clamp, origin is the CLAMPED point, not rect-pad -----------
@@ -868,6 +868,23 @@ def test_prior_html_only_embeds_map_and_manifest_and_changes_the_ui_config_hash(
             pass
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_load_geometry_by_fp_skips_header_summary_and_refuses_unknown():
+    import json as _j
+    d = tempfile.mkdtemp(prefix="a2_geomfp_")
+    def w(name, recs):
+        p = Path(d) / name
+        p.write_text("".join(_j.dumps(r) + "\n" for r in recs), encoding="utf-8")
+        return p
+    pages = [{"file_page": 1}, {"file_page": 2}]
+    assert RVT.load_geometry_by_fp(w("a.jsonl", [{"kind": "run_header"}] + pages + [{"kind": "run_summary"}]))         == RVT.load_geometry_by_fp(w("b.jsonl", pages)) == {1: pages[0], 2: pages[1]}
+    try:
+        RVT.load_geometry_by_fp(w("c.jsonl", pages + [{"kind": "bogus"}]))
+    except ValueError as e:
+        assert "line 3" in str(e) and "bogus" in str(e)
+    else:
+        raise AssertionError("expected ValueError")
 
 
 if __name__ == "__main__":

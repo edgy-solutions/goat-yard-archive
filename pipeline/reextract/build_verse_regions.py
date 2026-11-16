@@ -227,13 +227,21 @@ def get_git_dirty(repo_root):
 # ---------------------------------------------------------------------------
 
 def load_geometry(geometry_path):
+    """Per-page geometry by file_page. The original format has no "kind"; the derived file from
+    body_bottom.py derive carries a run_header and a run_summary, which are skipped. Any other
+    record lacking file_page is a ValueError naming the line and its kind (never skipped)."""
     by_page = {}
     with open(geometry_path, encoding="utf-8") as f:
-        for line in f:
+        for n, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             rec = json.loads(line)
+            if rec.get("kind") in ("run_header", "run_summary"):
+                continue
+            if "file_page" not in rec:
+                raise ValueError(f"{geometry_path}: line {n}: record without file_page "
+                                 f"(kind={rec.get('kind')!r})")
             by_page[rec["file_page"]] = rec
     return by_page
 

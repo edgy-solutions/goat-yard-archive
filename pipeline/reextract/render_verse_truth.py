@@ -713,13 +713,20 @@ def load_misses(path):
 
 
 def load_geometry_by_fp(path):
+    """Per-page geometry by file_page; skips the run_header/run_summary of a derived file, raises
+    ValueError (line, kind) on any other record without file_page. Same rule as
+    build_verse_regions.load_geometry."""
     out = {}
     with open(path, encoding="utf-8") as f:
-        for line in f:
+        for n, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             rec = json.loads(line)
+            if rec.get("kind") in ("run_header", "run_summary"):
+                continue
+            if "file_page" not in rec:
+                raise ValueError(f"{path}: line {n}: record without file_page (kind={rec.get('kind')!r})")
             out[rec["file_page"]] = rec
     return out
 
