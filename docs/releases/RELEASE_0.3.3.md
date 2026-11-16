@@ -447,6 +447,35 @@ prediction written into a MEASURED block is prose wearing a number's clothes.
 
 Both digests are the artefacts the gate run scored. Nothing was rebuilt.
 
+## The public page's build identifier — measured
+
+| | |
+|---|---|
+| served entry script | `assets/index-fx2QcAsD.js` (HTTP 200, 654,395 bytes) |
+| read | 2026-11-15, `curl https://goatyardarchive.org/` |
+| Cloudflare version | `cb7ca83c`, deployed ~2026-08 (operator-reported) |
+
+The Worker bundle is three months old, and **it does not matter for this
+release**, which is a measurement and not a date inference. The live bundle
+builds scan URLs as:
+
+```
+/scans/vol${fe}_page${Se}_image${fe}.png
+```
+
+That is the **post-`e0bf95e`** form — the 2026-08-02 fix that replaced a
+hardcoded `_image1`. `_image1.png` occurs **zero** times in the served bundle.
+Since `e0bf95e` is the **last** commit to touch `frontend/` and `frontend/` is
+byte-identical from tag `0.3.0` to `release-0.3.3`, the public bundle already
+contains every frontend change this release has. The stale deploy carries no
+exposure, nothing in it is needed for the structured answer, and a redeploy is
+hygiene rather than a fix.
+
+What this probe does **not** establish: that the bundle is byte-equal to one
+built from the release tree. One grep answered one question — whether the
+user-visible scan-URL defect is live — and the local half of the § Step 5
+comparison was not built, so the hash pair is recorded on one side only.
+
 ## The drift gate — NOT RECORDED HERE YET
 
 The second gate run's verdict block has not reached this lane. What is recorded
