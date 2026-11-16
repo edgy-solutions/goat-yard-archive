@@ -392,14 +392,40 @@ def signed_supply(letter):
     (a named index cannot beg the question) but the SITTING is choosing what to print as a specimen
     beside a rival, and a specimen whose own word holds the rival is a worse picture whatever its
     provenance. Both facts are shown; neither is collapsed into the other.
+
+    FIXED 2026-11-15, by the second sitting's page refusing to build. Two faults, one line apart:
+
+      - every `sig_exemplars` row was labelled "pointed", discarding the kind that function had
+        just worked out. A context box was presented as the signer's own attestation of the letter.
+      - one signing sitting writes one record PER LETTER, each carrying boxes for the whole word,
+        so the same glyph arrived twice: once as the pointed letter of its own record, once as a
+        context box of its neighbour's. `he` reported 8 clean impressions where four glyphs were
+        ever drawn; `resh` and `vav` reported two where there is ONE. That is not a conservative
+        error in either direction -- it made a single-instance letter look corroborated, which is
+        the one thing `single_instance` exists to prevent.
+
+    The unit of evidence is a GLYPH -- (file_page, word, index_from_right) -- not a record. Where
+    both kinds name the same glyph the POINTED row wins: it is the stronger claim about the same
+    pixels, and the weaker one is not additional evidence.
     """
     rivals = axis_rivals().get(letter, ((), (), ()))[0]
-    out = []
-    for r in sig_exemplars(letter):
+    out, at = [], {}
+    for r in sig_exemplars(letter, want=10 ** 6):
         bad = sorted(p for p in rivals if LETTER[p] in r["word"])
-        out.append(("pointed", r["file_page"], r["word"], r.get("letter_index_from_right"), bad))
+        key = (r["file_page"], r["word"], r.get("letter_index_from_right"))
+        row = (r["kind"], r["file_page"], r["word"], r.get("letter_index_from_right"), bad)
+        if key in at:
+            if row[0] == "pointed" and out[at[key]][0] != "pointed":
+                out[at[key]] = row
+            continue
+        at[key] = len(out)
+        out.append(row)
     for pg, word, idx in sig_context_tiles(letter):
+        key = (pg, word, idx)
+        if key in at:
+            continue
         bad = sorted(p for p in rivals if LETTER[p] in word)
+        at[key] = len(out)
         out.append(("context", pg, word, idx, bad))
     return out
 
@@ -829,6 +855,12 @@ if __name__ == "__main__":
         WANT = dict((k, n) for k, _rv, _t, _w, n in OFFER)
         SUG = dict((k, census_pages(k, rv, want=WANT[k])) for k, rv in BLOCKED)
         CANDS = set(x for c in CARDS for a in card_asks(c) for x in (a.get("candidates") or ()))
+        # Per-letter exclusion sets, DERIVED. The check below used to name tav as the letter
+        # with nothing signed; Chris signed tav on p577 and the check went red without
+        # anything having broken. A witness pinned to a state the project is trying to
+        # change is a witness with an expiry date on it.
+        AS = dict((k, already_signed(k)) for k in LETTER)
+        ASL = sorted(k for k in AS if AS[k])
         # The exemplar record's object literal ALONE. Scoped because the re-ratification record
         # carries some of the same field names, and a page-wide scan for `coord_space:` was
         # satisfied by the wrong branch -- which a mutation, not a green run, is how we found out.
@@ -994,8 +1026,10 @@ if __name__ == "__main__":
                  bool(SUG.get("zayin", ([], 0))[0])
                  and all((pg, w) not in already_signed("zayin")
                          for _r, _n, pg, w, _s, _nik, _sm in SUG.get("zayin", ([], 0))[0])),
-                ("the exclusion is scoped to the letter: a page signed for zayin is fresh for tav",
-                 already_signed("tav") == set() and already_signed("zayin") != set()),
+                ("the exclusion is scoped to the letter: a word signed for one letter is not "
+                 "withheld from another (%d letters carry a signed word)" % len(ASL),
+                 len(ASL) >= 2
+                 and any(x not in AS[b] for a in ASL for b in ASL if a != b for x in AS[a])),
                 # WANT=None is "all remaining", not "none". A falsy want collapsing to zero rows
                 # would print as a letter with no supply at all -- the same absence on the page as
                 # a letter nobody can point.
