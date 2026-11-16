@@ -1321,15 +1321,74 @@ def _disputed_native():
 _SIGCACHE = {}
 
 
-def sig_exemplars(letter, want=9):
-    """Signed exemplars of `letter` from anywhere in the volume, newest signature last.
+def card_rivals_union(letter):
+    """Every rival `letter` is asked against on any card, as one set.
 
-    No partner-letter exclusion: see the module docstring. A word containing both candidates is the
-    contrast pair this corpus could not supply, and it is admissible precisely because the signer
-    named an index."""
+    The default rule-2 standard for a context tile. UNION, because rule 2 holds against every rival
+    or it does not hold: dalet is asked against resh on one card and against samekh and final kaf on
+    others, and a word clean of only one of them begs the question on the next card.
+    """
+    out = set()
+    for c in CARDS:
+        for a in card_asks(c):
+            cand = tuple(a.get("candidates") or ())
+            if letter in cand:
+                out.update(x for x in cand if x != letter)
+    return out
+
+
+def _rule2_dirt(word, letter, rivals):
+    """The rivals actually present in `word` -- the reason a context tile is refused, or ()."""
+    w = strip_nikud(word)
+    return tuple(sorted(p for p in rivals if p != letter and LETTER.get(p) and LETTER[p] in w))
+
+
+def sig_exemplars(letter, want=9, partners=None):
+    """Signed exemplars of `letter` from anywhere in the volume, pointed first.
+
+    Two kinds, and the difference is a difference in what was attested (Chris, 2026-11-15):
+
+      kind="pointed"  the letter the signer named. EXEMPT from rule 2 -- see the module docstring:
+                      a word containing both candidates is the contrast pair this corpus could not
+                      supply, and it is admissible precisely because the signer named an index.
+      kind="context"  a glyph box drawn around another letter of the same pointed word, in the same
+                      sitting, by the same hand. It carries a named index too, which is why it is
+                      admissible at all. But the letter being ATTESTED was the pointed one, so this
+                      kind is admitted ONLY where rule 2 holds: a context resh standing next to a
+                      dalet is a specimen of neither.
+
+    `partners` is the rule-2 standard applied to the context tiles, and it is an ARGUMENT because
+    consumers differ: a card's standard is its own rivals (the default, unioned over every ask that
+    names the letter), while the sitting's legend scores against its axes. One consumer's axis
+    silently scoring another's is exactly the confusion this parameter exists to prevent.
+
+    Each returned row is a COPY carrying `kind`, `rule2_dirt` and `single_instance` -- the cached
+    records are not mutated, and `single_instance` is true only when this call admitted exactly one,
+    so a card can say what it rests on instead of printing one picture and implying a corpus.
+    """
     if "good" not in _SIGCACHE:
         _SIGCACHE["good"], _SIGCACHE["bad"] = sig_load()
-    return [r for r in _SIGCACHE["good"] if r["letter"] == letter][:want]
+    rivals = set(card_rivals_union(letter) if partners is None else partners)
+    out = []
+    for r in _SIGCACHE["good"]:
+        if r["letter"] == letter:
+            out.append(dict(r, kind="pointed", rule2_dirt=()))
+    for r in _SIGCACHE["good"]:
+        for lb in r.get("letter_boxes") or ():
+            if lb.get("letter") != letter:
+                continue
+            if (lb.get("index_from_right") == r.get("letter_index_from_right")
+                    and r.get("letter") == letter):
+                continue        # the pointed one, already taken above
+            dirt = _rule2_dirt(r["word"], letter, rivals)
+            if dirt:
+                continue        # refused, and `sig_context_tiles` reports it with its reason
+            out.append(dict(r, letter=letter, kind="context", rule2_dirt=(),
+                            letter_index_from_right=lb.get("index_from_right")))
+    out = out[:want]
+    for r in out:
+        r["single_instance"] = (len(out) == 1)
+    return out
 
 
 def rerat_load(path=None):
@@ -1526,13 +1585,12 @@ def sig_context_tiles(letter):
     a pointed dalet on p386 also carries boxes for the yods and the final nun around it. Those
     boxes are drawn and indexed by the same hand in the same sitting.
 
-    THEY ARE NOT EXEMPLARS HERE. `sig_exemplars` filters on the record's `letter`, so a context tile
-    is invisible to every card today, and this function does not change that -- it REPORTS what
-    exists so the capture page can say "one context tile, no pointed record" instead of "none".
-    Whether a context tile should count is a live question: the module docstring's reason that a
-    signed exemplar skips rule 2 is that the signer named an index, and a context tile has one --
-    but the letter the signer was ATTESTING is the pointed one, and that asymmetry is Chris's to
-    rule on, not this function's to assume.
+    RULED 2026-11-15: a context tile IS an exemplar where its word is rule-2 clean, labelled as
+    coming from context and as a single instance. `sig_exemplars` now admits those. THIS function
+    still reports ALL of them, clean and dirty alike, because the capture page has to say "one
+    context tile, rule-2 DIRTY, holds yod" rather than "none" -- a letter refused for a stated
+    reason and a letter nobody ever drew are different states, and a page that prints both as
+    absence sends a signer to the wrong work.
     """
     if "good" not in _SIGCACHE:
         _SIGCACHE["good"], _SIGCACHE["bad"] = sig_load()
@@ -2554,15 +2612,29 @@ def build(out=None):
                     # A signed volume exemplar carries its own provenance, and it is shown: a record
                     # whose page, box, index and signer are not on the page beside the picture is a
                     # screenshot with extra steps.
+                    # LABELLED by kind, and by whether it is the only one (Chris, 2026-11-15).
+                    # A context tile is a box the same hand drew around a neighbouring glyph of the
+                    # same word; it counts, and it is weaker, and an unlabelled picture would read
+                    # as the same evidence as a pointed one. "single exemplar" is printed where this
+                    # is all there is, so the card states what it rests on rather than showing one
+                    # specimen and implying a corpus.
+                    _kind = ("pointed &mdash; the letter the signer named"
+                             if r.get("kind") != "context" else
+                             "from context &mdash; a box the signer drew around another glyph of "
+                             "the same word, in the same sitting; admitted because this word holds "
+                             "no lookalike of it")
+                    _only = ('<br><b>single exemplar:</b> this is the only signed impression of %s '
+                             'in the corpus, so the comparison rests on one specimen.' % r["letter"]
+                             ) if r.get("single_instance") else ""
                     h.append('<div class="cell">%s<div class="cap"><b>signed exemplar</b> '
-                             '<span class="heb" dir="auto">%s</span><br>%s<br>'
+                             '(%s)<br><span class="heb" dir="auto">%s</span><br>%s<br>'
                              '<span class="prov">file p%s &middot; printed p%s &middot; box %s '
-                             '&middot; %s, %s</span>%s</div></div>'
-                             % (img_comp(r["_crop"]), r["word"],
+                             '&middot; %s, %s</span>%s%s</div></div>'
+                             % (img_comp(r["_crop"]), _kind, r["word"],
                                 where(r["word"], [(1, int(r["letter_index_from_right"]))]),
                                 r["file_page"], r["file_page"] - 88, r["box"], r["signer"],
                                 r["date"],
-                                ("<br>" + r["note"]) if r.get("note") else ""))
+                                ("<br>" + r["note"]) if r.get("note") else "", _only))
                 for sid, es, p, occ in ex:
                     # Same derivation as the card frame. p895:n0 reaches this loop as a pe exemplar
                     # and its claim says the shown glyph is a DIFFERENT letter and unaffected; that
@@ -3799,6 +3871,86 @@ def selftest():
     ck("a card whose pos is a tuple contributes BOTH of its positions",
        sorted(DISPUTED.get("p831:n2", ())) == [(1, 2), (1, 3)], DISPUTED.get("p831:n2"))
     ck("section 15 ran every one of its checks", n[0] - _e15 == 5, n[0] - _e15)
+
+    # ---------------------------------------------------------------- (16) the context-tile ruling
+    print("")
+    print("(16) Chris's ruling: a context tile is an exemplar where rule 2 holds")
+    _e16 = n[0]
+    # ADMITTED, and labelled. resh, vav and he are covered by NOTHING ELSE: if the admission broke,
+    # three letters on the sitting's own legend would silently have no specimen, and the legend would
+    # print a comparison with one side missing.
+    _resh = sig_exemplars("resh")
+    ck("a rule-2-clean context tile is an exemplar, and says it came from context",
+       len(_resh) == 1 and _resh[0]["kind"] == "context" and _resh[0]["word"] == u"\u05e1\u05e0\u05e8",
+       [(r["kind"], r["word"]) for r in _resh])
+    _only_ctx = [k for k in ("resh", "vav", "he")
+                 if sig_exemplars(k) and all(r["kind"] == "context" for r in sig_exemplars(k))]
+    ck("some letter is covered by a context tile and nothing else, so the clause above matters",
+       sorted(_only_ctx) == ["he", "resh", "vav"], _only_ctx)
+    # REFUSED, in the same breath. final nun's only impression anywhere is the p386 tile, and the
+    # word holds a yod -- its own lookalike on card p254:n1. Admitting it would have put the glyph
+    # under dispute on the card as the specimen of the answer.
+    ck("a rule-2-DIRTY context tile is NOT an exemplar",
+       sig_exemplars("final_nun") == [] and sig_exemplars("yod") == [],
+       (len(sig_exemplars("final_nun")), len(sig_exemplars("yod"))))
+    ck("such a tile exists, so the refusal above has a subject",
+       bool(sig_context_tiles("final_nun")) and bool(sig_context_tiles("yod")),
+       (sig_context_tiles("final_nun"), sig_context_tiles("yod")))
+    # The two states must stay DISTINGUISHABLE. "refused, and here is the rival" and "nobody ever
+    # drew one" send a signer to different work, and a page printing both as absence is the
+    # represent-nothing-here defect.
+    ck("a refused tile is still reported, with the rival that refused it named",
+       _rule2_dirt(u"\u05d9\u05d3\u05d9\u05df", "final_nun", card_rivals_union("final_nun"))
+       == ("yod",) and not sig_context_tiles("tav"),
+       (_rule2_dirt(u"\u05d9\u05d3\u05d9\u05df", "final_nun", card_rivals_union("final_nun")),
+        sig_context_tiles("tav")))
+    # THE EXEMPTION, under a standard that would refuse the word. The pointed zayin sits in a word
+    # holding a he; scored against he it survives, because the signer named the index.
+    ck("a POINTED exemplar survives a standard that refuses its word",
+       [r["kind"] for r in sig_exemplars("zayin", partners=("he",))] == ["pointed"],
+       [(r["kind"], r["word"]) for r in sig_exemplars("zayin", partners=("he",))])
+    ck("the same kind of standard DOES refuse a context tile, so the exemption is not vacuous",
+       sig_exemplars("resh", partners=("samekh",)) == [] and len(_resh) == 1,
+       (len(sig_exemplars("resh", partners=("samekh",))), len(_resh)))
+    # The default standard is the CARD's rivals, unioned over every ask. resh is asked only against
+    # dalet, which is why its samekh-bearing word is clean here and would not be under another axis.
+    ck("the default standard is the union of the card rivals, not a global list",
+       sorted(card_rivals_union("resh")) == ["dalet"]
+       and sorted(card_rivals_union("dalet")) == ["final_kaf", "resh", "samekh"],
+       (sorted(card_rivals_union("resh")), sorted(card_rivals_union("dalet"))))
+    # SINGLE INSTANCE, both directions. One zayin makes p233:n4 signable and the card has to say so;
+    # dalet has two, and a card claiming "single exemplar" over two would be understating its basis.
+    ck("the only impression of a letter is marked single_instance",
+       [r["single_instance"] for r in sig_exemplars("zayin")] == [True],
+       [(r["kind"], r["single_instance"]) for r in sig_exemplars("zayin")])
+    ck("a letter with more than one is NOT marked single_instance",
+       [r["single_instance"] for r in sig_exemplars("dalet")] == [False, False],
+       [(r["kind"], r["single_instance"]) for r in sig_exemplars("dalet")])
+    # The labels are added to COPIES. A record relabelled in the cache would arrive at the next
+    # caller already carrying another caller's standard, and a context tile whose `letter` was
+    # overwritten in place would stop being findable as the letter its signer actually pointed at.
+    for _k in ("resh", "zayin", "dalet", "nun", "he", "vav"):
+        sig_exemplars(_k)
+    ck("the labels go on copies: the cached signature records are untouched",
+       not any("kind" in r or "single_instance" in r for r in _SIGCACHE.get("good", ()))
+       and sorted(r["letter"] for r in _SIGCACHE.get("good", ())) ==
+       sorted(r["letter"] for r in sig_load()[0]),
+       [k for r in _SIGCACHE.get("good", ()) for k in ("kind", "single_instance") if k in r])
+    if OUTHTML.exists():
+        _t16 = re.sub(r"base64,[A-Za-z0-9+/=]+", "", OUTHTML.read_text(encoding="utf-8"))
+        # The ruling is only honoured if it reaches the page a human reads. An unlabelled picture
+        # reads as the same evidence as a pointed one, which is the opposite of what admitting the
+        # weaker kind was for.
+        ck("the page labels a context exemplar as coming from context",
+           "a box the signer drew around another glyph" in _t16, "a box the signer drew" in _t16)
+        ck("the page states where a comparison rests on one specimen, and names the letter",
+           "single exemplar:" in _t16 and "the only signed impression of zayin" in _t16,
+           ("single exemplar:" in _t16, "the only signed impression of zayin" in _t16))
+    else:
+        ck("the page labels a context exemplar as coming from context", False, "no page")
+        ck("the page states where a comparison rests on one specimen, and names the letter",
+           False, "no page")
+    ck("section 16 ran every one of its checks", n[0] - _e16 == 13, n[0] - _e16)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
