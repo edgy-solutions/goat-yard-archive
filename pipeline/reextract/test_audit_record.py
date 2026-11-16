@@ -4,6 +4,10 @@ re-transcription), the door is named, inputs are pinned by hash, freshness attes
 import json, tempfile, os
 import audit_record as AR
 
+
+class Skip(Exception):
+    """Raised by a test whose named local data is absent; the harness counts it as SKIPPED."""
+
 CROP = __file__  # any real file, for a real hash
 NOTE = "על אשר לי magistros pecuariae super illos, qui sunt mihi, Junius & Tremellius"
 NOTE2 = NOTE.replace("Junius & Tremellius", "Piscator")   # the second witness's reading of the same note
@@ -64,12 +68,16 @@ def test_correction_over_60pct_is_retranscription():
     except ValueError: pass
     assert AR.validate(_rec(chosen="neither", correction="על אשר לי")) # a real span -> valid
 
-def test_real_exports_guarded():
+def _real_exports_check(here, name="test_real_exports_guarded"):
     # born-test against the actual banked files: the human-door console let 11 defective records through
     # (6 over-long corrections + 5 empty 'neither's); the agent door (apd.py) let none through. The guard
     # in validate() now closes the human door to match. 11 red / 24 green for Chris, 0 red / 74 for agent.
-    import os
-    here = os.path.dirname(os.path.abspath(__file__))
+    chris = os.path.join(here, "audits", "chris_sitting_b_20260823.jsonl")
+    agent = os.path.join(here, "audits", "agent_session_20260823.jsonl")
+    for path in (chris, agent):
+        if not os.path.exists(path):
+            raise Skip(f"SKIP {name}: {path} absent (the banked 11-red/24-green and 0-red/74-green "
+                       f"validate() counts over the real exports)")
     def counts(path):
         recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
         recs = [r for r in recs if r.get("kind") != "sitting_manifest"]
@@ -78,10 +86,32 @@ def test_real_exports_guarded():
             try: AR.validate(r); green += 1
             except ValueError: red += 1
         return red, green
-    cr, cg = counts(os.path.join(here, "audits", "chris_sitting_b_20260823.jsonl"))
-    ar_, ag = counts(os.path.join(here, "audits", "agent_session_20260823.jsonl"))
+    cr, cg = counts(chris)
+    ar_, ag = counts(agent)
     assert (cr, cg) == (11, 24), f"chris: expected 11 red / 24 green, got {cr} / {cg}"
     assert (ar_, ag) == (0, 74), f"agent: expected 0 red / 74 green, got {ar_} / {ag}"
+
+def test_real_exports_guarded():
+    _real_exports_check(os.path.dirname(os.path.abspath(__file__)))
+
+def test_real_exports_skip_is_conditional_on_exactly_the_named_paths():
+    import shutil
+    d = tempfile.mkdtemp(prefix="ar_skip_")
+    try:
+        try: _real_exports_check(d); raise AssertionError("absent data did not skip")
+        except Skip: pass
+        os.makedirs(os.path.join(d, "audits"))
+        one = os.path.join(d, "audits", "chris_sitting_b_20260823.jsonl")
+        open(one, "w", encoding="utf-8").write("")
+        try: _real_exports_check(d); raise AssertionError("one path present did not skip")
+        except Skip as e:
+            assert "agent_session_20260823.jsonl" in str(e) and "chris_sitting" not in str(e).split("absent")[0].split(": ", 1)[1]
+        open(os.path.join(d, "audits", "agent_session_20260823.jsonl"), "w", encoding="utf-8").write("")
+        try: _real_exports_check(d); raise AssertionError("both present but the test did not run")
+        except Skip: raise AssertionError("both paths exist yet it skipped")
+        except AssertionError as e:
+            assert "chris: expected 11 red" in str(e), str(e)   # it RAN and checked the counts
+    finally: shutil.rmtree(d, ignore_errors=True)
 
 def test_append_and_reload_roundtrip():
     fd, path = tempfile.mkstemp(suffix=".jsonl"); os.close(fd)
@@ -107,8 +137,9 @@ def test_manifest_emits_keys_the_verifier_reads():
 if __name__ == "__main__":
     import traceback
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    p = f = 0
+    p = f = k = 0
     for fn in fns:
         try: fn(); p += 1; print(f"  PASS {fn.__name__}")
+        except Skip as e: k += 1; print(f"  {e}")
         except Exception: f += 1; print(f"  FAIL {fn.__name__}"); traceback.print_exc()
-    print(f"\n{p} passed, {f} failed"); raise SystemExit(1 if f else 0)
+    print(f"\n{p} passed, {f} failed, {k} skipped"); raise SystemExit(1 if f else 0)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import diff_body_shadow as DBS
 
-EXPECTED_TESTS = 35
+EXPECTED_TESTS = 41
 
 
 def unit(chunk_texts, key=(90, "left", 10), kind="verse", status="shipped", head=True, line=1):
@@ -391,6 +391,71 @@ def test_head_status_comes_from_stage1_and_changes_are_listed():
         rc, out = _synthetic_run(d, body_status="shipped", s1_status="shipped")
         recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
         assert recs[-1]["head_status_changed_vs_body"] == []
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _flags(old, new, **kw):
+    return [h["old_normalisation"] for h in DBS.diff_page(90, old, [unit([new], **kw)])]
+
+
+def test_old_normalisation_marker_format_flag():
+    assert _flags("a b ^a^ c d", "a b[^1] c d") == ["marker_format"]
+    assert _flags("a b c d", "a b[^1] c d") == ["marker_format"]      # mark on one side only
+
+
+def test_old_normalisation_chapter_heading_flag():
+    assert _flags("x y # Chapter XV", "x y CHAP. XV.") == ["chapter_heading"]
+    assert _flags("x y CHAPTER XV", "x y CHAP. XV.") == ["chapter_heading"]
+    assert DBS.old_normalisation("CHAPTER XV.", "CHAP. XV.") == "chapter_heading"   # optional trailing dot
+    assert _flags("x y Chapter IV", "x y CHAP. IV.") == ["chapter_heading"]
+
+
+def test_old_normalisation_null_for_ordinary_hunks_and_near_misses():
+    assert _flags("a b c d", "a b X d") == [None]
+    assert _flags("x y # Chapter XV", "x y CHAP. XVI.") == [None]            # numeral differs
+    assert _flags("x y # Chapter XV", "x y CHAP. XV. extra") == [None]       # residue differs
+    assert _flags("x y # Chapter 21", "x y CHAP. XXI.") == [None]            # not a Roman numeral
+    assert _flags("a b c d", "a b c d") == []                                # no hunk at all
+    # equal normalised tokens but NO mark on either side is not marker_format (the mark-present clause)
+    assert DBS.old_normalisation("foo .", "foo.") is None
+    assert DBS.old_normalisation("foo ^a^", "foo[^1]") == "marker_format"
+
+
+def test_old_normalisation_is_a_flag_class_unchanged():
+    # the same hunks classified with the flag computed vs forced off give the same class
+    pairs = [("a b ^a^ c d", "a b[^1] c d"), ("x y # Chapter XV", "x y CHAP. XV."), ("a b c d", "a b X d")]
+    for old, new in pairs:
+        got = [h["class"] for h in DBS.diff_page(90, old, [unit([new])])]
+        orig = DBS.old_normalisation
+        DBS.old_normalisation = lambda o, n: None
+        try:
+            base = [h["class"] for h in DBS.diff_page(90, old, [unit([new])])]
+        finally:
+            DBS.old_normalisation = orig
+        assert got == base == ["content"], (old, new, got, base)
+    h = DBS.diff_page(90, "x y # Chapter XV", [unit(["x y CHAP. XV."])])[0]
+    keys = list(h)
+    assert keys[keys.index("ends_on_chunk_last_line") + 1] == "old_normalisation"
+
+
+def test_marker_regex_copy_agrees_with_console():
+    # diff_body_shadow IMPORTS marker_only from render_body_console (no copy); pin that identity
+    import render_body_console as RBC
+    cases = [("a ^a^ b", "a[^1] b"), ("a b", "a b"), ("a ^ b", "a b"), ("a^1 b", "a b"), ("a b", "a b ^"),
+             ("a b", "a c"), ("a ^b b", "a b"), ("a[^12] b", "a b")]
+    assert len(cases) >= 8
+    for o, n in cases:
+        assert (DBS.old_normalisation(o, n) == "marker_format") == RBC.marker_only(o, n), (o, n)
+    assert DBS.RBC is RBC
+
+
+def test_old_normalisation_rules_in_config():
+    d = Path(tempfile.mkdtemp(prefix="dbs_test_"))
+    try:
+        rc, out = _synthetic_run(d)
+        recs = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines()]
+        assert recs[0]["config"]["old_normalisation_rules"] == ["marker_only_v1", "chapter_heading_v1"]
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

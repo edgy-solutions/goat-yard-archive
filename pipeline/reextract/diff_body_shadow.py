@@ -40,6 +40,7 @@ import assembler  # noqa: E402
 import body_read as BR  # noqa: E402
 import build_body_shadow as BSB  # noqa: E402
 import build_verse_regions as BVR  # noqa: E402
+import render_body_console as RBC  # noqa: E402  (marker_only_v1 lives there; no import cycle)
 import verse_regions as VR  # noqa: E402
 
 HEAD_TOKENS = 4
@@ -47,6 +48,23 @@ CONTEXT_TOKENS = 6
 CLASSES = ("disputed_head", "verse_boundary", "ws_punct", "content")
 _MARKER_RE = re.compile(r"\^[A-Za-z]\^")
 _NL = chr(10)
+
+OLD_NORMALISATION_RULES = ["marker_only_v1", "chapter_heading_v1"]
+_ROMAN = r"[IVXLCDM]+"
+_OLD_CHAPTER_RE = re.compile(r"(?:#\s*Chapter|CHAPTER|Chapter)\s+(" + _ROMAN + r")\.?")
+_NEW_CHAPTER_RE = re.compile(r"CHAP\.\s+(" + _ROMAN + r")\.")
+
+
+def old_normalisation(old_t, new_t):
+    """A FLAG (orthogonal to class): the two designed differences the old pipeline was instructed to
+    make. -> None | "marker_format" (rule marker_only_v1) | "chapter_heading" (rule chapter_heading_v1)."""
+    if RBC.marker_only(old_t, new_t):
+        return "marker_format"
+    mo, mn = _OLD_CHAPTER_RE.search(old_t), _NEW_CHAPTER_RE.search(new_t)
+    if (mo and mn and mo.group(1) == mn.group(1)
+            and RBC._norm(_OLD_CHAPTER_RE.sub("", old_t)) == RBC._norm(_NEW_CHAPTER_RE.sub("", new_t))):
+        return "chapter_heading"
+    return None
 
 
 # ---- the one tokeniser ----------------------------------------------------------------------
@@ -199,6 +217,7 @@ def diff_page(file_page, old_text, units):
             "span_chunks": span_chunks,
             "ends_on_chunk_last_line": (None if j1 == j2
                                         else new_li[j2 - 1] == last_li[new_tags[j2 - 1]]),
+            "old_normalisation": old_normalisation(old_t, new_t),
             "old_before": " ".join(old_toks[max(0, i1 - CONTEXT_TOKENS):i1]),
             "old_after": " ".join(old_toks[i2:i2 + CONTEXT_TOKENS]),
             "new_before": " ".join(new_toks[max(0, j1 - CONTEXT_TOKENS):j1]),
@@ -364,6 +383,7 @@ def main(argv=None):
         "head_status_source": "stage1",
         "span_chunks_rule": "distinct_new_tags_v1",
         "span_end_rule": "chunk_last_line_v1",
+        "old_normalisation_rules": list(OLD_NORMALISATION_RULES),
     }
     chash = BVR.config_hash(config)
     records = [{"kind": "diff_header", "tier": "best_effort", "config": config,

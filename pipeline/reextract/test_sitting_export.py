@@ -38,10 +38,17 @@ def rec_sitting_b(a):
             "inputs": {"crop": a["data-crop"], "crop_sha16": a["data-crop-sha"],
                        "candidates": json.loads(html.unescape(a["data-candidates"])), "page": int(a["data-page"])}}
 
-def run():
+class Skip(Exception):
+    pass
+
+def run(here=HERE):
     fails = 0
-    a_html = HERE / "audits" / "sitting_a_console.html"
-    b_html = HERE / "audits" / "sitting_b_console.html"
+    a_html = here / "audits" / "sitting_a_console.html"
+    b_html = here / "audits" / "sitting_b_console.html"
+    for path in (a_html, b_html):
+        if not path.exists():
+            raise Skip(f"SKIP test_sitting_export: {path} absent (the shipped Sitting A/B consoles' "
+                       f"cards must each produce a Build-2-valid verdict record)")
     a_cards = cards_of(a_html)
     assert len(a_cards) == 25, f"Sitting A: expected 25 cards, got {len(a_cards)}"
     for c in a_cards:
@@ -71,7 +78,34 @@ def run():
           else f"\nFAIL — {fails} cards cannot produce a valid verdict")
     return 1 if fails else 0
 
+def selfcheck_skip_is_conditional():
+    """The skip depends on exactly the two named paths: with neither, or only one, it skips; with both
+    present (empty pages, fake dir) the checks RUN and fail on the card count, they are not skipped."""
+    import shutil, tempfile
+    d = Path(tempfile.mkdtemp(prefix="sit_skip_"))
+    try:
+        for setup in ([], ["sitting_a_console.html"], ["sitting_b_console.html"]):
+            (d / "audits").mkdir(exist_ok=True)
+            for f in (d / "audits").iterdir(): f.unlink()
+            for n in setup: (d / "audits" / n).write_text("<html></html>", encoding="utf-8")
+            try: run(d); raise AssertionError("did not skip")
+            except Skip: pass
+        for n in ("sitting_a_console.html", "sitting_b_console.html"):
+            (d / "audits" / n).write_text("<html></html>", encoding="utf-8")
+        try: run(d); raise AssertionError("ran without failing on empty pages")
+        except Skip: raise AssertionError("both paths exist yet it skipped")
+        except AssertionError as e: assert "expected 25 cards" in str(e), str(e)
+    finally: shutil.rmtree(d, ignore_errors=True)
+
 if __name__ == "__main__":
     try: sys.stdout.reconfigure(encoding="utf-8")
     except Exception: pass
-    sys.exit(run())
+    selfcheck_skip_is_conditional()
+    try:
+        rc = run()
+    except Skip as e:
+        print(f"  {e}")
+        print("\n0 passed, 0 failed, 1 skipped")
+        sys.exit(0)
+    print(f"\n{1 - rc} passed, {rc} failed, 0 skipped")
+    sys.exit(rc)
