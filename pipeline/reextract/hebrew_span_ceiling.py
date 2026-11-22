@@ -95,11 +95,13 @@ RATCHET_SET = (
 
 # The state of the guard, on the artifact rather than in a report only. A guard that refuses every
 # commit is not installed by the lane that wrote it.
-WIRING = ("RULED AND REQUESTED, 2026-11-22. Chris, item 3: the public hook ratchets the "
+WIRING = ("RULED AND INSTALLED, 2026-11-22. Chris, item 3: the public hook ratchets the "
           "syntactic count and the signed-set check runs on the dr-voluminous side. So the hook "
-          "invokes `ratchet`, which is this module's DEFAULT command, and the change to "
-          ".githooks/pre-commit is REQUESTED from Lane A, which owns that file -- this lane does "
-          "not edit the shared substrate. `check` stays here as the ceiling's definition and its "
+          "invokes `ratchet`, which is this module's DEFAULT command. Chris's second ruling the "
+          "same day: Lane B INSTALLS the block in .githooks/pre-commit itself, on apparatus-next, "
+          "with a born-test (test_precommit_span_ratchet.py); the change request to Lane A is "
+          "WITHDRAWN, and A1 carries the same block to main with 0.3.4. `check` stays here as the "
+          "ceiling's definition and its "
           "refusal text, and is what the dr-voluminous side runs, because that side can see both "
           "populations. Withheld before the ruling because the ceiling of 11 against a count of 25 "
           "would have refused every commit in both lanes. The ceiling is still not widened, the "
@@ -185,7 +187,8 @@ FASTPATH = (u"THE FAST PATH AND WHAT IT RESTS ON. A whole-tree scan costs 23 s (
             u"under the pin -- only that this commit did not raise the count. That rests on the "
             u"previous commit having passed the same gate, and on the dr-voluminous gate "
             u"re-measuring the WHOLE tree before every push. `ratchet full` forces the full scan, "
-            u"and a commit made with --no-verify is caught there, not here.")
+            u"and a commit that reached the branch WITHOUT PASSING THIS GATE is caught there, not "
+            u"here.")
 
 
 def ids_from_staged(texts):
@@ -235,8 +238,8 @@ def check(cwd=None, out=sys.stdout):
         out.write("########################################################################\n")
         out.write("# COMMIT REFUSED -- the Hebrew span ceiling could not be measured.\n")
         out.write("#   %s\n" % exc)
-        out.write("# A guard that cannot run must not pass. Fix it, or override knowingly:\n")
-        out.write("#   git commit --no-verify\n")
+        out.write("# A guard that cannot run must not pass. Fix the measurement and commit\n")
+        out.write("# again; the whole tree is measured before every push either way.\n")
         out.write("########################################################################\n")
         return 1
     n = len(hits)
@@ -257,8 +260,7 @@ def check(cwd=None, out=sys.stdout):
     if skipped:
         out.write("# not scanned (%d): %s\n"
                   % (len(skipped), ", ".join("%s [%s]" % s for s in skipped[:4])))
-    out.write("# Move the rows to dr-voluminous, or override knowingly:\n")
-    out.write("#   git commit --no-verify\n")
+    out.write("# Move the rows named above to dr-voluminous, then commit again.\n")
     out.write("########################################################################\n")
     return 1
 
@@ -294,8 +296,8 @@ def ratchet(cwd=None, out=sys.stdout, full=False):
         out.write("########################################################################\n")
         out.write("# COMMIT REFUSED -- the Hebrew span ratchet could not be measured.\n")
         out.write("#   %s\n" % exc)
-        out.write("# A guard that cannot run must not pass. Fix it, or override knowingly:\n")
-        out.write("#   git commit --no-verify\n")
+        out.write("# A guard that cannot run must not pass. Fix the measurement and commit\n")
+        out.write("# again; the whole tree is measured before every push either way.\n")
         out.write("########################################################################\n")
         return 1
     n = len(hits)
@@ -335,8 +337,7 @@ def ratchet(cwd=None, out=sys.stdout, full=False):
     if skipped:
         out.write("# not scanned (%d): %s\n"
                   % (len(skipped), ", ".join("%s [%s]" % s for s in skipped[:4])))
-    out.write("# Put the row in dr-voluminous, or override knowingly:\n")
-    out.write("#   git commit --no-verify\n")
+    out.write("# Put the row named above in dr-voluminous, then commit again.\n")
     out.write("########################################################################\n")
     return 1
 
@@ -524,7 +525,7 @@ def selftest():
        "cannot have raised" not in _ratchet_fast(staged={}, full=True)[1])
     ck("the fast path's basis and its limit are stated on the artifact",
        all(x in FASTPATH for x in ("NECESSARY CONDITION", "not establish", "before every push",
-                                   "--no-verify")))
+                                   "WITHOUT PASSING THIS GATE")))
     ck("a substitution at an unchanged count is DISCLOSED, since the rule does not refuse it",
        "membership moved" in _ratchet_sub(), _ratchet_sub()[:60])
     # The first version of this check read the last `sys.exit(` line and was GREEN while the
@@ -537,13 +538,31 @@ def selftest():
        all(_cmd_reached([None, c]) == c for c in COMMANDS), COMMANDS)
     ck("an unrecognised command REFUSES instead of falling through to a gate nobody named",
        main([None, "chekc"], handlers=dict((k, lambda: 0) for k in COMMANDS)) == 2)
-    ck("the module states the wiring, and that the hook change is Lane A's to make",
-       all(x in WIRING for x in ("RULED AND REQUESTED", "Lane A", "DEFAULT", "never given the "
-                                 "signed list")))
+    ck("the module states the wiring: installed by this lane, and the request withdrawn",
+       all(x in WIRING for x in ("RULED AND INSTALLED", "WITHDRAWN", "apparatus-next", "DEFAULT",
+                                 "never given the signed list")))
+
+    # Chris, 2026-11-22 (second ruling): "a refusal names the count and the files, not the bypass."
+    # Checked over the bytes a human would READ, on all four refusal paths, not over the source --
+    # a hint reintroduced in any one of them fails this.
+    _bodies = _refusal_bodies()
+    ck("no refusal path names a bypass: not the flag, not the word",
+       not [k for k, b in _bodies.items()
+            if "no-verify" in b or "override" in b.lower() or "bypass" in b.lower()],
+       [k for k, b in _bodies.items() if "no-verify" in b or "override" in b.lower()])
+    ck("each of the four refusals is still a refusal, and says so in the first line a human reads",
+       all("COMMIT REFUSED" in b for b in _bodies.values()), sorted(_bodies))
+    ck("the two refusals that MEASURED something name the count and the file it is in",
+       all(x in _bodies["ceiling over"] for x in ("resulting tree: %d" % (CEILING + 1), "f.py:1"))
+       and all(x in _bodies["ratchet over"] for x in ("resulting tree: %d" % (RATCHET + 1),
+                                                      "fixture.py:1")),
+       (_bodies["ceiling over"][:60], _bodies["ratchet over"][:60]))
+    ck("the two that could NOT measure name the reason instead, since there is no count to name",
+       all("git is not here" in _bodies[k] for k in ("ceiling closed", "ratchet closed")))
 
     print("")
     ck("born-test check count is pinned, so a raise cannot quietly shorten the suite",
-       n[0] == 45, n[0])   # counted before this one; one more in all
+       n[0] == 49, n[0])   # counted before this one; one more in all
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
@@ -677,6 +696,35 @@ def _ratchet_raises():
         return ratchet(out=S(), full=True)
     finally:
         measure = real
+
+
+def _closed_body(fn):
+    u"""What a human reads when the measurement itself fails -- the fail-CLOSED refusal."""
+    class S(object):
+        def __init__(self):
+            self.b = []
+
+        def write(self, x):
+            self.b.append(x)
+    s = S()
+    g = globals()
+    real = g["measure"]
+    try:
+        def boom(cwd=None):
+            raise RuntimeError("git is not here")
+        g["measure"] = boom
+        fn(out=s, full=True) if fn is ratchet else fn(out=s)
+    finally:
+        g["measure"] = real
+    return "".join(s.b)
+
+
+def _refusal_bodies():
+    u"""Every refusal a human can be shown by this module, keyed by which one it is."""
+    return {"ceiling over": _refusal_text(),
+            "ratchet over": _ratchet_over(RATCHET + 1)[1],
+            "ceiling closed": _closed_body(check),
+            "ratchet closed": _closed_body(ratchet)}
 
 
 def _default_cmd():

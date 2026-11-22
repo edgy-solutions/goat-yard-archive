@@ -4,9 +4,10 @@
 # This hook is a WALL, not a warning: it fails the commit. It sees staged files regardless of
 # .gitignore, so it also catches `git add -f`. Install: git config core.hooksPath .githooks
 #
-# Two rules:
+# Three rules:
 #  1) no *.png/*.json/*.jsonl/*.html/*.md staged under the code-only pipeline/reextract/ tree
 #  2) no new BINARY file staged anywhere outside frontend/ (scan images must never land here)
+#  3) the number of Hebrew truth-set samples in this repo may not rise (Lane B's block below)
 
 d=$(git diff --cached --name-only --diff-filter=AM \
      | grep -E '^pipeline/reextract/.*\.(png|json|jsonl|html|md)$')
@@ -29,4 +30,26 @@ if [ -n "$d" ] || [ -n "$b" ]; then
   echo "########################################################################"
   exit 1
 fi
+# --- BEGIN Lane B: Hebrew span ratchet (Law 1, Chris 2026-11-16; wired 2026-11-22) ---
+# Rule 3: the Hebrew truth set as a whole lives only in dr-voluminous. This repo may carry
+# small samples, and their number may not RISE above the count measured on 2026-11-22.
+# Lane B owns pipeline/reextract/hebrew_span_ceiling.py -- the number, the pinned membership
+# and the refusal text. This block only invokes it, and passes NO argument on purpose:
+# `ratchet` is that module's default command, and the ceiling over the SIGNED set is a
+# different number, checked on the dr-voluminous side where its inputs are readable.
+# Cost ~1 s: it reads only the blobs this commit adds or modifies, and falls back to the
+# 23 s whole-tree scan only when one of them carries a span id with Hebrew near it.
+py=$(command -v python3 || command -v python)
+if [ -z "$py" ]; then
+  echo "# NOTE: no python on PATH, so the Hebrew span ratchet did NOT run for this commit." >&2
+elif [ ! -f pipeline/reextract/hebrew_span_ceiling.py ]; then
+  # Loud, not fatal: branches that predate the module must stay committable, and a guard
+  # that is silently absent is a guard nobody notices is gone.
+  echo "# NOTE: pipeline/reextract/hebrew_span_ceiling.py is absent, so the Hebrew span" >&2
+  echo "#       ratchet did NOT run for this commit. The whole tree is measured again on" >&2
+  echo "#       the dr-voluminous side before every push." >&2
+else
+  "$py" -X utf8 pipeline/reextract/hebrew_span_ceiling.py || exit 1
+fi
+# --- END Lane B: Hebrew span ratchet ---
 exit 0
