@@ -177,6 +177,47 @@ def staged_tree(cwd=None):
     return files, skipped
 
 
+FASTPATH = (u"THE FAST PATH AND WHAT IT RESTS ON. A whole-tree scan costs 23 s (measured "
+            u"2026-11-22, 425 files), and a 23 s pre-commit hook gets uninstalled. The window "
+            u"never crosses a file, so the tree count can only RISE if a blob this commit adds or "
+            u"modifies carries a span id with Hebrew within the window: reading only the staged "
+            u"blobs is a NECESSARY CONDITION, not a proxy. It does not establish that the tree is "
+            u"under the pin -- only that this commit did not raise the count. That rests on the "
+            u"previous commit having passed the same gate, and on the dr-voluminous gate "
+            u"re-measuring the WHOLE tree before every push. `ratchet full` forces the full scan, "
+            u"and a commit made with --no-verify is caught there, not here.")
+
+
+def ids_from_staged(texts):
+    u"""The span ids with Hebrew in a {path: staged text} map. Pure; the git part is separate."""
+    out = {}
+    for path, text in texts.items():
+        for sid, lineno in ids_with_hebrew(text).items():
+            out.setdefault(sid, []).append("%s:%d" % (path, lineno))
+    return out
+
+
+def staged_blobs(cwd=None):
+    u"""{path: text} for the blobs this commit ADDS or MODIFIES, with skips returned separately."""
+    out, skipped = {}, []
+    names = [l for l in _git(["diff", "--cached", "--name-only", "--diff-filter=AM"],
+                             cwd=cwd).splitlines() if l.strip()]
+    for path in names:
+        try:
+            raw = _git(["show", ":" + path], cwd=cwd, binary=True)
+        except RuntimeError:
+            skipped.append((path, "unreadable from the index"))
+            continue
+        if len(raw) > MAX_BYTES:
+            skipped.append((path, "%d bytes" % len(raw)))
+            continue
+        if b"\0" in raw[:8000]:
+            skipped.append((path, "binary"))
+            continue
+        out[path] = raw.decode("utf-8", "replace")
+    return out, skipped
+
+
 def measure(cwd=None):
     files, skipped = staged_tree(cwd)
     hits = {}
@@ -222,13 +263,31 @@ def check(cwd=None, out=sys.stdout):
     return 1
 
 
-def ratchet(cwd=None, out=sys.stdout):
+def ratchet(cwd=None, out=sys.stdout, full=False):
     """0 if the resulting tree is at or under RATCHET, 1 if it has risen. Fails CLOSED.
 
     This is the PUBLIC hook's gate (Chris, 2026-11-22, item 3). It does not know the signed set and
     does not pretend to: it refuses a tree that carries MORE span-shaped ids with Hebrew than the
     tree did on the day the number was measured. The ceiling of 11 is a different rule about a
     different population and runs where both populations are readable."""
+    if not full:
+        try:
+            texts, fskip = staged_blobs(cwd)
+            staged_ids = ids_from_staged(texts)
+        except Exception as exc:                                    # noqa: BLE001
+            out.write("RATCHET FAILED CLOSED on the fast path: %s\n" % exc)
+            return 1
+        if not staged_ids:
+            # A skip the caller cannot see is a hole, so the skip says what it rests on.
+            out.write("# ratchet: no staged blob carries a span id with Hebrew within %d line(s), "
+                      "so this commit cannot have raised the count of %d.\n"
+                      % (WINDOW, RATCHET))
+            if fskip:
+                out.write("# staged blobs not read (%d): %s\n"
+                          % (len(fskip), "; ".join("%s [%s]" % t for t in fskip[:4])))
+            out.write("# This is NOT a measurement of the tree. The tree is measured in full "
+                      "before every push, by the dr-voluminous side.\n")
+            return 0
     try:
         hits, files, skipped = measure(cwd)
     except Exception as exc:                                    # noqa: BLE001
@@ -443,6 +502,29 @@ def selftest():
        "ARRIVED" in _body_up and "NOT the ceiling" in _body_up,
        [l for l in _body_up.splitlines() if "ARRIVED" in l or "ceiling" in l])
     ck("the ratchet fails CLOSED when it cannot measure", _ratchet_raises() == 1)
+
+    # The fast path is a NECESSARY CONDITION, not a proxy: the window never crosses a file, so a
+    # commit that stages no id-with-Hebrew blob cannot have raised the tree count. What it does
+    # not establish is stated in FASTPATH and checked below.
+    ck("the fast path sees an id with Hebrew in a staged blob",
+       list(ids_from_staged({"a.py": u"p9:n1 %s" % _HEB1})) == ["p9:n1"])
+    ck("a staged blob with a BARE id does not trip the fast path",
+       ids_from_staged({"a.py": u"p9:n1 and nothing else"}) == {})
+    ck("a staged blob with Hebrew and no id does not trip it either",
+       ids_from_staged({"a.py": _HEB1}) == {})
+    _rc_fast, _body_fast = _ratchet_fast(staged={})
+    ck("with nothing staged that could raise the count, the ratchet SKIPS the full scan",
+       _rc_fast == 0 and "cannot have raised" in _body_fast, _body_fast[:70])
+    ck("the skip says it is NOT a measurement, and names where the tree is measured in full",
+       "NOT a measurement" in _body_fast and "dr-voluminous" in _body_fast)
+    _rc_slow, _body_slow = _ratchet_fast(staged={"a.py": u"p9:n1 %s" % _HEB1})
+    ck("with such a blob staged, the ratchet does NOT skip: it measures",
+       "cannot have raised" not in _body_slow, _body_slow[:70])
+    ck("`ratchet full` ignores the fast path entirely",
+       "cannot have raised" not in _ratchet_fast(staged={}, full=True)[1])
+    ck("the fast path's basis and its limit are stated on the artifact",
+       all(x in FASTPATH for x in ("NECESSARY CONDITION", "not establish", "before every push",
+                                   "--no-verify")))
     ck("a substitution at an unchanged count is DISCLOSED, since the rule does not refuse it",
        "membership moved" in _ratchet_sub(), _ratchet_sub()[:60])
     # The first version of this check read the last `sys.exit(` line and was GREEN while the
@@ -461,7 +543,7 @@ def selftest():
 
     print("")
     ck("born-test check count is pinned, so a raise cannot quietly shorten the suite",
-       n[0] == 37, n[0])   # counted before this one; one more in all
+       n[0] == 45, n[0])   # counted before this one; one more in all
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
@@ -533,7 +615,7 @@ def _ratchet_over(count):
     real = measure
     try:
         measure = lambda cwd=None: (dict((i, ["fixture.py:1"]) for i in ids), {}, [])
-        rc = ratchet(out=s)
+        rc = ratchet(out=s, full=True)   # the measuring path, not the fast path
     finally:
         measure = real
     return rc, "".join(s.b)
@@ -553,10 +635,33 @@ def _ratchet_sub():
     real = measure
     try:
         measure = lambda cwd=None: (dict((i, ["fixture.py:1"]) for i in ids), {}, [])
-        ratchet(out=s)
+        ratchet(out=s, full=True)
     finally:
         measure = real
     return "".join(s.b)
+
+
+_HEB1 = u"\u05d0\u05db\u05dc"
+
+
+def _ratchet_fast(staged, full=False):
+    u"""Run `ratchet` with a synthetic staged set, to exercise the fast path by mutation."""
+    class S(object):
+        def __init__(self):
+            self.buf = []
+
+        def write(self, x):
+            self.buf.append(x)
+    g = globals()
+    real_blobs, real_measure = g["staged_blobs"], g["measure"]
+    try:
+        g["staged_blobs"] = lambda cwd=None: (staged, [])
+        g["measure"] = lambda cwd=None: (dict((s, ["fixture.py:1"]) for s in RATCHET_SET),
+                                         {"fixture.py": u""}, [])
+        s = S()
+        return ratchet(out=s, full=full), u"".join(s.buf)
+    finally:
+        g["staged_blobs"], g["measure"] = real_blobs, real_measure
 
 
 def _ratchet_raises():
@@ -569,7 +674,7 @@ def _ratchet_raises():
         def boom(cwd=None):
             raise RuntimeError("git is not here")
         measure = boom
-        return ratchet(out=S())
+        return ratchet(out=S(), full=True)
     finally:
         measure = real
 
@@ -628,7 +733,7 @@ def main(argv, handlers=None):
         # The CEILING, over the signed set. Run by the dr-voluminous side, which can see both
         # populations; it is not the public hook's gate and is not the default.
         "check": lambda: check(_repo()),
-        "ratchet": lambda: ratchet(_repo()),
+        "ratchet": lambda: ratchet(_repo(), full=(len(argv) > 2 and argv[2] == "full")),
     }
     table = handlers if handlers is not None else live
     if cmd not in table:
