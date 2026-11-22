@@ -64,16 +64,55 @@ SIGNED_ROWS_BASIS = ("the signed set as of 2026-11-16: pass-1 74 + pass-2 26 + p
 CEILING = int(SIGNED_ROWS * 0.10)          # 11. Chris's number.
 WINDOW = 2                                 # reading (b), see the module docstring.
 
+# THE RATCHET, AND WHY IT IS A SECOND NUMBER. Chris, 2026-11-22, item 3: "the public hook ratchets
+# the syntactic count (it may not rise above today's), and the check against the signed set and the
+# ceiling of 11 runs on the dr-voluminous side."
+#
+# CEILING is Chris's number over the SIGNED SET -- the population this module cannot read, because a
+# public repo's guard must not need the private one. RATCHET is this tree's own count of what the
+# guard CAN see: span-shaped ids with Hebrew near them, a conservative superset. One tree scores 8
+# against the ceiling and 25 against the ratchet, and neither number is wrong; they are about
+# different populations, which is the whole reason the rule was split in two.
+#
+# The ratchet may be LOWERED whenever the tree carries fewer, and may never rise. Lowering it is the
+# point: a ratchet that is never tightened is a ceiling with a nicer name.
+RATCHET = 25
+RATCHET_BASIS = ("measured over this repository's tracked tree on 2026-11-22 (branch "
+                 "apparatus-next, clean, at the band-rule commit): 25 distinct span-shaped ids "
+                 "with Hebrew within %d line(s). Split against dr-voluminous on 2026-11-16, which "
+                 "this module cannot do: 8 SIGNED rows (7.2%% of the 111, under the ceiling), 14 "
+                 "census spans nobody has signed, 3 not spans at all. The number is a measurement "
+                 "of this tree, not a judgement about it." % WINDOW)
+# The membership as of that measurement. The ratchet Chris ruled is on the COUNT, so this list is
+# not the gate: it is what lets a refusal say WHICH id is new instead of only that one more exists.
+# A count pin cannot see a substitution -- one id leaving as another arrives -- and this list can,
+# so the refusal reports it even though the rule does not refuse it.
+RATCHET_SET = (
+    "p1:n0", "p102:n0", "p138:n5", "p138:n6", "p217:n2", "p233:n4", "p254:n1", "p293:n0",
+    "p379:n2", "p423:n3", "p427:n4", "p442:n0", "p491:n1", "p493:n3", "p594:n0", "p596:n2",
+    "p619:n0", "p628:n2", "p726:n3", "p803:n0", "p895:n0", "p897:n4", "p900:n4", "p910:n3",
+    "p912:n2")
+
 # The state of the guard, on the artifact rather than in a report only. A guard that refuses every
 # commit is not installed by the lane that wrote it.
-WIRING = ("WITHHELD, 2026-11-16. Run over this repository's tracked tree the count is 25 distinct "
-          "span ids with Hebrew within 2 lines, against the ceiling of 11, so wiring this into "
-          ".githooks/pre-commit would refuse every commit in both lanes. The ceiling is Chris's "
-          "number and is not widened; the window is not narrowed to the same line (6 signed ids) "
-          "because choosing a window by which rows it admits is fitting; and the hook is not given "
-          "the signed list because a PUBLIC repo's hook must not need the private one. The hook "
-          "change is requested once Chris rules on which population the ceiling governs: the 74 "
-          "distinct signed ids, or every span-shaped id in the tree.")
+WIRING = ("RULED AND REQUESTED, 2026-11-22. Chris, item 3: the public hook ratchets the "
+          "syntactic count and the signed-set check runs on the dr-voluminous side. So the hook "
+          "invokes `ratchet`, which is this module's DEFAULT command, and the change to "
+          ".githooks/pre-commit is REQUESTED from Lane A, which owns that file -- this lane does "
+          "not edit the shared substrate. `check` stays here as the ceiling's definition and its "
+          "refusal text, and is what the dr-voluminous side runs, because that side can see both "
+          "populations. Withheld before the ruling because the ceiling of 11 against a count of 25 "
+          "would have refused every commit in both lanes. The ceiling is still not widened, the "
+          "window is still not narrowed to the same line, and the hook is still never given the "
+          "signed list.")
+
+COMMANDS = ("selftest", "report", "check", "ratchet")
+
+# The hook is invoked with no argument, so this is the gate Chris's item 3 wired: the ratchet over
+# the syntactic count. `check` -- the ceiling of 11 over the signed set -- is explicit, because the
+# population it measures is not readable from here.
+DEFAULT_CMD = "ratchet"
+
 MAX_BYTES = 4 * 1024 * 1024
 
 ID = re.compile(r"p\d{1,4}:n\d{1,3}")
@@ -183,11 +222,74 @@ def check(cwd=None, out=sys.stdout):
     return 1
 
 
+def ratchet(cwd=None, out=sys.stdout):
+    """0 if the resulting tree is at or under RATCHET, 1 if it has risen. Fails CLOSED.
+
+    This is the PUBLIC hook's gate (Chris, 2026-11-22, item 3). It does not know the signed set and
+    does not pretend to: it refuses a tree that carries MORE span-shaped ids with Hebrew than the
+    tree did on the day the number was measured. The ceiling of 11 is a different rule about a
+    different population and runs where both populations are readable."""
+    try:
+        hits, files, skipped = measure(cwd)
+    except Exception as exc:                                    # noqa: BLE001
+        out.write("########################################################################\n")
+        out.write("# COMMIT REFUSED -- the Hebrew span ratchet could not be measured.\n")
+        out.write("#   %s\n" % exc)
+        out.write("# A guard that cannot run must not pass. Fix it, or override knowingly:\n")
+        out.write("#   git commit --no-verify\n")
+        out.write("########################################################################\n")
+        return 1
+    n = len(hits)
+    arrived = sorted(set(hits) - set(RATCHET_SET))
+    left = sorted(set(RATCHET_SET) - set(hits))
+    if n <= RATCHET:
+        # DISCLOSURE, NOT A GATE. Two things the rule does not refuse but nobody should have to go
+        # looking for: that the ratchet can now be tightened, and that the membership moved while
+        # the count did not.
+        if n < RATCHET:
+            out.write("note: the Hebrew span ratchet can be lowered from %d to %d "
+                      "(hebrew_span_ceiling.RATCHET, with RATCHET_SET and its basis).\n"
+                      % (RATCHET, n))
+        elif arrived:
+            out.write("note: the Hebrew span ratchet is unchanged at %d, but its membership moved "
+                      "-- arrived %s, left %s.\n" % (n, " ".join(arrived), " ".join(left)))
+        return 0
+    out.write("########################################################################\n")
+    out.write("# COMMIT REFUSED -- this PUBLIC repository would carry MORE of the Hebrew\n")
+    out.write("# truth set than it did when the ratchet was measured. Law 1 (Chris,\n")
+    out.write("# 2026-11-16): the truth set as a whole lives only in dr-voluminous.\n")
+    out.write("#\n")
+    out.write("# distinct span ids with Hebrew within %d line(s), in the resulting tree: %d\n"
+              % (WINDOW, n))
+    out.write("# RATCHET: %d -- %s\n" % (RATCHET, RATCHET_BASIS))
+    out.write("#\n")
+    out.write("# This is NOT the ceiling of %d, which is about the %d signed rows and is\n"
+              % (CEILING, SIGNED_ROWS))
+    out.write("# checked on the dr-voluminous side, where the signed set is readable.\n")
+    out.write("#\n")
+    for sid in arrived:
+        out.write("#   ARRIVED  %-12s %s\n" % (sid, ", ".join(sorted(hits[sid])[:4])))
+    if not arrived:
+        out.write("#   no id is new, so the rise is in the count alone -- re-measure.\n")
+    if left:
+        out.write("#   (left since the measurement: %s)\n" % " ".join(left))
+    if skipped:
+        out.write("# not scanned (%d): %s\n"
+                  % (len(skipped), ", ".join("%s [%s]" % s for s in skipped[:4])))
+    out.write("# Put the row in dr-voluminous, or override knowingly:\n")
+    out.write("#   git commit --no-verify\n")
+    out.write("########################################################################\n")
+    return 1
+
+
 def report(cwd=None):
     hits, files, skipped = measure(cwd)
     print("ceiling %d (10%% of %d signed rows) | window %d line(s) | files scanned %d, skipped %d"
           % (CEILING, SIGNED_ROWS, WINDOW, len(files), len(skipped)))
-    print("distinct span ids with Hebrew in the resulting tree: %d" % len(hits))
+    print("distinct span ids with Hebrew in the resulting tree: %d  (ratchet %d, %s)"
+          % (len(hits), RATCHET,
+             "at the pin" if len(hits) == RATCHET else
+             "RISEN -- the hook refuses" if len(hits) > RATCHET else "below: lower the pin"))
     for sid in sorted(hits):
         print("  %-12s %s" % (sid, ", ".join(sorted(hits[sid]))))
     for p, why in skipped:
@@ -260,7 +362,7 @@ def selftest():
        _check_raises() == 1)
 
     print("")
-    print("(4) the live tree -- and why the wiring is WITHHELD")
+    print("(4) the live tree -- and which gate the ruling wired")
     try:
         hits, files, skipped = measure(_repo())
         # THE GUARD REFUSES THIS REPOSITORY AS IT STANDS. Measured 2026-11-16: 25 distinct span ids
@@ -270,16 +372,24 @@ def selftest():
         # by SYNTAX, because a public repo's hook must not need the private one, so it also counts
         # ids that were never signed and strings that are not spans at all (p1:n0).
         #
-        # Three things were available and are refused: widening the ceiling (it is Chris's number),
-        # narrowing the window to the same line (6 signed ids -- chosen because it passes, which is
-        # fitting a threshold to the rows it has to admit), and gating on the signed list (the hook
-        # would then read the private repo). So the measurement stands, the count is DISCLOSED here
-        # and in the report, and WIRING says the hook change is not requested until Chris rules on
-        # which population the ceiling governs.
+        # Three things were available and are still refused: widening the ceiling (it is Chris's
+        # number), narrowing the window to the same line (6 signed ids -- chosen because it passes,
+        # which is fitting a threshold to the rows it has to admit), and gating on the signed list
+        # (the hook would then read the private repo). Chris ruled the split on 2026-11-22: the
+        # public hook ratchets THIS count, and the ceiling of 11 is enforced where the signed set
+        # is readable. So the measurement below still stands and is still disclosed -- it is the
+        # basis of the pin, not a passing grade.
         ck("the live count is measured, not assumed: %d distinct ids with Hebrew within %d lines"
            % (len(hits), WINDOW), isinstance(len(hits), int) and len(hits) > 0, sorted(hits)[:6])
-        ck("the module DISCLOSES that the live tree is over the ceiling and withholds the wiring",
-           "WITHHELD" in WIRING and str(CEILING) in WIRING and "25" in WIRING, WIRING[:60])
+        # Re-anchored 2026-11-22 on the ruled state. The two numbers are two measurements over
+        # two populations, and the thing to watch is that the module keeps saying so in words: the
+        # live count is over the ceiling, the ceiling is not what this hook enforces, and nothing
+        # here pretends the pin is the ceiling met.
+        ck("the module keeps the two numbers APART in words: the live count, the ceiling it does "
+           "not enforce, and which side enforces which",
+           len(hits) > CEILING and str(CEILING) in WIRING and str(RATCHET) in WIRING
+           and "dr-voluminous side" in WIRING and "ratchets" in WIRING,
+           (len(hits), CEILING, RATCHET))
         ck("the scan read this repository's tracked code, not an empty tree",
            len(files) >= 100 and "pipeline/reextract/hebrew_glyph_card.py" in files,
            (len(files), "pipeline/reextract/hebrew_glyph_card.py" in files))
@@ -310,8 +420,48 @@ def selftest():
     ck("no path into the private repository is reachable from this module's CODE",
        not [s for s in strings if any(b in s for b in bad_bits)],
        [s[:50] for s in strings if any(b in s for b in bad_bits)])
+    print("")
+    print("(6) the ratchet: the number the PUBLIC hook enforces")
+    _live = len(measure(_repo())[0])
+    ck("the ratchet is a measurement of this tree, and it still is: pinned %d, live %d"
+       % (RATCHET, _live), RATCHET == _live, (RATCHET, _live))
+    ck("the pinned MEMBERSHIP is this tree's too, so a refusal can name what is new",
+       set(RATCHET_SET) == set(measure(_repo())[0]),
+       sorted(set(RATCHET_SET) ^ set(measure(_repo())[0])))
+    ck("the basis says when it was measured and what the 25 are made of",
+       all(x in RATCHET_BASIS for x in ("2026-11-22", "8 SIGNED", "14 census", "3 not spans")))
+    ck("the two numbers are not the same rule: ceiling %d over the signed set, ratchet %d over "
+       "what this repo can see" % (CEILING, RATCHET), CEILING != RATCHET and RATCHET > CEILING)
+    ck("the ratchet ADMITS a tree at exactly the pin", _ratchet_over(RATCHET)[0] == 0)
+    ck("the ratchet ADMITS a tree below the pin, and says it can be lowered",
+       _ratchet_over(RATCHET - 3)[0] == 0 and "can be lowered" in _ratchet_over(RATCHET - 3)[1],
+       _ratchet_over(RATCHET - 3)[1][:60])
+    _rc_up, _body_up = _ratchet_over(RATCHET + 1)
+    ck("the ratchet REFUSES a tree one id over the pin -- proved by mutation, not by a green run",
+       _rc_up == 1 and "COMMIT REFUSED" in _body_up, _rc_up)
+    ck("the refusal NAMES the id that arrived, and says it is not the ceiling",
+       "ARRIVED" in _body_up and "NOT the ceiling" in _body_up,
+       [l for l in _body_up.splitlines() if "ARRIVED" in l or "ceiling" in l])
+    ck("the ratchet fails CLOSED when it cannot measure", _ratchet_raises() == 1)
+    ck("a substitution at an unchanged count is DISCLOSED, since the rule does not refuse it",
+       "membership moved" in _ratchet_sub(), _ratchet_sub()[:60])
+    # The first version of this check read the last `sys.exit(` line and was GREEN while the
+    # default was still `check`. It now goes through `main`, so what it reports is the branch the
+    # hook reaches. Every name in the table is dispatchable, and an unknown one refuses.
+    ck("the DEFAULT command is the ratchet, so a hook invoked without an argument enforces the "
+       "rule that was ruled, not the ceiling it was not given the inputs for",
+       _default_cmd() == "ratchet" and DEFAULT_CMD == "ratchet", _default_cmd())
+    ck("every named command is reachable through the dispatch",
+       all(_cmd_reached([None, c]) == c for c in COMMANDS), COMMANDS)
+    ck("an unrecognised command REFUSES instead of falling through to a gate nobody named",
+       main([None, "chekc"], handlers=dict((k, lambda: 0) for k in COMMANDS)) == 2)
+    ck("the module states the wiring, and that the hook change is Lane A's to make",
+       all(x in WIRING for x in ("RULED AND REQUESTED", "Lane A", "DEFAULT", "never given the "
+                                 "signed list")))
+
+    print("")
     ck("born-test check count is pinned, so a raise cannot quietly shorten the suite",
-       n[0] == 23, n[0])   # 23 counted before this one; 24 in all
+       n[0] == 37, n[0])   # counted before this one; one more in all
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
@@ -367,6 +517,87 @@ def _check_over(text):
     return rc, all(sid in body for sid in ids_with_hebrew(text))
 
 
+def _ratchet_over(count):
+    """(rc, what a human sees) for a synthetic tree carrying `count` ids with Hebrew."""
+    class S(object):
+        def __init__(self):
+            self.b = []
+
+        def write(self, x):
+            self.b.append(x)
+    s = S()
+    ids = list(RATCHET_SET)[:count]
+    while len(ids) < count:                      # over the pin: the extra ids are NEW
+        ids.append("p%d:n9" % (1000 + len(ids)))
+    global measure
+    real = measure
+    try:
+        measure = lambda cwd=None: (dict((i, ["fixture.py:1"]) for i in ids), {}, [])
+        rc = ratchet(out=s)
+    finally:
+        measure = real
+    return rc, "".join(s.b)
+
+
+def _ratchet_sub():
+    """What a human sees when the count holds but one id has been swapped for another."""
+    class S(object):
+        def __init__(self):
+            self.b = []
+
+        def write(self, x):
+            self.b.append(x)
+    s = S()
+    ids = list(RATCHET_SET)[:-1] + ["p1001:n9"]
+    global measure
+    real = measure
+    try:
+        measure = lambda cwd=None: (dict((i, ["fixture.py:1"]) for i in ids), {}, [])
+        ratchet(out=s)
+    finally:
+        measure = real
+    return "".join(s.b)
+
+
+def _ratchet_raises():
+    class S(object):
+        def write(self, x):
+            pass
+    global measure
+    real = measure
+    try:
+        def boom(cwd=None):
+            raise RuntimeError("git is not here")
+        measure = boom
+        return ratchet(out=S())
+    finally:
+        measure = real
+
+
+def _default_cmd():
+    """Which command the hook runs when it passes no argument.
+
+    This used to read the last `sys.exit(` line of the __main__ block. It was GREEN while the line
+    that actually decides still said `check`: the probe resembled the dispatch instead of being it,
+    and a hook with no argument would have run the ceiling this repo cannot supply the inputs for.
+    It now puts recording handlers through `main` itself and reports the branch that was reached.
+    """
+    seen = []
+
+    def rec(name):
+        return lambda: seen.append(name) or 0
+
+    main(["hebrew_span_ceiling.py"], handlers=dict((k, rec(k)) for k in COMMANDS))
+    return seen[0] if len(seen) == 1 else seen
+
+
+def _cmd_reached(argv):
+    """Which branch `main` dispatches for this argv, recorded by the dispatch rather than read."""
+    seen = []
+    main(argv, handlers=dict((k, (lambda n: lambda: seen.append(n) or 0)(k)) for k in COMMANDS))
+    return seen[0] if len(seen) == 1 else seen
+
+
 def _check_raises():
     class S(object):
         def write(self, x):
@@ -382,11 +613,30 @@ def _check_raises():
         measure = real
 
 
+def main(argv, handlers=None):
+    """Dispatch. One table, one named default, so what a check can ask is what the hook will do.
+
+    `handlers` is the seam: a check passes recording handlers to learn which branch an empty argv
+    reaches, without running the gate. An unrecognised command returns 2 rather than falling
+    through to a gate nobody named -- a mistyped hook invocation should refuse, not enforce
+    something else.
+    """
+    cmd = argv[1] if len(argv) > 1 else DEFAULT_CMD
+    live = {
+        "selftest": lambda: selftest(),
+        "report": lambda: report(_repo()) or 0,
+        # The CEILING, over the signed set. Run by the dr-voluminous side, which can see both
+        # populations; it is not the public hook's gate and is not the default.
+        "check": lambda: check(_repo()),
+        "ratchet": lambda: ratchet(_repo()),
+    }
+    table = handlers if handlers is not None else live
+    if cmd not in table:
+        sys.stderr.write("hebrew_span_ceiling: unknown command %r; one of %s\n"
+                         % (cmd, ", ".join(COMMANDS)))
+        return 2
+    return table[cmd]()
+
+
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
-    if cmd == "selftest":
-        sys.exit(selftest())
-    if cmd == "report":
-        report(_repo())
-        sys.exit(0)
-    sys.exit(check(_repo()))
+    sys.exit(main(sys.argv))
