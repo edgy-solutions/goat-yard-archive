@@ -581,9 +581,16 @@ def build():
          '&mdash; that is checked over the emitted bytes, not promised. Pointing new exemplars is '
          'still the other page, <span class="k">hebrew_point_and_name.html</span>: this one asks '
          'for verdicts, not boxes.</div>',
+         # The date is the SIGNER'S, filled from their own browser at load. It used to default
+         # to the build date, which would have put the builder's day on the signer's record --
+         # the export reads this field verbatim. The build date stays on the page as a labelled
+         # fact. Editable, because a sitting may be recorded on a later day than it was held.
          '<div class="bar"><label>signer</label><input id="signer" size="8" value="Chris">'
-         '<label>date</label><input id="date" size="10" value="%s">'
-         '<span class="mut">priors from <span class="k">%s</span> (sha16 '
+         '<label>date</label><input id="date" size="10" value="">'
+         '<script>document.getElementById("date").value='
+         'new Date(Date.now()-new Date().getTimezoneOffset()*60000)'
+         '.toISOString().slice(0,10);</script>'
+         '<span class="mut">built %s &middot; priors from <span class="k">%s</span> (sha16 '
          '<span class="k">%s</span>)</span></div>'
          % (TODAY, _esc(PRIOR.name), sha16(PRIOR)),
          "</header>",
@@ -885,6 +892,18 @@ def selftest():
     g, b = load_one(o1)
     ck("a verdict outside keep/take/neither is refused -- an adjudication is not a score",
        not g and "is not one of" in (b[0]["_refused"] if b else ""))
+
+    # The date field used to default to the BUILD date, and the export reads the field verbatim,
+    # so a signed row would have carried the builder's day. Asserted over the emitted bytes: the
+    # field ships EMPTY, it is filled from the signer's own browser, and the build date is still
+    # on the page as a labelled fact rather than as the default.
+    ck('the date field ships empty, not stamped with the build date',
+       '<input id="date" size="10" value="">' in txt and ('value="%s"' % TODAY) not in txt,
+       [l for l in txt.splitlines() if 'id="date"' in l][:1])
+    ck("the date is filled from the signer's own browser at load",
+       'document.getElementById("date").value=new Date(' in txt.replace("\n", ""))
+    ck("the build date is still disclosed on the page, as a fact and not as a default",
+       ("built %s" % TODAY) in txt)
 
     ck("the export file is not written by this module",
        not os.path.exists(str(EXPORT)) or "sitting2_page" not in txt.split("EXPORT_NAME")[0][-80:])
