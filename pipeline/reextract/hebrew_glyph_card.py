@@ -1175,6 +1175,18 @@ def word_band(file_page, boxes, expect):
     verdict, info = band_geometry(im)
     main = info.get("main")
     native = None if not main else [u[1] + int(main[0]), u[1] + int(main[1])]
+    # PART 1 OF THE RULED RULE IS AN INVARIANT OF THIS DERIVATION, NOT A TEST OF THE RECORD.
+    # Chris, 2026-11-22: "the word's band lies within the union of its glyph boxes". The band is
+    # measured ON the union crop and offset by the union's top, so it is inside the union's row
+    # range by construction and no record can break it. A check that cannot fail asserts nothing,
+    # so it is asserted HERE, where what it watches is the derivation: if band_geometry ever
+    # returns rows outside the image it was handed, this raises instead of shipping a band that
+    # part 1 would have caught had it been a test.
+    if native is not None and not (u[1] <= native[0] and native[1] <= u[3]):
+        raise AssertionError(
+            "word_band derived a band %s outside the union %s it was measured on -- part 1 of the "
+            "ruled band rule is an invariant of this function and it has stopped holding"
+            % (native, [u[1], u[3]]))
     return verdict, native, dict(union=u, verdict=verdict, n_bands=info.get("n_bands"),
                                  band_px=info.get("band_px"), main=main, band_native=native,
                                  crop_size=list(im.size))
@@ -1184,15 +1196,74 @@ def box_band_margin(box, band_native):
     """(inside, margins) for one box against the word's band. The margins are REPORTED ALWAYS.
 
     `top` and `bottom` are how far INSIDE the band the box sits at each end: >= 0 is inside, and a
-    negative number is how far it reaches past. Both are recorded whatever the verdict, because
-    clause 4(a) of the registered rule is strict containment with NO tolerance -- so the margin is
-    the whole of the evidence a future ruling about tolerance would have to argue from, and a gate
-    that stores only its yes/no leaves that ruling nothing. A measurement not persisted is a
-    comment."""
+    negative number is how far it reaches past. Both are recorded whatever the verdict.
+
+    `inside` WAS clause 4(a), strict containment with no tolerance, which Chris withdrew on
+    2026-11-22 after it refused all eleven signed records. It is still computed and still persisted:
+    it is the whole of the evidence any future ruling about containment would have to argue from,
+    and a gate that stores only its yes/no leaves that ruling nothing. A measurement not persisted
+    is a comment. Nothing gates on it -- see BAND_RULE and band_clause_fault."""
     b = [int(round(v)) for v in box]
     top = b[1] - int(band_native[0])
     bot = int(band_native[1]) - b[3]
     return (top >= 0 and bot >= 0), dict(top=top, bottom=bot)
+
+
+BAND_RULE = (
+    "ENFORCED since Chris's ruling of 2026-11-22, which withdrew clause 4(a) of "
+    "PREDICTIONS_exemplarband_3410d26cb1826b10.json (strict containment, no tolerance: it refused "
+    "all eleven signed records, 0 of 29 boxes inside the band). The rule is now two parts. PART 1, "
+    "the word's band lies within the union of its glyph boxes: an INVARIANT of the derivation, "
+    "asserted in word_band -- the band is measured on the union crop, so no record can break it, "
+    "and it is reported here, never counted as evidence about this record. PART 2, every glyph box "
+    "overlaps the band: ENFORCED on this record, no tolerance, and a record that fails it is "
+    "refused with the offending indices and their margins. `box_in_band` is the withdrawn clause's "
+    "own measure, kept because it is the evidence any future ruling about containment would argue "
+    "from; nothing gates on it.")
+
+
+def band_clause_fault(entries, band_native):
+    """(why or None, info) for the ruled band rule against one record's glyph boxes.
+
+    Pure geometry, no images, so the refusal can be driven by MUTATION rather than attested by a
+    green run over eleven records that all pass. `entries` are the record's letter_boxes, each with
+    `index_from_right` and `box`; `band_native` is the word's band in native rows.
+
+    Part 2 is the clause with teeth. A glyph box that overlaps nothing of the word's band is a box
+    on another line of type, or around nothing -- and the thing it would have been read as, an
+    exemplar of the named letter in the named word, is then false about the page. Overlap is
+    inclusive: a box touching the band's first or last row shares a row of ink with it.
+
+    Part 1 is checked here too, because hand-made inputs CAN break it even though the derivation
+    cannot, and its message says what such a failure means: a defect in word_band, not a verdict
+    about the record."""
+    ents = sorted(entries, key=lambda e: int(e["index_from_right"]))
+    if not ents:
+        raise ValueError("band_clause_fault needs the record's glyph boxes, and got none")
+    lo, hi = int(band_native[0]), int(band_native[1])
+    marg, inside, over = {}, {}, {}
+    for e in ents:
+        i = int(e["index_from_right"])
+        ok, m = box_band_margin(e["box"], band_native)
+        b = [int(round(v)) for v in e["box"]]
+        marg[i], inside[i] = m, bool(ok)
+        over[i] = bool(b[1] <= hi and lo <= b[3])
+    tops = [int(round(e["box"][1])) for e in ents]
+    bots = [int(round(e["box"][3])) for e in ents]
+    in_union = bool(min(tops) <= lo and hi <= max(bots))
+    info = dict(margins=marg, box_in_band=inside, box_overlaps_band=over,
+                band_in_box_union=in_union, band_rule=BAND_RULE)
+    if not in_union:
+        return ("the word's band %s is not inside the union of its glyph boxes %s -- part 1 of the "
+                "ruled rule, which this derivation is supposed to make unbreakable, so this is a "
+                "defect in word_band and not a verdict about the record"
+                % ([lo, hi], [min(tops), max(bots)]), info)
+    off = sorted(i for i, v in over.items() if not v)
+    if off:
+        return ("glyph box(es) %s overlap no row of the word's band %s -- part 2 of the ruled band "
+                "rule (Chris 2026-11-22): every glyph box overlaps the band, no tolerance. Their "
+                "margins: %s" % (off, [lo, hi], dict((i, marg[i]) for i in off)), info)
+    return None, info
 
 
 def letter_boxes_fault(word, letter, idx, box, lboxes):
@@ -1368,47 +1439,29 @@ def sig_load(path=None):
                                % (strip_nikud(r["word"]), _v, _info.get("union"),
                                   _info.get("n_bands"), _info.get("band_px")))
                     else:
-                        # CLAUSE 4(a) IS MEASURED HERE AND NOT ENFORCED, AND THE RECORD SAYS SO.
+# THE RULED BAND RULE IS ENFORCED HERE (Chris, 2026-11-22, item 1).
                         #
-                        # The clause is strict containment of each glyph box in the word's band.
-                        # Enforced literally, on 2026-11-16, it refused ALL ELEVEN records -- every
-                        # one Chris has signed. The measurement (diag_margins, same date): 0 of 29
-                        # glyph boxes sit inside the band; 0 of 29 sit inside even the crop's FULL
-                        # ink extent; in 11 of 11 words the band sits inside the union of the boxes;
-                        # and 29 of 29 boxes overlap the band. The boxes are hand-drawn containers
-                        # with 2-13px of slack around the glyph, so the clause is not a tolerance
-                        # away from satisfiable -- the containment runs the other way.
+                        # Clause 4(a) -- strict containment of each glyph box in the word's band --
+                        # is WITHDRAWN. Enforced literally on 2026-11-16 it refused all eleven
+                        # records Chris had signed: 0 of 29 glyph boxes sat inside the band, 0 of 29
+                        # inside even the crop's full ink extent, while the band sat inside the box
+                        # union in 11 of 11 words and 29 of 29 boxes overlapped it. The boxes are
+                        # hand-drawn containers with slack around the glyph, so the containment ran
+                        # the other way round and no tolerance was going to fix the direction.
                         #
-                        # Two things are therefore NOT done here. The margins are not widened by a
-                        # slack constant, which F1 of the registered lock forbids: a threshold
-                        # chosen after seeing the rows it has to admit is fitted, not derived. And
-                        # the clause is not re-read as "the band is inside the boxes" or "the box
-                        # overlaps the band", both of which the measurement would support, because
-                        # which of them the ruling means is not mine to decide and a rule
-                        # reformulated to rescue its own verdict has stopped being a check.
-                        #
-                        # So: every margin is persisted, `clause_4a` states in words that nothing
-                        # gated on it, and no consumer can read an accepted record as evidence that
-                        # containment was checked. The question is in the report with the numbers.
-                        marg, inside = {}, {}
-                        for e in sorted(r["letter_boxes"], key=lambda e: int(e["index_from_right"])):
-                            ok, m = box_band_margin(e["box"], _band)
-                            i = int(e["index_from_right"])
-                            marg[i], inside[i] = m, bool(ok)
-                        _info["margins"] = marg
-                        _info["box_in_band"] = inside
-                        _info["band_in_box_union"] = bool(
-                            min(int(round(e["box"][1])) for e in r["letter_boxes"]) <= _band[0]
-                            and _band[1] <= max(int(round(e["box"][3])) for e in r["letter_boxes"]))
-                        _info["clause_4a"] = (
-                            "MEASURED, NOT ENFORCED. Clause 4(a) of "
-                            "PREDICTIONS_exemplarband_3410d26cb1826b10.json is strict containment "
-                            "of each glyph box in the word's band. Literally enforced it refuses "
-                            "every record signed to date (0 of 29 boxes inside the band, 0 of 29 "
-                            "inside the full ink extent, band inside the box union in 11 of 11 "
-                            "words), so this record was NOT checked for it and must not be read as "
-                            "having passed it. Awaiting Chris's ruling on which direction the "
-                            "clause means; margins are above.")
+                        # What is ruled in its place is two clauses, and they are not of the same
+                        # kind. Part 1 -- the band lies within the union of the glyph boxes -- holds
+                        # BY CONSTRUCTION, because word_band measures the band on that very union;
+                        # it is asserted inside word_band, where what it watches is the derivation,
+                        # and reported on the record, never counted as evidence about the record.
+                        # Part 2 -- every glyph box overlaps the band -- is the clause with teeth,
+                        # and it refuses. The whole of it lives in band_clause_fault, a pure
+                        # function, so that its refusal is proved by MUTATION in the suite and not
+                        # attested by a green run over eleven records that all pass it today.
+                        _w4, _i4 = band_clause_fault(r["letter_boxes"], _band)
+                        _info.update(_i4)
+                        if _w4:
+                            why = _w4
                 if not why:
                     for lbl, bx in ([("the signed box", r["box"])]
                                     + [("glyph box %s" % e["index_from_right"], e["box"])
@@ -4452,9 +4505,8 @@ def selftest():
            (_gf, _runs, _wv))
         ck("p309 is admitted, which it was not before the ruling", bool(_r17))
 
-    # Clause 4(a): measured, disclosed, NOT enforced. These checks exist so that no consumer can
-    # read an accepted record as evidence that containment was checked, and so that the day the
-    # ruling arrives, the thing that changes is one clause and not the meaning of the record.
+    # The ruled band rule (Chris 2026-11-22). Part 2 is enforced, part 1 is an invariant, the
+    # withdrawn clause's measure is still carried, and the refusal is driven by mutation.
     ck("every admitted record carries a margin for every one of its glyph boxes",
        all(sorted((x["_word_band"].get("margins") or {}).keys())
            == sorted(int(e["index_from_right"]) for e in x["letter_boxes"]) for x in _g17),
@@ -4466,19 +4518,59 @@ def selftest():
            for x in _g17 for m in x["_word_band"]["margins"].values())
        and box_band_margin([0, 10, 10, 90], [20, 80])[1] == {"top": -10, "bottom": -10},
        box_band_margin([0, 10, 10, 90], [20, 80]))
-    ck("the record SAYS clause 4(a) was not enforced, in words, on every admitted record",
-       all("NOT ENFORCED" in (x["_word_band"].get("clause_4a") or "") and _LOCK
-           in (x["_word_band"].get("clause_4a") or "") for x in _g17))
-    # And the measurement that is the reason it is not enforced, carried in the suite so it is
-    # re-measured on every run rather than remembered: if boxes ever start landing inside the band,
-    # this check goes red and the clause can be enforced as written.
-    _nbox = sum(len(x["_word_band"]["box_in_band"]) for x in _g17)
+    ck("every admitted record states the ruled rule in words, and says part 1 is by construction",
+       all("ENFORCED since" in (x["_word_band"].get("band_rule") or "")
+           and "INVARIANT" in (x["_word_band"].get("band_rule") or "")
+           and "2026-11-22" in (x["_word_band"].get("band_rule") or "")
+           and _LOCK in (x["_word_band"].get("band_rule") or "")
+           and "clause_4a" not in x["_word_band"] for x in _g17),
+       [x["file_page"] for x in _g17 if "clause_4a" in x["_word_band"]])
+
+    # PART 2, re-measured on every run rather than remembered: 29 of 29 overlapped on 2026-11-22,
+    # so the clause refuses nothing today and this check is the record of that, not evidence that
+    # the clause is wired up. The mutation checks below are that evidence.
+    _nbox = sum(len(x["_word_band"]["box_overlaps_band"]) for x in _g17)
+    _ovl = sum(1 for x in _g17 for v in x["_word_band"]["box_overlaps_band"].values() if v)
     _inb = sum(1 for x in _g17 for v in x["_word_band"]["box_in_band"].values() if v)
     _binb = sum(1 for x in _g17 if x["_word_band"]["band_in_box_union"])
-    ck("the containment runs the other way, re-measured: %d of %d boxes inside the band, band "
-       "inside the box union in %d of %d words" % (_inb, _nbox, _binb, len(_g17)),
-       _inb == 0 and _binb == len(_g17), (_inb, _nbox, _binb, len(_g17)))
-    ck("section 17 ran every one of its checks", n[0] - _e17 == 14, n[0] - _e17)
+    ck("part 2 holds on every admitted record: %d of %d glyph boxes overlap their word's band"
+       % (_ovl, _nbox), _ovl == _nbox and _nbox > 0, (_ovl, _nbox))
+    ck("part 1 holds on %d of %d words -- reported, and by construction, so it is not evidence"
+       % (_binb, len(_g17)), _binb == len(_g17), (_binb, len(_g17)))
+    ck("the WITHDRAWN clause is still measured and still refuses everything: %d of %d boxes sit "
+       "inside the band" % (_inb, _nbox), _inb == 0, (_inb, _nbox))
+
+    # THE REFUSAL, PROVED BY MUTATION. A green run over records that all pass says nothing about
+    # whether the clause is wired up; the only thing that does is driving it to refuse.
+    _band17 = [100, 130]
+    _ok17 = [dict(index_from_right=1, box=[0, 95, 10, 135]),
+             dict(index_from_right=0, box=[12, 96, 22, 134])]
+    _w_ok, _i_ok = band_clause_fault(_ok17, _band17)
+    _moved = [_ok17[0], dict(index_from_right=0, box=[12, 200, 22, 240])]
+    _w_mv, _i_mv = band_clause_fault(_moved, _band17)
+    _w_p1, _i_p1 = band_clause_fault(
+        [dict(index_from_right=0, box=[0, 105, 10, 125])], [100, 130])
+    ck("the clause ADMITS two boxes that overlap the band", _w_ok is None, _w_ok)
+    ck("the clause REFUSES a glyph box displaced clear of the band, naming part 2 and the index",
+       _w_mv is not None and "part 2" in _w_mv and "[0]" in _w_mv
+       and _i_mv["box_overlaps_band"] == {0: False, 1: True}, (_w_mv, _i_mv.get("box_overlaps_band")))
+    _touch = [dict(index_from_right=1, box=[0, 95, 10, 135]),
+              dict(index_from_right=0, box=[12, 130, 22, 180])]
+    _w_t, _i_t = band_clause_fault(_touch, _band17)
+    ck("a box that only TOUCHES the band's last row still overlaps it",
+       _w_t is None and _i_t["box_overlaps_band"] == {0: True, 1: True}
+       and _i_t["box_in_band"][0] is False, (_w_t, _i_t.get("box_overlaps_band")))
+    ck("a part-1 failure is reported as a defect in word_band, not a verdict about the record",
+       _w_p1 is not None and "part 1" in _w_p1 and "defect in word_band" in _w_p1
+       and _i_p1["band_in_box_union"] is False, _w_p1)
+    _w_e = None
+    try:
+        band_clause_fault([], _band17)
+    except ValueError as _e4:
+        _w_e = str(_e4)
+    ck("the clause REFUSES an empty box list rather than passing a record it measured nothing of",
+       _w_e is not None and "glyph boxes" in _w_e, _w_e)
+    ck("section 17 ran every one of its checks", n[0] - _e17 == 21, n[0] - _e17)
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
