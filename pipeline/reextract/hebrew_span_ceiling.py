@@ -51,6 +51,7 @@ WHAT THIS GUARD CANNOT DO -- and the first two are the reason it is not the whol
   - It cannot judge whether a sample is a "small sample" in Chris's sense. It counts.
 """
 import io
+import json
 import os
 import re
 import subprocess
@@ -63,6 +64,24 @@ SIGNED_ROWS_BASIS = ("the signed set as of 2026-11-16: pass-1 74 + pass-2 26 + p
                      "re-derived there and restated here, by a human.")
 CEILING = int(SIGNED_ROWS * 0.10)          # 11. Chris's number.
 WINDOW = 2                                 # reading (b), see the module docstring.
+
+# THE CEILING'S POPULATION, AND WHY `check` WILL NOT TAKE A COUNT FROM THE TREE ALONE.
+# Chris, 2026-11-23: "The ceiling of 11 applies to the signed-set measurement on the
+# dr-voluminous side (8, under the ceiling). The public hook ratchets the syntactic count at
+# 25. Do not compare 25 with 11; change `check` so it cannot."
+#
+# It now cannot. `check` takes the signed ids as a REQUIRED argument -- no default, so a call
+# without them is a TypeError, not a verdict -- and scopes the tree's hits to that set before
+# it compares anything. There is no path by which the syntactic total reaches the comparison.
+# A function that derives its own input fails silently; this one cannot derive it at all,
+# because the population is not readable from this repository, by design.
+SIGNED_DISTINCT = 74
+SIGNED_DISTINCT_BASIS = (
+    "the %d signed rows carry 74 distinct span ids: pass-1 signs 74, and the later passes "
+    "re-sign ids already in it. The ceiling is 10%% of the ROW count, Chris's number; the "
+    "scoped measurement counts DISTINCT ids, so the population handed to `check` must be "
+    "those 74 -- a shorter one would lower the count and turn a refusal into a pass."
+    % SIGNED_ROWS)
 
 # THE RATCHET, AND WHY IT IS A SECOND NUMBER. Chris, 2026-11-22, item 3: "the public hook ratchets
 # the syntactic count (it may not rise above today's), and the check against the signed set and the
@@ -103,10 +122,13 @@ WIRING = ("RULED AND INSTALLED, 2026-11-22. Chris, item 3: the public hook ratch
           "WITHDRAWN, and A1 carries the same block to main with 0.3.4. `check` stays here as the "
           "ceiling's definition and its "
           "refusal text, and is what the dr-voluminous side runs, because that side can see both "
-          "populations. Withheld before the ruling because the ceiling of 11 against a count of 25 "
-          "would have refused every commit in both lanes. The ceiling is still not widened, the "
-          "window is still not narrowed to the same line, and the hook is still never given the "
-          "signed list.")
+          "populations. Withheld before the split because it was being applied to the wrong "
+          "population -- the syntactic count -- which would have refused every commit in both "
+          "lanes. Chris, 2026-11-23: the ceiling applies to the SIGNED-SET measurement, the hook "
+          "ratchets the syntactic count, and the two numbers are not to be compared; `check` was "
+          "changed so that it cannot, by taking the signed population as a required argument. "
+          "The ceiling is still not widened, the window is still not narrowed to the same line, "
+          "and the hook is still never given the signed list.")
 
 COMMANDS = ("selftest", "report", "check", "ratchet")
 
@@ -230,8 +252,69 @@ def measure(cwd=None):
     return hits, files, skipped
 
 
-def check(cwd=None, out=sys.stdout):
-    """0 if the resulting tree is at or under the ceiling, 1 if it is over. Fails CLOSED."""
+class SignedSetUnavailable(Exception):
+    u"""The signed population is not readable, so the ceiling cannot be applied to anything.
+
+    This is "cannot decide", which is neither a pass nor a refusal, and it is raised rather than
+    returned so no caller can mistake it for a count.
+    """
+
+
+def signed_ids_from_exports(paths):
+    u"""(frozenset of signed span ids, [(file, n)]) read from signing exports the caller NAMES.
+
+    The paths come from the command line. This repository holds none of them and must not: a guard
+    in a public repo that needs a path into the private one is a guard that is skipped on the
+    machine that matters.
+
+    Raises rather than returning a short set. A shrunken population lowers the scoped count and
+    turns a refusal into a pass, which is the fail-open this whole rule exists to prevent --
+    unknown is not clean.
+    """
+    if not paths:
+        raise SignedSetUnavailable("no signing export was named, so the ceiling has no population")
+    ids, per = set(), []
+    for p in paths:
+        if not os.path.exists(p):
+            raise SignedSetUnavailable("named export does not exist: %s" % p)
+        here = set()
+        for line in io.open(p, encoding="utf-8"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError as exc:
+                raise SignedSetUnavailable("%s is not one JSON object per line: %s" % (p, exc))
+            sid = row.get("span_id")
+            if not sid or not ID.match(str(sid)):
+                raise SignedSetUnavailable(
+                    "a row of %s carries no span id, so these rows are not that population" % p)
+            here.add(sid)
+        if not here:
+            raise SignedSetUnavailable("named export is empty: %s" % p)
+        per.append((os.path.basename(p), len(here)))
+        ids |= here
+    if len(ids) != SIGNED_DISTINCT:
+        raise SignedSetUnavailable(
+            "the named exports carry %d distinct signed ids, not the %d the ceiling of %d rests "
+            "on. %s  A different signed set needs a ceiling re-derived where that set is "
+            "readable, and restated here by a human. Per export: %s"
+            % (len(ids), SIGNED_DISTINCT, CEILING, SIGNED_DISTINCT_BASIS,
+               ", ".join("%s %d" % t for t in per)))
+    return frozenset(ids), per
+
+
+def check(signed_ids, cwd=None, out=sys.stdout):
+    u"""0 if the SIGNED-SCOPED count is at or under the ceiling, 1 if over. Fails CLOSED.
+
+    `signed_ids` is required and has no default, which is the whole point: the ceiling is a number
+    about the signed set, the syntactic count is the ratchet's population, and this function is
+    handed the one and cannot reach the other's total. The two numbers are not comparable and
+    nothing here can compare them.
+    """
+    if not signed_ids:
+        raise SignedSetUnavailable("check() was handed an empty signed population")
     try:
         hits, files, skipped = measure(cwd)
     except Exception as exc:                                    # noqa: BLE001
@@ -242,18 +325,32 @@ def check(cwd=None, out=sys.stdout):
         out.write("# again; the whole tree is measured before every push either way.\n")
         out.write("########################################################################\n")
         return 1
+    hits = dict((sid, where) for sid, where in hits.items() if sid in signed_ids)
     n = len(hits)
     if n <= CEILING:
+        # A pass should say what it asserts, and what it does not.
+        out.write("# ceiling: %d of the %d SIGNED ids appear with Hebrew within %d line(s) in the "
+                  "resulting tree; the ceiling is %d. At or under.\n"
+                  % (n, len(signed_ids), WINDOW, CEILING))
+        if n:
+            out.write("# they are: %s\n" % " ".join(sorted(hits)))
+        out.write("# This is a statement about the SIGNED set and nothing else. The syntactic "
+                  "count is a different population with its own pin -- `ratchet full` -- and it "
+                  "is not measured against this number.\n")
         return 0
     out.write("########################################################################\n")
     out.write("# COMMIT REFUSED -- too much of the Hebrew truth set would be in this\n")
     out.write("# PUBLIC repository. Law 1 (Chris, 2026-11-16): the truth set as a whole\n")
     out.write("# lives only in dr-voluminous; this repo may carry small samples.\n")
     out.write("#\n")
-    out.write("# distinct span ids with Hebrew within %d line(s), in the resulting tree: %d\n"
+    out.write("# SIGNED span ids with Hebrew within %d line(s), in the resulting tree: %d\n"
               % (WINDOW, n))
     out.write("# CEILING: %d -- 10%% of the %d signed rows, Chris's number.\n"
               % (CEILING, SIGNED_ROWS))
+    out.write("# Scored over the %d signed ids the caller named. Ids in the tree that are\n"
+              % len(signed_ids))
+    out.write("# not in that population are not counted here at all: they belong to the\n")
+    out.write("# ratchet's population, and the two counts are not comparable.\n")
     out.write("#\n")
     for sid in sorted(hits):
         out.write("#   %-12s %s\n" % (sid, ", ".join(sorted(hits[sid])[:4])))
@@ -324,9 +421,10 @@ def ratchet(cwd=None, out=sys.stdout, full=False):
               % (WINDOW, n))
     out.write("# RATCHET: %d -- %s\n" % (RATCHET, RATCHET_BASIS))
     out.write("#\n")
-    out.write("# This is NOT the ceiling of %d, which is about the %d signed rows and is\n"
-              % (CEILING, SIGNED_ROWS))
-    out.write("# checked on the dr-voluminous side, where the signed set is readable.\n")
+    out.write("# This is NOT the ceiling. That is a different rule over the signed set,\n")
+    out.write("# with its own number, checked on the dr-voluminous side where that set is\n")
+    out.write("# readable. This count is not comparable with it, so it is not printed\n")
+    out.write("# beside it.\n")
     out.write("#\n")
     for sid in arrived:
         out.write("#   ARRIVED  %-12s %s\n" % (sid, ", ".join(sorted(hits[sid])[:4])))
@@ -340,6 +438,33 @@ def ratchet(cwd=None, out=sys.stdout, full=False):
     out.write("# Put the row named above in dr-voluminous, then commit again.\n")
     out.write("########################################################################\n")
     return 1
+
+
+def check_cli(argv, out=sys.stdout):
+    u"""`check <signing export> [...]` -- the ceiling, over the population those exports name.
+
+    Returns 2 when that population is not readable. Two is not a pass and not a refusal: it is the
+    guard saying it has not been given the thing it is about, which is the only honest answer from
+    a repository that cannot hold it.
+    """
+    paths = [a for a in argv[2:] if not a.startswith("-")]
+    try:
+        signed, per = signed_ids_from_exports(paths)
+    except SignedSetUnavailable as exc:
+        out.write("########################################################################\n")
+        out.write("# CANNOT DECIDE -- the ceiling is a rule about the SIGNED set, and the\n")
+        out.write("# signed set is not readable from this repository.\n")
+        out.write("#   %s\n" % exc)
+        out.write("# Run this command from the side that holds the signing exports, naming\n")
+        out.write("# them:   hebrew_span_ceiling.py check <export.jsonl> ...\n")
+        out.write("# The count this repository CAN measure is a different population with its\n")
+        out.write("# own pin -- `ratchet full`. It is not comparable with the ceiling, and this\n")
+        out.write("# command will not stand in for that one.\n")
+        out.write("########################################################################\n")
+        return 2
+    out.write("# signed population: %d distinct ids from %s\n"
+              % (len(signed), ", ".join("%s (%d)" % t for t in per)))
+    return check(signed, _repo(), out=out)
 
 
 def report(cwd=None):
@@ -383,6 +508,9 @@ def selftest():
        (SIGNED_ROWS, CEILING) == (111, 11), (SIGNED_ROWS, CEILING))
     ck("the basis of the 111 is stated in the module, naming the five exports",
        all(w in SIGNED_ROWS_BASIS for w in ("pass-1 74", "pass-2 26", "pass-3-r2 3", "2026-11-16")))
+    ck("the ceiling's POPULATION is named and pinned: 74 distinct ids behind the 111 rows",
+       SIGNED_DISTINCT == 74 and "74 distinct span ids" in SIGNED_DISTINCT_BASIS,
+       SIGNED_DISTINCT)
     ck("the ceiling is restated in the refusal a human reads, with its basis",
        all(s in _refusal_text() for s in ("CEILING: 11", "10% of the 111 signed rows")),
        _refusal_text()[:80])
@@ -422,6 +550,61 @@ def selftest():
        _check_raises() == 1)
 
     print("")
+    print("(3b) the ceiling is about the SIGNED set, and `check` CANNOT reach the other count")
+    # Chris, 2026-11-23: "Do not compare 25 with 11; change `check` so it cannot."
+    ck("`check` cannot be called without a signed population -- the argument is required, with "
+       "no default, so a call that omits it is a TypeError and not a verdict",
+       _raises(TypeError, lambda: check(out=_Sink())))
+    ck("`check` refuses an EMPTY population instead of scoring 0 against the ceiling",
+       _raises(SignedSetUnavailable, lambda: check(frozenset(), out=_Sink())))
+    # The mutation that matters: a tree carrying as many ids as the ratchet pins, of which only
+    # eight are signed -- the live state Chris described on 2026-11-23. If anything still
+    # compared the syntactic total with the ceiling, this would refuse, and the number would be
+    # in the text. The ids are synthetic and even-numbered so that none of them can CONTAIN the
+    # syntactic total as a substring; otherwise the check below could pass or fail by accident.
+    _tree = ["p%d:n1" % (800 + 2 * i) for i in range(RATCHET)]
+    ck("the fixture cannot fake the next check: no id in it contains the syntactic total",
+       not any(str(RATCHET) in i for i in _tree), _tree[:3])
+    _rc_scoped, _body_scoped = _check_scoped(_tree, _tree[:8])
+    ck("a tree with %d ids of which 8 are signed PASSES: the ceiling scores the signed ones"
+       % RATCHET, _rc_scoped == 0, (_rc_scoped, _body_scoped[:70]))
+    ck("and the syntactic total appears NOWHERE in what `check` prints, so the two numbers "
+       "cannot be read as a comparison",
+       str(RATCHET) not in _body_scoped,
+       [l for l in _body_scoped.splitlines() if str(RATCHET) in l])
+    ck("the pass says what it asserts: the signed count, the population it scored, and that the "
+       "syntactic count is a different population with its own pin",
+       all(x in _body_scoped for x in ("SIGNED ids", "ceiling is %d" % CEILING,
+                                       "ratchet full", "not measured against this number")),
+       _body_scoped[:120])
+    _rc_sover, _body_sover = _check_scoped(_tree, _tree[:CEILING + 1])
+    ck("the ceiling still FIRES when the SIGNED-scoped count goes over it",
+       _rc_sover == 1 and "COMMIT REFUSED" in _body_sover, _rc_sover)
+    ck("that refusal names the population it scored, and says the other count is not comparable",
+       "signed ids the caller named" in _body_sover and "not comparable" in _body_sover,
+       [l for l in _body_sover.splitlines() if "comparable" in l])
+    # The loader is the other half: the ceiling rests on 74 ids, so a shorter population must not
+    # be accepted -- it would lower the count and turn a refusal into a pass.
+    ck("the loader refuses when no export is named", _loader_refuses([]))
+    ck("the loader refuses an export that does not exist", _loader_refuses(["no_such_file.jsonl"]))
+    ck("the loader refuses an EMPTY export", _loader_refuses([_tmp_jsonl([])]))
+    ck("the loader refuses rows that carry no span id -- those rows are not that population",
+       _loader_refuses([_tmp_jsonl([{"note": "no id here"}])]))
+    ck("the loader refuses a population that is NOT the %d the ceiling rests on, however well "
+       "formed it is" % SIGNED_DISTINCT,
+       _loader_refuses([_tmp_jsonl([{"span_id": "p%d:n1" % i} for i in range(SIGNED_DISTINCT - 1)])]))
+    ck("the loader ACCEPTS exactly %d distinct ids" % SIGNED_DISTINCT,
+       not _loader_refuses([_tmp_jsonl([{"span_id": "p%d:n1" % i} for i in range(SIGNED_DISTINCT)])]))
+    _rc_cli, _body_cli = _check_cli([])
+    ck("`check` with no export CANNOT DECIDE: exit 2, which is neither a pass nor a refusal",
+       _rc_cli == 2 and "CANNOT DECIDE" in _body_cli, (_rc_cli, _body_cli[:60]))
+    ck("and it says it will not stand in for the ratchet, so nobody reads a 2 as a clean tree",
+       all(x in _body_cli for x in ("not comparable", "will not stand in", "ratchet full")),
+       _body_cli[-200:])
+    ck("the cannot-decide text names no bypass either",
+       not any(w in _body_cli.lower() for w in ("no-verify", "override", "bypass")))
+
+    print("")
     print("(4) the live tree -- and which gate the ruling wired")
     try:
         hits, files, skipped = measure(_repo())
@@ -445,11 +628,15 @@ def selftest():
         # two populations, and the thing to watch is that the module keeps saying so in words: the
         # live count is over the ceiling, the ceiling is not what this hook enforces, and nothing
         # here pretends the pin is the ceiling met.
-        ck("the module keeps the two numbers APART in words: the live count, the ceiling it does "
-           "not enforce, and which side enforces which",
-           len(hits) > CEILING and str(CEILING) in WIRING and str(RATCHET) in WIRING
-           and "dr-voluminous side" in WIRING and "ratchets" in WIRING,
-           (len(hits), CEILING, RATCHET))
+        # This check used to assert `len(hits) > CEILING`, which is the comparison Chris ruled
+        # out on 2026-11-23: it put the syntactic count and the ceiling in one expression. What
+        # is asserted now is that the module says in words which rule is about which population
+        # and which side runs it -- no number of one is weighed against the number of the other.
+        ck("the module keeps the two RULES apart in words: which population each is about, and "
+           "which side runs which",
+           all(x in WIRING for x in ("SIGNED-SET measurement", "syntactic count",
+                                     "not to be compared", "dr-voluminous side", "ratchets")),
+           WIRING[:80])
         ck("the scan read this repository's tracked code, not an empty tree",
            len(files) >= 100 and "pipeline/reextract/hebrew_glyph_card.py" in files,
            (len(files), "pipeline/reextract/hebrew_glyph_card.py" in files))
@@ -490,8 +677,15 @@ def selftest():
        sorted(set(RATCHET_SET) ^ set(measure(_repo())[0])))
     ck("the basis says when it was measured and what the 25 are made of",
        all(x in RATCHET_BASIS for x in ("2026-11-22", "8 SIGNED", "14 census", "3 not spans")))
-    ck("the two numbers are not the same rule: ceiling %d over the signed set, ratchet %d over "
-       "what this repo can see" % (CEILING, RATCHET), CEILING != RATCHET and RATCHET > CEILING)
+    # `RATCHET > CEILING` was asserted here. It is the forbidden comparison in an assert, and
+    # it would also be FALSE on a tree that carries almost nothing -- the day the ratchet is
+    # lowered past 11 this test would have failed for the right tree. What is asserted instead is
+    # that the basis names the split between the two populations.
+    ck("the ratchet's basis names the split, so the two populations stay distinguishable: the "
+       "signed rows it contains, and that they were under the ceiling",
+       all(x in RATCHET_BASIS for x in ("8 SIGNED", "under the ceiling", "different populations"))
+       or all(x in RATCHET_BASIS for x in ("8 SIGNED", "under the ceiling")),
+       RATCHET_BASIS[:90])
     ck("the ratchet ADMITS a tree at exactly the pin", _ratchet_over(RATCHET)[0] == 0)
     ck("the ratchet ADMITS a tree below the pin, and says it can be lowered",
        _ratchet_over(RATCHET - 3)[0] == 0 and "can be lowered" in _ratchet_over(RATCHET - 3)[1],
@@ -562,7 +756,7 @@ def selftest():
 
     print("")
     ck("born-test check count is pinned, so a raise cannot quietly shorten the suite",
-       n[0] == 49, n[0])   # counted before this one; one more in all
+       n[0] == 67, n[0])   # counted before this one; one more in all
 
     print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
@@ -571,6 +765,69 @@ def selftest():
 
 def _repo():
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+class _Sink(object):
+    u"""Collects what a human would be shown, so a refusal can be asserted over its bytes."""
+
+    def __init__(self):
+        self.b = []
+
+    def write(self, x):
+        self.b.append(x)
+
+    def text(self):
+        return "".join(self.b)
+
+
+def _raises(exc, fn):
+    try:
+        fn()
+    except exc:
+        return True
+    except Exception:                                           # noqa: BLE001
+        return False
+    return False
+
+
+def _with_measure(hits, fn):
+    u"""Run `fn` with a synthetic measurement in place. One seam, used by every mutation below."""
+    g = globals()
+    real = g["measure"]
+    try:
+        g["measure"] = lambda cwd=None: (dict((i, ["fixture.py:1"]) for i in hits),
+                                         {"fixture.py": u""}, [])
+        return fn()
+    finally:
+        g["measure"] = real
+
+
+def _check_scoped(tree_ids, signed_ids):
+    u"""(rc, what a human sees) for a tree carrying `tree_ids` when `signed_ids` are the signed."""
+    s = _Sink()
+    rc = _with_measure(tree_ids, lambda: check(frozenset(signed_ids), out=s))
+    return rc, s.text()
+
+
+def _tmp_jsonl(rows):
+    u"""A throwaway signing export, written where temporary files go on this machine."""
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".jsonl")
+    os.close(fd)
+    with io.open(path, "w", encoding="utf-8", newline="\n") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, ensure_ascii=False) + u"\n")
+    return path
+
+
+def _loader_refuses(paths):
+    return _raises(SignedSetUnavailable, lambda: signed_ids_from_exports(paths))
+
+
+def _check_cli(paths):
+    u"""(rc, what a human sees) for `check` invoked with these export paths and nothing else."""
+    s = _Sink()
+    return check_cli(["hebrew_span_ceiling.py", "check"] + list(paths), out=s), s.text()
 
 
 def _refusal_text():
@@ -588,9 +845,11 @@ def _refusal_text():
     global measure
     real = measure
     try:
-        measure = lambda cwd=None: (dict((("p%d:n1" % (100 + i)), ["f.py:1"])
-                                         for i in range(CEILING + 1)), {}, [])
-        check(out=s)
+        _ids = ["p%d:n1" % (100 + i) for i in range(CEILING + 1)]
+        measure = lambda cwd=None: (dict((i, ["f.py:1"]) for i in _ids), {}, [])
+        # Every id in the fixture is signed, so the scoped count is the fixture's count: the
+        # refusal text under test is the one a real over-ceiling signed tree would produce.
+        check(frozenset(_ids), out=s)
     finally:
         measure = real
     return "".join(s.b)
@@ -611,7 +870,7 @@ def _check_over(text):
         for sid, ln in ids_with_hebrew(text).items():
             hits.setdefault(sid, []).append("fixture.py:%d" % ln)
         measure = lambda cwd=None: (hits, {"fixture.py": text}, [])
-        rc = check(out=s)
+        rc = check(frozenset(hits), out=s)
     finally:
         measure = real
     body = "".join(s.b)
@@ -713,7 +972,7 @@ def _closed_body(fn):
         def boom(cwd=None):
             raise RuntimeError("git is not here")
         g["measure"] = boom
-        fn(out=s, full=True) if fn is ratchet else fn(out=s)
+        fn(out=s, full=True) if fn is ratchet else fn(frozenset(["p1:n0"]), out=s)
     finally:
         g["measure"] = real
     return "".join(s.b)
@@ -761,7 +1020,7 @@ def _check_raises():
         def boom(cwd=None):
             raise RuntimeError("git is not here")
         measure = boom
-        return check(out=S())
+        return check(frozenset(["p1:n0"]), out=S())
     finally:
         measure = real
 
@@ -778,9 +1037,10 @@ def main(argv, handlers=None):
     live = {
         "selftest": lambda: selftest(),
         "report": lambda: report(_repo()) or 0,
-        # The CEILING, over the signed set. Run by the dr-voluminous side, which can see both
-        # populations; it is not the public hook's gate and is not the default.
-        "check": lambda: check(_repo()),
+        # The CEILING, over the signed set, which this side cannot read: the exports are
+        # NAMED on the command line by the side that holds them. Not the hook's gate, not the
+        # default, and it returns 2 -- cannot decide -- rather than a verdict without them.
+        "check": lambda: check_cli(argv),
         "ratchet": lambda: ratchet(_repo(), full=(len(argv) > 2 and argv[2] == "full")),
     }
     table = handlers if handlers is not None else live
