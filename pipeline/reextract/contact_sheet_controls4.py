@@ -111,7 +111,16 @@ def census_rows():
 
 
 def sealed_pages():
-    return sorted(set(int(k.split(":")[0][1:]) for k in HAD.SEALED_TRUTH))
+    u"""Every page ANY record calls sealed, from sealed_boundary.py.
+
+    This used to derive the boundary from the keys of SEALED_TRUTH -- a SPAN table -- which names
+    ten pages where the page-level record names fourteen and the draw's artifact eleven.  Five
+    pages short, in a builder whose output is a DISCLOSURE: a crop from a sealed page could have
+    reached a contact sheet.  Measured 2026-11-25: the four control rows sit on 257, 399, 426 and
+    677, none of which any record calls sealed, so nothing was exposed.  The defect was in what the
+    function could not see, not in what it had done."""
+    import sealed_boundary as SB
+    return sorted(SB.union())
 
 
 def rows():
