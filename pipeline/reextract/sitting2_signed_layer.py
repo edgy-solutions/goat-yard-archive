@@ -143,7 +143,7 @@ LAYER_NAME_RULE = ("the layer's sha16 in its filename is " + HASH_RULE +
                    "`sheet` names the file that digest names, so it cannot be inside it. The "
                    "written file's own byte digest is the manifest's layer.bytes_sha16.")
 
-EXPECTED_CHECKS = 67
+EXPECTED_CHECKS = 69
 
 
 class LayerRefused(Exception):
@@ -639,12 +639,23 @@ def manifest(rows, census, adj_detail, prior_path_sha16, export_sha16, layer_sha
 # ------------------------------------------------------------------ the build
 
 
+def _toplevel():
+    return subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL,
+        cwd=os.path.dirname(os.path.abspath(__file__))).decode("utf-8", "replace").strip()
+
+
 def _git(args, cwd=None):
-    """git, with stderr swallowed: a probe that EXPECTS a non-zero exit should not print the
-    failure it is testing for into a suite's output and make a pass look like an error."""
+    """git at the REPOSITORY ROOT, with stderr swallowed.
+
+    The root matters: git resolves a pathspec against the working directory, so running these from
+    this module's own directory asked about `pipeline/reextract/pipeline/reextract/...`, which
+    cannot exist -- and the answer came back `not tracked` for a file that was committed. The
+    stderr is swallowed because a probe that EXPECTS a non-zero exit should not print the failure
+    it is testing for and make a pass look like an error."""
     return subprocess.check_output(
         ["git"] + args, stderr=subprocess.DEVNULL,
-        cwd=cwd or os.path.dirname(os.path.abspath(__file__))).decode("utf-8", "replace").strip()
+        cwd=cwd or _toplevel()).decode("utf-8", "replace").strip()
 
 
 def builder_is_committed(path=None):
@@ -655,7 +666,7 @@ def builder_is_committed(path=None):
     is the whole question and git already knows about autocrlf, so no hand-rolled byte comparison
     is attempted here."""
     path = path or os.path.abspath(__file__)
-    rel = os.path.relpath(path, _git(["rev-parse", "--show-toplevel"])).replace("\\", "/")
+    rel = os.path.relpath(path, _toplevel()).replace("\\", "/")
     if rel.startswith(".."):
         # Named distinctly: a path outside the repository is not the same situation as a tracked
         # file with uncommitted edits, and reporting both as "not committed" would hide which.
@@ -667,7 +678,7 @@ def builder_is_committed(path=None):
     try:
         subprocess.check_call(["git", "diff", "--quiet", "HEAD", "--", rel],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              cwd=os.path.dirname(os.path.abspath(__file__)))
+                              cwd=_toplevel())
     except subprocess.CalledProcessError:
         return False, ("%s differs from the blob committed at HEAD; commit the builder before it "
                        "builds anything that will be judged" % rel)
@@ -1149,6 +1160,28 @@ def selftest():
         ok_c, detail_c = builder_is_committed()
         ck("the builder knows whether its own bytes are the committed blob at HEAD",
            isinstance(ok_c, bool) and isinstance(detail_c, str) and detail_c.strip(), detail_c)
+        # An INDEPENDENT witness for the same question, so the verdict is not just the function
+        # agreeing with itself: hash the file the way `git add` would and compare with HEAD's blob.
+        # git is asked rather than hand-rolling a CR/dirty comparison -- git already knows about
+        # autocrlf, and this file is checked out LF here and CRLF in the shared tree.
+        _rel = os.path.relpath(os.path.abspath(__file__), _toplevel()).replace("\\", "/")
+        try:
+            _onblob = _git(["rev-parse", "HEAD:%s" % _rel])
+        except subprocess.CalledProcessError:
+            _onblob = None
+        try:
+            _ondisk = _git(["hash-object", "--", _rel])
+        except subprocess.CalledProcessError:
+            _ondisk = None
+        ck("and that verdict agrees with an independent comparison of the file's own git hash "
+           "against HEAD's blob, in whichever direction the tree happens to be",
+           ok_c == (_onblob is not None and _onblob == _ondisk),
+           "on disk %s / at HEAD %s" % (str(_ondisk)[:12], str(_onblob)[:12]))
+        _sib = builder_is_committed(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                 "sitting2_page.py"))
+        ck("a tracked sibling is NOT reported as untracked -- the pathspec resolves at the "
+           "repository root, not this module's directory, which is where that answer came from",
+           "not tracked" not in _sib[1], _sib[1][:90])
         _out = builder_is_committed(os.path.join(tmp, "not_tracked.py"))
         ck("a path outside the repository is reported as such, not as `not tracked` -- two "
            "different situations must not share one message",
