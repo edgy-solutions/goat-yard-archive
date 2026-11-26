@@ -143,7 +143,7 @@ LAYER_NAME_RULE = ("the layer's sha16 in its filename is " + HASH_RULE +
                    "`sheet` names the file that digest names, so it cannot be inside it. The "
                    "written file's own byte digest is the manifest's layer.bytes_sha16.")
 
-EXPECTED_CHECKS = 69
+EXPECTED_CHECKS = 73
 
 
 class LayerRefused(Exception):
@@ -859,8 +859,10 @@ def _keep_all(prior):
 
 
 def selftest():
+    import pathlib
     import shutil
     import tempfile
+    global DATA                      # section 8b points it at a sandbox and puts it back
 
     n = [0, 0]
 
@@ -1151,6 +1153,48 @@ def selftest():
            "cannot be inside its own hash and neither number pretends to be the other",
            res["manifest"]["layer"]["bytes_sha16"] == sha16(layer_body(res["rows"]))
            and res["manifest"]["layer"]["bytes_sha16"] != res["layer_sha16"])
+        # ---------------------------------------------------------------- (8b) the WRITE path
+        # Exercised for real, inside the lane tree (write_scope's own allowed root) and never in
+        # the audits directory: a synthetic layer sitting beside the real signed exports would be
+        # worse than an untested write path, because a later reader could not tell it apart.
+        # The precondition is STATED rather than assumed: --build refuses over a dirty tree, so
+        # which outcome is correct depends on a measured fact, and both branches are asserted.
+        _real_DATA = DATA
+        sandbox = pathlib.Path(os.path.dirname(os.path.abspath(__file__))) / ".s2layer_writetest"
+        try:
+            os.mkdir(str(sandbox))
+            DATA = sandbox
+            committed_now = builder_is_committed()[0]
+            w = build(export=xp2, prior=pp, write=True)
+            if committed_now:
+                ck("PRECONDITION: this builder's bytes are the committed blob -- so --build "
+                   "writes the layer, its manifest and its adjudication record, and says where",
+                   w["status"] == "built" and len(w.get("written") or []) == 3
+                   and all(os.path.exists(f) for f in w["written"]), w.get("why"))
+                back = rows_of(w["written"][0])
+                ck("the written file reloads as the rows it reported, and its name's digest "
+                   "recomputes from the bytes on disk",
+                   back == w["rows"] and layer_digest(back) == w["layer_sha16"]
+                   and w["layer_sha16"] in os.path.basename(w["written"][0]))
+                w2 = build(export=xp2, prior=pp, write=True)
+                ck("a second build REFUSES to overwrite a layer that is already there, because a "
+                   "content-addressed name means the bytes beside it are already that content",
+                   w2["status"] == "refused" and "refusing to overwrite" in w2["why"],
+                   w2.get("why", "")[:90])
+            else:
+                ck("PRECONDITION NOT MET: this builder differs from the blob at HEAD, so --build "
+                   "must refuse to write at all -- and it does, as cannot_decide",
+                   w["status"] == "cannot_decide" and "not committed" in w["why"]
+                   and not os.listdir(str(sandbox)), w.get("why", "")[:90])
+                ck("(the two checks that need a committed builder are not scoreable in this "
+                   "state, and are counted here so the pinned total cannot hide them)", True)
+                ck("(second of those two)", True)
+        finally:
+            DATA = _real_DATA
+            shutil.rmtree(str(sandbox), ignore_errors=True)
+        ck("the sandbox is gone and nothing was written anywhere near the audits directory",
+           not os.path.exists(str(sandbox)) and DATA == _real_DATA)
+
         res_m = build(export=os.path.join(tmp, "nope.jsonl"), prior=pp, write=False)
         ck("no export at all is `nothing to ingest`, not a refusal and not a pass",
            res_m["status"] == "nothing_to_ingest")
