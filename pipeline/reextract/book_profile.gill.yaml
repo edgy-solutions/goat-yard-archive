@@ -143,6 +143,44 @@ output:
   target: sid_chunked_markdown
   canonical_marker: "[^N]"         # assembler assigns by POSITION; model's letters discarded
 
+# --- BODY-TEXT POLICIES (Lane A2's new-side normalisation, pasted here under ruling 2026-11-26).
+#     SCOPE: BODY TEXT ONLY, on the NEW SIDE, AFTER the read. The APPARATUS KEEPS THE PRINT -- a
+#     footnote's transcription, a Hebrew span's signed consonants and every crop-backed reading are
+#     the printed form and are NOT touched by anything in this section. That is the whole reason
+#     the section is scoped rather than global.
+#     Each rule is applied IN CODE (newside_policies.py / the normaliser and the scorers N), not by
+#     substituting profile text; what lives here is the book-specific FACT that the policy holds for
+#     Gill vol.1, with the ruling that settled it. Volume 1 is the only volume measured.
+#     Source block: dr-voluminous body_shadow_vol1/body_shadow/fullrun_20261116/profile/
+#     book_profile_body_text_policies.yaml, which Lane A2's builder asserts equals
+#     newside_policies.PROFILE_BLOCK, so the two cannot drift.
+body_text_policies:
+  long_s:
+    rule: 'long s -> s, done in code (the normaliser and the scorers N), not in the profile text'
+    applies_to: 'new side, after the read'
+    ruling:
+      date: '2026-11-23'
+      file: 'LOCK_content_categories_addendum3_20261123.md (A3.1)'
+    note: "lane B's apparatus keeps the print"
+  ligatures:
+    rule: 'æ -> ae, œ -> oe; Æ -> AE and Œ -> OE when the word is all capitals (>= 2 cased letters, all upper), otherwise Ae and Oe; e, é and every other character untouched'
+    applies_to: 'new side, after the read'
+    ruling:
+      date: '2026-11-26'
+      file: 'locks/RULING_20261126_laneA2.md (third ruling, ligatures)'
+    note: "lane B's apparatus keeps the print"
+  # stop_space is PENDING and is therefore NOT a key here: it is not ruled until Chris says so, and
+  # the fourth ruling of 2026-11-26 item 7 retracted the earlier "ruled IN" inference. Recorded in
+  # full so nothing is lost, commented so nothing applies it:
+  #   stop_space:
+  #     status: 'PENDING: not ruled until Chris says so; do not apply'
+  #     rule: 'remove every whitespace run that directly precedes one of ; : ? !'
+  #     applies_to: 'new side, after the read (if ruled)'
+  #     ruling:
+  #       date: null
+  #       file: 'none yet; locks/RULING_20261126_laneA2.md fourth ruling item 7'
+  #     note: "lane B's apparatus keeps the print"
+
 # --- AUTHORITY LIST (stage-3 safety net): Gill's citation universe. A transcribed name that
 #     FUZZY-matches one of these but isn't exact is a candidate misread (Gerson->Gersom) -> flag to
 #     review queue. Book-specific fact; SEED list (grow from the corpus's CitedAuthority entities).
