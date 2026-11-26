@@ -1546,6 +1546,56 @@ def _rule2_dirt(word, letter, rivals):
     return tuple(sorted(p for p in rivals if p != letter and LETTER.get(p) and LETTER[p] in w))
 
 
+def _one_row_per_glyph(rows, letter):
+    """`rows` with one row per GLYPH -- (file_page, word, index_from_right) -- pointed row kept.
+
+    THE UNIT OF EVIDENCE IS A GLYPH, NOT A RECORD. One signing sitting writes one record PER LETTER
+    and every record carries glyph boxes for the WHOLE word, so the same drawn glyph reaches a
+    consumer twice: once as the pointed letter of its own record, once as a context box inside a
+    neighbour's record about the same word. `sig_exemplars` cannot see that on its own -- the skip in
+    its context loop compares a box against the index of ITS OWN record only, which is a different
+    question. Two rows about one glyph would make `single_instance` false while the corpus holds
+    exactly one impression of the letter, which is the one thing that flag exists to prevent, and
+    would put one picture on a card twice as if it were a corpus.
+
+    Same rule as hebrew_point_and_name.signed_supply, where it was fixed on 2026-11-15 for the same
+    reason; this is it at the source, so every consumer inherits it. Section 16 already treats this
+    triple as the identity of an admitted tile (`_adm` is a set of exactly these keys), so the
+    identity is not new here -- what is new is that the supply is reduced to it.
+
+    ON THE SIGNATURES ON FILE TODAY THIS CHANGES NO COUNT: 11 pointed records on 11 distinct
+    (page, word) pairs, so no key collides and every letter's row count is what it was. It is
+    installed because the collision is a property of the RECORD SHAPE and not of today's set -- the
+    next sitting that points two letters of one word produces it -- and because the number it
+    protects (`single_instance`, and through it the `exemplar:` needs) is read by the signing rule.
+    """
+    at, keep = {}, []
+    for r in rows:
+        key = (r.get("file_page"), r.get("word"), r.get("letter_index_from_right"))
+        if key[2] is None:
+            # An unplaceable glyph cannot be deduplicated, and keeping it anyway is how one
+            # impression gets counted twice. sig_load admits no record without an index, so this
+            # refuses loudly rather than guessing if that ever changes.
+            raise ValueError("a %s exemplar from file p%s carries no letter index -- a glyph is "
+                             "identified by (page, word, index) and this one cannot be placed"
+                             % (letter, r.get("file_page")))
+        if key in at:
+            # Pointed rows are all appended before any context row, so the row already kept IS the
+            # pointed one whenever the two kinds collide: first-wins is pointed-wins here, and a
+            # tie-break expression would be unreachable code dressed up as a rule. The ORDERING is
+            # not by construction, though, so it is asserted rather than assumed -- reorder the
+            # loops and this raises instead of silently preferring the weaker claim.
+            if r.get("kind") == "pointed" and keep[at[key]].get("kind") != "pointed":
+                raise AssertionError(
+                    "a context row for %s file p%s index %s was kept ahead of the pointed row for "
+                    "the same glyph -- pointed is the stronger claim about those pixels and must "
+                    "come first" % (letter, key[0], key[2]))
+            continue
+        at[key] = len(keep)
+        keep.append(r)
+    return keep
+
+
 def sig_exemplars(letter, want=9, partners=None):
     """Signed exemplars of `letter` from anywhere in the volume, pointed first.
 
@@ -1588,7 +1638,9 @@ def sig_exemplars(letter, want=9, partners=None):
                 continue        # refused, and `sig_context_tiles` reports it with its reason
             out.append(dict(r, letter=letter, kind="context", rule2_dirt=(),
                             letter_index_from_right=lb.get("index_from_right")))
-    out = out[:want]
+    # Reduced to one row per glyph BEFORE the truncation: dropping a distinct glyph while
+    # keeping a duplicate of another is what truncating first would do.
+    out = _one_row_per_glyph(out, letter)[:want]
     for r in out:
         r["single_instance"] = (len(out) == 1)
     return out
@@ -1769,6 +1821,32 @@ def one_band_report(include_sealed=True):
     rows = [r for r in box_quality(include_sealed) if r["lines"] is not None]
     bad = [r["span_id"] for r in rows if not r["one_band"]]
     return len(rows) - len(bad), len(rows), bad
+
+
+def boxq_lines():
+    """The operator's box-quality report, as lines, so a check can assert over what is SHOWN.
+
+    It was printed straight out of the CLI, and a disclosure cannot be checked where it is also
+    built: section 8's first attempt asserted over a string it had assembled itself two lines
+    earlier. What is disclosed here is the BAND VERDICT, which box_quality has computed since the
+    merged-top-edge ruling and the report dropped -- so a box that clips the line above read
+    exactly like a clean one, and the ink-run count beside it ("3 run(s)") read like a fault where
+    there is none.
+    """
+    rows = box_quality()
+    one, tot, bad = one_band_report()
+    out = ["box quality over the signed set (FILE pages; printed = file - 88)"]
+    for r in rows:
+        out.append("  %-9s p%-5d %-11s %s run(s)  %-15s %s"
+                   % (r["span_id"], r["page"], str(r["size"]), r["lines"],
+                      r["band"] or "-", r["fault"] or ""))
+    out.append("")
+    out.append("  exactly one line band: %d of %d readable crops" % (one, tot))
+    out.append("  loose boxes: %s" % (", ".join(bad) or "none"))
+    out.append("  merged-top-edge (a pass; the box clips the line above): %s"
+               % (", ".join(sorted(r["span_id"] for r in rows
+                                   if r["band"] == "merged-top-edge")) or "none"))
+    return out
 
 
 def partner_prose(partners):
@@ -2301,6 +2379,139 @@ def signable(span_id):
     if u:
         return False, "needs unmet: %s" % ", ".join(u)
     return True, "%s, every recorded need met" % why
+
+
+READINESS_DEF = ("has a surface and all needs met (ruling 2026-11-01 item 4), where the "
+                 "qualifying clause of item 3 is read as part of the needs half, exactly as "
+                 "`signable` reads it")
+
+
+def readiness_population():
+    """The spans a readiness table may speak about: audited spans UNION the spans carrying a need.
+
+    THE DOMAIN IS NOT `D.build_set()`, and getting that wrong does not look like an error. A sweep
+    of the build set reports "0 of 21 signable, every one absent from the audit" -- which is not a
+    readiness table, it is two disjoint populations read as one. The build set is the spans whose
+    GEOMETRY this console owns; the audit of 2026-10-25 is the spans whose READING a human
+    adjudicated; on this corpus those two sets do not intersect AT ALL. A table over the wrong one
+    files "nobody has decided" as "nothing is ready", and the number it prints is about the join.
+
+    The population that can be ready is the one the signer derives its re-sign selection from, and
+    it is defined in glyph_signer with the reason: audited spans union the spans carrying a recorded
+    need, so that a span like p596:n2 -- a need with no audit row -- appears in the disclosure with
+    its reason instead of going missing from it. Nothing can be selected by widening it this way: a
+    span with no audit row never satisfies the rule's first clause.
+
+    SHARED WITH THE SIGNER BY CONSTRUCTION, on purpose -- the card and the signer must not disagree
+    about which spans are in question -- so no check claims the two agree independently. What the
+    suite checks instead is that this rule still covers everything each source supplies, that it is
+    disjoint from the build set (the mistake above, measured rather than remembered), and that the
+    signer's source has not drifted away from the same expression.
+    """
+    import audit_overlay_20261025 as _A
+    return sorted(set(r["span_id"] for r in _A.AUDIT) | set(NEEDS))
+
+
+def signer_pinned_population():
+    """(ids, how) -- the re-sign population glyph_signer PINS as a literal, read from its source.
+
+    Not imported: glyph_signer builds a console at import. Read as text, and a parse that fails
+    returns (None, why) so the reconciliation can say "could not read it" instead of quietly
+    reporting no difference -- which is the reading a missing list would produce.
+    """
+    import re as _re
+    p = Path(__file__).with_name("glyph_signer.py")
+    if not p.exists():
+        return None, "glyph_signer.py is not beside this module"
+    txt = "\n".join(l for l in p.read_text(encoding="utf-8").splitlines()
+                     if not l.strip().startswith("#"))
+    m = _re.search(r"RUN_N\s*==\s*(\d+)\s*and\s*sorted\(RUN_SPAN_IDS\)\s*==\s*\[([^\]]*)\]",
+                   txt)
+    if not m:
+        return None, "the pinned re-sign literal is no longer in glyph_signer's source"
+    ids = sorted(_re.findall(r'"(p\d+:n\d+)"', m.group(2)))
+    if len(ids) != int(m.group(1)):
+        return None, ("the pin says %s spans and lists %d: %s"
+                      % (m.group(1), len(ids), ", ".join(ids)))
+    return ids, "glyph_signer's pinned literal (RUN_N == %s)" % m.group(1)
+
+
+def readiness():
+    """One row per span, over the readiness population UNION the spans that have a card.
+
+    The union, because the two halves of the definition are supplied by different records and a
+    table over either half alone drops rows in the direction that looks clean. A span with a card
+    and no audit row and no need can never be ready under the rule, and is reported as exactly
+    that -- `surface_only` -- rather than left out: a population that silently narrows is how a
+    span disappears from a sitting without anyone deciding it should.
+    """
+    pop = set(readiness_population())
+    cards = set(c["span_id"] for c in CARDS)
+    build = set(s["span_id"] for s in D.build_set(include_sealed=True))
+    import audit_overlay_20261025 as _A
+    audited = set(r["span_id"] for r in _A.AUDIT)
+    out = []
+    for sid in sorted(pop | cards, key=lambda s: (int(s.split(":")[0][1:]), s)):
+        q, qwhy = audit_qualifies(sid)
+        ns = needs_state(sid)
+        ok, why = signable(sid)
+        surface = sid in cards
+        out.append(dict(
+            span_id=sid, file_page=int(sid.split(":")[0][1:]),
+            printed_page=int(sid.split(":")[0][1:]) - 88,
+            in_readiness_population=sid in pop, in_audit=sid in audited,
+            has_recorded_need=sid in NEEDS, in_build_set=sid in build,
+            has_surface=surface, surface_basis="a card entry exists" if surface else "no card",
+            surface_only=bool(surface and sid not in pop),
+            audit_qualifies=q, audit_why=qwhy,
+            needs=[dict(key=x["key"], source=x["source"], met=x["met"], why=x["why"]) for x in ns],
+            unmet=[x["key"] for x in ns if not x["met"]],
+            signable=ok, signable_why=why,
+            ready=bool(ok and surface)))
+    return out
+
+
+def readiness_lines(rows=None):
+    """The readiness table as lines, so a check can assert over what the report SHOWS.
+
+    A disclosure cannot be witnessed where it is also built. Section 18's first version asserted
+    that the spans ready-but-not-pinned were named, over a list it had just computed itself -- and
+    the expression it used was `sorted(A) == sorted(A)`, which is true whatever A is. What has to
+    name them is this report.
+    """
+    rows = readiness() if rows is None else rows
+    out = ["readiness: %s" % READINESS_DEF]
+    out.append("population: audited spans UNION spans carrying a recorded need (%d), plus the "
+               "spans that have a card (%d). FILE pages; printed = file - 88."
+               % (len(readiness_population()), len(set(c["span_id"] for c in CARDS))))
+    out.append("")
+    out.append("  %-9s %-7s %-7s %-5s %-5s %-5s  %s"
+               % ("span", "printed", "surface", "qual", "needs", "READY", "why"))
+    for r in rows:
+        out.append("  %-9s p%-6d %-7s %-5s %-5s %-5s  %s"
+                   % (r["span_id"], r["printed_page"], "yes" if r["has_surface"] else "NO",
+                      "yes" if r["audit_qualifies"] else "no",
+                      ("%d/%d" % (len(r["needs"]) - len(r["unmet"]), len(r["needs"]))
+                       if r["needs"] else "-"),
+                      "YES" if r["ready"] else "no", r["signable_why"][:74]))
+        for u in r["unmet"]:
+            out.append("  %-9s   unmet %-20s %s"
+                       % ("", u, [x["why"] for x in r["needs"] if x["key"] == u][0][:76]))
+    ready = sorted(r["span_id"] for r in rows if r["ready"])
+    out.append("")
+    out.append("  ready: %s" % (", ".join(ready) or "none"))
+    out.append("  surface only (a card, no verdict, no need -- never ready under the rule): %s"
+               % (", ".join(sorted(r["span_id"] for r in rows if r["surface_only"])) or "none"))
+    pin, how = signer_pinned_population()
+    if pin is None:
+        out.append("  the signer's pinned re-sign population could not be read: %s" % how)
+    else:
+        out.append("  the signer pins %d span(s) from %s: %s" % (len(pin), how, ", ".join(pin)))
+        out.append("  ready and NOT pinned (a human decision, not a defect to patch here): %s"
+                   % (", ".join(sorted(set(ready) - set(pin))) or "none"))
+        out.append("  pinned and NOT ready: %s"
+                   % (", ".join(sorted(set(pin) - set(ready))) or "none"))
+    return out
 
 
 def census():
@@ -3528,9 +3739,70 @@ def selftest():
     rg, rb = rerat_load()
     ck("every re-ratification on file is accepted", not rb,
        [(x.get("span_id"), x.get("_refused")) for x in rb])
-    ck("every re-ratified box holds exactly ONE line band",
-       all(n_lines(r["_crop"]) == 1 for r in rg.values()),
-       [(k, n_lines(v["_crop"])) for k, v in rg.items()])
+    # THIS CHECK ASKED FOR INK RUNS AND CALLED THEM LINES. It read `n_lines(...) == 1`, and
+    # n_lines' own docstring says no claim about LINES may come from it -- so the check contradicted
+    # the module on the one quantity it names, and went red on p423:n3, the only re-ratified box on
+    # file. That crop holds three ink runs: 1px at row 0, 7px at rows 5-11 -- descenders of the line
+    # above, clipped by a box Chris drew deliberately tight -- and the span's own 33px band. One
+    # line of type, three runs. The accept gate in rerat_load never asked this question and is
+    # untouched; what was wrong was the measurement, not the box.
+    #
+    # The replacement states the claim in the primitives the floor is defined in, and NOT by calling
+    # `_one_band`: a check that calls the gate it is checking agrees with it by construction. It is
+    # deliberately STRICTER than the gate, which also admits merged-top-edge -- if such a box is
+    # ever re-ratified this goes red and a human decides whether a clipped line may be signed from,
+    # instead of the distinction vanishing inside a boolean.
+    _rr_bands = dict((k, text_bands(v["_crop"])) for k, v in rg.items())
+    ck("every re-ratified box holds exactly one text band, of corpus-normal height",
+       all(len(b) == 1 and MIN_BAND_PX <= b[0][1] - b[0][0] + 1 <= MAX_BAND_PX
+           for b in _rr_bands.values()),
+       [(k, b, band_geometry(rg[k]["_crop"])[0]) for k, b in _rr_bands.items()])
+    # PRINTED, NOT ASSERTED, and the difference is the point. The check that stood here said "every
+    # ink run outside the band is thinner than the line floor" -- which restates the filter that
+    # produced the bands (text_bands is ink_runs above MIN_BAND_PX), so it cannot be false on any
+    # crop and asserts nothing. The geometry is still worth showing: it is the reason a card that
+    # reads "3 run(s)" is not reporting three lines.
+    for _k, _v in sorted(rg.items()):
+        print("      %s runs %s, band(s) %s, floor %dpx -- the runs under the floor are the line "
+              "above, clipped by the box's top edge"
+              % (_k, [(a, b, b - a + 1) for a, b in ink_runs(_v["_crop"])],
+                 _rr_bands[_k], MIN_BAND_PX))
+    # THE MAP IS LAST-WRITE-WINS OVER span_id, AND NOTHING SAID SO. There are two
+    # re-ratification records for p423:n3 -- 2026-09-27 retired the original rect for
+    # [1654,4717,2000,4752], and 2026-09-28 retired THAT rect for [1674,4655,1960,4715] -- so a
+    # re-ratification is a CHAIN, and `good[span_id] = r` keeps whichever link the file happens to
+    # end with. It keeps the right one today by accident of file order.
+    #
+    # Found by mutation, 2026-11-25: raising the line floor refused the newest link, the map fell
+    # back to the box that link had retired, and the band check above went GREEN on a box whose
+    # re-ratification had just been refused. A check whose subject can change identity without a
+    # word is not measuring the thing it names. So the chain is asserted, and the map is asserted to
+    # hold its head rather than its tail.
+    _rrall = [r for r in _jsonl(RERAT) if not r.get("_parse_error")]
+    _rrby = {}
+    for _r7 in _rrall:
+        _rrby.setdefault(_r7["span_id"], []).append(_r7)
+    ck("the re-ratified population is NOT EMPTY, so the band claim above is not a for-all over "
+       "nothing",
+       bool(rg) and bool(_rrall), (sorted(rg), len(_rrall)))
+    _brk7 = [(s, [r.get("new_box") for r in rs])
+             for s, rs in sorted(_rrby.items())
+             if any(rs[i].get("old_box") != rs[i - 1].get("new_box") for i in range(1, len(rs)))]
+    ck("every span's re-ratifications form a CHAIN -- each record retires the box the record before "
+       "it drew -- so a second signing cannot silently fork from the first",
+       not _brk7, _brk7)
+    _head7 = []
+    for _s7, _rs7 in sorted(_rrby.items()):
+        _sup7 = set(tuple(r["old_box"]) for r in _rs7 if r.get("old_box"))
+        _got7 = rg.get(_s7)
+        if _got7 is None or tuple(_got7["new_box"]) in _sup7:
+            _head7.append((_s7, _got7 and _got7["new_box"], sorted(_sup7)))
+    ck("the accepted map holds the HEAD of each chain -- the box nothing later retired -- and not "
+       "whichever link the file ends with",
+       not _head7, _head7)
+    print("      %d re-ratification record(s) over %d span(s); head(s) accepted: %s"
+          % (len(_rrall), len(_rrby),
+             ", ".join("%s %s" % (k, v["new_box"]) for k, v in sorted(rg.items())) or "none"))
     ck("a re-ratified box is not the empty rect it replaces",
        all(r["new_box"] != r.get("old_box") for r in rg.values()))
     if OUTHTML.exists():
@@ -3551,14 +3823,89 @@ def selftest():
     print("(8) ruling 3: a span box should contain exactly one line band")
     one, tot_, bad_ = one_band_report()
     print("      %d of %d ratified span boxes contain exactly one line band" % (one, tot_))
-    print("      loose boxes: %s" % ", ".join(bad_))
+    print("      loose boxes: %s" % (", ".join(bad_) or "none"))
     ck("the one-line-band property is measured for every readable crop", tot_ >= 15, tot_)
     ck("the box-quality table covers every span in the set",
        len(box_quality()) == len(D.build_set(include_sealed=True)))
     # This is a DEBT, not an invariant: the boxes are what they are until they are re-drawn. What is
     # asserted is that every box this lane RATIFIES from now on holds one line -- enforced in
     # rerat_load, checked above -- and that the debt is reported rather than discovered later.
-    ck("the debt is non-zero and named, so item 3 has something to assert against", bad_)
+    #
+    # WAS: ck("the debt is non-zero and named, so item 3 has something to assert against", bad_).
+    # That check was pinned to a transient state and went red when the debt was PAID -- 20 of 20
+    # measurable span boxes now hold one band and the loose list is empty. The sentence above says
+    # what was wanted ("the debt is reported rather than discovered later"), and a count of zero is
+    # a report. So what is asserted now is that the report CLOSES and reads the same from both
+    # sides, which is true whether the debt is zero or not.
+    _bq8 = box_quality(True)
+    _loose8 = sorted(r["span_id"] for r in _bq8 if r["lines"] is not None and not r["one_band"])
+    ck("the one-band report's arithmetic closes: one-band + loose == measurable",
+       one + len(bad_) == tot_ and tot_ == len([r for r in _bq8 if r["lines"] is not None]),
+       (one, len(bad_), tot_))
+    ck("the loose set reads the same from the report and from the table, both directions",
+       sorted(bad_) == _loose8, (sorted(bad_), _loose8))
+    # `one_band` is true for TWO shapes, and a row that says only "yes" hides which. merged-top-edge
+    # is a pass (Chris, 2026-09-27, p362:n1) and it is not the same fact as a clean box, so the
+    # spans it holds are NAMED here rather than counted into the clean total. A flag recorded and
+    # shown to nobody is not a disclosure, which is why the assertion is over the printed line.
+    _mte8 = sorted(r["span_id"] for r in _bq8 if r["band"] == "merged-top-edge")
+    _verd8 = {}
+    for _r8 in _bq8:
+        _verd8[_r8["band"]] = _verd8.get(_r8["band"], 0) + 1
+    print("      band verdicts: %s"
+          % ", ".join("%s=%d" % (str(k), v) for k, v in
+                      sorted(_verd8.items(), key=lambda t: (t[0] is None, str(t[0])))))
+    print("      merged-top-edge -- a pass, and not the same fact as a clean box: %s"
+          % (", ".join(_mte8) or "none"))
+    ck("every box the report counts as one-band is one of the two shapes the gate admits",
+       all(r["band"] in ("one-band", "merged-top-edge") for r in _bq8 if r["one_band"]),
+       [(r["span_id"], r["band"]) for r in _bq8 if r["one_band"]
+        and r["band"] not in ("one-band", "merged-top-edge")])
+    # WHAT THAT CHECK HAS TO BITE ON, stated rather than assumed. Every readable box on this set is
+    # one-band or merged-top-edge, so no row can satisfy `one_band` while holding a third verdict,
+    # and forcing `one_band=True` in the producer changes no byte of the table: the check above is a
+    # guard for a box that does not exist yet. The one row that could differ -- the span with no box
+    # at all -- gets `one_band=False` from the fault branch, a literal and not a measurement.
+    #
+    # What DOES notice that forcing is section 17's call-graph check, which asserts box_quality
+    # still calls `_one_band`. Worth being exact about: the first telling of this, in the same
+    # mutation round of 2026-11-25, said the mutant went unnoticed. It did not. It went unnoticed by
+    # the checks I was watching, which is a fact about my watch list. The guard on that line is at
+    # the SOURCE and the guard here is on the DATA, and neither stands in for the other.
+    #
+    # Reported as the STATE it is: the day a readable box reads multi-band, merged or no-band, this
+    # goes red and the check above starts doing work.
+    _third8 = [(r["span_id"], r["band"]) for r in _bq8
+               if r["band"] not in ("one-band", "merged-top-edge", None)]
+    ck("no readable span box on this set holds a third verdict, so the check above has no negative "
+       "instance today -- it guards a box that does not exist yet and measures nothing now",
+       not _third8, _third8)
+    print("      %d row(s): %d readable (%d one-band, %d merged-top-edge), %d with a crop fault "
+          "(one_band false by construction there, not by measurement)"
+          % (len(_bq8), sum(1 for r in _bq8 if not r["fault"]),
+             sum(1 for r in _bq8 if r["band"] == "one-band"),
+             sum(1 for r in _bq8 if r["band"] == "merged-top-edge"),
+             sum(1 for r in _bq8 if r["fault"])))
+    # Over the OPERATOR'S report, not over a string assembled here: the disclosure that matters is
+    # the one a human reads, and a check cannot witness a disclosure it writes itself.
+    _rep8 = boxq_lines()
+    # THE SUMMARY LINE, named by its own prefix, and exactly one of it. The first version took every
+    # line containing "merged-top-edge" -- which includes the span's own TABLE row, because the row
+    # carries the band verdict. So the disclosure line could be gutted to a count and this still
+    # passed, satisfied by the row line that the next check already covers. Found by mutation,
+    # 2026-11-25. A witness set wide enough to catch another check's subject witnesses nothing of
+    # its own. Both directions, as in section 18: the line names every clipped span and nothing else.
+    _sum8 = [l for l in _rep8 if l.strip().startswith("merged-top-edge (a pass")]
+    ck("the box-quality report NAMES every span whose box clips the line above on its own summary "
+       "line, instead of counting it into the clean total, and names nothing else there",
+       len(_sum8) == 1 and sorted(re.findall(r"p\d+:n\d+", _sum8[0])) == _mte8
+       and (bool(_mte8) or "none" in _sum8[0]), (_mte8, _sum8))
+    _nob8 = [r["span_id"] for r in _bq8
+             if not any(l.strip().startswith(r["span_id"]) and (r["band"] or "-") in l
+                        for l in _rep8)]
+    ck("the report carries the band verdict on each span's own row, so a clipped box cannot read "
+       "like a clean one and a run count cannot read like a line count",
+       not _nob8, _nob8)
 
     print("")
     print("(9) the four rulings reach the page")
@@ -4413,7 +4760,77 @@ def selftest():
            False, "no page")
     # 14 since the populations were derived: single_instance gained its liveness sibling, which
     # the two named letters did not need because naming them was itself the (wrong) subject.
-    ck("section 16 ran every one of its checks", n[0] - _e16 == 14, n[0] - _e16)
+    # ---- the unit of evidence is a GLYPH, not a record (see _one_row_per_glyph).
+    # First, why this fix is invisible today, measured off the RECORDS and not off the supply it
+    # changes: the collision needs two signatures about one word, and there are none. Said out loud
+    # because a fix that changes no number is otherwise indistinguishable from a fix that is not
+    # wired up, and the mutation suite cannot tell them apart either.
+    _words = {}
+    for _r in sig_load()[0]:
+        _words.setdefault((_r["file_page"], _r["word"]), []).append(_r["letter"])
+    _shared = sorted((k, v) for k, v in _words.items() if len(v) > 1)
+    ck("no two signature records on file name one word, which is WHY the glyph-unit rule changes "
+       "no count today -- it is installed for the record shape, not for this set",
+       not _shared, _shared)
+    # Then the collision itself, built rather than waited for. Two records about one 3-glyph word:
+    # one points its dalet, the other points its mem and carries a context box around the same
+    # dalet. Before the rule, dalet came back twice and single_instance said the corpus held more
+    # than one impression of it.
+    _fw = LETTER["resh"] + LETTER["mem"] + LETTER["dalet"]      # index_from_right 1, 2, 3
+    _fb = [dict(letter="resh", index_from_right=1, box=[10, 10, 20, 40]),
+           dict(letter="mem", index_from_right=2, box=[22, 10, 34, 40]),
+           dict(letter="dalet", index_from_right=3, box=[36, 10, 48, 40])]
+    _f1 = dict(letter="dalet", letter_index_from_right=3, word=_fw, file_page=9999,
+               box=[36, 10, 48, 40], letter_boxes=_fb, signer="fixture", date="2026-11-25")
+    _f2 = dict(_f1, letter="mem", letter_index_from_right=2, box=[22, 10, 34, 40])
+    _saved = _SIGCACHE.get("good"), _SIGCACHE.get("bad")
+    try:
+        _SIGCACHE["good"], _SIGCACHE["bad"] = [_f1, _f2], []
+        _got = sig_exemplars("dalet", want=1, partners=())
+        ck("two records about one word yield ONE row for the glyph they share, the pointed one, "
+           "and it says it is the only impression",
+           len(_got) == 1 and _got[0]["kind"] == "pointed"
+           and _got[0]["letter_index_from_right"] == 3 and _got[0]["single_instance"] is True,
+           [(r["kind"], r["letter_index_from_right"], r["single_instance"]) for r in _got])
+        # The complement: the rule must not merge two DIFFERENT glyphs of one word. The mem is a
+        # different letter at a different index of the same word and stays its own impression.
+        _gm = sig_exemplars("mem", want=9, partners=())
+        ck("a different glyph of the same word is not merged away",
+           len(_gm) == 1 and _gm[0]["letter_index_from_right"] == 2,
+           [(r["kind"], r["letter_index_from_right"]) for r in _gm])
+        # WHY THE ORDER OF THE TWO STEPS IS A CLAIM, and not a style choice. Truncating first
+        # spends a slot on the duplicate and drops a glyph that is really there: with a third
+        # record carrying a SECOND dalet on another page, `want=2` must come back with both
+        # distinct glyphs, not with one glyph twice collapsed to one. Nothing else in this section
+        # can tell the two orders apart -- at want=1 they agree, because the pointed row is first.
+        _f3 = dict(_f1, letter="mem", letter_index_from_right=2, file_page=8888,
+                   box=[22, 10, 34, 40])
+        _SIGCACHE["good"] = [_f1, _f2, _f3]
+        _two = sig_exemplars("dalet", want=2, partners=())
+        ck("a duplicate does not spend a slot that a real second glyph needs",
+           sorted(r["file_page"] for r in _two) == [8888, 9999]
+           and len(_two) == 2 and not any(r["single_instance"] for r in _two),
+           [(r["file_page"], r["kind"]) for r in _two])
+    finally:
+        _SIGCACHE["good"], _SIGCACHE["bad"] = _saved
+    # The two refusals, driven directly, because neither can be reached through sig_exemplars from
+    # the records on file and a guard nobody has seen fire is a comment.
+    _ord = None
+    try:
+        _one_row_per_glyph([dict(_f1, kind="context"), dict(_f1, kind="pointed")], "dalet")
+    except AssertionError as _e16a:
+        _ord = str(_e16a)
+    ck("a context row kept ahead of the pointed row for one glyph RAISES rather than winning",
+       _ord is not None and "pointed is the stronger claim" in _ord, _ord)
+    _noidx = None
+    try:
+        _one_row_per_glyph([dict(_f1, kind="pointed", letter_index_from_right=None)], "dalet")
+    except ValueError as _e16b:
+        _noidx = str(_e16b)
+    ck("a row carrying no letter index is refused, not kept as an unplaceable second impression",
+       _noidx is not None and "cannot be placed" in _noidx, _noidx)
+
+    ck("section 16 ran every one of its checks", n[0] - _e16 == 20, n[0] - _e16)
 
     print("")
     print("(17) Chris's ruling 2026-11-16: the band belongs to the WORD")
@@ -4573,6 +4990,110 @@ def selftest():
     ck("section 17 ran every one of its checks", n[0] - _e17 == 21, n[0] - _e17)
 
     print("")
+    print("(18) readiness: the population the table is allowed to speak about")
+    _e18 = n[0]
+    _pop = readiness_population()
+    _bset = sorted(s["span_id"] for s in D.build_set(include_sealed=True))
+    import audit_overlay_20261025 as _A18
+    # THE MISTAKE, MEASURED. A readiness sweep over the build set reported 0 of 21 and gave the
+    # reason "absent from the audit" for every row -- a population mismatch printed as a verdict
+    # about readiness. The two sets are disjoint on this corpus, and that is the fact that makes
+    # the wrong domain silent instead of noisy, so it is asserted rather than remembered.
+    _aud18 = sorted(set(r["span_id"] for r in _A18.AUDIT))
+    ck("the AUDIT and the build set are disjoint, which is why a readiness sweep of the build set "
+       "reads as 'nothing is ready' instead of as a wrong question",
+       not (set(_aud18) & set(_bset)) and _aud18 and _bset, sorted(set(_aud18) & set(_bset)))
+    # And the population is NOT disjoint from the build set -- the first version of this check
+    # claimed it was, generalising from the pair above, and went red on p596:n2. A span reaches the
+    # population by a recorded NEED as well as by a verdict, and that is the only way one of this
+    # console's own geometry spans can be in it.
+    ck("every span in both the readiness population and the build set is there by a recorded "
+       "need, not by a verdict",
+       set(_pop) & set(_bset) <= set(NEEDS),
+       sorted((set(_pop) & set(_bset)) - set(NEEDS)))
+    print("      population %d, build set %d, in both (by a recorded need): %s"
+          % (len(_pop), len(_bset), ", ".join(sorted(set(_pop) & set(_bset))) or "none"))
+    ck("the population covers every audited span and every span carrying a need, both directions",
+       set(_pop) == (set(r["span_id"] for r in _A18.AUDIT) | set(NEEDS)),
+       (sorted(set(_pop) - (set(r["span_id"] for r in _A18.AUDIT) | set(NEEDS))),
+        sorted((set(r["span_id"] for r in _A18.AUDIT) | set(NEEDS)) - set(_pop))))
+    _tab = readiness()
+    _cards18 = set(c["span_id"] for c in CARDS)
+    ck("the table speaks about the population UNION the spans that have a card, so no card is "
+       "dropped for having no verdict and no need",
+       set(r["span_id"] for r in _tab) == set(_pop) | _cards18,
+       sorted((set(_pop) | _cards18) ^ set(r["span_id"] for r in _tab)))
+    ck("a span with a surface and no place in the population is reported as surface_only, and "
+       "that set is exactly the cards outside the population",
+       set(r["span_id"] for r in _tab if r["surface_only"]) == _cards18 - set(_pop),
+       sorted(r["span_id"] for r in _tab if r["surface_only"]))
+    # READY is the conjunction, in both directions, and NEITHER clause is a for-all over nothing:
+    # a definition with an empty side is satisfied by anything.
+    ck("ready is exactly 'has a surface and signable', both directions",
+       all(r["ready"] == (r["has_surface"] and r["signable"]) for r in _tab),
+       [(r["span_id"], r["ready"], r["has_surface"], r["signable"]) for r in _tab
+        if r["ready"] != (r["has_surface"] and r["signable"])])
+    # WHICH CLAUSE IS DOING THE WORK, asked separately, because an OR over the two passed on the
+    # needs clause alone while the surface clause was empty -- and a conjunction with an empty side
+    # is satisfied by anything that satisfies the other.
+    _by_needs = [r["span_id"] for r in _tab if r["has_surface"] and not r["signable"]]
+    _by_surface = [r["span_id"] for r in _tab if r["signable"] and not r["has_surface"]]
+    ck("the needs clause is holding rows back on this set, so it is not a for-all over nothing",
+       bool(_by_needs), _by_needs)
+    # NOT a check that the surface clause works. It does not, on this set: every span signable
+    # under the rule has a card, so `ready` equals `signable` and the surface half of the
+    # definition has decided nothing. Asserted as the STATE it is, so the day a signable span has
+    # no surface this goes red and the sentence above is rewritten deliberately rather than
+    # quietly becoming true.
+    ck("the surface clause is vacuous on this set today -- no span is signable without a card, so "
+       "READY says no more than SIGNABLE does",
+       not _by_surface
+       and set(r["span_id"] for r in _tab if r["ready"])
+       == set(r["span_id"] for r in _tab if r["signable"]), _by_surface)
+    ck("the table is not unanimous in either direction, so it is reporting and not asserting",
+       0 < len([r for r in _tab if r["ready"]]) < len(_tab),
+       (len([r for r in _tab if r["ready"]]), len(_tab)))
+    # The signer's pinned population is read from its SOURCE, and the difference is named. A span
+    # that became signable after the literal was written is a human decision, not a defect to be
+    # patched away here -- the literal's own message says it is the thing to update, deliberately.
+    _pin, _how = signer_pinned_population()
+    ck("the signer's pinned re-sign population still parses out of its source",
+       _pin is not None, _how)
+    if _pin is not None:
+        _ready = sorted(r["span_id"] for r in _tab if r["ready"])
+        ck("every span the signer pins is in the table, so the pin cannot name a span readiness "
+           "says nothing about",
+           set(_pin) <= set(r["span_id"] for r in _tab),
+           sorted(set(_pin) - set(r["span_id"] for r in _tab)))
+        # Over the REPORT's own lines, both directions: a span ready and not pinned must be named
+        # on the line that names them, and a line that names a span must be about such a span.
+        _rl18 = readiness_lines(_tab)
+        _gap18 = sorted(set(_ready) - set(_pin))
+        _nline18 = [l for l in _rl18 if "ready and NOT pinned" in l]
+        ck("the report NAMES every span ready under the rule and absent from the signer's pinned "
+           "literal, and names nothing else there",
+           len(_nline18) == 1
+           and all(s in _nline18[0] for s in _gap18)
+           and sorted(re.findall(r"p\d+:n\d+", _nline18[0])) == _gap18
+           and (bool(_gap18) or "none" in _nline18[0]), (_gap18, _nline18))
+        print("      ready: %d of %d; pinned by the signer: %d; ready and not pinned: %s"
+              % (len(_ready), len(_tab), len(_pin), ", ".join(_gap18) or "none"))
+    # DRIFT. The domain is shared by construction, which is worth nothing if the two copies of the
+    # expression stop being the same expression. Asserted over glyph_signer's comment-stripped
+    # source, with the companion that proves the scan can see a string that IS there -- a probe
+    # that misses passes on nothing.
+    _gs = Path(__file__).with_name("glyph_signer.py")
+    if _gs.exists():
+        _gstxt = "\n".join(l for l in _gs.read_text(encoding="utf-8").splitlines()
+                            if not l.strip().startswith("#"))
+        ck("glyph_signer still derives its domain with the same expression this module does",
+           'set(r["span_id"] for r in AUDIT.AUDIT) | set(_GC.NEEDS)' in _gstxt
+           and "_GC.signable(" in _gstxt,
+           ('set(r["span_id"] for r in AUDIT.AUDIT) | set(_GC.NEEDS)' in _gstxt,
+            "_GC.signable(" in _gstxt))
+    ck("section 18 ran every one of its checks", n[0] - _e18 == 13, n[0] - _e18)
+
+    print("")
     print("%s: %d/%d checks" % ("PASS" if not f[0] else "FAIL", n[0] - f[0], n[0]))
     return f[0]
 
@@ -4627,14 +5148,31 @@ if __name__ == "__main__":
         for r in rb:
             print("  REFUSED line %-3s %s" % (r.get("_line"), r.get("_refused")))
     elif cmd == "boxq":
-        one, tot_, bad_ = one_band_report()
-        print("box quality over the signed set (FILE pages; printed = file - 88)")
-        for r in box_quality():
-            print("  %-9s p%-5d %-11s %s line(s)  %s"
-                  % (r["span_id"], r["page"], str(r["size"]), r["lines"], r["fault"] or ""))
-        print("")
-        print("  exactly one line band: %d of %d readable crops" % (one, tot_))
-        print("  loose boxes: %s" % ", ".join(bad_))
+        for _l in boxq_lines():
+            print(_l)
+    elif cmd == "readiness":
+        rows = readiness()
+        for _l in readiness_lines(rows):
+            print(_l)
+        _pin, _how = signer_pinned_population()
+        if "--json" in sys.argv:
+            import write_scope as _WS
+            _body = json.dumps(dict(
+                lane="B", session="50612c81", definition=READINESS_DEF,
+                page_convention="FILE pages; printed = file - 88",
+                population_rule="audited spans UNION spans carrying a recorded need",
+                population=readiness_population(),
+                surface_population=sorted(set(c["span_id"] for c in CARDS)),
+                build_set=sorted(s["span_id"] for s in D.build_set(include_sealed=True)),
+                signer_pinned=_pin, signer_pinned_basis=_how, rows=rows),
+                sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            _sha = hashlib.sha256(_body.encode("utf-8")).hexdigest()[:16]
+            _out = D.DATA / ("READINESS_20261125_%s.json" % _sha)
+            _WS.assert_inside(_out, "the readiness table")
+            _out.write_text(_body, encoding="utf-8")
+            print("")
+            print("  wrote %s" % _out)
+            print("  sha256[:16] over the UTF-8 bytes of the json, ensure_ascii=False: %s" % _sha)
     elif cmd == "exemplars":
         for a, b in (("mem", "pe"), ("pe", "mem"), ("bet", "gimel"), ("gimel", "bet")):
             print("")
