@@ -3055,11 +3055,23 @@ if RESIGN:
     # calling its own producer -- true by construction, never able to fail -- so what sits beside
     # it instead is an INDEPENDENT re-derivation of the verdict half straight from AUDIT.AUDIT,
     # and the complement, so a row cannot leave the population unnoticed either.
-    check(RUN_N == 5 and sorted(RUN_SPAN_IDS) == ["p254:n1", "p442:n0", "p628:n2", "p798:n0",
-                                                 "p831:n2"],
-          "the re-sign population is %r, not the five spans signable under ruling 2026-11-01 "
-          "item 3 -- if the audit grew or a need was met, this literal is the thing to update, "
-          "deliberately" % (sorted(RUN_SPAN_IDS),))
+    #
+    # Ruling 2026-11-26 (Chris), moved here deliberately: five -> six, p233:n4 joins the signing
+    # population and leaves the held-out complement below (nine -> eight). Its verdict was already
+    # `signature_suspect_unsettled`; its ONE recorded need, `exemplar:zayin`, is met by the two
+    # zayin impressions Chris pointed on 2026-11-15 -- file page 264, line 6, box
+    # [645, 4584, 660, 4622]; and file page 534, line 12, box [567, 4575, 594, 4619]. Both are
+    # `kind: pointed`, both the same two-letter word, the zayin at letter index 1 from the right.
+    # That signed pair is the WHOLE supply: no SPAN exemplar of zayin exists or can be built,
+    # because no word in the frozen set holds a zayin without a vav, which is what the card's own
+    # note says. So the card p233:n4 is signed from carries two pointed exemplars and no span one,
+    # and the ask it puts to the signer ("is glyph 2 a vav, as signed, or a zayin?") is answerable
+    # from pixels Chris himself marked.
+    check(RUN_N == 6 and sorted(RUN_SPAN_IDS) == ["p233:n4", "p254:n1", "p442:n0", "p628:n2",
+                                                 "p798:n0", "p831:n2"],
+          "the re-sign population is %r, not the six spans signable under ruling 2026-11-01 "
+          "item 3 as amended by ruling 2026-11-26 -- if the audit grew or a need was met, this "
+          "literal is the thing to update, deliberately" % (sorted(RUN_SPAN_IDS),))
     _qual = {}
     for _r in AUDIT.AUDIT:
         _q = _qual.setdefault(_r["span_id"], False)
@@ -3068,9 +3080,10 @@ if RESIGN:
     check(all(_qual.get(_s) for _s in RUN_SPAN_IDS),
           "re-derived from the audit rows alone, %r do not carry a qualifying verdict or a "
           "reversal flag" % [_s for _s in RUN_SPAN_IDS if not _qual.get(_s)])
-    check([s for s, _w in RESIGN_HELD] == ["p233:n4", "p326:n11", "p428:n0", "p558:n3", "p594:n0",
+    check([s for s, _w in RESIGN_HELD] == ["p326:n11", "p428:n0", "p558:n3", "p594:n0",
                                            "p596:n2", "p622:n0", "p735:n0", "p910:n3"],
-          "the held-out complement is %r, not the nine rows the rule excludes"
+          "the held-out complement is %r, not the eight rows the rule excludes -- p233:n4 left it "
+          "under ruling 2026-11-26 and is in the population above"
           % ([s for s, _w in RESIGN_HELD],))
     check("resign" in OUT_NAME_PREVIEW and "resign" in SKEL_NAME and "pass2" not in OUT_NAME_PREVIEW
           and "pass3" not in OUT_NAME_PREVIEW and ("_%dspan" % SET_N) not in OUT_NAME_PREVIEW,
@@ -3387,7 +3400,7 @@ if PASS3:
     print("  import: %s (sha16 %s), %d signed row(s) embedded" % (PASS2_EXPORT_NAME, PASS2_EXPORT_SHA16, RUN_N))
     print("  note crops in %s" % NOTECROP_DIR)
 if RESIGN:
-    print("  re-sign selection (signable under ruling 2026-11-01 item 3): %s"
+    print("  re-sign selection (signable under ruling 2026-11-01 item 3, as amended 2026-11-26): %s"
           % ", ".join(RUN_SPAN_IDS))
     for _sid in RUN_SPAN_IDS:
         print("    %-9s %s" % (_sid, _GC.signable(_sid)[1]))
