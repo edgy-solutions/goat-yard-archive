@@ -78,7 +78,7 @@ LOCK_SHA = "bf942e009e51c71e"
 LOCK_PATH = A / ("PREDICTIONS_localizer45_%s.json" % LOCK_SHA)
 CLEAN_SHEET = A / LOCK.SHEET41
 CLEAN_SHEET_BYTES_SHA = LOCK.SHEET41_SHA
-CTRL_SHEET = A / "CONTACT_SHEET_controls4_e9132010ceda4a52.json"
+CTRL_SHEET = A / "CONTACT_SHEET_controls4_3ac8580c8853b9f5.json"
 CROPS = Path(str(LOCK.CROPS))
 CUT = LOCK.CUT
 CENSUS = A / "hebrew_span_census_20261004.json"
@@ -88,7 +88,11 @@ PRINTED_OFFSET = 88
 # The 45-crop sheet and its approval.  NAMED HERE AND NOT FOUND ON DISK: the four control crops are
 # new disclosure (lock precondition P4), so the sheet Chris approves for this draw is a 45-row sheet
 # that does not exist yet.  CONTACT_SHEET_controls4_e9132010ceda4a52.json is its new-disclosure half,
-# built 2026-11-23 and not yet approved.  The gate wants the whole sheet and one yes over it, because
+# rebuilt 2026-11-26 from the COMMITTED builder over a clean tree (ruling 2026-11-26 item 3),
+# replacing CONTACT_SHEET_controls4_e9132010ceda4a52.json, which was built 2026-11-23 over a dirty
+# tree from a builder that was not yet committed.  The four crops are byte-identical across the two
+# sheets, so what changed is provenance, not pixels, and no approval existed to invalidate.  The
+# gate wants the whole sheet and one yes over it, because
 # two approvals over two populations is how a licence gets honoured on one axis and not the other.
 SHEET45_PREFIX = "CONTACT_SHEET_localizer45_"
 APPROVAL_FMT = "APPROVAL_localizer45_%s.json"
