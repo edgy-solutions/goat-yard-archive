@@ -59,8 +59,13 @@ agent = {o["span_id"]: o for o in D._lines(D.DOWN / "hebrew_sitting_agent_202609
 
 print("(1) the derivation rule reproduces the HAND-WRITTEN truths (it invents nothing)")
 # These four were derived by a human before the rule existed. They are the rule's control group.
+# p102:n0's row lives in SEALED_TRUTH since 2026-11-26 (its page was ruled sealed under the
+# union of 15).  The derivation rule is about the STRING and not about which table holds it, so
+# the control group is unchanged and the lookup spans both tables rather than quietly dropping
+# the row that moved -- which is what a KeyError here would have been fixed into.
+_HAND = dict(D.TRUTH, **D.SEALED_TRUTH)
 for sid in ("p102:n0", "p138:n5", "p219:n0", "p360:n0"):
-    hand = D.TRUTH[sid][0]
+    hand = _HAND[sid][0]
     got = D._heb_span(sitting[sid]["inputs"]["candidates"][0])
     check(f"{sid} derived == hand-written", N(got) == N(hand), f"derived={got!r} hand={hand!r}")
 
@@ -290,10 +295,18 @@ nf = sum(1 for s in full if not s["unscorable"])
 #                         bottom of its own strip (out-of-strip:beyond=bottom2), a geometry fault.
 # Both moves are membership, not drift, and both are named -- a count that changes by zero across a
 # two-in two-out swap is the failure mode these sets exist to prevent, and it has now happened twice.
-_BASE_SCORABLE = {"p102:n0", "p124:n4", "p138:n5", "p138:n6", "p200:n2", "p219:n0", "p253:n2",
+#   10 -> 9   2026-11-26  p102:n0 leaves the UNSEALED half -- the first move here with no fault
+#                         behind it.  Chris ruled page 102 sealed under the union of 15, so the
+#                         row moved from TRUTH to SEALED_TRUTH unchanged.  It is also the only
+#                         move that leaves the FULL set exactly as it was, which is why the full
+#                         set is written as the base plus the ELEVEN sealed ids and still totals
+#                         20.  A set that changed by a rule rather than by a measurement is
+#                         still a membership change and is named like one.
+_BASE_SCORABLE = {"p124:n4", "p138:n5", "p138:n6", "p200:n2", "p219:n0", "p253:n2",
                   "p360:n0", "p657:n0", "p895:n0"}
-_FULL_SCORABLE = _BASE_SCORABLE | {"p217:n2", "p293:n0", "p362:n1", "p423:n3", "p427:n4", "p491:n1",
-                                   "p596:n2", "p726:n3", "p897:n4", "p912:n2"}
+_FULL_SCORABLE = _BASE_SCORABLE | {"p102:n0", "p217:n2", "p293:n0", "p362:n1", "p423:n3",
+                                   "p427:n4", "p491:n1", "p596:n2", "p726:n3", "p897:n4",
+                                   "p912:n2"}
 check("default scorable set is exactly the unsealed signed spans",
       {s["span_id"] for s in base if not s["unscorable"]} == _BASE_SCORABLE,
       sorted({s["span_id"] for s in base if not s["unscorable"]} ^ _BASE_SCORABLE))

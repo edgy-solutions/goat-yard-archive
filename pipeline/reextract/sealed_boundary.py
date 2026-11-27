@@ -5,12 +5,14 @@ Why this file exists.  On 2026-11-25 `localizer45_run.sealed_pages()` derived th
 keys of `hebrew_aperture_diag.SEALED_TRUTH` -- a SPAN table -- and got ten pages.  Three records in
 this tree name a sealed page, and no two of them agree:
 
-  * `hebrew_aperture_diag.SEALED`              14 pages.  The page-level seal record; the one
-                                               `hebrew_glyph_card.seal_state` consults.
+  * `hebrew_aperture_diag.SEALED`              15 pages SINCE 2026-11-26, 14 when this module
+                                               was written.  The page-level seal record; the
+                                               one `hebrew_glyph_card.seal_state` consults.
   * `draw_pool_20261004.json["sealed_pages"]`  11 pages (Lane A's substrate wrote it, and
                                                span_axis_census and truth_set_draw read it).  It
-                                               carries 102, which `SEALED` does not, and omits
-                                               129, 206, 478 and 543, which `SEALED` has.
+                                               carried 102, which `SEALED` did not until the
+                                               2026-11-26 ruling, and omits 129, 206, 478 and
+                                               543, which `SEALED` has.
   * the pages of `SEALED_TRUTH`'s keys         10 pages.  A subset of `SEALED`, and not a boundary:
                                                a page is sealed whether or not a Hebrew span on it
                                                was ever signed.
@@ -57,7 +59,12 @@ POOL = ("C:/Users/cnogr/git/dr-voluminous/reextract_vol1/audits/draw_pool_202610
 # SAFETY boundary, so it is pinned rather than trusted, and a change in any record has to come
 # through a human reading this line.
 PINNED_UNION = 15
-PINNED_SOURCES = {"SEALED": 14, "draw_pool_artifact": 11, "SEALED_TRUTH_pages": 10}
+# SEALED 14 -> 15 and SEALED_TRUTH_pages 10 -> 11 on 2026-11-26: page 102 was ruled sealed and
+# p102:n0's signed row moved into the sealed table with it.  The UNION did not move, which is
+# the point -- the ruling closed a disagreement between two records, it did not widen the
+# boundary.  Per-source counts are pinned so that a source changing under the union is a
+# refusal here and not a silent re-derivation.
+PINNED_SOURCES = {"SEALED": 15, "draw_pool_artifact": 11, "SEALED_TRUTH_pages": 11}
 
 # The ruling that makes the union the rule rather than this module's caution.  Consumers cite it;
 # nothing reads it to decide anything, because the decision is `union()`.
@@ -66,8 +73,33 @@ RULING = {
     "by": "Chris",
     "words": "the union of 15 stands as the rule unless Chris says otherwise",
     "settles": "the boundary: which pages may be read, drawn and sent",
-    "does_not_settle": ("p102:n0's signed row, which sits in the OPEN truth table on a page the "
-                        "union calls sealed; see signed_rows_on_union_pages()"),
+    "does_not_settle": ("nothing outstanding as of the second ruling of 2026-11-26, which "
+                        "settled the one row this boundary left open; see `ROW_RULING` and "
+                        "signed_rows_on_union_pages(), whose open-table list is now empty"),
+}
+
+# The second ruling of the same day, about the ROW rather than the page. Kept separate because
+# they are two decisions: the first says which pages are spent, this one says where a signed
+# reading on such a page stands.
+ROW_RULING = {
+    "date": "2026-11-26",
+    "by": "Chris",
+    "words": ("Under the union of 15, page 102 is sealed: take p102:n0's card out of the "
+              "item-3 build set"),
+    "done": ("102 joined `hebrew_aperture_diag.SEALED` and p102:n0's row moved from TRUTH to "
+             "SEALED_TRUTH byte for byte, so the unsealed build set is 10 cards and the "
+             "combined set is unchanged at 21"),
+    "not_done": ("the reading was not reopened, re-scored or withdrawn, and the alignment "
+                 "gate was not touched. A sealed page may be READ under the ruling-2 "
+                 "carve-out and never re-scored"),
+    "label_correction": ("the phrase \"the item-3 build set\" is this lane's wording, from the "
+                         "2026-11-26 questions file, and it was loose: item 3 of the "
+                         "2026-11-01 ruling is the `signable` rule, whose population never "
+                         "contained p102:n0 (it is absent from the 2026-10-25 audit, so "
+                         "`signable` returned False before this ruling and after it). The set "
+                         "the ruling MOVED is the unsealed `hebrew_aperture_diag.build_set()` "
+                         "-- the 11 cards this module reported as the collision -- and that is "
+                         "the set named here, measured rather than inferred from the label"),
 }
 
 

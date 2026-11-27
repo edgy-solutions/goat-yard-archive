@@ -39,7 +39,11 @@ NUM_CTX = 16384
 PAD = 12                       # native px, applied AFTER the strip->native map so padding never straddles
                                # the 20px column gap
 
-SEALED = {129, 206, 217, 293, 362, 423, 427, 478, 491, 543, 596, 726, 897, 912}
+# RULED 2026-11-26 (Chris): "Under the union of 15, page 102 is sealed."  102 joins, so this
+# page-level record is now EXACTLY `sealed_boundary.union()` and the boundary rule and the
+# surface that consults it no longer disagree about any page.  The consequence is deliberate
+# and is recorded beside the row it moved: p102:n0 left TRUTH for SEALED_TRUTH, unchanged.
+SEALED = {102, 129, 206, 217, 293, 362, 423, 427, 478, 491, 543, 596, 726, 897, 912}
 HEB = re.compile(r"[\u0590-\u05FF]")
 NOT_HEBREW = "\x00NOT-HEBREW"  # sentinel: the correct answer is "there is no Hebrew here"
 
@@ -108,7 +112,9 @@ def _depoint(s):
 
 
 TRUTH = {
-    "p102:n0": ("\u05d1\u05e8\u05d0 - \u05dc\u05e2\u05e9\u05d5\u05ea", "signed-correct:candidate-verbatim"),
+    # p102:n0 stood here until 2026-11-26.  It is now in SEALED_TRUTH, unchanged, because
+    # Chris ruled its page sealed under the union of 15; the entry carries its own note there.
+    # Nothing about the reading was reopened -- only where the row stands.
     "p124:n4": ("\u05dc\u05d0 \u05db\u05df", "signed-correction:partial-span"),
     "p138:n5": ("\u05dc\u05da", "signed-correct:candidate-verbatim"),
     # SIGNED 2026-09-27 by Chris (sequence item 5). The 2026-09-06 sitting left this span with
@@ -253,6 +259,17 @@ SEALED_TRUTH = {
     # is not a reason to touch a signed string.
     "p912:n2": ("ביעקב בישראל",
                 "signed-correct:candidate-verbatim"),
+    # MOVED HERE 2026-11-26 from TRUTH, by ruling and not by a re-reading.  Chris: "Under the
+    # union of 15, page 102 is sealed: take p102:n0's card out of the item-3 build set."  Page
+    # 102 is one of the fifteen pages `sealed_boundary.union()` returns and is named sealed by
+    # the draw-pool artifact; until today the page-level set omitted it, so this signed row sat
+    # in the OPEN table on a page the boundary rule called spent and the unsealed `build_set()`
+    # carried its card.  It no longer does: the default set is 10 and the combined set is
+    # unchanged at 21, because nothing was re-scored and nothing was withdrawn.  The string and
+    # the verdict are the 2026-09-06 signature carried across BYTE FOR BYTE, asserted against a
+    # capture taken before the move, never retyped: a sealed page may be READ under the
+    # ruling-2 carve-out (`include_sealed=True`) and may never be re-scored.
+    "p102:n0": ("\u05d1\u05e8\u05d0 - \u05dc\u05e2\u05e9\u05d5\u05ea", "signed-correct:candidate-verbatim"),
 }
 # Empty since 2026-09-27, same ruling: p596:n2 was its only member. See the note on UNSCORABLE.
 SEALED_UNSCORABLE = {}
@@ -384,7 +401,9 @@ def append_jsonl(path, obj):
 def build_set(include_sealed=False):
     """The carried spans with their signed verdict, latin context, and both ratified boxes (strip coords).
 
-    n = len(TRUTH) scorable by default -- 11 since Chris signed p138:n6 on 2026-09-27, 10 before it.
+    n = len(TRUTH) scorable by default -- 10 since page 102 was ruled sealed on 2026-11-26, which
+    moved p102:n0 to SEALED_TRUTH and so took a card out of THIS set without changing the combined
+    one; 11 from 2026-09-27, when Chris signed p138:n6, and 10 before that.
     `include_sealed=True` adds the sealed half of the SAME signed sitting under Chris's ruling-2
     carve-out -> n = len(TRUTH) + len(SEALED_TRUTH), 21 since p596:n2 was signed the same day, 19
     before. Counts already MEASURED at n=19 keep their own denominator; see the audits. A sealed page is opened here for a READ only; no
