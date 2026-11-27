@@ -32,7 +32,7 @@ AUD = S.A
 VOL = Path("C:/Users/cnogr/git/dr-voluminous/commentary/volume1")
 LOCK_NAME = "LOCK_line_localizer_20261126.json"
 LOCK_SHA = "783c1ff204dbbd8d"
-OUT_NAME = "LOCALIZER_lines_20261126.json"
+OUT_NAME = "LOCALIZER_lines_20261127.json"
 
 
 def jl(p):
@@ -333,7 +333,7 @@ def main():
     offs = Counter(v["offset"] for v in res.values() if v["verdict"] == "off_by_lines")
     body = {
         "kind": "line_localizer_run",
-        "lane": "B", "session": "50612c81", "date": "2026-11-26",
+        "lane": "B", "session": "50612c81", "date": "2026-11-27",
         "page_convention": "all page numbers are FILE pages (printed = file - 88)",
         "lock": {"name": LOCK_NAME, "self_sha16": lock["self_sha16"]},
         "spend": {"model_calls": 0, "usd": 0.0},
