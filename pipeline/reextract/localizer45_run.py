@@ -92,10 +92,12 @@ CENSUS = A / "hebrew_span_census_20261004.json"
 ATTEMPT = 1
 PRINTED_OFFSET = 88
 
-# The 45-crop sheet and its approval.  NAMED HERE AND NOT FOUND ON DISK: the four control crops are
-# new disclosure (lock precondition P4), so the sheet Chris approves for this draw is a 45-row sheet
-# that does not exist yet.  Its new-disclosure half is CONTACT_SHEET_controls4_3ac8580c8853b9f5.json
-# -- the sheet the 2026-11-26 ruling names -- built over a CLEAN tree at 48aeed5 from the committed
+# The disclosure legs and their records.  RULED 2026-11-26 (Chris): "the 4-row sheet
+# 3ac8580c8853b9f5 carries the approval for the new pixels.  The other 41 crops ride on the
+# 2026-11-08 approval by recorded hash equality.  No 45-row sheet is needed."  The four control
+# crops are the new disclosure (lock precondition P4); the sheet over them is
+# CONTACT_SHEET_controls4_3ac8580c8853b9f5.json -- the sheet the ruling names -- built over a CLEAN
+# tree at 48aeed5 from the committed
 # builder.  It replaces CONTACT_SHEET_controls4_e9132010ceda4a52.json, built over a dirty tree at
 # 1ca1210 (one path: contact_sheet_controls4.py) from a builder that was not yet committed.  (This
 # paragraph named e9132010 on BOTH sides of "replacing" until 2026-11-26; the code always pointed at
@@ -103,11 +105,27 @@ PRINTED_OFFSET = 88
 # provenance by reading it would have been told the wrong thing.)  The four crop digests are
 # identical across the two sheets -- 2b9ba26f19910277, dcd410eb475afe6f, b77ae8e4a7e6e27b,
 # d39e4662adef315f -- so what changed is provenance, not pixels, and no approval existed to
-# invalidate.  The gate still wants the WHOLE 45-row sheet and one yes over it, because two
-# approvals over two populations is how a licence gets honoured on one axis and not the other; the
-# ruling says which sheet the yes is for, and does not say the 45-row leg is satisfied.
-SHEET45_PREFIX = "CONTACT_SHEET_localizer45_"
-APPROVAL_FMT = "APPROVAL_localizer45_%s.json"
+# invalidate.  The 45-row sheet this gate used to demand is gone by the ruling above, and what
+# replaces it is two records over two populations, checked separately because they rest on different
+# things: a yes over the four new crops, and an earlier yes the 41 ride on by hash.
+#
+# DATE, CORRECTED 2026-11-26.  The ruling says "the 2026-11-08 approval" and this lane is the reason
+# it says that.  The "approved 2026-11-08" label on the 41 was written by Lane B on 2026-11-22
+# (localizer45_lock.py, a2872cd) and 2026-11-23 (contact_sheet_controls4.py, 089266c), two weeks
+# after the fact, and the ruling inherited the label from this lane's own sheets.  Measured, the
+# records say:
+#   2026-10-25  the 41 crops' pixels first disclosed, on console
+#               CONTACT_SHEET_scoring45_adb9a26835533dbc_c26745f4be489471bd.html (bb50bb1569eaca62)
+#   2026-11-08  RE-PRESENTED in REPLICATE45_sheet_and_lock_20261108.md -- a document, not a record
+#   2026-11-12  the yes RECORDED: APPROVAL_scoring45_ad1ccbe4e7bbbc8b.json, by Chris Nogradi, over
+#               sheet bytes ad1ccbe4e7bbbc8b, pixels_new=false, originally_approved 2026-10-25
+# There IS an approval record dated 2026-11-08 and it is not these crops:
+# APPROVAL_blank45_4035ea8add73d217.json approves the 45 uniform-255 blanks (cut 45c4cd25300f0989).
+# So this gate names the record that exists and the document the ruling dates from, and pins no date
+# that no record carries.  A date is a label; the record is the thing.
+CTRL_APPROVAL = A / ("APPROVAL_controls4_%s.json" % CTRL_SHEET_RULED)
+RIDE_APPROVAL = A / ("APPROVAL_scoring45_%s.json" % CLEAN_SHEET_BYTES_SHA)
+RIDE_DOC = "REPLICATE45_sheet_and_lock_20261108.md"
 
 # The sitting-2 gate.  Chris's condition is "the second sitting is INGESTED"; the checkable form is
 # the layer manifest that `sitting2_signed_layer.py` writes when accepted rows become a signed layer.
@@ -388,64 +406,109 @@ def sealed_pages():
 
 
 # ---------------------------------------------------------------------------------------- the gates
-def gate_disclosure(dry):
-    u"""The 45-crop sheet and the one yes over it.
+def gate_disclosure(dry, rows):
+    u"""The two disclosure legs of the ruling of 2026-11-26, checked separately.
 
-    Reported in a dry run, FATAL for a send.  Two findings, named rather than counted, because the
-    thing that is missing is what a human has to do next:
-      - the 45-row sheet does not exist (the controls half does, unapproved);
-      - no APPROVAL_localizer45_<sheet bytes>.json licenses attempt 1."""
-    sheets = sorted(p for p in A.glob(SHEET45_PREFIX + "*.json"))
-    state = {"sheet": None, "sheet_bytes_sha16": None, "approval": None, "by": None, "on": None,
-             "controls_half": CTRL_SHEET.name if CTRL_SHEET.exists() else None,
-             "controls_half_bytes_sha16":
-                 sha16_bytes(CTRL_SHEET.read_bytes()) if CTRL_SHEET.exists() else None}
-    if sheets:
-        chk(len(sheets) == 1, "more than one 45-crop sheet on disk: %r" % [p.name for p in sheets])
-        state["sheet"] = sheets[0].name
-        state["sheet_bytes_sha16"] = sha16_bytes(sheets[0].read_bytes())
-        srows = json.loads(sheets[0].read_text(encoding="utf-8")).get("rows") or []
-        state["sheet_n_rows"] = len(srows)
-        ap = A / (APPROVAL_FMT % state["sheet_bytes_sha16"])
-        if ap.exists():
-            rec = json.loads(ap.read_text(encoding="utf-8"))
-            chk(rec.get("approves_sheet_bytes_sha16") == state["sheet_bytes_sha16"],
-                "%s approves sheet bytes %r and its own name says %s"
-                % (ap.name, rec.get("approves_sheet_bytes_sha16"), state["sheet_bytes_sha16"]))
-            chk(rec.get("approves_cut_digest") == CUT,
-                "%s approves cut %r, not %s -- the approved crops are not these crops"
-                % (ap.name, rec.get("approves_cut_digest"), CUT))
-            chk(bool(rec.get("by")) and bool(rec.get("on")),
-                "%s names no approver or no date" % ap.name)
-            chk(ATTEMPT in (rec.get("approves_attempts") or []),
-                "%s licenses attempts %r and this is attempt %d.  A yes to one spend is not a yes "
-                "to the next one on the same crops."
-                % (ap.name, rec.get("approves_attempts"), ATTEMPT))
-            # Ruling 2026-11-26: the approval is for sheet 3ac8580c8853b9f5.  The record is named
-            # for the 45-row sheet's bytes, which is a different digest of a different file, so
-            # the ruled sheet has to be named INSIDE it or the ruling is unenforceable at the one
-            # moment it matters.  An approval that does not say which new-disclosure half it saw
-            # cannot be told from an approval of the retired e9132010 sheet.
-            chk(rec.get("approves_sheet_self_sha16") == CTRL_SHEET_RULED,
-                "%s names new-disclosure sheet %r and the ruling of 2026-11-26 is for %s"
-                % (ap.name, rec.get("approves_sheet_self_sha16"), CTRL_SHEET_RULED))
-            state.update(approval=ap.name, by=rec.get("by"), on=rec.get("on"))
-    want = A / (APPROVAL_FMT % (state["sheet_bytes_sha16"] or "<the sheet's bytes>"))
+    Reported in a dry run, FATAL for a send.
+      NEW PIXELS -- the four controls.  A record over the ruled sheet 3ac8580c8853b9f5, naming it by
+      the id the ruling names, licensing THIS attempt.
+      THE 41 -- already disclosed, not reshown.  The earlier yes has to exist, and the crops it
+      approved have to be these crops: approved bytes -> sheet rows -> crop files, every link
+      checked and the riding crops COUNTED.  "Rides on an earlier approval" is a claim about 41
+      specific crops, and an uncounted claim is prose.
+
+    What this gate does NOT assert: that the spend is approved.  Chris, 2026-11-26 item 4 -- nothing
+    is sent until the second sitting is ingested and he approves the spend.  Disclosure is about
+    which pixels a human has seen; the spend is a separate yes.  So attempt scope is checked on the
+    NEW-PIXEL record, which is this draw's own disclosure, and NOT on the ride record, whose attempt
+    list ([3]) belongs to the score45 run it was written for.  Borrowing that attempt list would be
+    exactly the laundering the attempt check exists to stop."""
+    clean = [r for r in rows if r["stratum"] == "clean"]
+    state = {"ruling": "2026-11-26: the 4-row sheet carries the new pixels; the 41 ride by hash",
+             "sheet45_required": False,
+             "controls_sheet": CTRL_SHEET.name if CTRL_SHEET.exists() else None,
+             "controls_sheet_self_sha16": CTRL_SHEET_RULED,
+             "controls_sheet_bytes_sha16":
+                 sha16_bytes(CTRL_SHEET.read_bytes()) if CTRL_SHEET.exists() else None,
+             "approval": None, "by": None, "on": None,
+             "ride_approval": None, "ride_by": None, "ride_on": None, "ride_doc": RIDE_DOC,
+             "n_riding": len(clean), "n_riding_hash_equal": 0}
+
+    # ---- leg 2, the 41.  Free, and it is the leg the ruling moved.  population_rows() has already
+    # pinned the approved sheet's BYTES and hashed every clean crop file against its row; this
+    # re-reads the approved sheet and asserts the correspondence the ruling rests on, by id, with a
+    # count.  A count the gate prints is the difference between a checked ride and a described one.
+    sheet = json.loads(CLEAN_SHEET.read_text(encoding="utf-8"))
+    recorded = dict((r["span_id"], r["crop_sha16"]) for r in sheet["rows"])
+    n = 0
+    for r in clean:
+        chk(r["span_id"] in recorded,
+            "%s rides on the earlier approval and is not in the approved sheet %s"
+            % (r["span_id"], CLEAN_SHEET.name))
+        chk(recorded[r["span_id"]] == r["crop_sha16"],
+            "%s: the approved sheet recorded crop %s and this plan carries %s.  The ride is by "
+            "RECORDED HASH EQUALITY and these are not equal -- the pixels are not the approved "
+            "pixels, so this crop is new disclosure and needs a sheet."
+            % (r["span_id"], recorded[r["span_id"]], r["crop_sha16"]))
+        n += 1
+    state["n_riding_hash_equal"] = n
+    chk(n == len(clean) and n > 0,
+        "the ride was verified for %d of %d clean crops" % (n, len(clean)))
+    if RIDE_APPROVAL.exists():
+        rr = json.loads(RIDE_APPROVAL.read_text(encoding="utf-8"))
+        chk(rr.get("approves_sheet_bytes_sha16") == CLEAN_SHEET_BYTES_SHA,
+            "%s approves sheet bytes %r and the 41 ride on %s"
+            % (RIDE_APPROVAL.name, rr.get("approves_sheet_bytes_sha16"), CLEAN_SHEET_BYTES_SHA))
+        chk(rr.get("approves_sheet_file") == LOCK.SHEET41,
+            "%s approves sheet file %r, not %s"
+            % (RIDE_APPROVAL.name, rr.get("approves_sheet_file"), LOCK.SHEET41))
+        chk(bool(rr.get("by")) and bool(rr.get("on")),
+            "%s names no approver or no date" % RIDE_APPROVAL.name)
+        chk((rr.get("disclosure_basis") or {}).get("pixels_new") is False,
+            "%s does not record pixels_new=false, so it cannot be the approval 41 already-disclosed "
+            "crops ride on" % RIDE_APPROVAL.name)
+        state.update(ride_approval=RIDE_APPROVAL.name, ride_by=rr.get("by"), ride_on=rr.get("on"))
+
+    # ---- leg 1, the four new crops.
+    if CTRL_APPROVAL.exists():
+        rec = json.loads(CTRL_APPROVAL.read_text(encoding="utf-8"))
+        chk(rec.get("approves_sheet_self_sha16") == CTRL_SHEET_RULED,
+            "%s names new-disclosure sheet %r and the ruling of 2026-11-26 is for %s"
+            % (CTRL_APPROVAL.name, rec.get("approves_sheet_self_sha16"), CTRL_SHEET_RULED))
+        chk(rec.get("approves_sheet_bytes_sha16") == state["controls_sheet_bytes_sha16"],
+            "%s approves controls-sheet bytes %r and the sheet on disk hashes to %r"
+            % (CTRL_APPROVAL.name, rec.get("approves_sheet_bytes_sha16"),
+               state["controls_sheet_bytes_sha16"]))
+        chk(rec.get("approves_cut_digest") == CUT,
+            "%s approves cut %r, not %s -- the approved crops are not these crops"
+            % (CTRL_APPROVAL.name, rec.get("approves_cut_digest"), CUT))
+        chk(bool(rec.get("by")) and bool(rec.get("on")),
+            "%s names no approver or no date" % CTRL_APPROVAL.name)
+        chk(ATTEMPT in (rec.get("approves_attempts") or []),
+            "%s licenses attempts %r and this is attempt %d.  A yes to one spend is not a yes to "
+            "the next one on the same crops."
+            % (CTRL_APPROVAL.name, rec.get("approves_attempts"), ATTEMPT))
+        state.update(approval=CTRL_APPROVAL.name, by=rec.get("by"), on=rec.get("on"))
+
     if dry:
-        chk(True, "disclosure gate evaluated (dry: reported, not fatal): sheet=%r approval=%r"
-                  % (state["sheet"], state["approval"]))
+        chk(True, "disclosure gate evaluated (dry: reported, not fatal): new-pixel record=%r, "
+                  "ride record=%r, %d of %d riding crops hash-equal to the approved sheet"
+                  % (state["approval"], state["ride_approval"], n, len(clean)))
     else:
-        chk(state["sheet"] is not None,
-            "NOT APPROVED: there is no %s*.json on disk.  The four control crops are new "
-            "disclosure (lock P4), so this draw needs a 45-row sheet -- native size, each crop "
-            "beside its signed text where one exists, the four controls marked as new disclosure "
-            "-- and Chris approves the crops on what they SHOW.  %s is its unapproved half."
-            % (SHEET45_PREFIX, CTRL_SHEET.name))
-        chk(state["by"] is not None,
-            "NOT APPROVED: %s does not exist or names no approver.  Nothing goes out before a "
-            "human approves the crops." % want.name)
+        chk(RIDE_APPROVAL.exists(),
+            "NOT APPROVED: the 41 ride on an earlier approval and %s is not on disk.  The ride is "
+            "by recorded hash equality (ruling of 2026-11-26) and hash equality to a sheet nobody "
+            "is recorded as having approved licenses nothing." % RIDE_APPROVAL.name)
+        chk(state["approval"] is not None and state["by"] is not None,
+            "NOT APPROVED: the four control crops are new disclosure (lock P4) and %s does not "
+            "exist or names no approver.  The ruling of 2026-11-26 settles WHICH sheet the yes is "
+            "over -- %s, by its own self_sha16 %s -- and no 45-row sheet is needed.  What is still "
+            "wanted is the record of the yes: approves_sheet_self_sha16=%s, "
+            "approves_sheet_bytes_sha16=%s, approves_cut_digest=%s, approves_attempts including "
+            "%d, by, on.  Chris approves the crops on what they SHOW."
+            % (CTRL_APPROVAL.name, CTRL_SHEET.name, CTRL_SHEET_RULED, CTRL_SHEET_RULED,
+               state["controls_sheet_bytes_sha16"], CUT, ATTEMPT))
     return state
-
 
 def gate_sitting2(dry):
     u"""Chris's own precondition: the second sitting is INGESTED before the first paid call.
@@ -1345,7 +1408,7 @@ def precall(mode, dry, lock):
     pop_dig = gate_population(rows, lock)
     refused = gate_law8(rows, lock)
     sealed = gate_sealed(rows, lock)
-    disc = gate_disclosure(dry)
+    disc = gate_disclosure(dry, rows)
     sit2 = gate_sitting2(dry)
     payloads = build_payloads(rows, arms, CROPS, None, cap)
     n_calls = gate_counts(payloads, rows, arms, lock)
@@ -1411,9 +1474,11 @@ def main():
              len(SB.intersects(r["page_file"] for r in rows))))
     for _k, _p in facts["sealed_disagreement"]:
         print("                  DISAGREEMENT: %s does not name page %s" % (_k, _p))
-    print("  disclosure      sheet=%r approval=%r (controls half: %r)"
-          % (facts["disclosure"]["sheet"], facts["disclosure"]["approval"],
-             facts["disclosure"]["controls_half"]))
+    print("  disclosure      new-pixel sheet=%r approval=%r; the 41 ride on %r (%d of %d "
+          "hash-equal)"
+          % (facts["disclosure"]["controls_sheet"], facts["disclosure"]["approval"],
+             facts["disclosure"]["ride_approval"], facts["disclosure"]["n_riding_hash_equal"],
+             facts["disclosure"]["n_riding"]))
     print("  sitting 2       manifest=%r" % facts["sitting2"]["manifest"])
     print("  pre-call checks %d" % precall_checks)
 
