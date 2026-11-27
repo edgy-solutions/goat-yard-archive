@@ -78,7 +78,14 @@ LOCK_SHA = "bf942e009e51c71e"
 LOCK_PATH = A / ("PREDICTIONS_localizer45_%s.json" % LOCK_SHA)
 CLEAN_SHEET = A / LOCK.SHEET41
 CLEAN_SHEET_BYTES_SHA = LOCK.SHEET41_SHA
-CTRL_SHEET = A / "CONTACT_SHEET_controls4_3ac8580c8853b9f5.json"
+# RULED 2026-11-26 (Chris): "The approval, when Chris gives it, is for sheet
+# 3ac8580c8853b9f5."  That is the controls half's OWN self_sha16 under the sheet's stated
+# hash rule, which is how the sheet names itself and is not the digest of its file bytes
+# (4bfc71ae28568d20).  The path is derived from the pin so the id has one home: a sheet
+# swapped underneath this name is caught by the check in plan_rows(), not by a reader
+# noticing two constants disagree.
+CTRL_SHEET_RULED = "3ac8580c8853b9f5"
+CTRL_SHEET = A / ("CONTACT_SHEET_controls4_%s.json" % CTRL_SHEET_RULED)
 CROPS = Path(str(LOCK.CROPS))
 CUT = LOCK.CUT
 CENSUS = A / "hebrew_span_census_20261004.json"
@@ -87,13 +94,18 @@ PRINTED_OFFSET = 88
 
 # The 45-crop sheet and its approval.  NAMED HERE AND NOT FOUND ON DISK: the four control crops are
 # new disclosure (lock precondition P4), so the sheet Chris approves for this draw is a 45-row sheet
-# that does not exist yet.  CONTACT_SHEET_controls4_e9132010ceda4a52.json is its new-disclosure half,
-# rebuilt 2026-11-26 from the COMMITTED builder over a clean tree (ruling 2026-11-26 item 3),
-# replacing CONTACT_SHEET_controls4_e9132010ceda4a52.json, which was built 2026-11-23 over a dirty
-# tree from a builder that was not yet committed.  The four crops are byte-identical across the two
-# sheets, so what changed is provenance, not pixels, and no approval existed to invalidate.  The
-# gate wants the whole sheet and one yes over it, because
-# two approvals over two populations is how a licence gets honoured on one axis and not the other.
+# that does not exist yet.  Its new-disclosure half is CONTACT_SHEET_controls4_3ac8580c8853b9f5.json
+# -- the sheet the 2026-11-26 ruling names -- built over a CLEAN tree at 48aeed5 from the committed
+# builder.  It replaces CONTACT_SHEET_controls4_e9132010ceda4a52.json, built over a dirty tree at
+# 1ca1210 (one path: contact_sheet_controls4.py) from a builder that was not yet committed.  (This
+# paragraph named e9132010 on BOTH sides of "replacing" until 2026-11-26; the code always pointed at
+# the clean rebuild, so no run used the retired sheet, but the prose was wrong and a reader checking
+# provenance by reading it would have been told the wrong thing.)  The four crop digests are
+# identical across the two sheets -- 2b9ba26f19910277, dcd410eb475afe6f, b77ae8e4a7e6e27b,
+# d39e4662adef315f -- so what changed is provenance, not pixels, and no approval existed to
+# invalidate.  The gate still wants the WHOLE 45-row sheet and one yes over it, because two
+# approvals over two populations is how a licence gets honoured on one axis and not the other; the
+# ruling says which sheet the yes is for, and does not say the 45-row leg is satisfied.
 SHEET45_PREFIX = "CONTACT_SHEET_localizer45_"
 APPROVAL_FMT = "APPROVAL_localizer45_%s.json"
 
@@ -261,6 +273,19 @@ def population_rows():
         % sorted(set(clean_ids) - set(by_id)))
     chk(CTRL_SHEET.exists(), "the controls sheet %s is not on disk" % CTRL_SHEET.name)
     csheet = json.loads(CTRL_SHEET.read_text(encoding="utf-8"))
+    # The ruled sheet is identified by its CONTENT, not by the name it is filed under: recompute
+    # the sheet's own self_sha16 under its own stated hash rule and require the ruling's id.  A
+    # filename is a label a rebuild can reuse; this cannot be satisfied by renaming a file.
+    _cclaim = csheet.get("self_sha16")
+    _cbody = dict(csheet)
+    _cbody.pop("self_sha16", None)
+    chk(sha16(_cbody) == CTRL_SHEET_RULED,
+        "the controls half on disk hashes to %s under its own hash rule and the ruling of "
+        "2026-11-26 names sheet %s.  These are not the same sheet."
+        % (sha16(_cbody), CTRL_SHEET_RULED))
+    chk(_cclaim == CTRL_SHEET_RULED,
+        "the controls half CLAIMS self_sha16 %r and the ruling names %s"
+        % (_cclaim, CTRL_SHEET_RULED))
     cby_id = dict((r["span_id"], r) for r in csheet["rows"])
     chk(sorted(cby_id) == sorted(ctrl_ids),
         "the controls sheet holds %r and the lock's control stratum is %r"
@@ -396,6 +421,14 @@ def gate_disclosure(dry):
                 "%s licenses attempts %r and this is attempt %d.  A yes to one spend is not a yes "
                 "to the next one on the same crops."
                 % (ap.name, rec.get("approves_attempts"), ATTEMPT))
+            # Ruling 2026-11-26: the approval is for sheet 3ac8580c8853b9f5.  The record is named
+            # for the 45-row sheet's bytes, which is a different digest of a different file, so
+            # the ruled sheet has to be named INSIDE it or the ruling is unenforceable at the one
+            # moment it matters.  An approval that does not say which new-disclosure half it saw
+            # cannot be told from an approval of the retired e9132010 sheet.
+            chk(rec.get("approves_sheet_self_sha16") == CTRL_SHEET_RULED,
+                "%s names new-disclosure sheet %r and the ruling of 2026-11-26 is for %s"
+                % (ap.name, rec.get("approves_sheet_self_sha16"), CTRL_SHEET_RULED))
             state.update(approval=ap.name, by=rec.get("by"), on=rec.get("on"))
     want = A / (APPROVAL_FMT % (state["sheet_bytes_sha16"] or "<the sheet's bytes>"))
     if dry:
