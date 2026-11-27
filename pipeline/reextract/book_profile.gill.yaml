@@ -169,17 +169,19 @@ body_text_policies:
       date: '2026-11-26'
       file: 'locks/RULING_20261126_laneA2.md (third ruling, ligatures)'
     note: "lane B's apparatus keeps the print"
-  # stop_space is PENDING and is therefore NOT a key here: it is not ruled until Chris says so, and
-  # the fourth ruling of 2026-11-26 item 7 retracted the earlier "ruled IN" inference. Recorded in
-  # full so nothing is lost, commented so nothing applies it:
-  #   stop_space:
-  #     status: 'PENDING: not ruled until Chris says so; do not apply'
-  #     rule: 'remove every whitespace run that directly precedes one of ; : ? !'
-  #     applies_to: 'new side, after the read (if ruled)'
-  #     ruling:
-  #       date: null
-  #       file: 'none yet; locks/RULING_20261126_laneA2.md fourth ruling item 7'
-  #     note: "lane B's apparatus keeps the print"
+  # stop_space was PENDING here until 2026-11-26. It is now RULED and is a key. Two independent
+  # records of the same yes: Chris to Lane B, 2026-11-26, item 1 -- "commit the body-text policy
+  # block to the book profile, stop-space included as ruled" -- and, on A2's side, the fifth ruling
+  # item 5, "Stop-space: ruled by Chris, yes", which SUPERSEDES the fourth ruling item 7 that had
+  # kept it pending. The earlier pending stanza carried `status:` and an `applies_to` hedged with
+  # "(if ruled)"; both are gone, because a ruled policy must not read as a conditional one.
+  stop_space:
+    rule: 'remove every whitespace run that directly precedes one of ; : ? !'
+    applies_to: 'new side, after the read'
+    ruling:
+      date: '2026-11-26'
+      file: 'locks/RULING_20261126b_laneA2.md (fifth ruling, item 5)'
+    note: "lane B's apparatus keeps the print"
 
 # --- AUTHORITY LIST (stage-3 safety net): Gill's citation universe. A transcribed name that
 #     FUZZY-matches one of these but isn't exact is a candidate misread (Gerson->Gersom) -> flag to
