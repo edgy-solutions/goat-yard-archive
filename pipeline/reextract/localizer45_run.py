@@ -123,6 +123,18 @@ PRINTED_OFFSET = 88
 # APPROVAL_blank45_4035ea8add73d217.json approves the 45 uniform-255 blanks (cut 45c4cd25300f0989).
 # So this gate names the record that exists and the document the ruling dates from, and pins no date
 # that no record carries.  A date is a label; the record is the thing.
+# SCOPE, NOT CONSENT -- RULED 2026-11-27.  "My earlier item 2 was scope only.  The yes on the four
+# control crops is Chris's, after he has looked at sheet 3ac8580c8853b9f5."  So the quote at the top
+# of this block names WHICH sheet a yes would have to be given over.  It is NOT that yes.  No
+# APPROVAL_controls4_3ac8580c8853b9f5.json exists, this lane did not write one from those words, and
+# `--send` refuses on its absence -- which is the gate working, not a blockage to route around.
+#
+# The distinction is the whole point of the approval-record rule: a record of a human's yes must be
+# named by what it describes, and it must exist because the human said yes to THOSE PIXELS, not
+# because a lane found a sentence it could read as permission.  A ruling that fixes the scope of a
+# future approval is the easiest thing in this project to mistake for the approval itself, because
+# it names the same sheet by the same digest.  Nothing here may write that record except Chris's own
+# yes, given after he has looked at the sheet.
 CTRL_APPROVAL = A / ("APPROVAL_controls4_%s.json" % CTRL_SHEET_RULED)
 RIDE_APPROVAL = A / ("APPROVAL_scoring45_%s.json" % CLEAN_SHEET_BYTES_SHA)
 RIDE_DOC = "REPLICATE45_sheet_and_lock_20261108.md"
