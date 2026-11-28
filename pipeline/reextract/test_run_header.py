@@ -104,8 +104,24 @@ check("D resolves by port", hD["endpoint_id"] == "D", hD.get("endpoint_id"))
 check("C and D hash DIFFERENTLY (port is in the hash)", hC["config_sha16"] != hD["config_sha16"],
       "same hash for two different GPUs")
 
-hB = build_header(host="192.168.1.100", model="m", digest_fn=FAKE)
-check("different endpoint -> different hash", hC["config_sha16"] != hB["config_sha16"])
+# This fixture was host="192.168.1.100" and the variable was named `hB`, from this file's
+# creation until 2026-11-28.  Three faults in two lines, all the same one: it tested the
+# INSTANCE.  The host was retired 2026-11-14 with the register's words "Send nothing to it";
+# the name `hB` asserted in a variable the very label that was wrong in ENDPOINT_IDS (.100 is
+# B2, and B2 is retired); and the check only compared hashes, so it would have passed whatever
+# the id resolved to.  192.0.2.1 is RFC 5737 TEST-NET-1 -- reserved for documentation and
+# guaranteed never routable, so it cannot quietly become a real endpoint the way .100 did.
+#
+# What is asserted now is the LAW this file needs: an address absent from ENDPOINT_IDS gets
+# `UNREGISTERED:<host:port>` and is still a recorded machine, never a silent blank and never a
+# borrowed letter.  Proving the law needs no particular host, which is why naming a retired
+# one was never necessary.
+hUnreg = build_header(host="192.0.2.1", model="m", digest_fn=FAKE)
+check("an unlisted address is recorded as UNREGISTERED, not blank and not borrowed",
+      hUnreg["endpoint_id"] == "UNREGISTERED:192.0.2.1:11434", hUnreg.get("endpoint_id"))
+check("the authoritative field is the literal hostport",
+      hUnreg["endpoint_host"] == "192.0.2.1:11434", hUnreg.get("endpoint_host"))
+check("different endpoint -> different hash", hC["config_sha16"] != hUnreg["config_sha16"])
 
 hRepull = build_header(host="192.168.1.169", model="m",
                        digest_fn=lambda hp, mo, t=None: "0000000000000002")

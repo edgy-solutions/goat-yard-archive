@@ -53,10 +53,34 @@ from pathlib import Path
 DEFAULT_PORT = 11434
 REF = "C:/Users/cnogr/git/gpu-servers.md"
 
-# Transcribed from gpu-servers.md (last updated 2026-09-20). C and D differ ONLY by port.
+# A CONVENIENCE INDEX, NOT THE RECORD.  `endpoint_id()` below falls back to
+# `UNREGISTERED:<host:port>` for anything absent here, and that fallback is the correct
+# behaviour, not a degraded one: the authoritative field is `endpoint_host`, which is always
+# the literal hostport.  A machine is therefore ABSENT from this table whenever its letter
+# cannot be asserted from its address alone.  Two are, on purpose:
+#
+#   .100  was listed as "B" from this file's creation until 2026-11-28.  Wrong twice over: the
+#         host is B2, not B (B was the RX 7900 XTX in a Thunderbolt enclosure on ai1, retired
+#         2026-11-13 -- a different dead machine), and B2 was retired 2026-11-14 with the
+#         register's words "Send nothing to it".  Being LISTED is what made it a defect: it
+#         bypassed the UNREGISTERED fallback that was built for exactly this staleness.
+#         Realized exposure was zero -- no record in dr-voluminous carries endpoint_id "B".
+#
+#   .198  is ABSENT DELIBERATELY; do not add it.  B3 and B4 are the SAME LXC 116 on landinator
+#         at the SAME 192.168.1.198:11434 (gpu-servers.md:28-29), separated only by whether the
+#         card was bound to vfio-pci on the host.  B3 served eight days on llvmpipe at 1.21
+#         tok/s while /api/ps reported size_vram == size and "100%% on GPU"; :409 WITHDRAWS
+#         that check for precisely that reason, and :16 requires "device witness required
+#         before any run".  So this address does not determine its machine, and a row mapping
+#         it to "B4" would assert what only a witness can.  `UNREGISTERED:192.168.1.198:11434`
+#         is the honest stamp until a witness is recorded alongside it.
+#
+# There is deliberately NO transcription date here.  The comment it replaced read "last updated
+# 2026-09-20", a date literal that told a reader the copy had been checked without telling them
+# when it stopped being true -- and both retirements above postdate it.  C and D differ ONLY by
+# port.
 ENDPOINT_IDS = {
     "192.168.1.126:11434": "A",
-    "192.168.1.100:11434": "B",
     "192.168.1.169:11434": "C",
     "192.168.1.169:11435": "D",
     "192.168.1.179:11434": "E",
