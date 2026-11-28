@@ -31,8 +31,10 @@ enough on its own.
 
 SCOPE, HONESTLY. This refuses two addresses and requires a choice. It does NOT validate that the host you
 did name is reachable, is the endpoint you meant, holds the model you want, or has the memory for it — see
-`gpu-servers.md` for the assignment table (C `192.168.1.169:11434` is this project's testing endpoint; B
-`192.168.1.100:11434` is open and may be offline; D `192.168.1.169:11435` is open for large models).
+`gpu-servers.md` for the assignment table (C `192.168.1.169:11434` is this project's testing endpoint;
+D `192.168.1.169:11435` is open for large models).  B2 `.100` was listed here as "open and may be
+offline" until 2026-11-28; it was RETIRED 2026-11-14 and the register's words are "Send nothing to
+it", so naming it here was advertising a dead host -- and as B, which is a different dead machine.
 Nothing here inspects the port: a request aimed at D by port is a request to a different GPU, and only the
 caller knows which was meant.
 
@@ -46,9 +48,22 @@ REF = "C:/Users/cnogr/git/gpu-servers.md"
 RESERVED = {"192.168.1.179": "E", "192.168.1.188": "F"}
 
 # Endpoints this project may use, quoted for the error message so the fix is in the failure.
-SUGGESTED = ("192.168.1.169  (C, ai2 32 GB — this project's assigned testing endpoint)\n"
-             "    192.168.1.100  (B, open, may be offline — gemma witness batches only, recorded as a\n"
-             "                   different model variant AND endpoint)")
+# .100 was REMOVED from this text on 2026-11-28.  BASIS: the register REF names below --
+# gpu-servers.md :104, "192.168.1.100 ... IS RETIRED. Send nothing to it.", and :27, where
+# B2 (the Windows VM on landinator at .100) is retired 2026-11-14 and ".100 is hard-refused
+# in code (whole host, any port), born-tested".
+#
+# This string is interpolated into the REFUSED path below, so it handed a retired host to an
+# operator at the exact moment they were refused and looking for a replacement -- the worst
+# position for this defect.  It also mislabelled the host: .100 is B2, not B (B was the RX
+# 7900 XTX in a Thunderbolt enclosure on ai1, retired 2026-11-13 -- a different dead
+# machine).  An endpoint label is a role, not a host.
+#
+# NO replacement host is suggested.  Which hosts are endorsed is an open question with Chris
+# (allow-list vs this lane's recorded "UNREGISTERED passes on purpose" design point), and
+# naming one would pre-empt it.  Removing a retired host does not: both readings forbid a
+# host the register says to send nothing to appearing in the text a refusal prints.
+SUGGESTED = "192.168.1.169  (C, ai2 32 GB — this project's assigned testing endpoint)"
 
 
 class EndpointRefused(RuntimeError):
